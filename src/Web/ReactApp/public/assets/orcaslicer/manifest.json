@@ -7,7 +7,7 @@
         {
           "id": "afinia_h+1(hs)",
           "name": "Afinia H+1(HS)",
-          "cover": "/assets/orcaslicer/printers/afinia/afinia_h+1(hs)/cover.png"
+          "cover": "/assets/orcaslicer/afinia/afinia_h+1(hs)_cover.png"
         }
       ]
     },
@@ -29,17 +29,26 @@
         {
           "id": "anker_m5_all-metal_hot_end",
           "name": "Anker M5 All-Metal Hot End",
-          "cover": "/assets/orcaslicer/printers/anker/anker_m5_all-metal_hot_end/cover.png"
+          "cover": "/assets/orcaslicer/anker/anker_m5_all-metal_hot_end_cover.png",
+          "bedModel": "/assets/orcaslicer/anker/anker_m5_all-metal_hot_end_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anker/anker_m5_all-metal_hot_end_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anker_m5c",
           "name": "Anker M5C",
-          "cover": "/assets/orcaslicer/printers/anker/anker_m5c/cover.png"
+          "cover": "/assets/orcaslicer/anker/anker_m5c_cover.png",
+          "bedModel": "/assets/orcaslicer/anker/anker_m5c_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anker/anker_m5c_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anker_m5",
           "name": "Anker M5",
-          "cover": "/assets/orcaslicer/printers/anker/anker_m5/cover.png"
+          "cover": "/assets/orcaslicer/anker/anker_m5_cover.png",
+          "bedModel": "/assets/orcaslicer/anker/anker_m5_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anker/anker_m5_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -50,52 +59,82 @@
         {
           "id": "anycubic_4max_pro_2",
           "name": "Anycubic 4Max Pro 2",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_4max_pro_2/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_4max_pro_2_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_4max_pro_2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_4max_pro_2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_4max_pro",
           "name": "Anycubic 4Max Pro",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_4max_pro/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_4max_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_4max_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_4max_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_chiron",
           "name": "Anycubic Chiron",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_chiron/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_chiron_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_chiron_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_chiron_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_kobra_2_max",
           "name": "Anycubic Kobra 2 Max",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_max/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_2_max_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_2_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_2_max_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_kobra_2_neo",
           "name": "Anycubic Kobra 2 Neo",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_neo/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_2_neo_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_2_neo_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_2_neo_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_kobra_2_plus",
           "name": "Anycubic Kobra 2 Plus",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_plus/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_2_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_2_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_2_plus_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_kobra_2_pro",
           "name": "Anycubic Kobra 2 Pro",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_pro/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_2_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_2_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_2_pro_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_kobra_2",
           "name": "Anycubic Kobra 2",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_2_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_kobra_3",
           "name": "Anycubic Kobra 3",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_3/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_3_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_3_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_kobra_max",
           "name": "Anycubic Kobra Max",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_max/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_max_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_kobra_neo",
@@ -105,32 +144,50 @@
         {
           "id": "anycubic_kobra_plus",
           "name": "Anycubic Kobra Plus",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_plus/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_kobra_s1",
           "name": "Anycubic Kobra S1",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_s1/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_s1_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_s1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_s1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_kobra",
           "name": "Anycubic Kobra",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_kobra_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_kobra_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_predator",
           "name": "Anycubic Predator",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_predator/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_predator_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_predator_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_predator_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "anycubic_vyper",
           "name": "Anycubic Vyper",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_vyper/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_vyper_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_vyper_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_vyper_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "anycubic_i3_mega_s",
           "name": "Anycubic i3 Mega S",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_i3_mega_s/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_i3_mega_s_cover.png",
+          "bedModel": "/assets/orcaslicer/anycubic/anycubic_i3_mega_s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/anycubic/anycubic_i3_mega_s_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -141,52 +198,74 @@
         {
           "id": "artillery_genius_pro",
           "name": "Artillery Genius Pro",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_genius_pro/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_genius_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_genius_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/artillery/artillery_genius_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "artillery_genius",
           "name": "Artillery Genius",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_genius/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_genius_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_genius_bed.stl",
+          "bedTexture": "/assets/orcaslicer/artillery/artillery_genius_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "artillery_hornet",
           "name": "Artillery Hornet",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_hornet/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_hornet_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_hornet_bed.stl",
+          "bedTexture": "/assets/orcaslicer/artillery/artillery_hornet_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "artillery_m1_pro",
           "name": "Artillery M1 Pro",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_m1_pro/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_m1_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_m1_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/artillery/artillery_m1_pro_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "artillery_sidewinder_x1",
           "name": "Artillery Sidewinder X1",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x1/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_sidewinder_x1_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_sidewinder_x1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/artillery/artillery_sidewinder_x1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "artillery_sidewinder_x2",
           "name": "Artillery Sidewinder X2",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x2/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_sidewinder_x2_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_sidewinder_x2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/artillery/artillery_sidewinder_x2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "artillery_sidewinder_x3_plus",
           "name": "Artillery Sidewinder X3 Plus",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x3_plus/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_sidewinder_x3_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_sidewinder_x3_plus_bed.stl"
         },
         {
           "id": "artillery_sidewinder_x3_pro",
           "name": "Artillery Sidewinder X3 Pro",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x3_pro/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_sidewinder_x3_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_sidewinder_x3_pro_bed.stl"
         },
         {
           "id": "artillery_sidewinder_x4_plus",
           "name": "Artillery Sidewinder X4 Plus",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x4_plus/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_sidewinder_x4_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_sidewinder_x4_plus_bed.stl"
         },
         {
           "id": "artillery_sidewinder_x4_pro",
           "name": "Artillery Sidewinder X4 Pro",
-          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x4_pro/cover.png"
+          "cover": "/assets/orcaslicer/artillery/artillery_sidewinder_x4_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/artillery/artillery_sidewinder_x4_pro_bed.stl"
         }
       ]
     },
@@ -197,57 +276,90 @@
         {
           "id": "bambu_lab_a1_mini",
           "name": "Bambu Lab A1 mini",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_a1_mini/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_a1_mini_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_a1_mini_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_a1_mini_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_a1",
           "name": "Bambu Lab A1",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_a1/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_a1_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_a1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_a1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_h2d_pro",
           "name": "Bambu Lab H2D Pro",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_h2d_pro/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_h2d_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_h2d_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_h2d_pro_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_h2d",
           "name": "Bambu Lab H2D",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_h2d/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_h2d_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_h2d_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_h2d_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_h2s",
           "name": "Bambu Lab H2S",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_h2s/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_h2s_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_h2s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_h2s_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_p1p",
           "name": "Bambu Lab P1P",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_p1p/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_p1p_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_p1p_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_p1p_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_p1s",
           "name": "Bambu Lab P1S",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_p1s/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_p1s_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_p1s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_p1s_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_p2s",
           "name": "Bambu Lab P2S",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_p2s/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_p2s_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_p2s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_p2s_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_x1_carbon",
           "name": "Bambu Lab X1 Carbon",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_x1_carbon/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_x1_carbon_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_x1_carbon_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_x1_carbon_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_x1e",
           "name": "Bambu Lab X1E",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_x1e/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_x1e_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_x1e_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_x1e_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "bambu_lab_x1",
           "name": "Bambu Lab X1",
-          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_x1/cover.png"
+          "cover": "/assets/orcaslicer/bbl/bambu_lab_x1_cover.png",
+          "bedModel": "/assets/orcaslicer/bbl/bambu_lab_x1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/bbl/bambu_lab_x1_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -258,17 +370,24 @@
         {
           "id": "biqu_b1",
           "name": "BIQU B1",
-          "cover": "/assets/orcaslicer/printers/biqu/biqu_b1/cover.png"
+          "cover": "/assets/orcaslicer/biqu/biqu_b1_cover.png",
+          "bedModel": "/assets/orcaslicer/biqu/biqu_b1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/biqu/biqu_b1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "biqu_bx",
           "name": "BIQU BX",
-          "cover": "/assets/orcaslicer/printers/biqu/biqu_bx/cover.png"
+          "cover": "/assets/orcaslicer/biqu/biqu_bx_cover.png",
+          "bedModel": "/assets/orcaslicer/biqu/biqu_bx_bed.stl",
+          "bedTexture": "/assets/orcaslicer/biqu/biqu_bx_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "biqu_hurakan",
           "name": "BIQU Hurakan",
-          "cover": "/assets/orcaslicer/printers/biqu/biqu_hurakan/cover.png"
+          "cover": "/assets/orcaslicer/biqu/biqu_hurakan_cover.png",
+          "bedModel": "/assets/orcaslicer/biqu/biqu_hurakan_bed.stl"
         }
       ]
     },
@@ -279,17 +398,26 @@
         {
           "id": "blocks_pro_s100",
           "name": "BLOCKS Pro S100",
-          "cover": "/assets/orcaslicer/printers/blocks/blocks_pro_s100/cover.png"
+          "cover": "/assets/orcaslicer/blocks/blocks_pro_s100_cover.png",
+          "bedModel": "/assets/orcaslicer/blocks/blocks_pro_s100_bed.stl",
+          "bedTexture": "/assets/orcaslicer/blocks/blocks_pro_s100_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "blocks_rd50_v2",
           "name": "BLOCKS RD50 V2",
-          "cover": "/assets/orcaslicer/printers/blocks/blocks_rd50_v2/cover.png"
+          "cover": "/assets/orcaslicer/blocks/blocks_rd50_v2_cover.png",
+          "bedModel": "/assets/orcaslicer/blocks/blocks_rd50_v2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/blocks/blocks_rd50_v2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "blocks_rf50",
           "name": "BLOCKS RF50",
-          "cover": "/assets/orcaslicer/printers/blocks/blocks_rf50/cover.png"
+          "cover": "/assets/orcaslicer/blocks/blocks_rf50_cover.png",
+          "bedModel": "/assets/orcaslicer/blocks/blocks_rf50_bed.stl",
+          "bedTexture": "/assets/orcaslicer/blocks/blocks_rf50_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -300,12 +428,14 @@
         {
           "id": "construct_1_xl",
           "name": "Construct 1 XL",
-          "cover": "/assets/orcaslicer/printers/construct3d/construct_1_xl/cover.png"
+          "cover": "/assets/orcaslicer/construct3d/construct_1_xl_cover.png",
+          "bedModel": "/assets/orcaslicer/construct3d/construct_1_xl_bed.stl"
         },
         {
           "id": "construct_1",
           "name": "Construct 1",
-          "cover": "/assets/orcaslicer/printers/construct3d/construct_1/cover.png"
+          "cover": "/assets/orcaslicer/construct3d/construct_1_cover.png",
+          "bedModel": "/assets/orcaslicer/construct3d/construct_1_bed.stl"
         }
       ]
     },
@@ -316,7 +446,10 @@
         {
           "id": "chuanying_x1",
           "name": "Chuanying X1",
-          "cover": "/assets/orcaslicer/printers/chuanying/chuanying_x1/cover.png"
+          "cover": "/assets/orcaslicer/chuanying/chuanying_x1_cover.png",
+          "bedModel": "/assets/orcaslicer/chuanying/chuanying_x1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/chuanying/chuanying_x1_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -327,7 +460,9 @@
         {
           "id": "co_print_chromaset",
           "name": "Co Print ChromaSet",
-          "cover": "/assets/orcaslicer/printers/co_print/co_print_chromaset/cover.png"
+          "cover": "/assets/orcaslicer/co_print/co_print_chromaset_cover.png",
+          "bedTexture": "/assets/orcaslicer/co_print/co_print_chromaset_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -338,27 +473,27 @@
         {
           "id": "colido_160_v2",
           "name": "CoLiDo 160 V2",
-          "cover": "/assets/orcaslicer/printers/colido/colido_160_v2/cover.png"
+          "cover": "/assets/orcaslicer/colido/colido_160_v2_cover.png"
         },
         {
           "id": "colido_diy_4.0_v2",
           "name": "CoLiDo DIY 4.0 V2",
-          "cover": "/assets/orcaslicer/printers/colido/colido_diy_4.0_v2/cover.png"
+          "cover": "/assets/orcaslicer/colido/colido_diy_4.0_v2_cover.png"
         },
         {
           "id": "colido_diy_4.0",
           "name": "CoLiDo DIY 4.0",
-          "cover": "/assets/orcaslicer/printers/colido/colido_diy_4.0/cover.png"
+          "cover": "/assets/orcaslicer/colido/colido_diy_4.0_cover.png"
         },
         {
           "id": "colido_sr1",
           "name": "CoLiDo SR1",
-          "cover": "/assets/orcaslicer/printers/colido/colido_sr1/cover.png"
+          "cover": "/assets/orcaslicer/colido/colido_sr1_cover.png"
         },
         {
           "id": "colido_x16",
           "name": "CoLiDo X16",
-          "cover": "/assets/orcaslicer/printers/colido/colido_x16/cover.png"
+          "cover": "/assets/orcaslicer/colido/colido_x16_cover.png"
         }
       ]
     },
@@ -369,12 +504,18 @@
         {
           "id": "comgrow_t300",
           "name": "Comgrow T300",
-          "cover": "/assets/orcaslicer/printers/comgrow/comgrow_t300/cover.png"
+          "cover": "/assets/orcaslicer/comgrow/comgrow_t300_cover.png",
+          "bedModel": "/assets/orcaslicer/comgrow/comgrow_t300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/comgrow/comgrow_t300_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "comgrow_t500",
           "name": "Comgrow T500",
-          "cover": "/assets/orcaslicer/printers/comgrow/comgrow_t500/cover.png"
+          "cover": "/assets/orcaslicer/comgrow/comgrow_t500_cover.png",
+          "bedModel": "/assets/orcaslicer/comgrow/comgrow_t500_bed.stl",
+          "bedTexture": "/assets/orcaslicer/comgrow/comgrow_t500_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -385,172 +526,269 @@
         {
           "id": "creality_cr-10_max",
           "name": "Creality CR-10 Max",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_max/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-10_max_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-10_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-10_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_cr-10_se",
           "name": "Creality CR-10 SE",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_se/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-10_se_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-10_se_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-10_se_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_cr-10_v2",
           "name": "Creality CR-10 V2",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_v2/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-10_v2_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-10_v2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-10_v2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_cr-10_v3",
           "name": "Creality CR-10 V3",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_v3/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-10_v3_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-10_v3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-10_v3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_cr-6_max",
           "name": "Creality CR-6 Max",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-6_max/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-6_max_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-6_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-6_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_cr-6_se",
           "name": "Creality CR-6 SE",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-6_se/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-6_se_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-6_se_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-6_se_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_cr-m4",
           "name": "Creality CR-M4",
-          "cover": "/assets/orcaslicer/printers/creality/creality_cr-m4/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_cr-m4_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_cr-m4_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_cr-m4_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_pro",
           "name": "Creality Ender-3 Pro",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_pro/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_s1_plus",
           "name": "Creality Ender-3 S1 Plus",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_s1_plus/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_s1_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_s1_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_s1_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_s1_pro",
           "name": "Creality Ender-3 S1 Pro",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_s1_pro/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_s1_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_s1_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_s1_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_s1",
           "name": "Creality Ender-3 S1",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_s1/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_s1_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_s1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_s1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_v2_neo",
           "name": "Creality Ender-3 V2 Neo",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v2_neo/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_v2_neo_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_v2_neo_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_v2_neo_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_v2",
           "name": "Creality Ender-3 V2",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v2/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_v2_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_v2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_v2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_v3_ke",
           "name": "Creality Ender-3 V3 KE",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3_ke/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_v3_ke_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_v3_ke_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_v3_ke_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_v3_plus",
           "name": "Creality Ender-3 V3 Plus",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3_plus/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_v3_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_v3_plus_bed.stl"
         },
         {
           "id": "creality_ender-3_v3_se",
           "name": "Creality Ender-3 V3 SE",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3_se/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_v3_se_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_v3_se_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_v3_se_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3_v3",
           "name": "Creality Ender-3 V3",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_v3_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_v3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_v3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-3",
           "name": "Creality Ender-3",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-3_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-5_max",
           "name": "Creality Ender-5 Max",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_max/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-5_max_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-5_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-5_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-5_plus",
           "name": "Creality Ender-5 Plus",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_plus/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-5_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-5_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-5_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-5_pro_(2019)",
           "name": "Creality Ender-5 Pro (2019)",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_pro_(2019)/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-5_pro_(2019)_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-5_pro_(2019)_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-5_pro_(2019)_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-5_s1",
           "name": "Creality Ender-5 S1",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_s1/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-5_s1_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-5_s1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-5_s1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-5s",
           "name": "Creality Ender-5S",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5s/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-5s_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-5s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-5s_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-5",
           "name": "Creality Ender-5",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-5_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-5_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-5_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_ender-6",
           "name": "Creality Ender-6",
-          "cover": "/assets/orcaslicer/printers/creality/creality_ender-6/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_ender-6_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_ender-6_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_ender-6_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_hi",
           "name": "Creality Hi",
-          "cover": "/assets/orcaslicer/printers/creality/creality_hi/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_hi_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_hi_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_hi_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k1_max",
           "name": "Creality K1 Max",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k1_max/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k1_max_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k1_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k1_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k1_se",
           "name": "Creality K1 SE",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k1_se/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k1_se_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k1_se_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k1_se_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k1c",
           "name": "Creality K1C",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k1c/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k1c_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k1c_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k1c_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k1",
           "name": "Creality K1",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k1/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k1_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k2_plus",
           "name": "Creality K2 Plus",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k2_plus/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k2_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k2_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k2_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k2_pro",
           "name": "Creality K2 Pro",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k2_pro/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k2_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k2_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k2_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_k2",
           "name": "Creality K2",
-          "cover": "/assets/orcaslicer/printers/creality/creality_k2/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_k2_cover.png",
+          "bedModel": "/assets/orcaslicer/creality/creality_k2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/creality/creality_k2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "creality_sermoon_v1",
           "name": "Creality Sermoon V1",
-          "cover": "/assets/orcaslicer/printers/creality/creality_sermoon_v1/cover.png"
+          "cover": "/assets/orcaslicer/creality/creality_sermoon_v1_cover.png"
         }
       ]
     },
@@ -561,12 +799,16 @@
         {
           "id": "cubicon_xceler-i",
           "name": "Cubicon xCeler-I",
-          "cover": "/assets/orcaslicer/printers/cubicon/cubicon_xceler-i/cover.png"
+          "cover": "/assets/orcaslicer/cubicon/cubicon_xceler-i_cover.png",
+          "bedTexture": "/assets/orcaslicer/cubicon/cubicon_xceler-i_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "cubicon_xceler-plus",
           "name": "Cubicon xCeler-Plus",
-          "cover": "/assets/orcaslicer/printers/cubicon/cubicon_xceler-plus/cover.png"
+          "cover": "/assets/orcaslicer/cubicon/cubicon_xceler-plus_cover.png",
+          "bedTexture": "/assets/orcaslicer/cubicon/cubicon_xceler-plus_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -577,22 +819,31 @@
         {
           "id": "generic_klipper_printer",
           "name": "Generic Klipper Printer",
-          "cover": "/assets/orcaslicer/printers/custom/generic_klipper_printer/cover.png"
+          "cover": "/assets/orcaslicer/custom/generic_klipper_printer_cover.png",
+          "bedTexture": "/assets/orcaslicer/custom/generic_klipper_printer_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "generic_marlin_printer",
           "name": "Generic Marlin Printer",
-          "cover": "/assets/orcaslicer/printers/custom/generic_marlin_printer/cover.png"
+          "cover": "/assets/orcaslicer/custom/generic_marlin_printer_cover.png",
+          "bedTexture": "/assets/orcaslicer/custom/generic_marlin_printer_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "generic_rrf_printer",
           "name": "Generic RRF Printer",
-          "cover": "/assets/orcaslicer/printers/custom/generic_rrf_printer/cover.png"
+          "cover": "/assets/orcaslicer/custom/generic_rrf_printer_cover.png",
+          "bedTexture": "/assets/orcaslicer/custom/generic_rrf_printer_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "generic_toolchanger_printer",
           "name": "Generic ToolChanger Printer",
-          "cover": "/assets/orcaslicer/printers/custom/generic_toolchanger_printer/cover.png"
+          "cover": "/assets/orcaslicer/custom/generic_toolchanger_printer_cover.png",
+          "bedModel": "/assets/orcaslicer/custom/generic_toolchanger_printer_bed.stl",
+          "bedTexture": "/assets/orcaslicer/custom/generic_toolchanger_printer_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -603,17 +854,26 @@
         {
           "id": "deltamaker_2t",
           "name": "DeltaMaker 2T",
-          "cover": "/assets/orcaslicer/printers/deltamaker/deltamaker_2t/cover.png"
+          "cover": "/assets/orcaslicer/deltamaker/deltamaker_2t_cover.png",
+          "bedModel": "/assets/orcaslicer/deltamaker/deltamaker_2t_bed.stl",
+          "bedTexture": "/assets/orcaslicer/deltamaker/deltamaker_2t_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "deltamaker_2xt",
           "name": "DeltaMaker 2XT",
-          "cover": "/assets/orcaslicer/printers/deltamaker/deltamaker_2xt/cover.png"
+          "cover": "/assets/orcaslicer/deltamaker/deltamaker_2xt_cover.png",
+          "bedModel": "/assets/orcaslicer/deltamaker/deltamaker_2xt_bed.stl",
+          "bedTexture": "/assets/orcaslicer/deltamaker/deltamaker_2xt_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "deltamaker_2",
           "name": "DeltaMaker 2",
-          "cover": "/assets/orcaslicer/printers/deltamaker/deltamaker_2/cover.png"
+          "cover": "/assets/orcaslicer/deltamaker/deltamaker_2_cover.png",
+          "bedModel": "/assets/orcaslicer/deltamaker/deltamaker_2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/deltamaker/deltamaker_2_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -624,17 +884,20 @@
         {
           "id": "dremel_3d20",
           "name": "Dremel 3D20",
-          "cover": "/assets/orcaslicer/printers/dremel/dremel_3d20/cover.png"
+          "cover": "/assets/orcaslicer/dremel/dremel_3d20_cover.png",
+          "bedModel": "/assets/orcaslicer/dremel/dremel_3d20_bed.stl"
         },
         {
           "id": "dremel_3d40",
           "name": "Dremel 3D40",
-          "cover": "/assets/orcaslicer/printers/dremel/dremel_3d40/cover.png"
+          "cover": "/assets/orcaslicer/dremel/dremel_3d40_cover.png",
+          "bedModel": "/assets/orcaslicer/dremel/dremel_3d40_bed.stl"
         },
         {
           "id": "dremel_3d45",
           "name": "Dremel 3D45",
-          "cover": "/assets/orcaslicer/printers/dremel/dremel_3d45/cover.png"
+          "cover": "/assets/orcaslicer/dremel/dremel_3d45_cover.png",
+          "bedModel": "/assets/orcaslicer/dremel/dremel_3d45_bed.stl"
         }
       ]
     },
@@ -645,87 +908,138 @@
         {
           "id": "elegoo_centauri_carbon_2",
           "name": "Elegoo Centauri Carbon 2",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_centauri_carbon_2/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_centauri_carbon_2_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_centauri_carbon_2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_centauri_carbon_2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_centauri_carbon",
           "name": "Elegoo Centauri Carbon",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_centauri_carbon/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_centauri_carbon_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_centauri_carbon_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_centauri_carbon_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_centauri",
           "name": "Elegoo Centauri",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_centauri/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_centauri_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_centauri_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_centauri_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_2d",
           "name": "Elegoo Neptune 2D",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_2d/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_2d_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_2d_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_2d_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_2s",
           "name": "Elegoo Neptune 2S",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_2s/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_2s_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_2s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_2s_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_2",
           "name": "Elegoo Neptune 2",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_2/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_2_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_3_max",
           "name": "Elegoo Neptune 3 Max",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3_max/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_3_max_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_3_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_3_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_3_plus",
           "name": "Elegoo Neptune 3 Plus",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3_plus/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_3_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_3_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_3_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_3_pro",
           "name": "Elegoo Neptune 3 Pro",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3_pro/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_3_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_3_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_3_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_3",
           "name": "Elegoo Neptune 3",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_3_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_4_max",
           "name": "Elegoo Neptune 4 Max",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4_max/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_4_max_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_4_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_4_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_4_plus",
           "name": "Elegoo Neptune 4 Plus",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4_plus/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_4_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_4_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_4_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_4_pro",
           "name": "Elegoo Neptune 4 Pro",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4_pro/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_4_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_4_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_4_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_4",
           "name": "Elegoo Neptune 4",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_4_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_4_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_4_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune_x",
           "name": "Elegoo Neptune X",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_x/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_x_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_x_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_x_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_neptune",
           "name": "Elegoo Neptune",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_neptune_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_neptune_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_neptune_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "elegoo_orangestorm_giga",
           "name": "Elegoo OrangeStorm Giga",
-          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_orangestorm_giga/cover.png"
+          "cover": "/assets/orcaslicer/elegoo/elegoo_orangestorm_giga_cover.png",
+          "bedModel": "/assets/orcaslicer/elegoo/elegoo_orangestorm_giga_bed.stl",
+          "bedTexture": "/assets/orcaslicer/elegoo/elegoo_orangestorm_giga_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -736,17 +1050,26 @@
         {
           "id": "eryone_er20_klipper",
           "name": "Eryone ER20 Klipper",
-          "cover": "/assets/orcaslicer/printers/eryone/eryone_er20_klipper/cover.png"
+          "cover": "/assets/orcaslicer/eryone/eryone_er20_klipper_cover.png",
+          "bedModel": "/assets/orcaslicer/eryone/eryone_er20_klipper_bed.stl",
+          "bedTexture": "/assets/orcaslicer/eryone/eryone_er20_klipper_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "eryone_er20",
           "name": "Eryone ER20",
-          "cover": "/assets/orcaslicer/printers/eryone/eryone_er20/cover.png"
+          "cover": "/assets/orcaslicer/eryone/eryone_er20_cover.png",
+          "bedModel": "/assets/orcaslicer/eryone/eryone_er20_bed.stl",
+          "bedTexture": "/assets/orcaslicer/eryone/eryone_er20_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "thinker_x400",
           "name": "Thinker X400",
-          "cover": "/assets/orcaslicer/printers/eryone/thinker_x400/cover.png"
+          "cover": "/assets/orcaslicer/eryone/thinker_x400_cover.png",
+          "bedModel": "/assets/orcaslicer/eryone/thinker_x400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/eryone/thinker_x400_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -757,32 +1080,50 @@
         {
           "id": "flsun_q5",
           "name": "FLSun Q5",
-          "cover": "/assets/orcaslicer/printers/flsun/flsun_q5/cover.png"
+          "cover": "/assets/orcaslicer/flsun/flsun_q5_cover.png",
+          "bedModel": "/assets/orcaslicer/flsun/flsun_q5_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flsun/flsun_q5_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flsun_qq-s_pro",
           "name": "FLSun QQ-S Pro",
-          "cover": "/assets/orcaslicer/printers/flsun/flsun_qq-s_pro/cover.png"
+          "cover": "/assets/orcaslicer/flsun/flsun_qq-s_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/flsun/flsun_qq-s_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flsun/flsun_qq-s_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flsun_s1",
           "name": "FLSun S1",
-          "cover": "/assets/orcaslicer/printers/flsun/flsun_s1/cover.png"
+          "cover": "/assets/orcaslicer/flsun/flsun_s1_cover.png",
+          "bedModel": "/assets/orcaslicer/flsun/flsun_s1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flsun/flsun_s1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "flsun_super_racer_(sr)",
           "name": "FLSun Super Racer (SR)",
-          "cover": "/assets/orcaslicer/printers/flsun/flsun_super_racer_(sr)/cover.png"
+          "cover": "/assets/orcaslicer/flsun/flsun_super_racer_(sr)_cover.png",
+          "bedModel": "/assets/orcaslicer/flsun/flsun_super_racer_(sr)_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flsun/flsun_super_racer_(sr)_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "flsun_t1",
           "name": "FLSun T1",
-          "cover": "/assets/orcaslicer/printers/flsun/flsun_t1/cover.png"
+          "cover": "/assets/orcaslicer/flsun/flsun_t1_cover.png",
+          "bedModel": "/assets/orcaslicer/flsun/flsun_t1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flsun/flsun_t1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "flsun_v400",
           "name": "FLSun V400",
-          "cover": "/assets/orcaslicer/printers/flsun/flsun_v400/cover.png"
+          "cover": "/assets/orcaslicer/flsun/flsun_v400_cover.png",
+          "bedModel": "/assets/orcaslicer/flsun/flsun_v400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flsun/flsun_v400_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -793,47 +1134,74 @@
         {
           "id": "flashforge_ad5x",
           "name": "Flashforge AD5X",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_ad5x/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_ad5x_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_ad5x_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_ad5x_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_adventurer_3_series",
           "name": "Flashforge Adventurer 3 Series",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_3_series/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_adventurer_3_series_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_adventurer_3_series_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_adventurer_3_series_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_adventurer_4_series",
           "name": "Flashforge Adventurer 4 Series",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_4_series/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_adventurer_4_series_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_adventurer_4_series_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_adventurer_4_series_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_adventurer_5m_pro",
           "name": "Flashforge Adventurer 5M Pro",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_5m_pro/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_adventurer_5m_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_adventurer_5m_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_adventurer_5m_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_adventurer_5m",
           "name": "Flashforge Adventurer 5M",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_5m/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_adventurer_5m_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_adventurer_5m_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_adventurer_5m_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_guider_2s",
           "name": "Flashforge Guider 2s",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider_2s/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_guider_2s_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_guider_2s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_guider_2s_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_guider_3_ultra",
           "name": "Flashforge Guider 3 Ultra",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider_3_ultra/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_guider_3_ultra_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_guider_3_ultra_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_guider_3_ultra_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_guider4_pro",
           "name": "Flashforge Guider4 Pro",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider4_pro/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_guider4_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_guider4_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_guider4_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flashforge_guider4",
           "name": "Flashforge Guider4",
-          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider4/cover.png"
+          "cover": "/assets/orcaslicer/flashforge/flashforge_guider4_cover.png",
+          "bedModel": "/assets/orcaslicer/flashforge/flashforge_guider4_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flashforge/flashforge_guider4_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -844,22 +1212,34 @@
         {
           "id": "flyingbear_ghost_6",
           "name": "FlyingBear Ghost 6",
-          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_ghost_6/cover.png"
+          "cover": "/assets/orcaslicer/flyingbear/flyingbear_ghost_6_cover.png",
+          "bedModel": "/assets/orcaslicer/flyingbear/flyingbear_ghost_6_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flyingbear/flyingbear_ghost_6_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flyingbear_ghost7",
           "name": "FlyingBear Ghost7",
-          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_ghost7/cover.png"
+          "cover": "/assets/orcaslicer/flyingbear/flyingbear_ghost7_cover.png",
+          "bedModel": "/assets/orcaslicer/flyingbear/flyingbear_ghost7_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flyingbear/flyingbear_ghost7_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flyingbear_reborn3",
           "name": "FlyingBear Reborn3",
-          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_reborn3/cover.png"
+          "cover": "/assets/orcaslicer/flyingbear/flyingbear_reborn3_cover.png",
+          "bedModel": "/assets/orcaslicer/flyingbear/flyingbear_reborn3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flyingbear/flyingbear_reborn3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "flyingbear_s1",
           "name": "FlyingBear S1",
-          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_s1/cover.png"
+          "cover": "/assets/orcaslicer/flyingbear/flyingbear_s1_cover.png",
+          "bedModel": "/assets/orcaslicer/flyingbear/flyingbear_s1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/flyingbear/flyingbear_s1_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -870,17 +1250,26 @@
         {
           "id": "folgertech_ft-5",
           "name": "Folgertech FT-5",
-          "cover": "/assets/orcaslicer/printers/folgertech/folgertech_ft-5/cover.png"
+          "cover": "/assets/orcaslicer/folgertech/folgertech_ft-5_cover.png",
+          "bedModel": "/assets/orcaslicer/folgertech/folgertech_ft-5_bed.stl",
+          "bedTexture": "/assets/orcaslicer/folgertech/folgertech_ft-5_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "folgertech_ft-6",
           "name": "Folgertech FT-6",
-          "cover": "/assets/orcaslicer/printers/folgertech/folgertech_ft-6/cover.png"
+          "cover": "/assets/orcaslicer/folgertech/folgertech_ft-6_cover.png",
+          "bedModel": "/assets/orcaslicer/folgertech/folgertech_ft-6_bed.stl",
+          "bedTexture": "/assets/orcaslicer/folgertech/folgertech_ft-6_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "folgertech_i3",
           "name": "Folgertech i3",
-          "cover": "/assets/orcaslicer/printers/folgertech/folgertech_i3/cover.png"
+          "cover": "/assets/orcaslicer/folgertech/folgertech_i3_cover.png",
+          "bedModel": "/assets/orcaslicer/folgertech/folgertech_i3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/folgertech/folgertech_i3_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -891,82 +1280,130 @@
         {
           "id": "geeetech_a10_m",
           "name": "Geeetech A10 M",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a10_m/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a10_m_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a10_m_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a10_m_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a10_pro",
           "name": "Geeetech A10 Pro",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a10_pro/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a10_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a10_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a10_pro_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a10_t",
           "name": "Geeetech A10 T",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a10_t/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a10_t_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a10_t_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a10_t_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a20_m",
           "name": "Geeetech A20 M",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a20_m/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a20_m_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a20_m_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a20_m_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a20_t",
           "name": "Geeetech A20 T",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a20_t/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a20_t_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a20_t_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a20_t_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a20",
           "name": "Geeetech A20",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a20/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a20_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a20_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a20_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a30_m",
           "name": "Geeetech A30 M",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a30_m/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a30_m_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a30_m_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a30_m_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a30_pro",
           "name": "Geeetech A30 Pro",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a30_pro/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a30_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a30_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a30_pro_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_a30_t",
           "name": "Geeetech A30 T",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a30_t/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_a30_t_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_a30_t_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_a30_t_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_m1",
           "name": "Geeetech M1",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_m1/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_m1_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_m1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_m1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_mizar_m",
           "name": "Geeetech Mizar M",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_m/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_mizar_m_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_mizar_m_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_mizar_m_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_mizar_max",
           "name": "Geeetech Mizar Max",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_max/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_mizar_max_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_mizar_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_mizar_max_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_mizar_pro",
           "name": "Geeetech Mizar Pro",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_pro/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_mizar_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_mizar_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_mizar_pro_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_mizar_s",
           "name": "Geeetech Mizar S",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_s/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_mizar_s_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_mizar_s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_mizar_s_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_mizar",
           "name": "Geeetech Mizar",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_mizar_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_mizar_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_mizar_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "geeetech_thunder",
           "name": "Geeetech Thunder",
-          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_thunder/cover.png"
+          "cover": "/assets/orcaslicer/geeetech/geeetech_thunder_cover.png",
+          "bedModel": "/assets/orcaslicer/geeetech/geeetech_thunder_bed.stl",
+          "bedTexture": "/assets/orcaslicer/geeetech/geeetech_thunder_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -977,7 +1414,10 @@
         {
           "id": "ginger_g1",
           "name": "Ginger G1",
-          "cover": "/assets/orcaslicer/printers/ginger_additive/ginger_g1/cover.png"
+          "cover": "/assets/orcaslicer/ginger_additive/ginger_g1_cover.png",
+          "bedModel": "/assets/orcaslicer/ginger_additive/ginger_g1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ginger_additive/ginger_g1_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -988,22 +1428,34 @@
         {
           "id": "infimech_ex+aps",
           "name": "InfiMech EX+APS",
-          "cover": "/assets/orcaslicer/printers/infimech/infimech_ex+aps/cover.png"
+          "cover": "/assets/orcaslicer/infimech/infimech_ex+aps_cover.png",
+          "bedModel": "/assets/orcaslicer/infimech/infimech_ex+aps_bed.stl",
+          "bedTexture": "/assets/orcaslicer/infimech/infimech_ex+aps_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "infimech_ex",
           "name": "InfiMech EX",
-          "cover": "/assets/orcaslicer/printers/infimech/infimech_ex/cover.png"
+          "cover": "/assets/orcaslicer/infimech/infimech_ex_cover.png",
+          "bedModel": "/assets/orcaslicer/infimech/infimech_ex_bed.stl",
+          "bedTexture": "/assets/orcaslicer/infimech/infimech_ex_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "infimech_tx_hardened_steel_nozzle",
           "name": "InfiMech TX Hardened Steel Nozzle",
-          "cover": "/assets/orcaslicer/printers/infimech/infimech_tx_hardened_steel_nozzle/cover.png"
+          "cover": "/assets/orcaslicer/infimech/infimech_tx_hardened_steel_nozzle_cover.png",
+          "bedModel": "/assets/orcaslicer/infimech/infimech_tx_hardened_steel_nozzle_bed.stl",
+          "bedTexture": "/assets/orcaslicer/infimech/infimech_tx_hardened_steel_nozzle_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "infimech_tx",
           "name": "InfiMech TX",
-          "cover": "/assets/orcaslicer/printers/infimech/infimech_tx/cover.png"
+          "cover": "/assets/orcaslicer/infimech/infimech_tx_cover.png",
+          "bedModel": "/assets/orcaslicer/infimech/infimech_tx_bed.stl",
+          "bedTexture": "/assets/orcaslicer/infimech/infimech_tx_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1014,27 +1466,36 @@
         {
           "id": "kingroon_klp1",
           "name": "Kingroon KLP1",
-          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_klp1/cover.png"
+          "cover": "/assets/orcaslicer/kingroon/kingroon_klp1_cover.png"
         },
         {
           "id": "kingroon_kp3s_3.0",
           "name": "Kingroon KP3S 3.0",
-          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_3.0/cover.png"
+          "cover": "/assets/orcaslicer/kingroon/kingroon_kp3s_3.0_cover.png",
+          "bedModel": "/assets/orcaslicer/kingroon/kingroon_kp3s_3.0_bed.stl",
+          "bedTexture": "/assets/orcaslicer/kingroon/kingroon_kp3s_3.0_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "kingroon_kp3s_pro_s1",
           "name": "Kingroon KP3S PRO S1",
-          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_pro_s1/cover.png"
+          "cover": "/assets/orcaslicer/kingroon/kingroon_kp3s_pro_s1_cover.png",
+          "bedModel": "/assets/orcaslicer/kingroon/kingroon_kp3s_pro_s1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/kingroon/kingroon_kp3s_pro_s1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "kingroon_kp3s_pro_v2",
           "name": "Kingroon KP3S PRO V2",
-          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_pro_v2/cover.png"
+          "cover": "/assets/orcaslicer/kingroon/kingroon_kp3s_pro_v2_cover.png",
+          "bedModel": "/assets/orcaslicer/kingroon/kingroon_kp3s_pro_v2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/kingroon/kingroon_kp3s_pro_v2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "kingroon_kp3s_v1",
           "name": "Kingroon KP3S V1",
-          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_v1/cover.png"
+          "cover": "/assets/orcaslicer/kingroon/kingroon_kp3s_v1_cover.png"
         }
       ]
     },
@@ -1045,12 +1506,18 @@
         {
           "id": "longer_lk10_plus",
           "name": "LONGER LK10 Plus",
-          "cover": "/assets/orcaslicer/printers/longer/longer_lk10_plus/cover.png"
+          "cover": "/assets/orcaslicer/longer/longer_lk10_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/longer/longer_lk10_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/longer/longer_lk10_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "longer_lk10",
           "name": "LONGER LK10",
-          "cover": "/assets/orcaslicer/printers/longer/longer_lk10/cover.png"
+          "cover": "/assets/orcaslicer/longer/longer_lk10_cover.png",
+          "bedModel": "/assets/orcaslicer/longer/longer_lk10_bed.stl",
+          "bedTexture": "/assets/orcaslicer/longer/longer_lk10_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1061,12 +1528,18 @@
         {
           "id": "lulzbot_taz_4_or_5",
           "name": "Lulzbot Taz 4 or 5",
-          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_4_or_5/cover.png"
+          "cover": "/assets/orcaslicer/lulzbot/lulzbot_taz_4_or_5_cover.png",
+          "bedModel": "/assets/orcaslicer/lulzbot/lulzbot_taz_4_or_5_bed.stl",
+          "bedTexture": "/assets/orcaslicer/lulzbot/lulzbot_taz_4_or_5_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "lulzbot_taz_6",
           "name": "Lulzbot Taz 6",
-          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_6/cover.png"
+          "cover": "/assets/orcaslicer/lulzbot/lulzbot_taz_6_cover.png",
+          "bedModel": "/assets/orcaslicer/lulzbot/lulzbot_taz_6_bed.stl",
+          "bedTexture": "/assets/orcaslicer/lulzbot/lulzbot_taz_6_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "lulzbot_taz_mini_2",
@@ -1076,12 +1549,18 @@
         {
           "id": "lulzbot_taz_pro_dual",
           "name": "Lulzbot Taz Pro Dual",
-          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_pro_dual/cover.png"
+          "cover": "/assets/orcaslicer/lulzbot/lulzbot_taz_pro_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/lulzbot/lulzbot_taz_pro_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/lulzbot/lulzbot_taz_pro_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "lulzbot_taz_pro_s",
           "name": "Lulzbot Taz Pro S",
-          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_pro_s/cover.png"
+          "cover": "/assets/orcaslicer/lulzbot/lulzbot_taz_pro_s_cover.png",
+          "bedModel": "/assets/orcaslicer/lulzbot/lulzbot_taz_pro_s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/lulzbot/lulzbot_taz_pro_s_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "lulzbot_taz_workhorse",
@@ -1097,7 +1576,10 @@
         {
           "id": "m3d_enabler_d8500_mm_model",
           "name": "M3D Enabler D8500 MM Model",
-          "cover": "/assets/orcaslicer/printers/m3d/m3d_enabler_d8500_mm_model/cover.png"
+          "cover": "/assets/orcaslicer/m3d/m3d_enabler_d8500_mm_model_cover.png",
+          "bedModel": "/assets/orcaslicer/m3d/m3d_enabler_d8500_mm_model_bed.stl",
+          "bedTexture": "/assets/orcaslicer/m3d/m3d_enabler_d8500_mm_model_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1108,27 +1590,42 @@
         {
           "id": "mm_boneking",
           "name": "MM BoneKing",
-          "cover": "/assets/orcaslicer/printers/magicmaker/mm_boneking/cover.png"
+          "cover": "/assets/orcaslicer/magicmaker/mm_boneking_cover.png",
+          "bedModel": "/assets/orcaslicer/magicmaker/mm_boneking_bed.stl",
+          "bedTexture": "/assets/orcaslicer/magicmaker/mm_boneking_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "mm_hj_sk",
           "name": "MM hj SK",
-          "cover": "/assets/orcaslicer/printers/magicmaker/mm_hj_sk/cover.png"
+          "cover": "/assets/orcaslicer/magicmaker/mm_hj_sk_cover.png",
+          "bedModel": "/assets/orcaslicer/magicmaker/mm_hj_sk_bed.stl",
+          "bedTexture": "/assets/orcaslicer/magicmaker/mm_hj_sk_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "mm_hqs_sf",
           "name": "MM hqs SF",
-          "cover": "/assets/orcaslicer/printers/magicmaker/mm_hqs_sf/cover.png"
+          "cover": "/assets/orcaslicer/magicmaker/mm_hqs_sf_cover.png",
+          "bedModel": "/assets/orcaslicer/magicmaker/mm_hqs_sf_bed.stl",
+          "bedTexture": "/assets/orcaslicer/magicmaker/mm_hqs_sf_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "mm_hqs_hj",
           "name": "MM hqs hj",
-          "cover": "/assets/orcaslicer/printers/magicmaker/mm_hqs_hj/cover.png"
+          "cover": "/assets/orcaslicer/magicmaker/mm_hqs_hj_cover.png",
+          "bedModel": "/assets/orcaslicer/magicmaker/mm_hqs_hj_bed.stl",
+          "bedTexture": "/assets/orcaslicer/magicmaker/mm_hqs_hj_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "mm_slb",
           "name": "MM slb",
-          "cover": "/assets/orcaslicer/printers/magicmaker/mm_slb/cover.png"
+          "cover": "/assets/orcaslicer/magicmaker/mm_slb_cover.png",
+          "bedModel": "/assets/orcaslicer/magicmaker/mm_slb_bed.stl",
+          "bedTexture": "/assets/orcaslicer/magicmaker/mm_slb_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1139,7 +1636,10 @@
         {
           "id": "m1",
           "name": "M1",
-          "cover": "/assets/orcaslicer/printers/mellow/m1/cover.png"
+          "cover": "/assets/orcaslicer/mellow/m1_cover.png",
+          "bedModel": "/assets/orcaslicer/mellow/m1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/mellow/m1_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1150,7 +1650,10 @@
         {
           "id": "openeye_peacock_v2",
           "name": "OpenEYE Peacock V2",
-          "cover": "/assets/orcaslicer/printers/openeye/openeye_peacock_v2/cover.png"
+          "cover": "/assets/orcaslicer/openeye/openeye_peacock_v2_cover.png",
+          "bedModel": "/assets/orcaslicer/openeye/openeye_peacock_v2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/openeye/openeye_peacock_v2_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1161,7 +1664,7 @@
         {
           "id": "orca_arena_x1_carbon",
           "name": "Orca Arena X1 Carbon",
-          "cover": "/assets/orcaslicer/printers/orcaarena/orca_arena_x1_carbon/cover.png"
+          "cover": "/assets/orcaslicer/orcaarena/orca_arena_x1_carbon_cover.png"
         }
       ]
     },
@@ -1172,7 +1675,10 @@
         {
           "id": "peopoly_magneto_x",
           "name": "Peopoly Magneto X",
-          "cover": "/assets/orcaslicer/printers/peopoly/peopoly_magneto_x/cover.png"
+          "cover": "/assets/orcaslicer/peopoly/peopoly_magneto_x_cover.png",
+          "bedModel": "/assets/orcaslicer/peopoly/peopoly_magneto_x_bed.stl",
+          "bedTexture": "/assets/orcaslicer/peopoly/peopoly_magneto_x_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1183,7 +1689,10 @@
         {
           "id": "phrozen_arco",
           "name": "Phrozen Arco",
-          "cover": "/assets/orcaslicer/printers/phrozen/phrozen_arco/cover.png"
+          "cover": "/assets/orcaslicer/phrozen/phrozen_arco_cover.png",
+          "bedModel": "/assets/orcaslicer/phrozen/phrozen_arco_bed.stl",
+          "bedTexture": "/assets/orcaslicer/phrozen/phrozen_arco_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1194,7 +1703,10 @@
         {
           "id": "the_positron",
           "name": "The Positron",
-          "cover": "/assets/orcaslicer/printers/positron3d/the_positron/cover.png"
+          "cover": "/assets/orcaslicer/positron3d/the_positron_cover.png",
+          "bedModel": "/assets/orcaslicer/positron3d/the_positron_bed.stl",
+          "bedTexture": "/assets/orcaslicer/positron3d/the_positron_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1205,67 +1717,106 @@
         {
           "id": "prusa_core_one_hf",
           "name": "Prusa CORE One HF",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one_hf/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_core_one_hf_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_core_one_hf_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_core_one_hf_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_core_one_l_hf",
           "name": "Prusa CORE One L HF",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one_l_hf/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_core_one_l_hf_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_core_one_l_hf_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_core_one_l_hf_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_core_one_l",
           "name": "Prusa CORE One L",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one_l/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_core_one_l_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_core_one_l_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_core_one_l_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_core_one",
           "name": "Prusa CORE One",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_core_one_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_core_one_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_core_one_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mini_is",
           "name": "Prusa MINI IS",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mini_is/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mini_is_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mini_is_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mini_is_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mini",
           "name": "Prusa MINI",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mini/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mini_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mini_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mini_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mk3.5",
           "name": "Prusa MK3.5",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk3.5/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mk3.5_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mk3.5_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mk3.5_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mk3s",
           "name": "Prusa MK3S",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk3s/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mk3s_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mk3s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mk3s_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mk4s_hf",
           "name": "Prusa MK4S HF",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk4s_hf/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mk4s_hf_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mk4s_hf_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mk4s_hf_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mk4s",
           "name": "Prusa MK4S",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk4s/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mk4s_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mk4s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mk4s_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_mk4",
           "name": "Prusa MK4",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk4/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_mk4_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_mk4_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_mk4_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_xl_5t",
           "name": "Prusa XL 5T",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_xl_5t/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_xl_5t_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_xl_5t_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_xl_5t_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "prusa_xl",
           "name": "Prusa XL",
-          "cover": "/assets/orcaslicer/printers/prusa/prusa_xl/cover.png"
+          "cover": "/assets/orcaslicer/prusa/prusa_xl_cover.png",
+          "bedModel": "/assets/orcaslicer/prusa/prusa_xl_bed.stl",
+          "bedTexture": "/assets/orcaslicer/prusa/prusa_xl_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1276,57 +1827,90 @@
         {
           "id": "qidi_q1_pro",
           "name": "Qidi Q1 Pro",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_q1_pro/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_q1_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_q1_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_q1_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_q2c",
           "name": "Qidi Q2C",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_q2c/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_q2c_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_q2c_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_q2c_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_q2",
           "name": "Qidi Q2",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_q2/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_q2_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_q2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_q2_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-cf_pro",
           "name": "Qidi X-CF Pro",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-cf_pro/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-cf_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-cf_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-cf_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-max_3",
           "name": "Qidi X-Max 3",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-max_3/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-max_3_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-max_3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-max_3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-max_4",
           "name": "Qidi X-Max 4",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-max_4/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-max_4_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-max_4_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-max_4_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "qidi_x-max",
           "name": "Qidi X-Max",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-max/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-max_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-plus_3",
           "name": "Qidi X-Plus 3",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-plus_3/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-plus_3_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-plus_3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-plus_3_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-plus_4",
           "name": "Qidi X-Plus 4",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-plus_4/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-plus_4_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-plus_4_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-plus_4_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-plus",
           "name": "Qidi X-Plus",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-plus/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-plus_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "qidi_x-smart_3",
           "name": "Qidi X-Smart 3",
-          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-smart_3/cover.png"
+          "cover": "/assets/orcaslicer/qidi/qidi_x-smart_3_cover.png",
+          "bedModel": "/assets/orcaslicer/qidi/qidi_x-smart_3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/qidi/qidi_x-smart_3_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1337,7 +1921,10 @@
         {
           "id": "e3ng_v1.2s",
           "name": "E3NG v1.2S",
-          "cover": "/assets/orcaslicer/printers/rh3d/e3ng_v1.2s/cover.png"
+          "cover": "/assets/orcaslicer/rh3d/e3ng_v1.2s_cover.png",
+          "bedModel": "/assets/orcaslicer/rh3d/e3ng_v1.2s_bed.stl",
+          "bedTexture": "/assets/orcaslicer/rh3d/e3ng_v1.2s_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1348,12 +1935,18 @@
         {
           "id": "raise3d_pro3_plus",
           "name": "Raise3D Pro3 Plus",
-          "cover": "/assets/orcaslicer/printers/raise3d/raise3d_pro3_plus/cover.png"
+          "cover": "/assets/orcaslicer/raise3d/raise3d_pro3_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/raise3d/raise3d_pro3_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/raise3d/raise3d_pro3_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "raise3d_pro3",
           "name": "Raise3D Pro3",
-          "cover": "/assets/orcaslicer/printers/raise3d/raise3d_pro3/cover.png"
+          "cover": "/assets/orcaslicer/raise3d/raise3d_pro3_cover.png",
+          "bedModel": "/assets/orcaslicer/raise3d/raise3d_pro3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/raise3d/raise3d_pro3_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1364,107 +1957,170 @@
         {
           "id": "ratrig_v-cast",
           "name": "RatRig V-Cast",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-cast/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-cast_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-cast_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-cast_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_3_200",
           "name": "RatRig V-Core 3 200",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_200/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_3_200_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_3_200_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_3_200_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_3_300",
           "name": "RatRig V-Core 3 300",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_300/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_3_300_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_3_300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_3_300_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_3_400",
           "name": "RatRig V-Core 3 400",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_400/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_3_400_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_3_400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_3_400_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_3_500",
           "name": "RatRig V-Core 3 500",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_500/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_3_500_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_3_500_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_3_500_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_300",
           "name": "RatRig V-Core 4 300",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_300/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_300_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_300_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_400",
           "name": "RatRig V-Core 4 400",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_400/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_400_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_400_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_500",
           "name": "RatRig V-Core 4 500",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_500/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_500_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_500_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_500_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_hybrid_300",
           "name": "RatRig V-Core 4 HYBRID 300",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_hybrid_300/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_300_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_300_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_hybrid_400",
           "name": "RatRig V-Core 4 HYBRID 400",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_hybrid_400/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_400_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_400_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_hybrid_500",
           "name": "RatRig V-Core 4 HYBRID 500",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_hybrid_500/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_500_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_500_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_hybrid_500_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_300_copy_mode",
           "name": "RatRig V-Core 4 IDEX 300 COPY MODE",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_300_copy_mode/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_copy_mode_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_copy_mode_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_copy_mode_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_300_mirror_mode",
           "name": "RatRig V-Core 4 IDEX 300 MIRROR MODE",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_300_mirror_mode/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_mirror_mode_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_mirror_mode_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_mirror_mode_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_300",
           "name": "RatRig V-Core 4 IDEX 300",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_300/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_300_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_400_copy_mode",
           "name": "RatRig V-Core 4 IDEX 400 COPY MODE",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_400_copy_mode/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_copy_mode_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_copy_mode_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_copy_mode_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_400_mirror_mode",
           "name": "RatRig V-Core 4 IDEX 400 MIRROR MODE",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_400_mirror_mode/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_mirror_mode_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_mirror_mode_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_mirror_mode_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_400",
           "name": "RatRig V-Core 4 IDEX 400",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_400/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_400_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_500_copy_mode",
           "name": "RatRig V-Core 4 IDEX 500 COPY MODE",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_500_copy_mode/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_copy_mode_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_copy_mode_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_copy_mode_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_500_mirror_mode",
           "name": "RatRig V-Core 4 IDEX 500 MIRROR MODE",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_500_mirror_mode/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_mirror_mode_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_mirror_mode_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_mirror_mode_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-core_4_idex_500",
           "name": "RatRig V-Core 4 IDEX 500",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_500/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-core_4_idex_500_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "ratrig_v-minion",
           "name": "RatRig V-Minion",
-          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-minion/cover.png"
+          "cover": "/assets/orcaslicer/ratrig/ratrig_v-minion_cover.png",
+          "bedModel": "/assets/orcaslicer/ratrig/ratrig_v-minion_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ratrig/ratrig_v-minion_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1475,12 +2131,16 @@
         {
           "id": "rolohaun_delta_flyer_refit",
           "name": "Rolohaun Delta Flyer Refit",
-          "cover": "/assets/orcaslicer/printers/rolohaundesign/rolohaun_delta_flyer_refit/cover.png"
+          "cover": "/assets/orcaslicer/rolohaundesign/rolohaun_delta_flyer_refit_cover.png",
+          "bedTexture": "/assets/orcaslicer/rolohaundesign/rolohaun_delta_flyer_refit_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "rook_mk1_ldo",
           "name": "Rook MK1 LDO",
-          "cover": "/assets/orcaslicer/printers/rolohaundesign/rook_mk1_ldo/cover.png"
+          "cover": "/assets/orcaslicer/rolohaundesign/rook_mk1_ldo_cover.png",
+          "bedTexture": "/assets/orcaslicer/rolohaundesign/rook_mk1_ldo_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1491,12 +2151,18 @@
         {
           "id": "seckit_sk-tank",
           "name": "SecKit SK-Tank",
-          "cover": "/assets/orcaslicer/printers/seckit/seckit_sk-tank/cover.png"
+          "cover": "/assets/orcaslicer/seckit/seckit_sk-tank_cover.png",
+          "bedModel": "/assets/orcaslicer/seckit/seckit_sk-tank_bed.stl",
+          "bedTexture": "/assets/orcaslicer/seckit/seckit_sk-tank_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "seckit_go3",
           "name": "Seckit Go3",
-          "cover": "/assets/orcaslicer/printers/seckit/seckit_go3/cover.png"
+          "cover": "/assets/orcaslicer/seckit/seckit_go3_cover.png",
+          "bedModel": "/assets/orcaslicer/seckit/seckit_go3_bed.stl",
+          "bedTexture": "/assets/orcaslicer/seckit/seckit_go3_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1507,97 +2173,152 @@
         {
           "id": "snapmaker_a250_bkit",
           "name": "Snapmaker A250 BKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_bkit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_bkit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_bkit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_bkit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250_dual_bkit",
           "name": "Snapmaker A250 Dual BKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual_bkit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_bkit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_bkit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_bkit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250_dual_qs+b_kit",
           "name": "Snapmaker A250 Dual QS+B Kit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual_qs+b_kit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_qs+b_kit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_qs+b_kit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_qs+b_kit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250_dual_qskit",
           "name": "Snapmaker A250 Dual QSKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual_qskit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_qskit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_qskit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_qskit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250_dual",
           "name": "Snapmaker A250 Dual",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_dual_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250_qs+b_kit",
           "name": "Snapmaker A250 QS+B Kit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_qs+b_kit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_qs+b_kit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_qs+b_kit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_qs+b_kit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250_qskit",
           "name": "Snapmaker A250 QSKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_qskit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_qskit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_qskit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_qskit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a250",
           "name": "Snapmaker A250",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a250_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a250_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a250_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_bkit",
           "name": "Snapmaker A350 BKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_bkit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_bkit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_bkit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_bkit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_dual_bkit",
           "name": "Snapmaker A350 Dual BKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual_bkit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_bkit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_bkit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_bkit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_dual_qs+b_kit",
           "name": "Snapmaker A350 Dual QS+B Kit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual_qs+b_kit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_qs+b_kit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_qs+b_kit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_qs+b_kit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_dual_qskit",
           "name": "Snapmaker A350 Dual QSKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual_qskit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_qskit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_qskit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_qskit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_dual",
           "name": "Snapmaker A350 Dual",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_dual_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_qs+b_kit",
           "name": "Snapmaker A350 QS+B Kit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_qs+b_kit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_qs+b_kit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_qs+b_kit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_qs+b_kit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350_qskit",
           "name": "Snapmaker A350 QSKit",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_qskit/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_qskit_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_qskit_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_qskit_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_a350",
           "name": "Snapmaker A350",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_a350_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_a350_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_a350_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_artisan",
           "name": "Snapmaker Artisan",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_artisan/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_artisan_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_artisan_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_artisan_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_j1",
           "name": "Snapmaker J1",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_j1/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_j1_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_j1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/snapmaker/snapmaker_j1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "snapmaker_u1",
           "name": "Snapmaker U1",
-          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_u1/cover.png"
+          "cover": "/assets/orcaslicer/snapmaker/snapmaker_u1_cover.png",
+          "bedModel": "/assets/orcaslicer/snapmaker/snapmaker_u1_bed.stl"
         }
       ]
     },
@@ -1608,67 +2329,106 @@
         {
           "id": "sovol_sv01_pro",
           "name": "Sovol SV01 Pro",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv01_pro/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv01_pro_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv01_pro_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv01_pro_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv01",
           "name": "Sovol SV01",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv01/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv01_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv01_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv01_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv02",
           "name": "Sovol SV02",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv02/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv02_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv02_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv02_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv05",
           "name": "Sovol SV05",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv05/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv05_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv05_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv05_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv06_ace",
           "name": "Sovol SV06 ACE",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06_ace/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv06_ace_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv06_ace_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv06_ace_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv06_plus_ace",
           "name": "Sovol SV06 Plus ACE",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06_plus_ace/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv06_plus_ace_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv06_plus_ace_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv06_plus_ace_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv06_plus",
           "name": "Sovol SV06 Plus",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06_plus/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv06_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv06_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv06_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv06",
           "name": "Sovol SV06",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv06_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv06_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv06_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv07_plus",
           "name": "Sovol SV07 Plus",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv07_plus/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv07_plus_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv07_plus_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv07_plus_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv07",
           "name": "Sovol SV07",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv07/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv07_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv07_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv07_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv08_max",
           "name": "Sovol SV08 MAX",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv08_max/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv08_max_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv08_max_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv08_max_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_sv08",
           "name": "Sovol SV08",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv08/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_sv08_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_sv08_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_sv08_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "sovol_zero",
           "name": "Sovol Zero",
-          "cover": "/assets/orcaslicer/printers/sovol/sovol_zero/cover.png"
+          "cover": "/assets/orcaslicer/sovol/sovol_zero_cover.png",
+          "bedModel": "/assets/orcaslicer/sovol/sovol_zero_bed.stl",
+          "bedTexture": "/assets/orcaslicer/sovol/sovol_zero_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1679,22 +2439,22 @@
         {
           "id": "tiertime_up300_hs",
           "name": "Tiertime UP300 HS",
-          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up300_hs/cover.png"
+          "cover": "/assets/orcaslicer/tiertime/tiertime_up300_hs_cover.png"
         },
         {
           "id": "tiertime_up310_pro",
           "name": "Tiertime UP310 Pro",
-          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up310_pro/cover.png"
+          "cover": "/assets/orcaslicer/tiertime/tiertime_up310_pro_cover.png"
         },
         {
           "id": "tiertime_up400_pro",
           "name": "Tiertime UP400 Pro",
-          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up400_pro/cover.png"
+          "cover": "/assets/orcaslicer/tiertime/tiertime_up400_pro_cover.png"
         },
         {
           "id": "tiertime_up600_hs",
           "name": "Tiertime UP600 HS",
-          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up600_hs/cover.png"
+          "cover": "/assets/orcaslicer/tiertime/tiertime_up600_hs_cover.png"
         }
       ]
     },
@@ -1705,7 +2465,9 @@
         {
           "id": "tronxy_x5sa_400_marlin_firmware",
           "name": "Tronxy X5SA 400 Marlin Firmware",
-          "cover": "/assets/orcaslicer/printers/tronxy/tronxy_x5sa_400_marlin_firmware/cover.png"
+          "cover": "/assets/orcaslicer/tronxy/tronxy_x5sa_400_marlin_firmware_cover.png",
+          "bedTexture": "/assets/orcaslicer/tronxy/tronxy_x5sa_400_marlin_firmware_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1716,12 +2478,18 @@
         {
           "id": "twotrees_sk1",
           "name": "TwoTrees SK1",
-          "cover": "/assets/orcaslicer/printers/twotrees/twotrees_sk1/cover.png"
+          "cover": "/assets/orcaslicer/twotrees/twotrees_sk1_cover.png",
+          "bedModel": "/assets/orcaslicer/twotrees/twotrees_sk1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/twotrees/twotrees_sk1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "twotrees_sp-5_klipper",
           "name": "TwoTrees SP-5 Klipper",
-          "cover": "/assets/orcaslicer/printers/twotrees/twotrees_sp-5_klipper/cover.png"
+          "cover": "/assets/orcaslicer/twotrees/twotrees_sp-5_klipper_cover.png",
+          "bedModel": "/assets/orcaslicer/twotrees/twotrees_sp-5_klipper_bed.stl",
+          "bedTexture": "/assets/orcaslicer/twotrees/twotrees_sp-5_klipper_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1732,7 +2500,10 @@
         {
           "id": "ultimaker_2",
           "name": "UltiMaker 2",
-          "cover": "/assets/orcaslicer/printers/ultimaker/ultimaker_2/cover.png"
+          "cover": "/assets/orcaslicer/ultimaker/ultimaker_2_cover.png",
+          "bedModel": "/assets/orcaslicer/ultimaker/ultimaker_2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/ultimaker/ultimaker_2_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1743,12 +2514,16 @@
         {
           "id": "troodon_2.0_-_klipper",
           "name": "Troodon 2.0 - Klipper",
-          "cover": "/assets/orcaslicer/printers/vivedino/troodon_2.0_-_klipper/cover.png"
+          "cover": "/assets/orcaslicer/vivedino/troodon_2.0_-_klipper_cover.png",
+          "bedTexture": "/assets/orcaslicer/vivedino/troodon_2.0_-_klipper_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "troodon_2.0_-_rrf",
           "name": "Troodon 2.0 - RRF",
-          "cover": "/assets/orcaslicer/printers/vivedino/troodon_2.0_-_rrf/cover.png"
+          "cover": "/assets/orcaslicer/vivedino/troodon_2.0_-_rrf_cover.png",
+          "bedTexture": "/assets/orcaslicer/vivedino/troodon_2.0_-_rrf_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1759,107 +2534,128 @@
         {
           "id": "exo42_idre",
           "name": "EXO42 IDRE",
-          "cover": "/assets/orcaslicer/printers/volumic/exo42_idre/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo42_idre_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo42_idre_bed.stl"
         },
         {
           "id": "exo42_performance",
           "name": "EXO42 Performance",
-          "cover": "/assets/orcaslicer/printers/volumic/exo42_performance/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo42_performance_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo42_performance_bed.stl"
         },
         {
           "id": "exo42_stage_2",
           "name": "EXO42 Stage 2",
-          "cover": "/assets/orcaslicer/printers/volumic/exo42_stage_2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo42_stage_2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo42_stage_2_bed.stl"
         },
         {
           "id": "exo42",
           "name": "EXO42",
-          "cover": "/assets/orcaslicer/printers/volumic/exo42/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo42_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo42_bed.stl"
         },
         {
           "id": "exo65_idre",
           "name": "EXO65 IDRE",
-          "cover": "/assets/orcaslicer/printers/volumic/exo65_idre/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo65_idre_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo65_idre_bed.stl"
         },
         {
           "id": "exo65_performance",
           "name": "EXO65 Performance",
-          "cover": "/assets/orcaslicer/printers/volumic/exo65_performance/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo65_performance_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo65_performance_bed.stl"
         },
         {
           "id": "exo65_stage_2",
           "name": "EXO65 Stage 2",
-          "cover": "/assets/orcaslicer/printers/volumic/exo65_stage_2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo65_stage_2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo65_stage_2_bed.stl"
         },
         {
           "id": "exo65",
           "name": "EXO65",
-          "cover": "/assets/orcaslicer/printers/volumic/exo65/cover.png"
+          "cover": "/assets/orcaslicer/volumic/exo65_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/exo65_bed.stl"
         },
         {
           "id": "sh65_idre",
           "name": "SH65 IDRE",
-          "cover": "/assets/orcaslicer/printers/volumic/sh65_idre/cover.png"
+          "cover": "/assets/orcaslicer/volumic/sh65_idre_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/sh65_idre_bed.stl"
         },
         {
           "id": "sh65_performance",
           "name": "SH65 Performance",
-          "cover": "/assets/orcaslicer/printers/volumic/sh65_performance/cover.png"
+          "cover": "/assets/orcaslicer/volumic/sh65_performance_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/sh65_performance_bed.stl"
         },
         {
           "id": "sh65_stage_2",
           "name": "SH65 Stage 2",
-          "cover": "/assets/orcaslicer/printers/volumic/sh65_stage_2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/sh65_stage_2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/sh65_stage_2_bed.stl"
         },
         {
           "id": "sh65",
           "name": "SH65",
-          "cover": "/assets/orcaslicer/printers/volumic/sh65/cover.png"
+          "cover": "/assets/orcaslicer/volumic/sh65_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/sh65_bed.stl"
         },
         {
           "id": "vs20mk2",
           "name": "VS20MK2",
-          "cover": "/assets/orcaslicer/printers/volumic/vs20mk2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs20mk2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs20mk2_bed.stl"
         },
         {
           "id": "vs30mk2",
           "name": "VS30MK2",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30mk2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30mk2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30mk2_bed.stl"
         },
         {
           "id": "vs30mk3_stage_2",
           "name": "VS30MK3 Stage 2",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30mk3_stage_2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30mk3_stage_2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30mk3_stage_2_bed.stl"
         },
         {
           "id": "vs30mk3",
           "name": "VS30MK3",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30mk3/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30mk3_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30mk3_bed.stl"
         },
         {
           "id": "vs30sc2_performance",
           "name": "VS30SC2 Performance",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30sc2_performance/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30sc2_performance_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30sc2_performance_bed.stl"
         },
         {
           "id": "vs30sc2_stage_2",
           "name": "VS30SC2 Stage 2",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30sc2_stage_2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30sc2_stage_2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30sc2_stage_2_bed.stl"
         },
         {
           "id": "vs30sc2",
           "name": "VS30SC2",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30sc2/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30sc2_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30sc2_bed.stl"
         },
         {
           "id": "vs30sc",
           "name": "VS30SC",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30sc/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30sc_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30sc_bed.stl"
         },
         {
           "id": "vs30ultra",
           "name": "VS30ULTRA",
-          "cover": "/assets/orcaslicer/printers/volumic/vs30ultra/cover.png"
+          "cover": "/assets/orcaslicer/volumic/vs30ultra_cover.png",
+          "bedModel": "/assets/orcaslicer/volumic/vs30ultra_bed.stl"
         }
       ]
     },
@@ -1870,42 +2666,65 @@
         {
           "id": "voron_0.1",
           "name": "Voron 0.1",
-          "cover": "/assets/orcaslicer/printers/voron/voron_0.1/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_0.1_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_0.1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_0.1_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_2.4_250",
           "name": "Voron 2.4 250",
-          "cover": "/assets/orcaslicer/printers/voron/voron_2.4_250/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_2.4_250_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_2.4_250_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_2.4_250_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_2.4_300",
           "name": "Voron 2.4 300",
-          "cover": "/assets/orcaslicer/printers/voron/voron_2.4_300/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_2.4_300_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_2.4_300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_2.4_300_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_2.4_350",
           "name": "Voron 2.4 350",
-          "cover": "/assets/orcaslicer/printers/voron/voron_2.4_350/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_2.4_350_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_2.4_350_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_2.4_350_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_switchwire_250",
           "name": "Voron Switchwire 250",
-          "cover": "/assets/orcaslicer/printers/voron/voron_switchwire_250/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_switchwire_250_cover.png",
+          "bedTexture": "/assets/orcaslicer/voron/voron_switchwire_250_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_trident_250",
           "name": "Voron Trident 250",
-          "cover": "/assets/orcaslicer/printers/voron/voron_trident_250/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_trident_250_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_trident_250_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_trident_250_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_trident_300",
           "name": "Voron Trident 300",
-          "cover": "/assets/orcaslicer/printers/voron/voron_trident_300/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_trident_300_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_trident_300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_trident_300_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "voron_trident_350",
           "name": "Voron Trident 350",
-          "cover": "/assets/orcaslicer/printers/voron/voron_trident_350/cover.png"
+          "cover": "/assets/orcaslicer/voron/voron_trident_350_cover.png",
+          "bedModel": "/assets/orcaslicer/voron/voron_trident_350_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voron/voron_trident_350_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1916,7 +2735,10 @@
         {
           "id": "voxelab_aquila_x2",
           "name": "Voxelab Aquila X2",
-          "cover": "/assets/orcaslicer/printers/voxelab/voxelab_aquila_x2/cover.png"
+          "cover": "/assets/orcaslicer/voxelab/voxelab_aquila_x2_cover.png",
+          "bedModel": "/assets/orcaslicer/voxelab/voxelab_aquila_x2_bed.stl",
+          "bedTexture": "/assets/orcaslicer/voxelab/voxelab_aquila_x2_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1927,12 +2749,18 @@
         {
           "id": "vzbot_235_awd",
           "name": "Vzbot 235 AWD",
-          "cover": "/assets/orcaslicer/printers/vzbot/vzbot_235_awd/cover.png"
+          "cover": "/assets/orcaslicer/vzbot/vzbot_235_awd_cover.png",
+          "bedModel": "/assets/orcaslicer/vzbot/vzbot_235_awd_bed.stl",
+          "bedTexture": "/assets/orcaslicer/vzbot/vzbot_235_awd_texture.svg",
+          "bedTextureFormat": "svg"
         },
         {
           "id": "vzbot_330_awd",
           "name": "Vzbot 330 AWD",
-          "cover": "/assets/orcaslicer/printers/vzbot/vzbot_330_awd/cover.png"
+          "cover": "/assets/orcaslicer/vzbot/vzbot_330_awd_cover.png",
+          "bedModel": "/assets/orcaslicer/vzbot/vzbot_330_awd_bed.stl",
+          "bedTexture": "/assets/orcaslicer/vzbot/vzbot_330_awd_texture.svg",
+          "bedTextureFormat": "svg"
         }
       ]
     },
@@ -1943,12 +2771,18 @@
         {
           "id": "wemake3d_phoenixprov1",
           "name": "WEMAKE3D PhoenixProV1",
-          "cover": "/assets/orcaslicer/printers/wemake3d/wemake3d_phoenixprov1/cover.png"
+          "cover": "/assets/orcaslicer/wemake3d/wemake3d_phoenixprov1_cover.png",
+          "bedModel": "/assets/orcaslicer/wemake3d/wemake3d_phoenixprov1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wemake3d/wemake3d_phoenixprov1_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "wemake3d_tinybotv1",
           "name": "WEMAKE3D TinyBotV1",
-          "cover": "/assets/orcaslicer/printers/wemake3d/wemake3d_tinybotv1/cover.png"
+          "cover": "/assets/orcaslicer/wemake3d/wemake3d_tinybotv1_cover.png",
+          "bedModel": "/assets/orcaslicer/wemake3d/wemake3d_tinybotv1_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wemake3d/wemake3d_tinybotv1_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1959,7 +2793,9 @@
         {
           "id": "wanhao_d12-300",
           "name": "Wanhao D12-300",
-          "cover": "/assets/orcaslicer/printers/wanhao/wanhao_d12-300/cover.png"
+          "cover": "/assets/orcaslicer/wanhao/wanhao_d12-300_cover.png",
+          "bedTexture": "/assets/orcaslicer/wanhao/wanhao_d12-300_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -1970,92 +2806,146 @@
         {
           "id": "d12_230_pro_m2_direct",
           "name": "D12 230 PRO M2 DIRECT",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_m2_direct/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_direct_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_direct_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_direct_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_230_pro_m2_mono_dual_pooptool",
           "name": "D12 230 PRO M2 MONO DUAL PoopTool",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_m2_mono_dual_pooptool/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_mono_dual_pooptool_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_mono_dual_pooptool_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_mono_dual_pooptool_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_230_pro_m2_mono_dual",
           "name": "D12 230 PRO M2 MONO DUAL",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_m2_mono_dual/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_mono_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_mono_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_230_pro_m2_mono_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_230_pro_smartpad_direct",
           "name": "D12 230 PRO SMARTPAD DIRECT",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_smartpad_direct/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_direct_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_direct_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_direct_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_230_pro_smartpad_mono_dual_pooptool",
           "name": "D12 230 PRO SMARTPAD MONO DUAL PoopTool",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_smartpad_mono_dual_pooptool/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_mono_dual_pooptool_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_mono_dual_pooptool_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_mono_dual_pooptool_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_230_pro_smartpad_mono_dual",
           "name": "D12 230 PRO SMARTPAD MONO DUAL",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_smartpad_mono_dual/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_mono_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_mono_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_230_pro_smartpad_mono_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_300_pro_m2_direct",
           "name": "D12 300 PRO M2 DIRECT",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_m2_direct/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_direct_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_direct_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_direct_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_300_pro_m2_mono_dual_pooptool",
           "name": "D12 300 PRO M2 MONO DUAL PoopTool",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_m2_mono_dual_pooptool/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_mono_dual_pooptool_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_mono_dual_pooptool_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_mono_dual_pooptool_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_300_pro_m2_mono_dual",
           "name": "D12 300 PRO M2 MONO DUAL",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_m2_mono_dual/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_mono_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_mono_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_300_pro_m2_mono_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_300_pro_smartpad_direct",
           "name": "D12 300 PRO SMARTPAD DIRECT",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_smartpad_direct/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_direct_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_direct_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_direct_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_300_pro_smartpad_mono_dual_pooptool",
           "name": "D12 300 PRO SMARTPAD MONO DUAL PoopTool",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_smartpad_mono_dual_pooptool/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_mono_dual_pooptool_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_mono_dual_pooptool_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_mono_dual_pooptool_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_300_pro_smartpad_mono_dual",
           "name": "D12 300 PRO SMARTPAD MONO DUAL",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_smartpad_mono_dual/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_mono_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_mono_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_300_pro_smartpad_mono_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_500_pro_m2_direct",
           "name": "D12 500 PRO M2 DIRECT",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_m2_direct/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_direct_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_direct_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_direct_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_500_pro_m2_mono_dual_pooptool",
           "name": "D12 500 PRO M2 MONO DUAL PoopTool",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_m2_mono_dual_pooptool/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_mono_dual_pooptool_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_mono_dual_pooptool_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_mono_dual_pooptool_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_500_pro_m2_mono_dual",
           "name": "D12 500 PRO M2 MONO DUAL",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_m2_mono_dual/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_mono_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_mono_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_500_pro_m2_mono_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_500_pro_smartpad_direct",
           "name": "D12 500 PRO SMARTPAD DIRECT",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_smartpad_direct/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_direct_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_direct_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_direct_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_500_pro_smartpad_mono_dual_pooptool",
           "name": "D12 500 PRO SMARTPAD MONO DUAL PoopTool",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_smartpad_mono_dual_pooptool/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_mono_dual_pooptool_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_mono_dual_pooptool_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_mono_dual_pooptool_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "d12_500_pro_smartpad_mono_dual",
           "name": "D12 500 PRO SMARTPAD MONO DUAL",
-          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_smartpad_mono_dual/cover.png"
+          "cover": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_mono_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_mono_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/wanhao_france/d12_500_pro_smartpad_mono_dual_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -2066,17 +2956,20 @@
         {
           "id": "wondermaker_zr_ultra_s",
           "name": "WonderMaker ZR Ultra S",
-          "cover": "/assets/orcaslicer/printers/wondermaker/wondermaker_zr_ultra_s/cover.png"
+          "cover": "/assets/orcaslicer/wondermaker/wondermaker_zr_ultra_s_cover.png",
+          "bedModel": "/assets/orcaslicer/wondermaker/wondermaker_zr_ultra_s_bed.stl"
         },
         {
           "id": "wondermaker_zr_ultra",
           "name": "WonderMaker ZR Ultra",
-          "cover": "/assets/orcaslicer/printers/wondermaker/wondermaker_zr_ultra/cover.png"
+          "cover": "/assets/orcaslicer/wondermaker/wondermaker_zr_ultra_cover.png",
+          "bedModel": "/assets/orcaslicer/wondermaker/wondermaker_zr_ultra_bed.stl"
         },
         {
           "id": "wondermaker_zr",
           "name": "WonderMaker ZR",
-          "cover": "/assets/orcaslicer/printers/wondermaker/wondermaker_zr/cover.png"
+          "cover": "/assets/orcaslicer/wondermaker/wondermaker_zr_cover.png",
+          "bedModel": "/assets/orcaslicer/wondermaker/wondermaker_zr_bed.stl"
         }
       ]
     },
@@ -2087,47 +2980,74 @@
         {
           "id": "z-bolt_s1000_dual",
           "name": "Z-Bolt S1000 Dual",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s1000_dual/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s1000_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s1000_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s1000_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s1000",
           "name": "Z-Bolt S1000",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s1000/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s1000_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s1000_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s1000_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s300_dual",
           "name": "Z-Bolt S300 Dual",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s300_dual/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s300_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s300_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s300_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s300",
           "name": "Z-Bolt S300",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s300/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s300_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s300_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s300_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s400_dual",
           "name": "Z-Bolt S400 Dual",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s400_dual/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s400_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s400_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s400_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s400",
           "name": "Z-Bolt S400",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s400/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s400_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s400_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s400_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s600_dual",
           "name": "Z-Bolt S600 Dual",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s600_dual/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s600_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s600_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s600_dual_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s600",
           "name": "Z-Bolt S600",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s600/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s600_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s600_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s600_texture.png",
+          "bedTextureFormat": "png"
         },
         {
           "id": "z-bolt_s800_dual",
           "name": "Z-Bolt S800 Dual",
-          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s800_dual/cover.png"
+          "cover": "/assets/orcaslicer/z-bolt/z-bolt_s800_dual_cover.png",
+          "bedModel": "/assets/orcaslicer/z-bolt/z-bolt_s800_dual_bed.stl",
+          "bedTexture": "/assets/orcaslicer/z-bolt/z-bolt_s800_dual_texture.png",
+          "bedTextureFormat": "png"
         }
       ]
     },
@@ -2138,16 +3058,25 @@
         {
           "id": "tiq2",
           "name": "TiQ2",
-          "cover": "/assets/orcaslicer/printers/iq/tiq2/cover.png"
-          ,"bedTexture": "/assets/orcaslicer/printers/iq/tiq2/bed-texture.png"
+          "cover": "/assets/orcaslicer/iq/tiq2_cover.png",
+          "bedTexture": "/assets/orcaslicer/iq/tiq2_texture.png",
+          "bedModel": "/assets/orcaslicer/iq/tiq2_bed.stl",
+          "bedTextureFormat": "png"
         },
         {
           "id": "tiq8",
           "name": "TiQ8",
-          "cover": "/assets/orcaslicer/printers/iq/tiq8/cover.png"
-          ,"bedTexture": "/assets/orcaslicer/printers/iq/tiq8/bed-texture.png"
+          "cover": "/assets/orcaslicer/iq/tiq8_cover.png",
+          "bedTexture": "/assets/orcaslicer/iq/tiq8_texture.png",
+          "bedModel": "/assets/orcaslicer/iq/tiq8_bed.stl",
+          "bedTextureFormat": "png"
         }
       ]
     }
-  ]
+  ],
+  "statistics": {
+    "totalPrinters": 355,
+    "printersWithBedModel": 324,
+    "printersWithBedTexture": 301
+  }
 }

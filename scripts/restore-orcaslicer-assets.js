@@ -205,6 +205,7 @@ function restoreAssets() {
   });
 
   // Update manifest statistics
+  if (!manifest.statistics) manifest.statistics = {};
   manifest.statistics.totalPrinters = manifest.manufacturers.reduce((sum, m) => sum + m.printers.length, 0);
   manifest.statistics.printersWithBedModel = manifest.manufacturers.reduce((sum, mfr) =>
     sum + mfr.printers.filter(p => p.bedModel).length, 0);
