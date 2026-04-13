@@ -118,9 +118,10 @@ function TexturedPrintBed({
     >
       <boxGeometry args={[width, depth, thickness]} />
       <meshStandardMaterial 
-        map={texture} 
-        metalness={0.05} 
-        roughness={0.85} 
+        map={texture}
+        color="#3a3a4e"
+        metalness={0.1} 
+        roughness={0.75} 
       />
     </mesh>
   );
@@ -191,8 +192,9 @@ function SvgTexturedPrintBed({
       <boxGeometry args={[width, depth, thickness]} />
       <meshStandardMaterial
         map={texture}
-        metalness={0.05}
-        roughness={0.85}
+        color="#3a3a4e"
+        metalness={0.1}
+        roughness={0.75}
       />
     </mesh>
   );
