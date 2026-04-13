@@ -62,6 +62,7 @@ export interface SlicerBedVisualizationProps {
   } | null) => void;
   showGrid?: boolean;
   showAxes?: boolean;
+  showGridLines?: boolean;
   gridDivisions?: number;
   backgroundColor?: string;
   className?: string;
@@ -97,6 +98,11 @@ function LoadingIndicator() {
 /**
  * Textured print bed platform component (PNG via Three.js TextureLoader)
  */
+/**
+ * Textured print bed platform component (PNG via canvas compositing).
+ * Many OrcaSlicer textures use alpha transparency — they look dark on a dark
+ * background but invisible on white. We composite onto a dark canvas first.
+ */
 function TexturedPrintBed({ 
   width, 
   depth, 
@@ -108,7 +114,39 @@ function TexturedPrintBed({
 }) {
   const thickness = 2;
   const meshRef = useRef<THREE.Mesh>(null);
-  const texture = useLoader(TextureLoader, textureUrl);
+  const [composited, setComposited] = useState<THREE.CanvasTexture | null>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      // Dark background matching OrcaSlicer's bed color
+      ctx.fillStyle = '#2a2a3a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Draw texture on top — alpha-transparent pixels blend with dark background
+      ctx.drawImage(img, 0, 0);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      setComposited(tex);
+    };
+    img.src = textureUrl;
+    return () => { img.onload = null; };
+  }, [textureUrl]);
+
+  useEffect(() => {
+    return () => { composited?.dispose(); };
+  }, [composited]);
+
+  if (!composited) {
+    return <PlainPrintBed width={width} depth={depth} />;
+  }
 
   return (
     <mesh 
@@ -118,8 +156,7 @@ function TexturedPrintBed({
     >
       <boxGeometry args={[width, depth, thickness]} />
       <meshStandardMaterial 
-        map={texture}
-        color="#3a3a4e"
+        map={composited}
         metalness={0.1} 
         roughness={0.75} 
       />
@@ -159,6 +196,9 @@ function SvgTexturedPrintBed({
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
+      // Dark background — SVGs may use alpha transparency
+      ctx.fillStyle = '#2a2a3a';
+      ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       const tex = new THREE.CanvasTexture(canvas);
       tex.colorSpace = THREE.SRGBColorSpace;
@@ -192,7 +232,6 @@ function SvgTexturedPrintBed({
       <boxGeometry args={[width, depth, thickness]} />
       <meshStandardMaterial
         map={texture}
-        color="#3a3a4e"
         metalness={0.1}
         roughness={0.75}
       />
@@ -364,6 +403,7 @@ function PrintBedPlatform({
   textureUrl?: string;
   textureFormat?: 'svg' | 'png';
   bedModelUrl?: string;
+  showGridLines?: boolean;
 }) {
   const shouldUsePngTexture = textureUrl && textureFormat === 'png';
   const shouldUseSvgTexture = textureUrl && textureFormat === 'svg';
@@ -391,8 +431,8 @@ function PrintBedPlatform({
         <lineBasicMaterial color="#4a4a6a" linewidth={2} />
       </lineSegments>
 
-      {/* Grid lines — only when no texture (textures have grid lines baked in) */}
-      {!shouldUsePngTexture && !shouldUseSvgTexture && (
+      {/* Grid lines — always shown when toggled on, otherwise only for plain beds */}
+      {(showGridLines || (!shouldUsePngTexture && !shouldUseSvgTexture)) && (
         <BedGridLines width={width} depth={depth} cellSize={10} sectionSize={50} />
       )}
     </group>
@@ -1014,6 +1054,7 @@ function BedScene({
   onModelTransform,
   onSelectedModelMetricsChange,
   showAxes = true,
+  showGridLines = true,
   outOfBoundsModelIds,
   layFlatMode = false,
   onLayFlatComplete,
@@ -1270,6 +1311,7 @@ function BedScene({
         textureUrl={textureUrl}
         textureFormat={textureFormat}
         bedModelUrl={bedModelUrl}
+        showGridLines={showGridLines}
       />
 
       {/* Build volume wireframe */}

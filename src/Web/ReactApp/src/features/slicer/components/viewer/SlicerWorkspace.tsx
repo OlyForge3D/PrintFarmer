@@ -91,6 +91,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
   const [showLayers, setShowLayers] = useState(false);
+  const [showGridLines, setShowGridLines] = useState(true);
   const [layFlatMode, setLayFlatMode] = useState(false);
   const [autoOrientTrigger, setAutoOrientTrigger] = useState(0);
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
@@ -646,6 +647,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           autoOrientTrigger={autoOrientTrigger}
           showGrid={true}
           showAxes={true}
+          showGridLines={showGridLines}
           className="w-full h-full"
         />
 
@@ -664,6 +666,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onLayersToggle={handleLayersToggle}
           showLayers={showLayers}
           hasSelection={hasSelection}
+          showGridLines={showGridLines}
+          onGridToggle={() => setShowGridLines(prev => !prev)}
         />
 
         {/* Non-modal transform panel: can be used alongside gizmo controls */}
