@@ -391,8 +391,10 @@ function PrintBedPlatform({
         <lineBasicMaterial color="#4a4a6a" linewidth={2} />
       </lineSegments>
 
-      {/* Grid lines on bed surface — line-based so texture shows through */}
-      <BedGridLines width={width} depth={depth} cellSize={10} sectionSize={50} />
+      {/* Grid lines — only when no texture (textures have grid lines baked in) */}
+      {!shouldUsePngTexture && !shouldUseSvgTexture && (
+        <BedGridLines width={width} depth={depth} cellSize={10} sectionSize={50} />
+      )}
     </group>
   );
 }
