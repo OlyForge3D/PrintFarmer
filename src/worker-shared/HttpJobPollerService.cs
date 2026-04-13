@@ -168,7 +168,8 @@ public abstract class HttpJobPollerService(
                     EngineType = engineEnum,
                     SlicerEngine = engineEnum.ToString(),
                     Status = SlicingJobStatus.Slicing, // in-progress mapping
-                    StartedAt = DateTime.UtcNow
+                    StartedAt = DateTime.UtcNow,
+                    ModelTransformJson = jobStatus.ModelTransformJson,
                 };
 
                 // Resolve profile names from SlicerProfileJson into full SlicerProfileDto

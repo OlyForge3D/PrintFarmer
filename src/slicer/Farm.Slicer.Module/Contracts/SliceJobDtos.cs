@@ -28,6 +28,12 @@ public class SubmitSliceJobRequest
     public string? RequiredCapabilitiesJson { get; set; }
 
     public int Priority { get; set; } = 1;
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// Format: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} (radians, Y-up).
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
 }
 
 /// <summary>
@@ -81,6 +87,11 @@ public class SliceJobStatusResponse
     public int SlicerEngine { get; set; }
 
     public string? SlicerProfileJson { get; set; }
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
 }
 
 /// <summary>

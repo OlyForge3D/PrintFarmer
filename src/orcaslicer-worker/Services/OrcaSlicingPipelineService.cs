@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Dtos;
@@ -154,8 +156,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
         // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
         // --ensure-on-bed: lift objects partially below Z=0
-        // TODO: pass user model transforms (rotation/scale) via --rotate-x/--rotate-y/--rotate/--scale flags
-        string arguments = $"--slice 0 --arrange 1 --ensure-on-bed --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+        string transformFlags = BuildTransformFlags(job.ModelTransformJson);
+        string arguments = $"--slice 0 --arrange 1 --ensure-on-bed{transformFlags} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
@@ -342,6 +344,90 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     [GeneratedRegex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex MyRegex();
+
+    /// <summary>
+    /// Parse model transform JSON from the UI and build OrcaSlicer CLI rotation/scale flags.
+    /// Input: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} — radians, Y-up (Three.js/R3F).
+    /// Output: OrcaSlicer flags in degrees, Z-up.
+    /// Axis mapping: R3F X → --rotate-x, R3F Y (up) → --rotate (Z), R3F Z → --rotate-y.
+    /// </summary>
+    internal static string BuildTransformFlags(string? modelTransformJson)
+    {
+        if (string.IsNullOrWhiteSpace(modelTransformJson))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(modelTransformJson);
+            JsonElement root = doc.RootElement;
+            StringBuilder flags = new();
+
+            if (root.TryGetProperty("rotation", out JsonElement rotEl) && rotEl.ValueKind == JsonValueKind.Array)
+            {
+                double[] rot = new double[3];
+                int i = 0;
+                foreach (JsonElement el in rotEl.EnumerateArray())
+                {
+                    if (i < 3)
+                    {
+                        rot[i++] = el.GetDouble();
+                    }
+                }
+
+                const double radToDeg = 180.0 / Math.PI;
+                const double epsilon = 0.001;
+
+                // R3F X-rotation → OrcaSlicer X-rotation
+                double rotXDeg = rot[0] * radToDeg;
+                if (Math.Abs(rotXDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
+                }
+
+                // R3F Y-rotation (up in Y-up) → OrcaSlicer Z-rotation
+                double rotZDeg = rot[1] * radToDeg;
+                if (Math.Abs(rotZDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
+                }
+
+                // R3F Z-rotation → OrcaSlicer Y-rotation
+                double rotYDeg = rot[2] * radToDeg;
+                if (Math.Abs(rotYDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-y {rotYDeg:F2}");
+                }
+            }
+
+            if (root.TryGetProperty("scale", out JsonElement scaleEl) && scaleEl.ValueKind == JsonValueKind.Array)
+            {
+                double[] scale = new double[3];
+                int i = 0;
+                foreach (JsonElement el in scaleEl.EnumerateArray())
+                {
+                    if (i < 3)
+                    {
+                        scale[i++] = el.GetDouble();
+                    }
+                }
+
+                // Use uniform scale (first component). 1.0 = no change.
+                const double epsilon = 0.001;
+                if (Math.Abs(scale[0] - 1.0) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --scale {scale[0]:F4}");
+                }
+            }
+
+            return flags.ToString();
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
 
     /// <summary>
     /// Converts a Settings dictionary to JSON for OrcaSlicer --load-settings.

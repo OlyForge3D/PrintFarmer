@@ -80,6 +80,7 @@ public class SliceJobController(
             SlicerProfileId = request.SlicerProfileId,
             RequiredCapabilitiesJson = request.RequiredCapabilitiesJson,
             Priority = request.Priority,
+            ModelTransformJson = request.ModelTransformJson,
             Status = SliceJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -481,6 +482,7 @@ public class SliceJobController(
         ModelFileName = job.ModelFileName,
         SlicerEngine = job.SlicerEngine,
         SlicerProfileJson = job.SlicerProfileJson,
+        ModelTransformJson = job.ModelTransformJson,
     };
 }
 

@@ -12,6 +12,7 @@ export interface SubmitSliceJobRequest {
   slicerProfileId?: string;
   requiredCapabilitiesJson: string;
   priority?: number;
+  modelTransformJson?: string;
 }
 
 export interface SubmitSliceJobResponse {
