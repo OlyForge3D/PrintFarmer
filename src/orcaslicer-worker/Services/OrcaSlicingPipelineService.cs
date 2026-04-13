@@ -151,11 +151,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Build command line: --slice 0 --orient 1 --arrange 1 --ensure-on-bed --load-settings ...
-        // --orient 1: auto-orient model for best print orientation (flat on bed)
-        // --arrange 1: auto-center model on build plate (CLI loads STL at origin which may be outside print volume)
+        // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
+        // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
         // --ensure-on-bed: lift objects partially below Z=0
-        string arguments = $"--slice 0 --orient 1 --arrange 1 --ensure-on-bed --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+        // TODO: pass user model transforms (rotation/scale) via --rotate-x/--rotate-y/--rotate/--scale flags
+        string arguments = $"--slice 0 --arrange 1 --ensure-on-bed --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
