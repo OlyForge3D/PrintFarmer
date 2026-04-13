@@ -10,6 +10,7 @@ import {
   RotateToolIcon,
   ScaleToolIcon,
   LayersViewIcon,
+  GridIcon,
 } from './SlicerToolbarIcons';
 
 export type ToolType = 'move' | 'rotate' | 'scale' | 'layers';
@@ -50,6 +51,8 @@ export interface SlicerLeftToolsProps {
   onLayersToggle?: () => void;
   showLayers?: boolean;
   hasSelection?: boolean;
+  showGridLines?: boolean;
+  onGridToggle?: () => void;
 }
 
 export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
@@ -58,6 +61,8 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
   onLayersToggle,
   showLayers = false,
   hasSelection = false,
+  showGridLines = false,
+  onGridToggle,
 }) => {
   return (
     <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10 pointer-events-none">
@@ -93,6 +98,12 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
           title="Layer View (L)"
           active={showLayers}
           onClick={onLayersToggle}
+        />
+        <ToolButton
+          icon={<GridIcon />}
+          title="Toggle Grid (G)"
+          active={showGridLines}
+          onClick={onGridToggle}
         />
       </div>
     </div>
