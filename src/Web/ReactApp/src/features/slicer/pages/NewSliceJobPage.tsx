@@ -912,12 +912,16 @@ export const NewSliceJobPage: React.FC = () => {
             ? selectedProcessPresetId.slice('custom:'.length)
             : undefined,
       requiredCapabilitiesJson: '[]',
-      priority: 1
+      priority: 1,
+      modelTransformJson: bedModels[0]
+        ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale })
+        : undefined,
     };
 
     submitMutation.mutate(request);
   }, [
     advancedProcessSettings,
+    bedModels,
     modelFileName,
     modelFileUrl,
     selectedFilamentProfileId,

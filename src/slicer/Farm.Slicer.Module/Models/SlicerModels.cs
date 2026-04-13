@@ -173,6 +173,11 @@ public class DistributedSlicingJob : SlicingJobDto
 
     public DateTime? ScheduledAt { get; set; } // Optional: when job becomes available for processing (for delayed retries)
 
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
+
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
 

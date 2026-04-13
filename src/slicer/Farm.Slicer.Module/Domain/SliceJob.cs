@@ -167,6 +167,12 @@ public class SliceJob
     /// Number of times this job has been retried after timing out or failing.
     /// </summary>
     public int RetryCount { get; set; }
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// Format: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} (radians, Y-up).
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
 }
 
 /// <summary>
