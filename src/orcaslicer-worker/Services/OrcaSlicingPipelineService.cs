@@ -51,6 +51,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             string gcodeFilePath = await RunOrcaSlicerAsync(stlFilePath, jobWorkDir, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
+
+            // Rename gcode to descriptive filename: {model}_{printer}_{material}_{time}.gcode
+            gcodeFilePath = RenameGcodeFile(gcodeFilePath, job, metadata);
+
             await _progressReporter.ReportProgressAsync(job.Id, 90, "Uploading G-code", cancellationToken);
             string gcodeUrl = await UploadGcodeAsync(gcodeFilePath, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
@@ -274,6 +278,46 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             ?? string.Empty;
 
         return fallback.Length > 500 ? fallback[..500] : fallback;
+    }
+
+    private static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)
+    {
+        string modelName = Path.GetFileNameWithoutExtension(job.ModelFileName);
+        string printerModel = job.Profile?.MachineProfile?.PrinterModel
+                           ?? job.Profile?.MachineProfile?.Name
+                           ?? "Unknown";
+        string material = job.Profile?.FilamentProfile?.Material ?? "PLA";
+        string printTime = FormatPrintTime(metadata.PrintTimeSeconds);
+
+        string newName = SanitizeFileName($"{modelName}_{printerModel}_{material}_{printTime}.gcode");
+        string newPath = Path.Combine(Path.GetDirectoryName(gcodeFilePath)!, newName);
+
+        if (string.Equals(gcodeFilePath, newPath, StringComparison.Ordinal))
+        {
+            return gcodeFilePath;
+        }
+
+        File.Move(gcodeFilePath, newPath);
+        return newPath;
+    }
+
+    private static string FormatPrintTime(double totalSeconds)
+    {
+        if (totalSeconds <= 0)
+        {
+            return "unknown";
+        }
+
+        TimeSpan ts = TimeSpan.FromSeconds(totalSeconds);
+        return ts.TotalHours >= 1
+            ? $"{(int)ts.TotalHours}h{ts.Minutes}m"
+            : $"{ts.Minutes}m";
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        return new string(name.Select(c => invalid.Contains(c) || c == ' ' ? '_' : c).ToArray());
     }
 
     private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
