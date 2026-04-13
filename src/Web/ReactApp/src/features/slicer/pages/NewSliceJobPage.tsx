@@ -368,6 +368,7 @@ export const NewSliceJobPage: React.FC = () => {
 
     // Look up asset by manufacturer and model name from local asset service
     const asset = assetService.getAsset(selectedPrinterWithDetails.manufacturerName, selectedPrinterWithDetails.modelName);
+    console.log('[BedTexture] lookup:', selectedPrinterWithDetails.manufacturerName, '/', selectedPrinterWithDetails.modelName, '→ asset:', asset ? { texture: asset.bedTexture, format: asset.bedTextureFormat } : 'NOT FOUND');
 
     if (asset?.bedTexture) {
       return {
