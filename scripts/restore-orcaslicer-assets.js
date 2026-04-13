@@ -101,14 +101,17 @@ function restoreAssets() {
         return;
       }
 
-      // Find corresponding manifest entry
-      const mfrEntry = manifest.manufacturers.find(m => 
+      // Find corresponding manifest entry, or create one
+      let mfrEntry = manifest.manufacturers.find(m => 
         m.name.toLowerCase() === mfrDir.toLowerCase()
       );
 
       if (!mfrEntry) {
-        console.log(`⚠️  No manifest entry for ${mfrDir}`);
-        return;
+        // Create new manufacturer entry
+        const mfrId = mfrDir.toLowerCase().replace(/\s+/g, '-');
+        mfrEntry = { id: mfrId, name: mfrDir, printers: [] };
+        manifest.manufacturers.push(mfrEntry);
+        console.log(`  ➕ Created manifest entry for ${mfrDir}`);
       }
 
       // Create manufacturer asset directory
@@ -122,12 +125,15 @@ function restoreAssets() {
         const printerName = modelEntry.name;
 
         // Find corresponding printer in manifest
-        const printerEntry = mfrEntry.printers.find(p => 
+        let printerEntry = mfrEntry.printers.find(p => 
           p.name === printerName
         );
 
         if (!printerEntry) {
-          return;
+          // Create new printer entry
+          const printerId = printerName.toLowerCase().replace(/\s+/g, '_');
+          printerEntry = { id: printerId, name: printerName };
+          mfrEntry.printers.push(printerEntry);
         }
 
         // Get printer spec JSON path

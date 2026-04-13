@@ -18,7 +18,7 @@
         {
           "id": "anet_a8_plus(a8+)",
           "name": "Anet A8 Plus(A8+)",
-          "cover": "/assets/orcaslicer/printers/anet/anet_a8_plus(a8+)/cover.png"
+          "cover": "/assets/orcaslicer/anet/anet_a8_plus(a8+)_cover.png"
         }
       ]
     },
@@ -139,7 +139,7 @@
         {
           "id": "anycubic_kobra_neo",
           "name": "Anycubic Kobra Neo",
-          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_neo/cover.png"
+          "cover": "/assets/orcaslicer/anycubic/anycubic_kobra_neo_cover.png"
         },
         {
           "id": "anycubic_kobra_plus",
@@ -1544,7 +1544,7 @@
         {
           "id": "lulzbot_taz_mini_2",
           "name": "Lulzbot Taz Mini 2",
-          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_mini_2/cover.png"
+          "cover": "/assets/orcaslicer/lulzbot/lulzbot_taz_mini_2_cover.png"
         },
         {
           "id": "lulzbot_taz_pro_dual",
@@ -1565,7 +1565,7 @@
         {
           "id": "lulzbot_taz_workhorse",
           "name": "Lulzbot Taz Workhorse",
-          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_workhorse/cover.png"
+          "cover": "/assets/orcaslicer/lulzbot/lulzbot_taz_workhorse_cover.png"
         }
       ]
     },
@@ -3072,6 +3072,11 @@
           "bedTextureFormat": "png"
         }
       ]
+    },
+    {
+      "id": "orcafilamentlibrary",
+      "name": "OrcaFilamentLibrary",
+      "printers": []
     }
   ],
   "statistics": {
