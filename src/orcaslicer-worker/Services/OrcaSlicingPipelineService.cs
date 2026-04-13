@@ -396,6 +396,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Clamp values that OrcaSlicer profiles store as 0 (meaning "auto/disabled")
     /// but the --load-settings CLI validator rejects as out of range.
+    /// Also injects defaults for fields required by OrcaSlicer 2.3.2+ CLI
+    /// that weren't present in older profiles.
     /// </summary>
     private static void SanitizeForCli(Dictionary<string, string> settings)
     {
@@ -412,6 +414,19 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 settings[key] = "1";
             }
+        }
+
+        // OrcaSlicer 2.3.2 requires extruder_type and nozzle_volume_type for
+        // update_values_to_printer_extruders. Without them the CLI segfaults
+        // (exit 139) when looking up extruder defaults.
+        if (!settings.ContainsKey("extruder_type"))
+        {
+            settings["extruder_type"] = "[\"Direct Drive\"]";
+        }
+
+        if (!settings.ContainsKey("nozzle_volume_type"))
+        {
+            settings["nozzle_volume_type"] = "[\"Standard\"]";
         }
     }
 }
