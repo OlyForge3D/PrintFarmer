@@ -364,6 +364,7 @@ function PrintBedPlatform({
   depth, 
   textureUrl, 
   textureFormat,
+  showGridLines,
 }: { 
   width: number; 
   depth: number; 
