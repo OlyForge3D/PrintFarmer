@@ -162,7 +162,13 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
         // --ensure-on-bed: lift objects partially below Z=0
         string transformFlags = BuildTransformFlags(job.ModelTransformJson);
-        string arguments = $"--slice 0 --arrange 1 --ensure-on-bed{transformFlags} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+
+        // Create a named pipe for real-time progress from OrcaSlicer
+        string pipePath = Path.Combine(workDir, "progress.pipe");
+        bool pipeCreated = TryCreateNamedPipe(pipePath);
+        string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
+
+        string arguments = $"--slice 0 --arrange 1 --ensure-on-bed{transformFlags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
@@ -190,7 +196,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         };
         _ = process.Start();
 #pragma warning disable CA2025 // progressTask references process but completes before disposal (awaited explicitly)
-        Task progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
+        Task progressTask = pipeCreated
+            ? MonitorSlicingProgressViaPipeAsync(job.Id, pipePath, process, cancellationToken)
+            : MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
 #pragma warning restore CA2025
         Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -320,6 +328,94 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return new string(name.Select(c => invalid.Contains(c) || c == ' ' ? '_' : c).ToArray());
     }
 
+    private async Task MonitorSlicingProgressViaPipeAsync(
+        Guid jobId,
+        string pipePath,
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Open the pipe for reading — blocks until OrcaSlicer opens it for writing.
+            // Use a timeout so we fall back to time-based if OrcaSlicer never opens the pipe.
+            using CancellationTokenSource pipeOpenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            pipeOpenCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            FileStream? pipeStream = null;
+            try
+            {
+                // FileStream.Open on a FIFO blocks until a writer opens it.
+                // Run in a thread pool thread to avoid blocking the async context.
+                pipeStream = await Task.Run(
+                    () => new FileStream(pipePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite),
+                    pipeOpenCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Pipe open timed out for job {JobId}, falling back to time-based progress", jobId);
+                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to open progress pipe for job {JobId}, falling back to time-based progress", jobId);
+                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                return;
+            }
+
+            using (pipeStream)
+            using (StreamReader reader = new StreamReader(pipeStream, Encoding.UTF8))
+            {
+                while (!process.HasExited && !cancellationToken.IsCancellationRequested)
+                {
+                    string? line = await reader.ReadLineAsync(cancellationToken);
+                    if (line is null)
+                    {
+                        break; // Writer closed the pipe
+                    }
+
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        using JsonDocument doc = JsonDocument.Parse(line);
+                        JsonElement root = doc.RootElement;
+
+                        int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp) ? tp.GetInt32() : -1;
+                        string message = root.TryGetProperty("message", out JsonElement msg) ? msg.GetString() ?? "Slicing..." : "Slicing...";
+
+                        if (root.TryGetProperty("warning", out JsonElement warn))
+                        {
+                            _logger.LogWarning("OrcaSlicer warning for job {JobId}: {Warning}", jobId, warn.GetString());
+                        }
+
+                        if (totalPercent >= 0)
+                        {
+                            // Map OrcaSlicer's 0-100 to our 30-70 range
+                            int mapped = 30 + (int)(totalPercent * 0.4);
+                            mapped = Math.Clamp(mapped, 30, 70);
+                            await _progressReporter.ReportProgressAsync(jobId, mapped, message, cancellationToken);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // Non-JSON line — ignore
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error reading progress pipe for job {JobId}", jobId);
+        }
+    }
+
     private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
     {
         try
@@ -350,6 +446,46 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error monitoring slicing progress for job {JobId}", jobId);
+        }
+    }
+
+    private bool TryCreateNamedPipe(string pipePath)
+    {
+        try
+        {
+            if (File.Exists(pipePath))
+            {
+                File.Delete(pipePath);
+            }
+
+            using Process mkfifo = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "mkfifo",
+                    Arguments = $"\"{pipePath}\"",
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            _ = mkfifo.Start();
+            mkfifo.WaitForExit(5000);
+
+            if (mkfifo.ExitCode != 0)
+            {
+                string err = mkfifo.StandardError.ReadToEnd();
+                _logger.LogWarning("mkfifo failed (exit {ExitCode}): {Error}", mkfifo.ExitCode, err);
+                return false;
+            }
+
+            _logger.LogDebug("Created progress pipe at {PipePath}", pipePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create named pipe at {PipePath}", pipePath);
+            return false;
         }
     }
 

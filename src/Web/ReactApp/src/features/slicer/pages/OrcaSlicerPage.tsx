@@ -153,6 +153,9 @@ export const OrcaSlicerPage: React.FC = () => {
           config.textureUrl = asset.bedTexture;
           config.textureFormat = asset.bedTextureFormat as 'svg' | 'png' | undefined;
         }
+        if (asset?.bedModel) {
+          config.bedModelUrl = asset.bedModel;
+        }
       }
 
       return config;

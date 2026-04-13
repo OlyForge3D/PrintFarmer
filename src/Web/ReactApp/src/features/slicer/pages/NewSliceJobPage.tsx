@@ -221,6 +221,16 @@ export const NewSliceJobPage: React.FC = () => {
   // Post-submission progress tracking
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const jobProgress = useSliceJobProgress(submittedJobId);
+
+  // Auto-clear submittedJobId when the job reaches a terminal state
+  useEffect(() => {
+    if (jobProgress.status === 'completed' || jobProgress.status === 'failed') {
+      const timer = setTimeout(() => {
+        setSubmittedJobId(prev => prev ? null : prev);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [jobProgress.status]);
   
   const stlFile = useSTLFile();
 
@@ -353,7 +363,7 @@ export const NewSliceJobPage: React.FC = () => {
   // Get bed texture for the selected printer
   const bedTextureInfo = useMemo(() => {
     if (!selectedPrinterWithDetails?.manufacturerName || !selectedPrinterWithDetails?.modelName) {
-      return { url: undefined, format: undefined };
+      return { url: undefined, format: undefined, bedModelUrl: undefined };
     }
 
     // Look up asset by manufacturer and model name from local asset service
@@ -362,13 +372,14 @@ export const NewSliceJobPage: React.FC = () => {
     if (asset?.bedTexture) {
       return {
         url: asset.bedTexture,
-        format: asset.bedTextureFormat as 'svg' | 'png' | undefined
+        format: asset.bedTextureFormat as 'svg' | 'png' | undefined,
+        bedModelUrl: asset.bedModel,
       };
     }
 
     // If local asset service doesn't have it, return undefined
     // Don't use API fallback as it may return 404 and cause TextureLoader errors
-    return { url: undefined, format: undefined };
+    return { url: undefined, format: undefined, bedModelUrl: asset?.bedModel };
   }, [selectedPrinterWithDetails]);
 
   // === INCREMENTAL PROFILE LOADING (Phase 1) ===
@@ -962,7 +973,8 @@ export const NewSliceJobPage: React.FC = () => {
     height: bedDimensions?.height ?? 250,
     textureUrl: bedTextureInfo.url,
     textureFormat: bedTextureInfo.format,
-  }), [bedDimensions, bedTextureInfo.format, bedTextureInfo.url]);
+    bedModelUrl: bedTextureInfo.bedModelUrl,
+  }), [bedDimensions, bedTextureInfo.format, bedTextureInfo.url, bedTextureInfo.bedModelUrl]);
 
   // workspaceModels is the live bedModels state (multi-model accumulation)
   const workspaceModels = bedModels;
