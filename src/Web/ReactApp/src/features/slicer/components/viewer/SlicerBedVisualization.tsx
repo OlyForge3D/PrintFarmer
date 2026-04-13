@@ -8,7 +8,6 @@ import { Canvas, useThree, useLoader, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
-import { TextureLoader } from 'three';
 
 export interface LoadedModel {
   id: string;
@@ -358,37 +357,6 @@ function BedGridLines({
 }
 
 /**
- * 3D bed model (STL) rendered as a semi-transparent mesh under the print surface.
- */
-function BedModelMesh({ url }: { url: string }) {
-  const geometry = useLoader(STLLoader, url);
-
-  const centeredGeometry = useMemo(() => {
-    const geo = geometry.clone();
-    geo.computeVertexNormals();
-    geo.computeBoundingBox();
-    if (geo.boundingBox) {
-      const center = new THREE.Vector3();
-      geo.boundingBox.getCenter(center);
-      // Center X/Y, keep Z so the top of the bed aligns with z=0
-      geo.translate(-center.x, -center.y, -geo.boundingBox.max.z);
-    }
-    return geo;
-  }, [geometry]);
-
-  return (
-    <mesh geometry={centeredGeometry} receiveShadow>
-      <meshStandardMaterial
-        color="#666677"
-        side={THREE.DoubleSide}
-        metalness={0.2}
-        roughness={0.7}
-      />
-    </mesh>
-  );
-}
-
-/**
  * Print bed platform with optional texture
  */
 function PrintBedPlatform({ 
@@ -396,13 +364,11 @@ function PrintBedPlatform({
   depth, 
   textureUrl, 
   textureFormat,
-  bedModelUrl,
 }: { 
   width: number; 
   depth: number; 
   textureUrl?: string;
   textureFormat?: 'svg' | 'png';
-  bedModelUrl?: string;
   showGridLines?: boolean;
 }) {
   const shouldUsePngTexture = textureUrl && textureFormat === 'png';
@@ -1060,7 +1026,7 @@ function BedScene({
   onLayFlatComplete,
   autoOrientTrigger = 0,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
-  const { width, depth, height, textureUrl, textureFormat, bedModelUrl } = bedConfig;
+  const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Object3D>(null);
 
@@ -1310,7 +1276,6 @@ function BedScene({
         depth={depth} 
         textureUrl={textureUrl}
         textureFormat={textureFormat}
-        bedModelUrl={bedModelUrl}
         showGridLines={showGridLines}
       />
 
@@ -1380,6 +1345,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   onModelTransform,
   onSelectedModelMetricsChange,
   showAxes = true,
+  showGridLines = true,
   backgroundColor = '#2a2a2e',
   className = '',
   outOfBoundsModelIds,
@@ -1423,6 +1389,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             onSelectedModelMetricsChange={onSelectedModelMetricsChange}
             outOfBoundsModelIds={outOfBoundsModelIds}
             showAxes={showAxes}
+            showGridLines={showGridLines}
             layFlatMode={layFlatMode}
             onLayFlatComplete={onLayFlatComplete}
             autoOrientTrigger={autoOrientTrigger}
