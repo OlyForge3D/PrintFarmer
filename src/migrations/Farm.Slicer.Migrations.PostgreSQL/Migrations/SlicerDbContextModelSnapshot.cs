@@ -586,6 +586,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
 
+                    b.Property<string>("ModelTransformJson")
+                        .HasColumnType("text");
+
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uuid");
 
