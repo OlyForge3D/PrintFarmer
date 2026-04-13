@@ -73,7 +73,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             // Keep temp files on failure for debugging; only clean up on success
             if (Directory.Exists(jobWorkDir))
             {
-                bool succeeded = File.Exists(Path.Combine(jobWorkDir, "output", Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode"));
+                string outputDir = Path.Combine(jobWorkDir, "output");
+                bool succeeded = Directory.Exists(outputDir) && Directory.GetFiles(outputDir, "*.gcode").Length > 0;
                 if (succeeded)
                 {
                     try
@@ -216,9 +217,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 $"OrcaSlicer failed with exit code {process.ExitCode}: {detail}");
         }
 
-        return !File.Exists(gcodeFilePath)
-            ? throw new InvalidOperationException("OrcaSlicer completed but no G-code produced")
-            : gcodeFilePath;
+        // OrcaSlicer CLI always outputs plate_1.gcode (not {modelname}.gcode)
+        if (!File.Exists(gcodeFilePath))
+        {
+            // Look for plate_1.gcode or any .gcode file in the output dir
+            string plate1Path = Path.Combine(gcodeOutputDir, "plate_1.gcode");
+            if (File.Exists(plate1Path))
+            {
+                gcodeFilePath = plate1Path;
+            }
+            else
+            {
+                string[] gcodeFiles = Directory.GetFiles(gcodeOutputDir, "*.gcode");
+                gcodeFilePath = gcodeFiles.Length > 0
+                    ? gcodeFiles[0]
+                    : throw new InvalidOperationException("OrcaSlicer completed but no G-code produced");
+            }
+        }
+
+        return gcodeFilePath;
     }
 
     private static string ExtractOrcaErrorDetail(string stdout, string stderr)
