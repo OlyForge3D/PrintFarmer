@@ -10,6 +10,7 @@ export interface PrinterAsset {
   cover?: string; // PNG image URL for printer thumbnail
   bedTexture?: string; // SVG or PNG URL for bed texture
   bedTextureFormat?: "svg" | "png" | null; // Format of bed texture (SVG preferred for scaling)
+  bedModel?: string; // STL URL for 3D bed model
 }
 
 export interface ManufacturerAssets {

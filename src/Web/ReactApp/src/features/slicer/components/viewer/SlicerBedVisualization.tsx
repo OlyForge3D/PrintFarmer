@@ -26,6 +26,7 @@ export interface BedConfig {
   height: number; // Z dimension in mm (build volume height)
   textureUrl?: string;
   textureFormat?: 'svg' | 'png';
+  bedModelUrl?: string; // STL URL for 3D bed model
   originCenter?: boolean; // If true, origin is at bed center; if false, at corner
 }
 
@@ -94,7 +95,7 @@ function LoadingIndicator() {
 }
 
 /**
- * Textured print bed platform component
+ * Textured print bed platform component (PNG via Three.js TextureLoader)
  */
 function TexturedPrintBed({ 
   width, 
@@ -120,6 +121,73 @@ function TexturedPrintBed({
         map={texture} 
         metalness={0.05} 
         roughness={0.85} 
+      />
+    </mesh>
+  );
+}
+
+/**
+ * SVG textured print bed — rasterizes the SVG onto a canvas,
+ * then creates a CanvasTexture for Three.js.
+ */
+function SvgTexturedPrintBed({
+  width,
+  depth,
+  textureUrl,
+}: {
+  width: number;
+  depth: number;
+  textureUrl: string;
+}) {
+  const thickness = 2;
+  const meshRef = useRef<THREE.Mesh>(null);
+  const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // Use the SVG's intrinsic size, clamped for performance
+      const maxDim = 2048;
+      const w = Math.min(img.naturalWidth || 1024, maxDim);
+      const h = Math.min(img.naturalHeight || 1024, maxDim);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, w, h);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      setTexture(tex);
+    };
+    img.src = textureUrl;
+
+    return () => {
+      img.onload = null;
+    };
+  }, [textureUrl]);
+
+  // Dispose old texture when replaced or unmounted
+  useEffect(() => {
+    return () => { texture?.dispose(); };
+  }, [texture]);
+
+  if (!texture) {
+    return <PlainPrintBed width={width} depth={depth} />;
+  }
+
+  return (
+    <mesh
+      ref={meshRef}
+      position={[0, 0, -thickness / 2]}
+      receiveShadow
+    >
+      <boxGeometry args={[width, depth, thickness]} />
+      <meshStandardMaterial
+        map={texture}
+        metalness={0.05}
+        roughness={0.85}
       />
     </mesh>
   );
@@ -244,20 +312,55 @@ function BedGridLines({
 }
 
 /**
+ * 3D bed model (STL) rendered as a semi-transparent mesh under the print surface.
+ */
+function BedModelMesh({ url }: { url: string }) {
+  const geometry = useLoader(STLLoader, url);
+
+  const centeredGeometry = useMemo(() => {
+    const geo = geometry.clone();
+    geo.computeBoundingBox();
+    if (geo.boundingBox) {
+      const center = new THREE.Vector3();
+      geo.boundingBox.getCenter(center);
+      // Center X/Y, keep Z so the top of the bed aligns with z=0
+      geo.translate(-center.x, -center.y, -geo.boundingBox.max.z);
+    }
+    return geo;
+  }, [geometry]);
+
+  return (
+    <mesh geometry={centeredGeometry} receiveShadow>
+      <meshStandardMaterial
+        color="#888899"
+        transparent
+        opacity={0.3}
+        metalness={0.1}
+        roughness={0.8}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
+/**
  * Print bed platform with optional texture
  */
 function PrintBedPlatform({ 
   width, 
   depth, 
   textureUrl, 
-  textureFormat 
+  textureFormat,
+  bedModelUrl,
 }: { 
   width: number; 
   depth: number; 
   textureUrl?: string;
   textureFormat?: 'svg' | 'png';
+  bedModelUrl?: string;
 }) {
   const shouldUsePngTexture = textureUrl && textureFormat === 'png';
+  const shouldUseSvgTexture = textureUrl && textureFormat === 'svg';
 
   return (
     <group>
@@ -268,6 +371,8 @@ function PrintBedPlatform({
             <TexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
           </Suspense>
         </TextureFallbackBoundary>
+      ) : shouldUseSvgTexture ? (
+        <SvgTexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
       ) : (
         <PlainPrintBed width={width} depth={depth} />
       )}
@@ -282,6 +387,15 @@ function PrintBedPlatform({
 
       {/* Grid lines on bed surface — line-based so texture shows through */}
       <BedGridLines width={width} depth={depth} cellSize={10} sectionSize={50} />
+
+      {/* 3D bed model (STL) — rendered under the print surface */}
+      {bedModelUrl && (
+        <TextureFallbackBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <BedModelMesh url={bedModelUrl} />
+          </Suspense>
+        </TextureFallbackBoundary>
+      )}
     </group>
   );
 }
@@ -906,7 +1020,7 @@ function BedScene({
   onLayFlatComplete,
   autoOrientTrigger = 0,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
-  const { width, depth, height, textureUrl, textureFormat } = bedConfig;
+  const { width, depth, height, textureUrl, textureFormat, bedModelUrl } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Object3D>(null);
 
@@ -1156,6 +1270,7 @@ function BedScene({
         depth={depth} 
         textureUrl={textureUrl}
         textureFormat={textureFormat}
+        bedModelUrl={bedModelUrl}
       />
 
       {/* Build volume wireframe */}
