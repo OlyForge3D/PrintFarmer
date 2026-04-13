@@ -319,6 +319,7 @@ function BedModelMesh({ url }: { url: string }) {
 
   const centeredGeometry = useMemo(() => {
     const geo = geometry.clone();
+    geo.computeVertexNormals();
     geo.computeBoundingBox();
     if (geo.boundingBox) {
       const center = new THREE.Vector3();
@@ -332,12 +333,10 @@ function BedModelMesh({ url }: { url: string }) {
   return (
     <mesh geometry={centeredGeometry} receiveShadow>
       <meshStandardMaterial
-        color="#888899"
-        transparent
-        opacity={0.3}
-        metalness={0.1}
-        roughness={0.8}
-        depthWrite={false}
+        color="#666677"
+        side={THREE.DoubleSide}
+        metalness={0.2}
+        roughness={0.7}
       />
     </mesh>
   );
@@ -364,18 +363,27 @@ function PrintBedPlatform({
 
   return (
     <group>
-      {/* Main bed surface */}
+      {/* 3D bed model (STL) — rendered first, underneath the print surface */}
+      {bedModelUrl && (
+        <TextureFallbackBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <BedModelMesh url={bedModelUrl} />
+          </Suspense>
+        </TextureFallbackBoundary>
+      )}
+
+      {/* Main bed surface — when bed model exists, only show textured surface as thin top layer */}
       {shouldUsePngTexture ? (
-        <TextureFallbackBoundary fallback={<PlainPrintBed width={width} depth={depth} />}>
-          <Suspense fallback={<PlainPrintBed width={width} depth={depth} />}>
+        <TextureFallbackBoundary fallback={!bedModelUrl ? <PlainPrintBed width={width} depth={depth} /> : null}>
+          <Suspense fallback={!bedModelUrl ? <PlainPrintBed width={width} depth={depth} /> : null}>
             <TexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
           </Suspense>
         </TextureFallbackBoundary>
       ) : shouldUseSvgTexture ? (
         <SvgTexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
-      ) : (
+      ) : !bedModelUrl ? (
         <PlainPrintBed width={width} depth={depth} />
-      )}
+      ) : null}
 
       {/* Bed edge outline */}
       <lineSegments position={[0, 0, 0.01]}>
@@ -387,15 +395,6 @@ function PrintBedPlatform({
 
       {/* Grid lines on bed surface — line-based so texture shows through */}
       <BedGridLines width={width} depth={depth} cellSize={10} sectionSize={50} />
-
-      {/* 3D bed model (STL) — rendered under the print surface */}
-      {bedModelUrl && (
-        <TextureFallbackBoundary fallback={null}>
-          <Suspense fallback={null}>
-            <BedModelMesh url={bedModelUrl} />
-          </Suspense>
-        </TextureFallbackBoundary>
-      )}
     </group>
   );
 }
