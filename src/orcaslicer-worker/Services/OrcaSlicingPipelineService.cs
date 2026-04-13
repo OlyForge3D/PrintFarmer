@@ -208,12 +208,55 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         if (process.ExitCode != 0)
         {
             _logger.LogError("OrcaSlicer stderr: {Error}", error);
-            throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
+
+            // Parse stdout for [error] lines — OrcaSlicer writes diagnostics to stdout, not stderr
+            string detail = ExtractOrcaErrorDetail(output, error);
+
+            throw new InvalidOperationException(
+                $"OrcaSlicer failed with exit code {process.ExitCode}: {detail}");
         }
 
         return !File.Exists(gcodeFilePath)
             ? throw new InvalidOperationException("OrcaSlicer completed but no G-code produced")
             : gcodeFilePath;
+    }
+
+    private static string ExtractOrcaErrorDetail(string stdout, string stderr)
+    {
+        // OrcaSlicer writes errors to stdout as "[error] <message>" lines
+        var errorLines = stdout
+            .Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.Contains("[error]", StringComparison.OrdinalIgnoreCase))
+            .Select(l =>
+            {
+                // Strip timestamp prefix: "[2026-04-13 ...] [0x...] [error]   message"
+                int idx = l.IndexOf("[error]", StringComparison.OrdinalIgnoreCase);
+                return idx >= 0 ? l[(idx + 7)..].TrimStart(':', ' ') : l;
+            })
+            .Where(l => l.Length > 0)
+            .ToList();
+
+        if (errorLines.Count > 0)
+        {
+            return string.Join("; ", errorLines);
+        }
+
+        // Fall back to stderr if no [error] lines in stdout
+        if (!string.IsNullOrWhiteSpace(stderr))
+        {
+            return stderr.Length > 500 ? stderr[..500] : stderr;
+        }
+
+        // Last resort: grab lines containing "error" or "fail" from stdout
+        string fallback = stdout
+            .Split('\n')
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.Contains("error", StringComparison.OrdinalIgnoreCase)
+                              || l.Contains("fail", StringComparison.OrdinalIgnoreCase))
+            ?? string.Empty;
+
+        return fallback.Length > 500 ? fallback[..500] : fallback;
     }
 
     private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
