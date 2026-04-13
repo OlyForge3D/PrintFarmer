@@ -381,7 +381,22 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     }
                 }
 
-                writer.WriteStringValue(value);
+                // OrcaSlicer 2.3.2+ CLI requires native JSON types for numeric params.
+                // Write integers/floats as JSON numbers; keep strings with '%' or
+                // non-numeric text as JSON strings.
+                if (long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long intVal))
+                {
+                    writer.WriteNumberValue(intVal);
+                }
+                else if (!value.Contains('%')
+                         && double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double dblVal))
+                {
+                    writer.WriteNumberValue(dblVal);
+                }
+                else
+                {
+                    writer.WriteStringValue(value);
+                }
             }
 
             writer.WriteEndObject();

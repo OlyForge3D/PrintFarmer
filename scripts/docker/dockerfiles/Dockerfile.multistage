@@ -6,7 +6,7 @@
 ############################################################
 
 # Global build arguments
-ARG ORCASLICER_VERSION=2.3.1
+ARG ORCASLICER_VERSION=2.3.2
 ARG BUILD_VERBOSITY=quiet
 
 # Multi-architecture support
@@ -346,7 +346,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
         libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
-        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+        libglu1-mesa \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libmspack0 \
         libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
         xvfb fuse squashfs-tools file p7zip-full \
     && rm -rf /var/lib/apt/lists/*
