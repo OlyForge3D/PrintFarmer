@@ -368,27 +368,18 @@ function PrintBedPlatform({
 
   return (
     <group>
-      {/* 3D bed model (STL) — rendered first, underneath the print surface */}
-      {bedModelUrl && (
-        <TextureFallbackBoundary fallback={null}>
-          <Suspense fallback={null}>
-            <BedModelMesh url={bedModelUrl} />
-          </Suspense>
-        </TextureFallbackBoundary>
-      )}
-
-      {/* Main bed surface — when bed model exists, only show textured surface as thin top layer */}
+      {/* Main bed surface */}
       {shouldUsePngTexture ? (
-        <TextureFallbackBoundary fallback={!bedModelUrl ? <PlainPrintBed width={width} depth={depth} /> : null}>
-          <Suspense fallback={!bedModelUrl ? <PlainPrintBed width={width} depth={depth} /> : null}>
+        <TextureFallbackBoundary fallback={<PlainPrintBed width={width} depth={depth} />}>
+          <Suspense fallback={<PlainPrintBed width={width} depth={depth} />}>
             <TexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
           </Suspense>
         </TextureFallbackBoundary>
       ) : shouldUseSvgTexture ? (
         <SvgTexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
-      ) : !bedModelUrl ? (
+      ) : (
         <PlainPrintBed width={width} depth={depth} />
-      ) : null}
+      )}
 
       {/* Bed edge outline */}
       <lineSegments position={[0, 0, 0.01]}>
