@@ -1,26 +1,24 @@
 {
-  "version": "2.0",
-  "extractedDate": "2025-11-11T04:40:00.090Z",
-  "source": "OrcaSlicer machine profiles + PrintersForAnts community derivative",
-  "defaultBedTexture": "/assets/orcaslicer/default-bed-texture.svg",
-  "statistics": {
-    "totalManufacturers": 57,
-    "totalPrinters": 361,
-    "printersWithBedModel": 292,
-    "printersWithBedTexture": 258
-  },
   "manufacturers": [
     {
       "id": "afinia",
       "name": "Afinia",
       "printers": [
         {
-          "id": "Afinia H+1(HS)",
+          "id": "afinia_h+1(hs)",
           "name": "Afinia H+1(HS)",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/afinia/Afinia H+1(HS)_cover.png"
+          "cover": "/assets/orcaslicer/printers/afinia/afinia_h+1(hs)/cover.png"
+        }
+      ]
+    },
+    {
+      "id": "anet",
+      "name": "Anet",
+      "printers": [
+        {
+          "id": "anet_a8_plus(a8+)",
+          "name": "Anet A8 Plus(A8+)",
+          "cover": "/assets/orcaslicer/printers/anet/anet_a8_plus(a8+)/cover.png"
         }
       ]
     },
@@ -29,37 +27,19 @@
       "name": "Anker",
       "printers": [
         {
-          "id": "Anker M5",
-          "name": "Anker M5",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/anker/Anker M5_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anker/Anker M5_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anker/Anker M5_cover.png"
-        },
-        {
-          "id": "Anker M5 All-Metal Hot End",
+          "id": "anker_m5_all-metal_hot_end",
           "name": "Anker M5 All-Metal Hot End",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/anker/Anker M5 All-Metal Hot End_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anker/Anker M5 All-Metal Hot End_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anker/Anker M5 All-Metal Hot End_cover.png"
+          "cover": "/assets/orcaslicer/printers/anker/anker_m5_all-metal_hot_end/cover.png"
         },
         {
-          "id": "Anker M5C",
+          "id": "anker_m5c",
           "name": "Anker M5C",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/anker/Anker M5C_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anker/Anker M5C_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anker/Anker M5C_cover.png"
+          "cover": "/assets/orcaslicer/printers/anker/anker_m5c/cover.png"
+        },
+        {
+          "id": "anker_m5",
+          "name": "Anker M5",
+          "cover": "/assets/orcaslicer/printers/anker/anker_m5/cover.png"
         }
       ]
     },
@@ -68,169 +48,89 @@
       "name": "Anycubic",
       "printers": [
         {
-          "id": "Anycubic 4Max Pro",
-          "name": "Anycubic 4Max Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic 4Max Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic 4Max Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic 4Max Pro_cover.png"
-        },
-        {
-          "id": "Anycubic 4Max Pro 2",
+          "id": "anycubic_4max_pro_2",
           "name": "Anycubic 4Max Pro 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic 4Max Pro 2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic 4Max Pro 2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic 4Max Pro 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_4max_pro_2/cover.png"
         },
         {
-          "id": "Anycubic Chiron",
+          "id": "anycubic_4max_pro",
+          "name": "Anycubic 4Max Pro",
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_4max_pro/cover.png"
+        },
+        {
+          "id": "anycubic_chiron",
           "name": "Anycubic Chiron",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Chiron_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Chiron_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Chiron_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_chiron/cover.png"
         },
         {
-          "id": "Anycubic Kobra",
-          "name": "Anycubic Kobra",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra_cover.png"
-        },
-        {
-          "id": "Anycubic Kobra 2",
-          "name": "Anycubic Kobra 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra 2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra 2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra 2_cover.png"
-        },
-        {
-          "id": "Anycubic Kobra 2 Max",
+          "id": "anycubic_kobra_2_max",
           "name": "Anycubic Kobra 2 Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Max_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_max/cover.png"
         },
         {
-          "id": "Anycubic Kobra 2 Neo",
+          "id": "anycubic_kobra_2_neo",
           "name": "Anycubic Kobra 2 Neo",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Neo_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Neo_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Neo_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_neo/cover.png"
         },
         {
-          "id": "Anycubic Kobra 2 Plus",
+          "id": "anycubic_kobra_2_plus",
           "name": "Anycubic Kobra 2 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Plus_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_plus/cover.png"
         },
         {
-          "id": "Anycubic Kobra 2 Pro",
+          "id": "anycubic_kobra_2_pro",
           "name": "Anycubic Kobra 2 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Pro_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra 2 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2_pro/cover.png"
         },
         {
-          "id": "Anycubic Kobra 3",
+          "id": "anycubic_kobra_2",
+          "name": "Anycubic Kobra 2",
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_2/cover.png"
+        },
+        {
+          "id": "anycubic_kobra_3",
           "name": "Anycubic Kobra 3",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra 3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra 3_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra 3_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_3/cover.png"
         },
         {
-          "id": "Anycubic Kobra Max",
+          "id": "anycubic_kobra_max",
           "name": "Anycubic Kobra Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_max/cover.png"
         },
         {
-          "id": "Anycubic Kobra Plus",
+          "id": "anycubic_kobra_neo",
+          "name": "Anycubic Kobra Neo",
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_neo/cover.png"
+        },
+        {
+          "id": "anycubic_kobra_plus",
           "name": "Anycubic Kobra Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_plus/cover.png"
         },
         {
-          "id": "Anycubic Kobra S1",
+          "id": "anycubic_kobra_s1",
           "name": "Anycubic Kobra S1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Kobra S1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Kobra S1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Kobra S1_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra_s1/cover.png"
         },
         {
-          "id": "Anycubic Vyper",
+          "id": "anycubic_kobra",
+          "name": "Anycubic Kobra",
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_kobra/cover.png"
+        },
+        {
+          "id": "anycubic_predator",
+          "name": "Anycubic Predator",
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_predator/cover.png"
+        },
+        {
+          "id": "anycubic_vyper",
           "name": "Anycubic Vyper",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic Vyper_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic Vyper_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic Vyper_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_vyper/cover.png"
         },
         {
-          "id": "Anycubic i3 Mega S",
+          "id": "anycubic_i3_mega_s",
           "name": "Anycubic i3 Mega S",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/anycubic/Anycubic i3 Mega S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/anycubic/Anycubic i3 Mega S_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/anycubic/Anycubic i3 Mega S_cover.png"
+          "cover": "/assets/orcaslicer/printers/anycubic/anycubic_i3_mega_s/cover.png"
         }
       ]
     },
@@ -239,106 +139,54 @@
       "name": "Artillery",
       "printers": [
         {
-          "id": "Artillery Genius",
-          "name": "Artillery Genius",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Genius_bed.stl",
-          "bedTexture": "/assets/orcaslicer/artillery/Artillery Genius_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/artillery/Artillery Genius_cover.png"
-        },
-        {
-          "id": "Artillery Genius Pro",
+          "id": "artillery_genius_pro",
           "name": "Artillery Genius Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Genius Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/artillery/Artillery Genius Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/artillery/Artillery Genius Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_genius_pro/cover.png"
         },
         {
-          "id": "Artillery Hornet",
+          "id": "artillery_genius",
+          "name": "Artillery Genius",
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_genius/cover.png"
+        },
+        {
+          "id": "artillery_hornet",
           "name": "Artillery Hornet",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Hornet_bed.stl",
-          "bedTexture": "/assets/orcaslicer/artillery/Artillery Hornet_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/artillery/Artillery Hornet_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_hornet/cover.png"
         },
         {
-          "id": "Artillery M1 Pro",
+          "id": "artillery_m1_pro",
           "name": "Artillery M1 Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery M1 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/artillery/Artillery M1 Pro_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/artillery/Artillery M1 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_m1_pro/cover.png"
         },
         {
-          "id": "Artillery Sidewinder X1",
+          "id": "artillery_sidewinder_x1",
           "name": "Artillery Sidewinder X1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Sidewinder X1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/artillery/Artillery Sidewinder X1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/artillery/Artillery Sidewinder X1_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x1/cover.png"
         },
         {
-          "id": "Artillery Sidewinder X2",
+          "id": "artillery_sidewinder_x2",
           "name": "Artillery Sidewinder X2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Sidewinder X2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/artillery/Artillery Sidewinder X2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/artillery/Artillery Sidewinder X2_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x2/cover.png"
         },
         {
-          "id": "Artillery Sidewinder X3 Plus",
+          "id": "artillery_sidewinder_x3_plus",
           "name": "Artillery Sidewinder X3 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Sidewinder X3 Plus_bed.stl",
-          "cover": "/assets/orcaslicer/artillery/Artillery Sidewinder X3 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x3_plus/cover.png"
         },
         {
-          "id": "Artillery Sidewinder X3 Pro",
+          "id": "artillery_sidewinder_x3_pro",
           "name": "Artillery Sidewinder X3 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Sidewinder X3 Pro_bed.stl",
-          "cover": "/assets/orcaslicer/artillery/Artillery Sidewinder X3 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x3_pro/cover.png"
         },
         {
-          "id": "Artillery Sidewinder X4 Plus",
+          "id": "artillery_sidewinder_x4_plus",
           "name": "Artillery Sidewinder X4 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Sidewinder X4 Plus_bed.stl",
-          "cover": "/assets/orcaslicer/artillery/Artillery Sidewinder X4 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x4_plus/cover.png"
         },
         {
-          "id": "Artillery Sidewinder X4 Pro",
+          "id": "artillery_sidewinder_x4_pro",
           "name": "Artillery Sidewinder X4 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/artillery/Artillery Sidewinder X4 Pro_bed.stl",
-          "cover": "/assets/orcaslicer/artillery/Artillery Sidewinder X4 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/artillery/artillery_sidewinder_x4_pro/cover.png"
         }
       ]
     },
@@ -347,81 +195,59 @@
       "name": "BBL",
       "printers": [
         {
-          "id": "Bambu Lab A1",
-          "name": "Bambu Lab A1",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab A1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab A1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab A1_cover.png"
-        },
-        {
-          "id": "Bambu Lab A1 mini",
+          "id": "bambu_lab_a1_mini",
           "name": "Bambu Lab A1 mini",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab A1 mini_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab A1 mini_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab A1 mini_cover.png"
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_a1_mini/cover.png"
         },
         {
-          "id": "Bambu Lab P1P",
+          "id": "bambu_lab_a1",
+          "name": "Bambu Lab A1",
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_a1/cover.png"
+        },
+        {
+          "id": "bambu_lab_h2d_pro",
+          "name": "Bambu Lab H2D Pro",
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_h2d_pro/cover.png"
+        },
+        {
+          "id": "bambu_lab_h2d",
+          "name": "Bambu Lab H2D",
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_h2d/cover.png"
+        },
+        {
+          "id": "bambu_lab_h2s",
+          "name": "Bambu Lab H2S",
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_h2s/cover.png"
+        },
+        {
+          "id": "bambu_lab_p1p",
           "name": "Bambu Lab P1P",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab P1P_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab P1P_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab P1P_cover.png"
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_p1p/cover.png"
         },
         {
-          "id": "Bambu Lab P1S",
+          "id": "bambu_lab_p1s",
           "name": "Bambu Lab P1S",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab P1S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab P1S_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab P1S_cover.png"
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_p1s/cover.png"
         },
         {
-          "id": "Bambu Lab X1",
-          "name": "Bambu Lab X1",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab X1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab X1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab X1_cover.png"
+          "id": "bambu_lab_p2s",
+          "name": "Bambu Lab P2S",
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_p2s/cover.png"
         },
         {
-          "id": "Bambu Lab X1 Carbon",
+          "id": "bambu_lab_x1_carbon",
           "name": "Bambu Lab X1 Carbon",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab X1 Carbon_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab X1 Carbon_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab X1 Carbon_cover.png"
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_x1_carbon/cover.png"
         },
         {
-          "id": "Bambu Lab X1E",
+          "id": "bambu_lab_x1e",
           "name": "Bambu Lab X1E",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/bbl/Bambu Lab X1E_bed.stl",
-          "bedTexture": "/assets/orcaslicer/bbl/Bambu Lab X1E_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/bbl/Bambu Lab X1E_cover.png"
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_x1e/cover.png"
+        },
+        {
+          "id": "bambu_lab_x1",
+          "name": "Bambu Lab X1",
+          "cover": "/assets/orcaslicer/printers/bbl/bambu_lab_x1/cover.png"
         }
       ]
     },
@@ -430,37 +256,19 @@
       "name": "BIQU",
       "printers": [
         {
-          "id": "BIQU B1",
+          "id": "biqu_b1",
           "name": "BIQU B1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/biqu/BIQU B1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/biqu/BIQU B1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/biqu/BIQU B1_cover.png"
+          "cover": "/assets/orcaslicer/printers/biqu/biqu_b1/cover.png"
         },
         {
-          "id": "BIQU BX",
+          "id": "biqu_bx",
           "name": "BIQU BX",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/biqu/BIQU BX_bed.stl",
-          "bedTexture": "/assets/orcaslicer/biqu/BIQU BX_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/biqu/BIQU BX_cover.png"
+          "cover": "/assets/orcaslicer/printers/biqu/biqu_bx/cover.png"
         },
         {
-          "id": "BIQU Hurakan",
+          "id": "biqu_hurakan",
           "name": "BIQU Hurakan",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/biqu/BIQU Hurakan_bed.stl",
-          "bedTexture": "/assets/orcaslicer/biqu/BIQU Hurakan_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/biqu/BIQU Hurakan_cover.png"
+          "cover": "/assets/orcaslicer/printers/biqu/biqu_hurakan/cover.png"
         }
       ]
     },
@@ -469,37 +277,19 @@
       "name": "Blocks",
       "printers": [
         {
-          "id": "BLOCKS Pro S100",
+          "id": "blocks_pro_s100",
           "name": "BLOCKS Pro S100",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/blocks/BLOCKS Pro S100_bed.stl",
-          "bedTexture": "/assets/orcaslicer/blocks/BLOCKS Pro S100_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/blocks/BLOCKS Pro S100_cover.png"
+          "cover": "/assets/orcaslicer/printers/blocks/blocks_pro_s100/cover.png"
         },
         {
-          "id": "BLOCKS RD50 V2",
+          "id": "blocks_rd50_v2",
           "name": "BLOCKS RD50 V2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/blocks/BLOCKS RD50 V2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/blocks/BLOCKS RD50 V2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/blocks/BLOCKS RD50 V2_cover.png"
+          "cover": "/assets/orcaslicer/printers/blocks/blocks_rd50_v2/cover.png"
         },
         {
-          "id": "BLOCKS RF50",
+          "id": "blocks_rf50",
           "name": "BLOCKS RF50",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/blocks/BLOCKS RF50_bed.stl",
-          "bedTexture": "/assets/orcaslicer/blocks/BLOCKS RF50_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/blocks/BLOCKS RF50_cover.png"
+          "cover": "/assets/orcaslicer/printers/blocks/blocks_rf50/cover.png"
         }
       ]
     },
@@ -508,22 +298,14 @@
       "name": "CONSTRUCT3D",
       "printers": [
         {
-          "id": "Construct 1",
-          "name": "Construct 1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/construct3d/Construct 1_bed.stl",
-          "cover": "/assets/orcaslicer/construct3d/Construct 1_cover.png"
+          "id": "construct_1_xl",
+          "name": "Construct 1 XL",
+          "cover": "/assets/orcaslicer/printers/construct3d/construct_1_xl/cover.png"
         },
         {
-          "id": "Construct 1 XL",
-          "name": "Construct 1 XL",
-          "nozzleDiameters": [
-            "0.6"
-          ],
-          "bedModel": "/assets/orcaslicer/construct3d/Construct 1 XL_bed.stl",
-          "cover": "/assets/orcaslicer/construct3d/Construct 1 XL_cover.png"
+          "id": "construct_1",
+          "name": "Construct 1",
+          "cover": "/assets/orcaslicer/printers/construct3d/construct_1/cover.png"
         }
       ]
     },
@@ -532,31 +314,20 @@
       "name": "Chuanying",
       "printers": [
         {
-          "id": "Chuanying X1",
+          "id": "chuanying_x1",
           "name": "Chuanying X1",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/chuanying/Chuanying X1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/chuanying/Chuanying X1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/chuanying/Chuanying X1_cover.png"
+          "cover": "/assets/orcaslicer/printers/chuanying/chuanying_x1/cover.png"
         }
       ]
     },
     {
-      "id": "co-print",
+      "id": "co_print",
       "name": "Co Print",
       "printers": [
         {
-          "id": "Co Print ChromaSet",
+          "id": "co_print_chromaset",
           "name": "Co Print ChromaSet",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/co-print/Co Print ChromaSet_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/co-print/Co Print ChromaSet_cover.png"
+          "cover": "/assets/orcaslicer/printers/co_print/co_print_chromaset/cover.png"
         }
       ]
     },
@@ -565,44 +336,29 @@
       "name": "CoLiDo",
       "printers": [
         {
-          "id": "CoLiDo 160 V2",
+          "id": "colido_160_v2",
           "name": "CoLiDo 160 V2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/colido/CoLiDo 160 V2_cover.png"
+          "cover": "/assets/orcaslicer/printers/colido/colido_160_v2/cover.png"
         },
         {
-          "id": "CoLiDo DIY 4.0",
-          "name": "CoLiDo DIY 4.0",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/colido/CoLiDo DIY 4.0_cover.png"
-        },
-        {
-          "id": "CoLiDo DIY 4.0 V2",
+          "id": "colido_diy_4.0_v2",
           "name": "CoLiDo DIY 4.0 V2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/colido/CoLiDo DIY 4.0 V2_cover.png"
+          "cover": "/assets/orcaslicer/printers/colido/colido_diy_4.0_v2/cover.png"
         },
         {
-          "id": "CoLiDo SR1",
+          "id": "colido_diy_4.0",
+          "name": "CoLiDo DIY 4.0",
+          "cover": "/assets/orcaslicer/printers/colido/colido_diy_4.0/cover.png"
+        },
+        {
+          "id": "colido_sr1",
           "name": "CoLiDo SR1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/colido/CoLiDo SR1_cover.png"
+          "cover": "/assets/orcaslicer/printers/colido/colido_sr1/cover.png"
         },
         {
-          "id": "CoLiDo X16",
+          "id": "colido_x16",
           "name": "CoLiDo X16",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/colido/CoLiDo X16_cover.png"
+          "cover": "/assets/orcaslicer/printers/colido/colido_x16/cover.png"
         }
       ]
     },
@@ -611,26 +367,14 @@
       "name": "Comgrow",
       "printers": [
         {
-          "id": "Comgrow T300",
+          "id": "comgrow_t300",
           "name": "Comgrow T300",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/comgrow/Comgrow T300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/comgrow/Comgrow T300_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/comgrow/Comgrow T300_cover.png"
+          "cover": "/assets/orcaslicer/printers/comgrow/comgrow_t300/cover.png"
         },
         {
-          "id": "Comgrow T500",
+          "id": "comgrow_t500",
           "name": "Comgrow T500",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/comgrow/Comgrow T500_bed.stl",
-          "bedTexture": "/assets/orcaslicer/comgrow/Comgrow T500_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/comgrow/Comgrow T500_cover.png"
+          "cover": "/assets/orcaslicer/printers/comgrow/comgrow_t500/cover.png"
         }
       ]
     },
@@ -639,350 +383,174 @@
       "name": "Creality",
       "printers": [
         {
-          "id": "Creality CR-10 Max",
+          "id": "creality_cr-10_max",
           "name": "Creality CR-10 Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality CR-10 Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-10 Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-10 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_max/cover.png"
         },
         {
-          "id": "Creality CR-10 SE",
+          "id": "creality_cr-10_se",
           "name": "Creality CR-10 SE",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality CR-10 SE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-10 SE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-10 SE_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_se/cover.png"
         },
         {
-          "id": "Creality CR-10 V2",
+          "id": "creality_cr-10_v2",
           "name": "Creality CR-10 V2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality CR-10 V2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-10 V2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-10 V2_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_v2/cover.png"
         },
         {
-          "id": "Creality CR-10 V3",
+          "id": "creality_cr-10_v3",
           "name": "Creality CR-10 V3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality CR-10 V3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-10 V3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-10 V3_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-10_v3/cover.png"
         },
         {
-          "id": "Creality CR-6 Max",
+          "id": "creality_cr-6_max",
           "name": "Creality CR-6 Max",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-6 Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-6 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-6_max/cover.png"
         },
         {
-          "id": "Creality CR-6 SE",
+          "id": "creality_cr-6_se",
           "name": "Creality CR-6 SE",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality CR-6 SE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-6 SE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-6 SE_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-6_se/cover.png"
         },
         {
-          "id": "Creality CR-M4",
+          "id": "creality_cr-m4",
           "name": "Creality CR-M4",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality CR-M4_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality CR-M4_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality CR-M4_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_cr-m4/cover.png"
         },
         {
-          "id": "Creality Ender-3",
-          "name": "Creality Ender-3",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3_cover.png"
-        },
-        {
-          "id": "Creality Ender-3 Pro",
+          "id": "creality_ender-3_pro",
           "name": "Creality Ender-3 Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_pro/cover.png"
         },
         {
-          "id": "Creality Ender-3 S1",
-          "name": "Creality Ender-3 S1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 S1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 S1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 S1_cover.png"
-        },
-        {
-          "id": "Creality Ender-3 S1 Plus",
+          "id": "creality_ender-3_s1_plus",
           "name": "Creality Ender-3 S1 Plus",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 S1 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 S1 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 S1 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_s1_plus/cover.png"
         },
         {
-          "id": "Creality Ender-3 S1 Pro",
+          "id": "creality_ender-3_s1_pro",
           "name": "Creality Ender-3 S1 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 S1 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 S1 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 S1 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_s1_pro/cover.png"
         },
         {
-          "id": "Creality Ender-3 V2",
-          "name": "Creality Ender-3 V2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 V2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 V2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 V2_cover.png"
+          "id": "creality_ender-3_s1",
+          "name": "Creality Ender-3 S1",
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_s1/cover.png"
         },
         {
-          "id": "Creality Ender-3 V2 Neo",
+          "id": "creality_ender-3_v2_neo",
           "name": "Creality Ender-3 V2 Neo",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 V2 Neo_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 V2 Neo_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 V2 Neo_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v2_neo/cover.png"
         },
         {
-          "id": "Creality Ender-3 V3",
-          "name": "Creality Ender-3 V3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 V3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 V3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 V3_cover.png"
+          "id": "creality_ender-3_v2",
+          "name": "Creality Ender-3 V2",
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v2/cover.png"
         },
         {
-          "id": "Creality Ender-3 V3 KE",
+          "id": "creality_ender-3_v3_ke",
           "name": "Creality Ender-3 V3 KE",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 V3 KE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 V3 KE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 V3 KE_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3_ke/cover.png"
         },
         {
-          "id": "Creality Ender-3 V3 Plus",
+          "id": "creality_ender-3_v3_plus",
           "name": "Creality Ender-3 V3 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 V3 Plus_bed.stl",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 V3 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3_plus/cover.png"
         },
         {
-          "id": "Creality Ender-3 V3 SE",
+          "id": "creality_ender-3_v3_se",
           "name": "Creality Ender-3 V3 SE",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-3 V3 SE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-3 V3 SE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-3 V3 SE_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3_se/cover.png"
         },
         {
-          "id": "Creality Ender-5",
-          "name": "Creality Ender-5",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-5_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-5_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-5_cover.png"
+          "id": "creality_ender-3_v3",
+          "name": "Creality Ender-3 V3",
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3_v3/cover.png"
         },
         {
-          "id": "Creality Ender-5 Max",
+          "id": "creality_ender-3",
+          "name": "Creality Ender-3",
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-3/cover.png"
+        },
+        {
+          "id": "creality_ender-5_max",
           "name": "Creality Ender-5 Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-5 Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-5 Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-5 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_max/cover.png"
         },
         {
-          "id": "Creality Ender-5 Plus",
+          "id": "creality_ender-5_plus",
           "name": "Creality Ender-5 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-5 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-5 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-5 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_plus/cover.png"
         },
         {
-          "id": "Creality Ender-5 Pro (2019)",
+          "id": "creality_ender-5_pro_(2019)",
           "name": "Creality Ender-5 Pro (2019)",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-5 Pro (2019)_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-5 Pro (2019)_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-5 Pro (2019)_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_pro_(2019)/cover.png"
         },
         {
-          "id": "Creality Ender-5 S1",
+          "id": "creality_ender-5_s1",
           "name": "Creality Ender-5 S1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-5 S1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-5 S1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-5 S1_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5_s1/cover.png"
         },
         {
-          "id": "Creality Ender-5S",
+          "id": "creality_ender-5s",
           "name": "Creality Ender-5S",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-5S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-5S_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-5S_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5s/cover.png"
         },
         {
-          "id": "Creality Ender-6",
+          "id": "creality_ender-5",
+          "name": "Creality Ender-5",
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-5/cover.png"
+        },
+        {
+          "id": "creality_ender-6",
           "name": "Creality Ender-6",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Ender-6_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Ender-6_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Ender-6_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_ender-6/cover.png"
         },
         {
-          "id": "Creality Hi",
+          "id": "creality_hi",
           "name": "Creality Hi",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality Hi_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality Hi_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality Hi_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_hi/cover.png"
         },
         {
-          "id": "Creality K1",
-          "name": "Creality K1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality K1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality K1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality K1_cover.png"
-        },
-        {
-          "id": "Creality K1 Max",
+          "id": "creality_k1_max",
           "name": "Creality K1 Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality K1 Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality K1 Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality K1 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_k1_max/cover.png"
         },
         {
-          "id": "Creality K1 SE",
+          "id": "creality_k1_se",
           "name": "Creality K1 SE",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality K1 SE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality K1 SE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality K1 SE_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_k1_se/cover.png"
         },
         {
-          "id": "Creality K1C",
+          "id": "creality_k1c",
           "name": "Creality K1C",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality K1C_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality K1C_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality K1C_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_k1c/cover.png"
         },
         {
-          "id": "Creality K2 Plus",
+          "id": "creality_k1",
+          "name": "Creality K1",
+          "cover": "/assets/orcaslicer/printers/creality/creality_k1/cover.png"
+        },
+        {
+          "id": "creality_k2_plus",
           "name": "Creality K2 Plus",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/creality/Creality K2 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/creality/Creality K2 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/creality/Creality K2 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_k2_plus/cover.png"
         },
         {
-          "id": "Creality Sermoon V1",
+          "id": "creality_k2_pro",
+          "name": "Creality K2 Pro",
+          "cover": "/assets/orcaslicer/printers/creality/creality_k2_pro/cover.png"
+        },
+        {
+          "id": "creality_k2",
+          "name": "Creality K2",
+          "cover": "/assets/orcaslicer/printers/creality/creality_k2/cover.png"
+        },
+        {
+          "id": "creality_sermoon_v1",
           "name": "Creality Sermoon V1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/creality/Creality Sermoon V1_cover.png"
+          "cover": "/assets/orcaslicer/printers/creality/creality_sermoon_v1/cover.png"
         }
       ]
     },
@@ -991,14 +559,14 @@
       "name": "Cubicon",
       "printers": [
         {
-          "id": "Cubicon xCeler-I",
+          "id": "cubicon_xceler-i",
           "name": "Cubicon xCeler-I",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/cubicon/Cubicon xCeler-I_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/cubicon/Cubicon xCeler-I_cover.png"
+          "cover": "/assets/orcaslicer/printers/cubicon/cubicon_xceler-i/cover.png"
+        },
+        {
+          "id": "cubicon_xceler-plus",
+          "name": "Cubicon xCeler-Plus",
+          "cover": "/assets/orcaslicer/printers/cubicon/cubicon_xceler-plus/cover.png"
         }
       ]
     },
@@ -1007,83 +575,24 @@
       "name": "Custom",
       "printers": [
         {
-          "id": "Generic Klipper Printer",
+          "id": "generic_klipper_printer",
           "name": "Generic Klipper Printer",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedTexture": "/assets/orcaslicer/custom/Generic Klipper Printer_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/custom/Generic Klipper Printer_cover.png"
+          "cover": "/assets/orcaslicer/printers/custom/generic_klipper_printer/cover.png"
         },
         {
-          "id": "myklipper",
-          "name": "MyKlipper",
-          "nozzleDiameters": [
-            "0.4",
-            "0.2",
-            "0.6",
-            "0.8"
-          ]
-        },
-        {
-          "id": "Generic Marlin Printer",
+          "id": "generic_marlin_printer",
           "name": "Generic Marlin Printer",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/custom/Generic Marlin Printer_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/custom/Generic Marlin Printer_cover.png"
+          "cover": "/assets/orcaslicer/printers/custom/generic_marlin_printer/cover.png"
         },
         {
-          "id": "mymarlin",
-          "name": "MyMarlin",
-          "nozzleDiameters": [
-            "0.4"
-          ]
-        },
-        {
-          "id": "Generic RRF Printer",
+          "id": "generic_rrf_printer",
           "name": "Generic RRF Printer",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/custom/Generic RRF Printer_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/custom/Generic RRF Printer_cover.png"
+          "cover": "/assets/orcaslicer/printers/custom/generic_rrf_printer/cover.png"
         },
         {
-          "id": "myrrf",
-          "name": "MyRRF",
-          "nozzleDiameters": [
-            "0.4"
-          ]
-        },
-        {
-          "id": "Generic ToolChanger Printer",
+          "id": "generic_toolchanger_printer",
           "name": "Generic ToolChanger Printer",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2",
-            "0.2",
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/custom/Generic ToolChanger Printer_bed.stl",
-          "bedTexture": "/assets/orcaslicer/custom/Generic ToolChanger Printer_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/custom/Generic ToolChanger Printer_cover.png"
-        },
-        {
-          "id": "mytoolchanger",
-          "name": "MyToolChanger",
-          "nozzleDiameters": [
-            "0.4",
-            "0.2",
-            "0.6",
-            "0.8"
-          ]
+          "cover": "/assets/orcaslicer/printers/custom/generic_toolchanger_printer/cover.png"
         }
       ]
     },
@@ -1092,37 +601,19 @@
       "name": "DeltaMaker",
       "printers": [
         {
-          "id": "DeltaMaker 2",
-          "name": "DeltaMaker 2",
-          "nozzleDiameters": [
-            "0.35"
-          ],
-          "bedModel": "/assets/orcaslicer/deltamaker/DeltaMaker 2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/deltamaker/DeltaMaker 2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/deltamaker/DeltaMaker 2_cover.png"
-        },
-        {
-          "id": "DeltaMaker 2T",
+          "id": "deltamaker_2t",
           "name": "DeltaMaker 2T",
-          "nozzleDiameters": [
-            "0.5"
-          ],
-          "bedModel": "/assets/orcaslicer/deltamaker/DeltaMaker 2T_bed.stl",
-          "bedTexture": "/assets/orcaslicer/deltamaker/DeltaMaker 2T_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/deltamaker/DeltaMaker 2T_cover.png"
+          "cover": "/assets/orcaslicer/printers/deltamaker/deltamaker_2t/cover.png"
         },
         {
-          "id": "DeltaMaker 2XT",
+          "id": "deltamaker_2xt",
           "name": "DeltaMaker 2XT",
-          "nozzleDiameters": [
-            "0.5"
-          ],
-          "bedModel": "/assets/orcaslicer/deltamaker/DeltaMaker 2XT_bed.stl",
-          "bedTexture": "/assets/orcaslicer/deltamaker/DeltaMaker 2XT_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/deltamaker/DeltaMaker 2XT_cover.png"
+          "cover": "/assets/orcaslicer/printers/deltamaker/deltamaker_2xt/cover.png"
+        },
+        {
+          "id": "deltamaker_2",
+          "name": "DeltaMaker 2",
+          "cover": "/assets/orcaslicer/printers/deltamaker/deltamaker_2/cover.png"
         }
       ]
     },
@@ -1131,31 +622,19 @@
       "name": "Dremel",
       "printers": [
         {
-          "id": "Dremel 3D20",
+          "id": "dremel_3d20",
           "name": "Dremel 3D20",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/dremel/Dremel 3D20_bed.stl",
-          "cover": "/assets/orcaslicer/dremel/Dremel 3D20_cover.png"
+          "cover": "/assets/orcaslicer/printers/dremel/dremel_3d20/cover.png"
         },
         {
-          "id": "Dremel 3D40",
+          "id": "dremel_3d40",
           "name": "Dremel 3D40",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/dremel/Dremel 3D40_bed.stl",
-          "cover": "/assets/orcaslicer/dremel/Dremel 3D40_cover.png"
+          "cover": "/assets/orcaslicer/printers/dremel/dremel_3d40/cover.png"
         },
         {
-          "id": "Dremel 3D45",
+          "id": "dremel_3d45",
           "name": "Dremel 3D45",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/dremel/Dremel 3D45_bed.stl",
-          "cover": "/assets/orcaslicer/dremel/Dremel 3D45_cover.png"
+          "cover": "/assets/orcaslicer/printers/dremel/dremel_3d45/cover.png"
         }
       ]
     },
@@ -1164,179 +643,89 @@
       "name": "Elegoo",
       "printers": [
         {
-          "id": "Elegoo Centauri",
-          "name": "Elegoo Centauri",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Centauri_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Centauri_cover.png"
+          "id": "elegoo_centauri_carbon_2",
+          "name": "Elegoo Centauri Carbon 2",
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_centauri_carbon_2/cover.png"
         },
         {
-          "id": "Elegoo Centauri Carbon",
+          "id": "elegoo_centauri_carbon",
           "name": "Elegoo Centauri Carbon",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Centauri Carbon_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Centauri Carbon_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_centauri_carbon/cover.png"
         },
         {
-          "id": "Elegoo Neptune",
-          "name": "Elegoo Neptune",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune_cover.png"
+          "id": "elegoo_centauri",
+          "name": "Elegoo Centauri",
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_centauri/cover.png"
         },
         {
-          "id": "Elegoo Neptune 2",
-          "name": "Elegoo Neptune 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 2_cover.png"
-        },
-        {
-          "id": "Elegoo Neptune 2D",
+          "id": "elegoo_neptune_2d",
           "name": "Elegoo Neptune 2D",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 2D_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 2D_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 2D_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_2d/cover.png"
         },
         {
-          "id": "Elegoo Neptune 2S",
+          "id": "elegoo_neptune_2s",
           "name": "Elegoo Neptune 2S",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 2S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 2S_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 2S_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_2s/cover.png"
         },
         {
-          "id": "Elegoo Neptune 3",
-          "name": "Elegoo Neptune 3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 3_cover.png"
+          "id": "elegoo_neptune_2",
+          "name": "Elegoo Neptune 2",
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_2/cover.png"
         },
         {
-          "id": "Elegoo Neptune 3 Max",
+          "id": "elegoo_neptune_3_max",
           "name": "Elegoo Neptune 3 Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3_max/cover.png"
         },
         {
-          "id": "Elegoo Neptune 3 Plus",
+          "id": "elegoo_neptune_3_plus",
           "name": "Elegoo Neptune 3 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3_plus/cover.png"
         },
         {
-          "id": "Elegoo Neptune 3 Pro",
+          "id": "elegoo_neptune_3_pro",
           "name": "Elegoo Neptune 3 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 3 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3_pro/cover.png"
         },
         {
-          "id": "Elegoo Neptune 4",
-          "name": "Elegoo Neptune 4",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 4_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 4_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 4_cover.png"
+          "id": "elegoo_neptune_3",
+          "name": "Elegoo Neptune 3",
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_3/cover.png"
         },
         {
-          "id": "Elegoo Neptune 4 Max",
+          "id": "elegoo_neptune_4_max",
           "name": "Elegoo Neptune 4 Max",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4_max/cover.png"
         },
         {
-          "id": "Elegoo Neptune 4 Plus",
+          "id": "elegoo_neptune_4_plus",
           "name": "Elegoo Neptune 4 Plus",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4_plus/cover.png"
         },
         {
-          "id": "Elegoo Neptune 4 Pro",
+          "id": "elegoo_neptune_4_pro",
           "name": "Elegoo Neptune 4 Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune 4 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4_pro/cover.png"
         },
         {
-          "id": "Elegoo Neptune X",
+          "id": "elegoo_neptune_4",
+          "name": "Elegoo Neptune 4",
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_4/cover.png"
+        },
+        {
+          "id": "elegoo_neptune_x",
           "name": "Elegoo Neptune X",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo Neptune X_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Neptune X_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo Neptune X_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune_x/cover.png"
         },
         {
-          "id": "Elegoo OrangeStorm Giga",
+          "id": "elegoo_neptune",
+          "name": "Elegoo Neptune",
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_neptune/cover.png"
+        },
+        {
+          "id": "elegoo_orangestorm_giga",
           "name": "Elegoo OrangeStorm Giga",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/elegoo/Elegoo OrangeStorm Giga_bed.stl",
-          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo OrangeStorm Giga_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/elegoo/Elegoo OrangeStorm Giga_cover.png"
+          "cover": "/assets/orcaslicer/printers/elegoo/elegoo_orangestorm_giga/cover.png"
         }
       ]
     },
@@ -1345,15 +734,19 @@
       "name": "Eryone",
       "printers": [
         {
-          "id": "Thinker X400",
+          "id": "eryone_er20_klipper",
+          "name": "Eryone ER20 Klipper",
+          "cover": "/assets/orcaslicer/printers/eryone/eryone_er20_klipper/cover.png"
+        },
+        {
+          "id": "eryone_er20",
+          "name": "Eryone ER20",
+          "cover": "/assets/orcaslicer/printers/eryone/eryone_er20/cover.png"
+        },
+        {
+          "id": "thinker_x400",
           "name": "Thinker X400",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/eryone/Thinker X400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/eryone/Thinker X400_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/eryone/Thinker X400_cover.png"
+          "cover": "/assets/orcaslicer/printers/eryone/thinker_x400/cover.png"
         }
       ]
     },
@@ -1362,77 +755,34 @@
       "name": "FLSun",
       "printers": [
         {
-          "id": "FLSun Q5",
+          "id": "flsun_q5",
           "name": "FLSun Q5",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flsun/FLSun Q5_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flsun/FLSun Q5_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flsun/FLSun Q5_cover.png"
+          "cover": "/assets/orcaslicer/printers/flsun/flsun_q5/cover.png"
         },
         {
-          "id": "FLSun QQ-S Pro",
+          "id": "flsun_qq-s_pro",
           "name": "FLSun QQ-S Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flsun/FLSun QQ-S Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flsun/FLSun QQ-S Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flsun/FLSun QQ-S Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/flsun/flsun_qq-s_pro/cover.png"
         },
         {
-          "id": "FLSun S1",
+          "id": "flsun_s1",
           "name": "FLSun S1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flsun/FLSun S1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flsun/FLSun S1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/flsun/FLSun S1_cover.png"
+          "cover": "/assets/orcaslicer/printers/flsun/flsun_s1/cover.png"
         },
         {
-          "id": "FLSun Super Racer (SR)",
+          "id": "flsun_super_racer_(sr)",
           "name": "FLSun Super Racer (SR)",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flsun/FLSun Super Racer (SR)_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flsun/FLSun Super Racer (SR)_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/flsun/FLSun Super Racer (SR)_cover.png"
+          "cover": "/assets/orcaslicer/printers/flsun/flsun_super_racer_(sr)/cover.png"
         },
         {
-          "id": "flsun-sr",
-          "name": "FLSun SR",
-          "nozzleDiameters": [
-            "0.4"
-          ]
-        },
-        {
-          "id": "FLSun T1",
+          "id": "flsun_t1",
           "name": "FLSun T1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flsun/FLSun T1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flsun/FLSun T1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/flsun/FLSun T1_cover.png"
+          "cover": "/assets/orcaslicer/printers/flsun/flsun_t1/cover.png"
         },
         {
-          "id": "FLSun V400",
+          "id": "flsun_v400",
           "name": "FLSun V400",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flsun/FLSun V400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flsun/FLSun V400_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/flsun/FLSun V400_cover.png"
+          "cover": "/assets/orcaslicer/printers/flsun/flsun_v400/cover.png"
         }
       ]
     },
@@ -1441,104 +791,49 @@
       "name": "Flashforge",
       "printers": [
         {
-          "id": "Flashforge AD5X",
+          "id": "flashforge_ad5x",
           "name": "Flashforge AD5X",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge AD5X_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge AD5X_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge AD5X_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_ad5x/cover.png"
         },
         {
-          "id": "Flashforge Adventurer 3 Series",
+          "id": "flashforge_adventurer_3_series",
           "name": "Flashforge Adventurer 3 Series",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Adventurer 3 Series_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Adventurer 3 Series_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Adventurer 3 Series_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_3_series/cover.png"
         },
         {
-          "id": "Flashforge Adventurer 4 Series",
+          "id": "flashforge_adventurer_4_series",
           "name": "Flashforge Adventurer 4 Series",
-          "nozzleDiameters": [
-            "0.3"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Adventurer 4 Series_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Adventurer 4 Series_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Adventurer 4 Series_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_4_series/cover.png"
         },
         {
-          "id": "Flashforge Adventurer 5M",
-          "name": "Flashforge Adventurer 5M",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Adventurer 5M_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Adventurer 5M_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Adventurer 5M_cover.png"
-        },
-        {
-          "id": "Flashforge Adventurer 5M Pro",
+          "id": "flashforge_adventurer_5m_pro",
           "name": "Flashforge Adventurer 5M Pro",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Adventurer 5M Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Adventurer 5M Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Adventurer 5M Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_5m_pro/cover.png"
         },
         {
-          "id": "Flashforge Guider 2s",
+          "id": "flashforge_adventurer_5m",
+          "name": "Flashforge Adventurer 5M",
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_adventurer_5m/cover.png"
+        },
+        {
+          "id": "flashforge_guider_2s",
           "name": "Flashforge Guider 2s",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Guider 2s_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Guider 2s_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Guider 2s_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider_2s/cover.png"
         },
         {
-          "id": "Flashforge Guider 3 Ultra",
+          "id": "flashforge_guider_3_ultra",
           "name": "Flashforge Guider 3 Ultra",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Guider 3 Ultra_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Guider 3 Ultra_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Guider 3 Ultra_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider_3_ultra/cover.png"
         },
         {
-          "id": "Flashforge Guider4",
-          "name": "Flashforge Guider4",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Guider4_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Guider4_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Guider4_cover.png"
-        },
-        {
-          "id": "Flashforge Guider4 Pro",
+          "id": "flashforge_guider4_pro",
           "name": "Flashforge Guider4 Pro",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/flashforge/Flashforge Guider4 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flashforge/Flashforge Guider4 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flashforge/Flashforge Guider4 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider4_pro/cover.png"
+        },
+        {
+          "id": "flashforge_guider4",
+          "name": "Flashforge Guider4",
+          "cover": "/assets/orcaslicer/printers/flashforge/flashforge_guider4/cover.png"
         }
       ]
     },
@@ -1547,33 +842,24 @@
       "name": "FlyingBear",
       "printers": [
         {
-          "id": "FlyingBear Ghost 6",
+          "id": "flyingbear_ghost_6",
           "name": "FlyingBear Ghost 6",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flyingbear/FlyingBear Ghost 6_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flyingbear/FlyingBear Ghost 6_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flyingbear/FlyingBear Ghost 6_cover.png"
+          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_ghost_6/cover.png"
         },
         {
-          "id": "FlyingBear Reborn3",
+          "id": "flyingbear_ghost7",
+          "name": "FlyingBear Ghost7",
+          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_ghost7/cover.png"
+        },
+        {
+          "id": "flyingbear_reborn3",
           "name": "FlyingBear Reborn3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/flyingbear/FlyingBear Reborn3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/flyingbear/FlyingBear Reborn3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/flyingbear/FlyingBear Reborn3_cover.png"
+          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_reborn3/cover.png"
         },
         {
-          "id": "Generic Klipper Printer",
-          "name": "Generic Klipper Printer",
-          "nozzleDiameters": [
-            "0.4"
-          ]
+          "id": "flyingbear_s1",
+          "name": "FlyingBear S1",
+          "cover": "/assets/orcaslicer/printers/flyingbear/flyingbear_s1/cover.png"
         }
       ]
     },
@@ -1582,37 +868,19 @@
       "name": "Folgertech",
       "printers": [
         {
-          "id": "Folgertech FT-5",
+          "id": "folgertech_ft-5",
           "name": "Folgertech FT-5",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/folgertech/Folgertech FT-5_bed.stl",
-          "bedTexture": "/assets/orcaslicer/folgertech/Folgertech FT-5_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/folgertech/Folgertech FT-5_cover.png"
+          "cover": "/assets/orcaslicer/printers/folgertech/folgertech_ft-5/cover.png"
         },
         {
-          "id": "Folgertech FT-6",
+          "id": "folgertech_ft-6",
           "name": "Folgertech FT-6",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/folgertech/Folgertech FT-6_bed.stl",
-          "bedTexture": "/assets/orcaslicer/folgertech/Folgertech FT-6_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/folgertech/Folgertech FT-6_cover.png"
+          "cover": "/assets/orcaslicer/printers/folgertech/folgertech_ft-6/cover.png"
         },
         {
-          "id": "Folgertech i3",
+          "id": "folgertech_i3",
           "name": "Folgertech i3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/folgertech/Folgertech i3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/folgertech/Folgertech i3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/folgertech/Folgertech i3_cover.png"
+          "cover": "/assets/orcaslicer/printers/folgertech/folgertech_i3/cover.png"
         }
       ]
     },
@@ -1621,195 +889,95 @@
       "name": "Geeetech",
       "printers": [
         {
-          "id": "Geeetech A10 M",
+          "id": "geeetech_a10_m",
           "name": "Geeetech A10 M",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A10 M_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A10 M_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A10 M_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a10_m/cover.png"
         },
         {
-          "id": "Geeetech A10 Pro",
+          "id": "geeetech_a10_pro",
           "name": "Geeetech A10 Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A10 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A10 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A10 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a10_pro/cover.png"
         },
         {
-          "id": "Geeetech A10 T",
+          "id": "geeetech_a10_t",
           "name": "Geeetech A10 T",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A10 T_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A10 T_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A10 T_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a10_t/cover.png"
         },
         {
-          "id": "Geeetech A20",
-          "name": "Geeetech A20",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A20_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A20_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A20_cover.png"
-        },
-        {
-          "id": "Geeetech A20 M",
+          "id": "geeetech_a20_m",
           "name": "Geeetech A20 M",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A20 M_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A20 M_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A20 M_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a20_m/cover.png"
         },
         {
-          "id": "Geeetech A20 T",
+          "id": "geeetech_a20_t",
           "name": "Geeetech A20 T",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A20 T_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A20 T_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A20 T_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a20_t/cover.png"
         },
         {
-          "id": "Geeetech A30 M",
+          "id": "geeetech_a20",
+          "name": "Geeetech A20",
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a20/cover.png"
+        },
+        {
+          "id": "geeetech_a30_m",
           "name": "Geeetech A30 M",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A30 M_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A30 M_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A30 M_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a30_m/cover.png"
         },
         {
-          "id": "Geeetech A30 Pro",
+          "id": "geeetech_a30_pro",
           "name": "Geeetech A30 Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A30 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A30 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A30 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a30_pro/cover.png"
         },
         {
-          "id": "Geeetech A30 T",
+          "id": "geeetech_a30_t",
           "name": "Geeetech A30 T",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech A30 T_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech A30 T_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech A30 T_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_a30_t/cover.png"
         },
         {
-          "id": "Geeetech M1",
+          "id": "geeetech_m1",
           "name": "Geeetech M1",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech M1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech M1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech M1_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_m1/cover.png"
         },
         {
-          "id": "Geeetech Mizar",
-          "name": "Geeetech Mizar",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech Mizar_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech Mizar_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech Mizar_cover.png"
-        },
-        {
-          "id": "Geeetech Mizar M",
+          "id": "geeetech_mizar_m",
           "name": "Geeetech Mizar M",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech Mizar M_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech Mizar M_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech Mizar M_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_m/cover.png"
         },
         {
-          "id": "Geeetech Mizar Max",
+          "id": "geeetech_mizar_max",
           "name": "Geeetech Mizar Max",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech Mizar Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech Mizar Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech Mizar Max_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_max/cover.png"
         },
         {
-          "id": "Geeetech Mizar Pro",
+          "id": "geeetech_mizar_pro",
           "name": "Geeetech Mizar Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech Mizar Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech Mizar Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech Mizar Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_pro/cover.png"
         },
         {
-          "id": "Geeetech Mizar S",
+          "id": "geeetech_mizar_s",
           "name": "Geeetech Mizar S",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech Mizar S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech Mizar S_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech Mizar S_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar_s/cover.png"
         },
         {
-          "id": "Geeetech Thunder",
+          "id": "geeetech_mizar",
+          "name": "Geeetech Mizar",
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_mizar/cover.png"
+        },
+        {
+          "id": "geeetech_thunder",
           "name": "Geeetech Thunder",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/geeetech/Geeetech Thunder_bed.stl",
-          "bedTexture": "/assets/orcaslicer/geeetech/Geeetech Thunder_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/geeetech/Geeetech Thunder_cover.png"
+          "cover": "/assets/orcaslicer/printers/geeetech/geeetech_thunder/cover.png"
         }
       ]
     },
     {
-      "id": "ginger-additive",
+      "id": "ginger_additive",
       "name": "Ginger Additive",
       "printers": [
         {
-          "id": "Ginger G1",
+          "id": "ginger_g1",
           "name": "Ginger G1",
-          "nozzleDiameters": [
-            "1.2"
-          ],
-          "bedModel": "/assets/orcaslicer/ginger-additive/Ginger G1_bed.stl",
-          "cover": "/assets/orcaslicer/ginger-additive/Ginger G1_cover.png"
+          "cover": "/assets/orcaslicer/printers/ginger_additive/ginger_g1/cover.png"
         }
       ]
     },
@@ -1818,22 +986,24 @@
       "name": "InfiMech",
       "printers": [
         {
-          "id": "InfiMech TX",
-          "name": "InfiMech TX",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/infimech/InfiMech TX_bed.stl",
-          "bedTexture": "/assets/orcaslicer/infimech/InfiMech TX_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/infimech/InfiMech TX_cover.png"
+          "id": "infimech_ex+aps",
+          "name": "InfiMech EX+APS",
+          "cover": "/assets/orcaslicer/printers/infimech/infimech_ex+aps/cover.png"
         },
         {
-          "id": "Generic Klipper Printer",
-          "name": "Generic Klipper Printer",
-          "nozzleDiameters": [
-            "0.4"
-          ]
+          "id": "infimech_ex",
+          "name": "InfiMech EX",
+          "cover": "/assets/orcaslicer/printers/infimech/infimech_ex/cover.png"
+        },
+        {
+          "id": "infimech_tx_hardened_steel_nozzle",
+          "name": "InfiMech TX Hardened Steel Nozzle",
+          "cover": "/assets/orcaslicer/printers/infimech/infimech_tx_hardened_steel_nozzle/cover.png"
+        },
+        {
+          "id": "infimech_tx",
+          "name": "InfiMech TX",
+          "cover": "/assets/orcaslicer/printers/infimech/infimech_tx/cover.png"
         }
       ]
     },
@@ -1842,53 +1012,45 @@
       "name": "Kingroon",
       "printers": [
         {
-          "id": "Kingroon KLP1",
+          "id": "kingroon_klp1",
           "name": "Kingroon KLP1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/kingroon/Kingroon KLP1_cover.png"
+          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_klp1/cover.png"
         },
         {
-          "id": "Kingroon KP3S 3.0",
+          "id": "kingroon_kp3s_3.0",
           "name": "Kingroon KP3S 3.0",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/kingroon/Kingroon KP3S 3.0_bed.stl",
-          "bedTexture": "/assets/orcaslicer/kingroon/Kingroon KP3S 3.0_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/kingroon/Kingroon KP3S 3.0_cover.png"
+          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_3.0/cover.png"
         },
         {
-          "id": "Kingroon KP3S PRO S1",
+          "id": "kingroon_kp3s_pro_s1",
           "name": "Kingroon KP3S PRO S1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/kingroon/Kingroon KP3S PRO S1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/kingroon/Kingroon KP3S PRO S1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/kingroon/Kingroon KP3S PRO S1_cover.png"
+          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_pro_s1/cover.png"
         },
         {
-          "id": "Kingroon KP3S PRO V2",
+          "id": "kingroon_kp3s_pro_v2",
           "name": "Kingroon KP3S PRO V2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/kingroon/Kingroon KP3S PRO V2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/kingroon/Kingroon KP3S PRO V2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/kingroon/Kingroon KP3S PRO V2_cover.png"
+          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_pro_v2/cover.png"
         },
         {
-          "id": "Kingroon KP3S V1",
+          "id": "kingroon_kp3s_v1",
           "name": "Kingroon KP3S V1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/kingroon/Kingroon KP3S V1_cover.png"
+          "cover": "/assets/orcaslicer/printers/kingroon/kingroon_kp3s_v1/cover.png"
+        }
+      ]
+    },
+    {
+      "id": "longer",
+      "name": "LONGER",
+      "printers": [
+        {
+          "id": "longer_lk10_plus",
+          "name": "LONGER LK10 Plus",
+          "cover": "/assets/orcaslicer/printers/longer/longer_lk10_plus/cover.png"
+        },
+        {
+          "id": "longer_lk10",
+          "name": "LONGER LK10",
+          "cover": "/assets/orcaslicer/printers/longer/longer_lk10/cover.png"
         }
       ]
     },
@@ -1897,54 +1059,45 @@
       "name": "Lulzbot",
       "printers": [
         {
-          "id": "Lulzbot Taz 4 or 5",
+          "id": "lulzbot_taz_4_or_5",
           "name": "Lulzbot Taz 4 or 5",
-          "nozzleDiameters": [
-            "0.5"
-          ],
-          "bedModel": "/assets/orcaslicer/lulzbot/Lulzbot Taz 4 or 5_bed.stl",
-          "bedTexture": "/assets/orcaslicer/lulzbot/Lulzbot Taz 4 or 5_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/lulzbot/Lulzbot Taz 4 or 5_cover.png"
+          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_4_or_5/cover.png"
         },
         {
-          "id": "Lulzbot Taz 6",
+          "id": "lulzbot_taz_6",
           "name": "Lulzbot Taz 6",
-          "nozzleDiameters": [
-            "0.5"
-          ],
-          "bedModel": "/assets/orcaslicer/lulzbot/Lulzbot Taz 6_bed.stl",
-          "bedTexture": "/assets/orcaslicer/lulzbot/Lulzbot Taz 6_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/lulzbot/Lulzbot Taz 6_cover.png"
+          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_6/cover.png"
         },
         {
-          "id": "Lulzbot Taz Pro Common",
-          "name": "Lulzbot Taz Pro Common",
-          "nozzleDiameters": []
+          "id": "lulzbot_taz_mini_2",
+          "name": "Lulzbot Taz Mini 2",
+          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_mini_2/cover.png"
         },
         {
-          "id": "Lulzbot Taz Pro Dual",
+          "id": "lulzbot_taz_pro_dual",
           "name": "Lulzbot Taz Pro Dual",
-          "nozzleDiameters": [
-            "0.5",
-            "0.5"
-          ],
-          "bedModel": "/assets/orcaslicer/lulzbot/Lulzbot Taz Pro Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/lulzbot/Lulzbot Taz Pro Dual_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/lulzbot/Lulzbot Taz Pro Dual_cover.png"
+          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_pro_dual/cover.png"
         },
         {
-          "id": "Lulzbot Taz Pro S",
+          "id": "lulzbot_taz_pro_s",
           "name": "Lulzbot Taz Pro S",
-          "nozzleDiameters": [
-            "0.5"
-          ],
-          "bedModel": "/assets/orcaslicer/lulzbot/Lulzbot Taz Pro S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/lulzbot/Lulzbot Taz Pro S_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/lulzbot/Lulzbot Taz Pro S_cover.png"
+          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_pro_s/cover.png"
+        },
+        {
+          "id": "lulzbot_taz_workhorse",
+          "name": "Lulzbot Taz Workhorse",
+          "cover": "/assets/orcaslicer/printers/lulzbot/lulzbot_taz_workhorse/cover.png"
+        }
+      ]
+    },
+    {
+      "id": "m3d",
+      "name": "M3D",
+      "printers": [
+        {
+          "id": "m3d_enabler_d8500_mm_model",
+          "name": "M3D Enabler D8500 MM Model",
+          "cover": "/assets/orcaslicer/printers/m3d/m3d_enabler_d8500_mm_model/cover.png"
         }
       ]
     },
@@ -1953,59 +1106,29 @@
       "name": "MagicMaker",
       "printers": [
         {
-          "id": "MM BoneKing",
+          "id": "mm_boneking",
           "name": "MM BoneKing",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/magicmaker/MM BoneKing_bed.stl",
-          "bedTexture": "/assets/orcaslicer/magicmaker/MM BoneKing_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/magicmaker/MM BoneKing_cover.png"
+          "cover": "/assets/orcaslicer/printers/magicmaker/mm_boneking/cover.png"
         },
         {
-          "id": "MM hj SK",
+          "id": "mm_hj_sk",
           "name": "MM hj SK",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/magicmaker/MM hj SK_bed.stl",
-          "bedTexture": "/assets/orcaslicer/magicmaker/MM hj SK_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/magicmaker/MM hj SK_cover.png"
+          "cover": "/assets/orcaslicer/printers/magicmaker/mm_hj_sk/cover.png"
         },
         {
-          "id": "MM hqs SF",
+          "id": "mm_hqs_sf",
           "name": "MM hqs SF",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/magicmaker/MM hqs SF_bed.stl",
-          "bedTexture": "/assets/orcaslicer/magicmaker/MM hqs SF_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/magicmaker/MM hqs SF_cover.png"
+          "cover": "/assets/orcaslicer/printers/magicmaker/mm_hqs_sf/cover.png"
         },
         {
-          "id": "MM hqs hj",
+          "id": "mm_hqs_hj",
           "name": "MM hqs hj",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/magicmaker/MM hqs hj_bed.stl",
-          "bedTexture": "/assets/orcaslicer/magicmaker/MM hqs hj_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/magicmaker/MM hqs hj_cover.png"
+          "cover": "/assets/orcaslicer/printers/magicmaker/mm_hqs_hj/cover.png"
         },
         {
-          "id": "MM slb",
+          "id": "mm_slb",
           "name": "MM slb",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/magicmaker/MM slb_bed.stl",
-          "bedTexture": "/assets/orcaslicer/magicmaker/MM slb_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/magicmaker/MM slb_cover.png"
+          "cover": "/assets/orcaslicer/printers/magicmaker/mm_slb/cover.png"
         }
       ]
     },
@@ -2014,15 +1137,20 @@
       "name": "Mellow",
       "printers": [
         {
-          "id": "M1",
+          "id": "m1",
           "name": "M1",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/mellow/M1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/mellow/M1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/mellow/M1_cover.png"
+          "cover": "/assets/orcaslicer/printers/mellow/m1/cover.png"
+        }
+      ]
+    },
+    {
+      "id": "openeye",
+      "name": "OpenEYE",
+      "printers": [
+        {
+          "id": "openeye_peacock_v2",
+          "name": "OpenEYE Peacock V2",
+          "cover": "/assets/orcaslicer/printers/openeye/openeye_peacock_v2/cover.png"
         }
       ]
     },
@@ -2031,12 +1159,9 @@
       "name": "OrcaArena",
       "printers": [
         {
-          "id": "Orca Arena X1 Carbon",
+          "id": "orca_arena_x1_carbon",
           "name": "Orca Arena X1 Carbon",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "cover": "/assets/orcaslicer/orcaarena/Orca Arena X1 Carbon_cover.png"
+          "cover": "/assets/orcaslicer/printers/orcaarena/orca_arena_x1_carbon/cover.png"
         }
       ]
     },
@@ -2045,15 +1170,9 @@
       "name": "Peopoly",
       "printers": [
         {
-          "id": "Peopoly Magneto X",
+          "id": "peopoly_magneto_x",
           "name": "Peopoly Magneto X",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/peopoly/Peopoly Magneto X_bed.stl",
-          "bedTexture": "/assets/orcaslicer/peopoly/Peopoly Magneto X_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/peopoly/Peopoly Magneto X_cover.png"
+          "cover": "/assets/orcaslicer/printers/peopoly/peopoly_magneto_x/cover.png"
         }
       ]
     },
@@ -2062,15 +1181,9 @@
       "name": "Phrozen",
       "printers": [
         {
-          "id": "Phrozen Arco",
+          "id": "phrozen_arco",
           "name": "Phrozen Arco",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/phrozen/Phrozen Arco_bed.stl",
-          "bedTexture": "/assets/orcaslicer/phrozen/Phrozen Arco_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/phrozen/Phrozen Arco_cover.png"
+          "cover": "/assets/orcaslicer/printers/phrozen/phrozen_arco/cover.png"
         }
       ]
     },
@@ -2079,65 +1192,9 @@
       "name": "Positron3D",
       "printers": [
         {
-          "id": "The Positron",
+          "id": "the_positron",
           "name": "The Positron",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/positron3d/The Positron_bed.stl",
-          "bedTexture": "/assets/orcaslicer/positron3d/The Positron_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/positron3d/The Positron_cover.png"
-        }
-      ]
-    },
-    {
-      "id": "printersforAnts",
-      "name": "PrintersForAnts",
-      "printers": [
-        {
-          "id": "SaladFork 120",
-          "name": "SaladFork 120",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/printersforAnts/SaladFork 120_bed.stl",
-          "bedTexture": "/assets/orcaslicer/printersforAnts/SaladFork 120_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/printersforAnts/SaladFork 120_cover.png"
-        },
-        {
-          "id": "SaladFork 180",
-          "name": "SaladFork 180",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/printersforAnts/SaladFork 180_bed.stl",
-          "bedTexture": "/assets/orcaslicer/printersforAnts/SaladFork 180_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/printersforAnts/SaladFork 180_cover.png"
-        },
-        {
-          "id": "Micron 120",
-          "name": "Micron 120",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/printersforAnts/Micron 120_bed.stl",
-          "bedTexture": "/assets/orcaslicer/printersforAnts/Micron 120_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/printersforAnts/Micron 120_cover.png"
-        },
-        {
-          "id": "Micron 180",
-          "name": "Micron 180",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/printersforAnts/Micron 180_bed.stl",
-          "bedTexture": "/assets/orcaslicer/printersforAnts/Micron 180_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/printersforAnts/Micron 180_cover.png"
+          "cover": "/assets/orcaslicer/printers/positron3d/the_positron/cover.png"
         }
       ]
     },
@@ -2146,142 +1203,69 @@
       "name": "Prusa",
       "printers": [
         {
-          "id": "Prusa CORE One",
-          "name": "Prusa CORE One",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa CORE One_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa CORE One_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa CORE One_cover.png"
-        },
-        {
-          "id": "Prusa CORE One HF",
+          "id": "prusa_core_one_hf",
           "name": "Prusa CORE One HF",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa CORE One HF_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa CORE One HF_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa CORE One HF_cover.png"
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one_hf/cover.png"
         },
         {
-          "id": "Prusa MINI",
-          "name": "Prusa MINI",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa MINI_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa MINI_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa MINI_cover.png"
+          "id": "prusa_core_one_l_hf",
+          "name": "Prusa CORE One L HF",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one_l_hf/cover.png"
         },
         {
-          "id": "Prusa MINI IS",
+          "id": "prusa_core_one_l",
+          "name": "Prusa CORE One L",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one_l/cover.png"
+        },
+        {
+          "id": "prusa_core_one",
+          "name": "Prusa CORE One",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_core_one/cover.png"
+        },
+        {
+          "id": "prusa_mini_is",
           "name": "Prusa MINI IS",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa MINI IS_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa MINI IS_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa MINI IS_cover.png"
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mini_is/cover.png"
         },
         {
-          "id": "prusa-miniis",
-          "name": "Prusa MINIIS",
-          "nozzleDiameters": [
-            "0.25",
-            "0.4",
-            "0.6",
-            "0.8"
-          ]
+          "id": "prusa_mini",
+          "name": "Prusa MINI",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mini/cover.png"
         },
         {
-          "id": "Prusa MK3.5",
+          "id": "prusa_mk3.5",
           "name": "Prusa MK3.5",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa MK3.5_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa MK3.5_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa MK3.5_cover.png"
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk3.5/cover.png"
         },
         {
-          "id": "Prusa MK3S",
+          "id": "prusa_mk3s",
           "name": "Prusa MK3S",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa MK3S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa MK3S_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa MK3S_cover.png"
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk3s/cover.png"
         },
         {
-          "id": "Prusa MK4",
-          "name": "Prusa MK4",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa MK4_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa MK4_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa MK4_cover.png"
-        },
-        {
-          "id": "Prusa MK4S",
-          "name": "Prusa MK4S",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa MK4S_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa MK4S_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa MK4S_cover.png"
-        },
-        {
-          "id": "prusa-mk4s-hf",
+          "id": "prusa_mk4s_hf",
           "name": "Prusa MK4S HF",
-          "nozzleDiameters": [
-            "0.4",
-            "0.5",
-            "0.6",
-            "0.8"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/prusa-mk4s-hf_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/prusa-mk4s-hf_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/prusa-mk4s-hf_cover.png"
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk4s_hf/cover.png"
         },
         {
-          "id": "Prusa XL",
-          "name": "Prusa XL",
-          "nozzleDiameters": [
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa XL_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa XL_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa XL_cover.png"
+          "id": "prusa_mk4s",
+          "name": "Prusa MK4S",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk4s/cover.png"
         },
         {
-          "id": "Prusa XL 5T",
+          "id": "prusa_mk4",
+          "name": "Prusa MK4",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_mk4/cover.png"
+        },
+        {
+          "id": "prusa_xl_5t",
           "name": "Prusa XL 5T",
-          "nozzleDiameters": [
-            "0.25",
-            "0.25",
-            "0.25",
-            "0.25",
-            "0.25"
-          ],
-          "bedModel": "/assets/orcaslicer/prusa/Prusa XL 5T_bed.stl",
-          "bedTexture": "/assets/orcaslicer/prusa/Prusa XL 5T_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/prusa/Prusa XL 5T_cover.png"
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_xl_5t/cover.png"
+        },
+        {
+          "id": "prusa_xl",
+          "name": "Prusa XL",
+          "cover": "/assets/orcaslicer/printers/prusa/prusa_xl/cover.png"
         }
       ]
     },
@@ -2290,103 +1274,70 @@
       "name": "Qidi",
       "printers": [
         {
-          "id": "Qidi Q1 Pro",
+          "id": "qidi_q1_pro",
           "name": "Qidi Q1 Pro",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi Q1 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi Q1 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi Q1 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_q1_pro/cover.png"
         },
         {
-          "id": "Qidi Q2",
+          "id": "qidi_q2c",
+          "name": "Qidi Q2C",
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_q2c/cover.png"
+        },
+        {
+          "id": "qidi_q2",
           "name": "Qidi Q2",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi Q2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi Q2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi Q2_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_q2/cover.png"
         },
         {
-          "id": "Qidi X-CF Pro",
+          "id": "qidi_x-cf_pro",
           "name": "Qidi X-CF Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-CF Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-CF Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-CF Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-cf_pro/cover.png"
         },
         {
-          "id": "Qidi X-Max",
-          "name": "Qidi X-Max",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-Max_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-Max_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-Max_cover.png"
-        },
-        {
-          "id": "Qidi X-Max 3",
+          "id": "qidi_x-max_3",
           "name": "Qidi X-Max 3",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-Max 3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-Max 3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-Max 3_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-max_3/cover.png"
         },
         {
-          "id": "Qidi X-Plus",
-          "name": "Qidi X-Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-Plus_cover.png"
+          "id": "qidi_x-max_4",
+          "name": "Qidi X-Max 4",
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-max_4/cover.png"
         },
         {
-          "id": "Qidi X-Plus 3",
+          "id": "qidi_x-max",
+          "name": "Qidi X-Max",
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-max/cover.png"
+        },
+        {
+          "id": "qidi_x-plus_3",
           "name": "Qidi X-Plus 3",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-Plus 3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-Plus 3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-Plus 3_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-plus_3/cover.png"
         },
         {
-          "id": "Qidi X-Plus 4",
+          "id": "qidi_x-plus_4",
           "name": "Qidi X-Plus 4",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-Plus 4_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-Plus 4_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-Plus 4_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-plus_4/cover.png"
         },
         {
-          "id": "Qidi X-Smart 3",
+          "id": "qidi_x-plus",
+          "name": "Qidi X-Plus",
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-plus/cover.png"
+        },
+        {
+          "id": "qidi_x-smart_3",
           "name": "Qidi X-Smart 3",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/qidi/Qidi X-Smart 3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/qidi/Qidi X-Smart 3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/qidi/Qidi X-Smart 3_cover.png"
+          "cover": "/assets/orcaslicer/printers/qidi/qidi_x-smart_3/cover.png"
+        }
+      ]
+    },
+    {
+      "id": "rh3d",
+      "name": "RH3D",
+      "printers": [
+        {
+          "id": "e3ng_v1.2s",
+          "name": "E3NG v1.2S",
+          "cover": "/assets/orcaslicer/printers/rh3d/e3ng_v1.2s/cover.png"
         }
       ]
     },
@@ -2395,28 +1346,14 @@
       "name": "Raise3D",
       "printers": [
         {
-          "id": "Raise3D Pro3",
-          "name": "Raise3D Pro3",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/raise3d/Raise3D Pro3_bed.stl",
-          "bedTexture": "/assets/orcaslicer/raise3d/Raise3D Pro3_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/raise3d/Raise3D Pro3_cover.png"
+          "id": "raise3d_pro3_plus",
+          "name": "Raise3D Pro3 Plus",
+          "cover": "/assets/orcaslicer/printers/raise3d/raise3d_pro3_plus/cover.png"
         },
         {
-          "id": "Raise3D Pro3 Plus",
-          "name": "Raise3D Pro3 Plus",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/raise3d/Raise3D Pro3 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/raise3d/Raise3D Pro3 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/raise3d/Raise3D Pro3 Plus_cover.png"
+          "id": "raise3d_pro3",
+          "name": "Raise3D Pro3",
+          "cover": "/assets/orcaslicer/printers/raise3d/raise3d_pro3/cover.png"
         }
       ]
     },
@@ -2425,240 +1362,109 @@
       "name": "Ratrig",
       "printers": [
         {
-          "id": "RatRig V-Cast",
+          "id": "ratrig_v-cast",
           "name": "RatRig V-Cast",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Cast_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Cast_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Cast_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-cast/cover.png"
         },
         {
-          "id": "RatRig V-Core 3 200",
+          "id": "ratrig_v-core_3_200",
           "name": "RatRig V-Core 3 200",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 3 200_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 3 200_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 3 200_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_200/cover.png"
         },
         {
-          "id": "RatRig V-Core 3 300",
+          "id": "ratrig_v-core_3_300",
           "name": "RatRig V-Core 3 300",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 3 300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 3 300_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 3 300_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_300/cover.png"
         },
         {
-          "id": "RatRig V-Core 3 400",
+          "id": "ratrig_v-core_3_400",
           "name": "RatRig V-Core 3 400",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 3 400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 3 400_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 3 400_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_400/cover.png"
         },
         {
-          "id": "RatRig V-Core 3 500",
+          "id": "ratrig_v-core_3_500",
           "name": "RatRig V-Core 3 500",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 3 500_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 3 500_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 3 500_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_3_500/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 300",
+          "id": "ratrig_v-core_4_300",
           "name": "RatRig V-Core 4 300",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 300_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 300_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_300/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 400",
+          "id": "ratrig_v-core_4_400",
           "name": "RatRig V-Core 4 400",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 400_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 400_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_400/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 500",
+          "id": "ratrig_v-core_4_500",
           "name": "RatRig V-Core 4 500",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 500_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 500_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 500_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_500/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 HYBRID 300",
+          "id": "ratrig_v-core_4_hybrid_300",
           "name": "RatRig V-Core 4 HYBRID 300",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 300_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 300_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_hybrid_300/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 HYBRID 400",
+          "id": "ratrig_v-core_4_hybrid_400",
           "name": "RatRig V-Core 4 HYBRID 400",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 400_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 400_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_hybrid_400/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 HYBRID 500",
+          "id": "ratrig_v-core_4_hybrid_500",
           "name": "RatRig V-Core 4 HYBRID 500",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 500_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 500_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 HYBRID 500_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_hybrid_500/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 300",
-          "name": "RatRig V-Core 4 IDEX 300",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300_cover.png"
-        },
-        {
-          "id": "RatRig V-Core 4 IDEX 300 COPY MODE",
+          "id": "ratrig_v-core_4_idex_300_copy_mode",
           "name": "RatRig V-Core 4 IDEX 300 COPY MODE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300 COPY MODE_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300 COPY MODE_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_300_copy_mode/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 300 MIRROR MODE",
+          "id": "ratrig_v-core_4_idex_300_mirror_mode",
           "name": "RatRig V-Core 4 IDEX 300 MIRROR MODE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300 MIRROR MODE_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 300 MIRROR MODE_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_300_mirror_mode/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 400",
-          "name": "RatRig V-Core 4 IDEX 400",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400_cover.png"
+          "id": "ratrig_v-core_4_idex_300",
+          "name": "RatRig V-Core 4 IDEX 300",
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_300/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 400 COPY MODE",
+          "id": "ratrig_v-core_4_idex_400_copy_mode",
           "name": "RatRig V-Core 4 IDEX 400 COPY MODE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400 COPY MODE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400 COPY MODE_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400 COPY MODE_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_400_copy_mode/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 400 MIRROR MODE",
+          "id": "ratrig_v-core_4_idex_400_mirror_mode",
           "name": "RatRig V-Core 4 IDEX 400 MIRROR MODE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400 MIRROR MODE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400 MIRROR MODE_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 400 MIRROR MODE_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_400_mirror_mode/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 500",
-          "name": "RatRig V-Core 4 IDEX 500",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500_cover.png"
+          "id": "ratrig_v-core_4_idex_400",
+          "name": "RatRig V-Core 4 IDEX 400",
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_400/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 500 COPY MODE",
+          "id": "ratrig_v-core_4_idex_500_copy_mode",
           "name": "RatRig V-Core 4 IDEX 500 COPY MODE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500 COPY MODE_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500 COPY MODE_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_500_copy_mode/cover.png"
         },
         {
-          "id": "RatRig V-Core 4 IDEX 500 MIRROR MODE",
+          "id": "ratrig_v-core_4_idex_500_mirror_mode",
           "name": "RatRig V-Core 4 IDEX 500 MIRROR MODE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500 MIRROR MODE_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Core 4 IDEX 500 MIRROR MODE_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_500_mirror_mode/cover.png"
         },
         {
-          "id": "RatRig V-Minion",
+          "id": "ratrig_v-core_4_idex_500",
+          "name": "RatRig V-Core 4 IDEX 500",
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-core_4_idex_500/cover.png"
+        },
+        {
+          "id": "ratrig_v-minion",
           "name": "RatRig V-Minion",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ratrig/RatRig V-Minion_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ratrig/RatRig V-Minion_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/ratrig/RatRig V-Minion_cover.png"
+          "cover": "/assets/orcaslicer/printers/ratrig/ratrig_v-minion/cover.png"
         }
       ]
     },
@@ -2667,22 +1473,14 @@
       "name": "RolohaunDesign",
       "printers": [
         {
-          "id": "Rolohaun Delta Flyer Refit",
+          "id": "rolohaun_delta_flyer_refit",
           "name": "Rolohaun Delta Flyer Refit",
-          "nozzleDiameters": [],
-          "bedTexture": "/assets/orcaslicer/rolohaundesign/Rolohaun Delta Flyer Refit_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/rolohaundesign/Rolohaun Delta Flyer Refit_cover.png"
+          "cover": "/assets/orcaslicer/printers/rolohaundesign/rolohaun_delta_flyer_refit/cover.png"
         },
         {
-          "id": "Rook MK1 LDO",
+          "id": "rook_mk1_ldo",
           "name": "Rook MK1 LDO",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedTexture": "/assets/orcaslicer/rolohaundesign/Rook MK1 LDO_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/rolohaundesign/Rook MK1 LDO_cover.png"
+          "cover": "/assets/orcaslicer/printers/rolohaundesign/rook_mk1_ldo/cover.png"
         }
       ]
     },
@@ -2691,24 +1489,14 @@
       "name": "SecKit",
       "printers": [
         {
-          "id": "Seckit Go3",
-          "name": "Seckit Go3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/seckit/Seckit Go3_bed.stl",
-          "cover": "/assets/orcaslicer/seckit/Seckit Go3_cover.png"
+          "id": "seckit_sk-tank",
+          "name": "SecKit SK-Tank",
+          "cover": "/assets/orcaslicer/printers/seckit/seckit_sk-tank/cover.png"
         },
         {
-          "id": "SecKit SK-Tank",
-          "name": "SecKit SK-Tank",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/seckit/SecKit SK-Tank_bed.stl",
-          "bedTexture": "/assets/orcaslicer/seckit/SecKit SK-Tank_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/seckit/SecKit SK-Tank_cover.png"
+          "id": "seckit_go3",
+          "name": "Seckit Go3",
+          "cover": "/assets/orcaslicer/printers/seckit/seckit_go3/cover.png"
         }
       ]
     },
@@ -2717,349 +1505,99 @@
       "name": "Snapmaker",
       "printers": [
         {
-          "id": "Snapmaker A250",
-          "name": "Snapmaker A250",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250_cover.png"
-        },
-        {
-          "id": "Snapmaker A250 BKit",
+          "id": "snapmaker_a250_bkit",
           "name": "Snapmaker A250 BKit",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 BKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 BKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 BKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_bkit/cover.png"
         },
         {
-          "id": "Snapmaker A250 Dual",
-          "name": "Snapmaker A250 Dual",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual_cover.png"
-        },
-        {
-          "id": "Snapmaker A250 Dual BKit",
+          "id": "snapmaker_a250_dual_bkit",
           "name": "Snapmaker A250 Dual BKit",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual BKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual BKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual BKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual_bkit/cover.png"
         },
         {
-          "id": "Snapmaker A250 Dual QS+B Kit",
+          "id": "snapmaker_a250_dual_qs+b_kit",
           "name": "Snapmaker A250 Dual QS+B Kit",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual QS+B Kit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual QS+B Kit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual QS+B Kit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual_qs+b_kit/cover.png"
         },
         {
-          "id": "Snapmaker A250 Dual QSKit",
+          "id": "snapmaker_a250_dual_qskit",
           "name": "Snapmaker A250 Dual QSKit",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual QSKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual QSKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 Dual QSKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual_qskit/cover.png"
         },
         {
-          "id": "Snapmaker A250 QS+B Kit",
+          "id": "snapmaker_a250_dual",
+          "name": "Snapmaker A250 Dual",
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_dual/cover.png"
+        },
+        {
+          "id": "snapmaker_a250_qs+b_kit",
           "name": "Snapmaker A250 QS+B Kit",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 QS+B Kit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 QS+B Kit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 QS+B Kit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_qs+b_kit/cover.png"
         },
         {
-          "id": "Snapmaker A250 QSKit",
+          "id": "snapmaker_a250_qskit",
           "name": "Snapmaker A250 QSKit",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A250 QSKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A250 QSKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A250 QSKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250_qskit/cover.png"
         },
         {
-          "id": "Snapmaker A350",
-          "name": "Snapmaker A350",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350_cover.png"
+          "id": "snapmaker_a250",
+          "name": "Snapmaker A250",
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a250/cover.png"
         },
         {
-          "id": "Snapmaker A350 BKit",
+          "id": "snapmaker_a350_bkit",
           "name": "Snapmaker A350 BKit",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 BKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 BKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 BKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_bkit/cover.png"
         },
         {
-          "id": "Snapmaker A350 Dual",
-          "name": "Snapmaker A350 Dual",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual_cover.png"
-        },
-        {
-          "id": "Snapmaker A350 Dual BKit",
+          "id": "snapmaker_a350_dual_bkit",
           "name": "Snapmaker A350 Dual BKit",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual BKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual BKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual BKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual_bkit/cover.png"
         },
         {
-          "id": "Snapmaker A350 Dual QS+B Kit",
+          "id": "snapmaker_a350_dual_qs+b_kit",
           "name": "Snapmaker A350 Dual QS+B Kit",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual QS+B Kit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual QS+B Kit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual QS+B Kit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual_qs+b_kit/cover.png"
         },
         {
-          "id": "Snapmaker A350 Dual QSKit",
+          "id": "snapmaker_a350_dual_qskit",
           "name": "Snapmaker A350 Dual QSKit",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual QSKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual QSKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 Dual QSKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual_qskit/cover.png"
         },
         {
-          "id": "Snapmaker A350 QS+B Kit",
+          "id": "snapmaker_a350_dual",
+          "name": "Snapmaker A350 Dual",
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_dual/cover.png"
+        },
+        {
+          "id": "snapmaker_a350_qs+b_kit",
           "name": "Snapmaker A350 QS+B Kit",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 QS+B Kit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 QS+B Kit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 QS+B Kit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_qs+b_kit/cover.png"
         },
         {
-          "id": "Snapmaker A350 QSKit",
+          "id": "snapmaker_a350_qskit",
           "name": "Snapmaker A350 QSKit",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker A350 QSKit_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker A350 QSKit_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker A350 QSKit_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350_qskit/cover.png"
         },
         {
-          "id": "Snapmaker Artisan",
+          "id": "snapmaker_a350",
+          "name": "Snapmaker A350",
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_a350/cover.png"
+        },
+        {
+          "id": "snapmaker_artisan",
           "name": "Snapmaker Artisan",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker Artisan_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker Artisan_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker Artisan_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_artisan/cover.png"
         },
         {
-          "id": "Snapmaker J1",
+          "id": "snapmaker_j1",
           "name": "Snapmaker J1",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker J1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker J1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker J1_cover.png"
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_j1/cover.png"
         },
         {
-          "id": "Snapmaker U1",
+          "id": "snapmaker_u1",
           "name": "Snapmaker U1",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4",
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/snapmaker/Snapmaker U1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/snapmaker/Snapmaker U1_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/snapmaker/Snapmaker U1_cover.png"
-        },
-        {
-          "id": "fdm_u1",
-          "name": "fdm_U1",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4",
-            "0.4",
-            "0.4",
-            "0.4"
-          ]
-        },
-        {
-          "id": "fdm_a250",
-          "name": "fdm_a250",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_bk",
-          "name": "fdm_a250_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_dual",
-          "name": "fdm_a250_dual",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_dual_bk",
-          "name": "fdm_a250_dual_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_dual_qs",
-          "name": "fdm_a250_dual_qs",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_dual_qs_bk",
-          "name": "fdm_a250_dual_qs_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_qs",
-          "name": "fdm_a250_qs",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a250_qs_bk",
-          "name": "fdm_a250_qs_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350",
-          "name": "fdm_a350",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_bk",
-          "name": "fdm_a350_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_dual",
-          "name": "fdm_a350_dual",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_dual_bk",
-          "name": "fdm_a350_dual_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_dual_qs",
-          "name": "fdm_a350_dual_qs",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_dual_qs_bk",
-          "name": "fdm_a350_dual_qs_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_qs",
-          "name": "fdm_a350_qs",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a350_qs_bk",
-          "name": "fdm_a350_qs_bk",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_a400",
-          "name": "fdm_a400",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_idex",
-          "name": "fdm_idex",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_klipper",
-          "name": "fdm_klipper",
-          "nozzleDiameters": [
-            "0.4"
-          ]
-        },
-        {
-          "id": "fdm_linear2",
-          "name": "fdm_linear2",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_linear2_dual",
-          "name": "fdm_linear2_dual",
-          "nozzleDiameters": []
-        },
-        {
-          "id": "fdm_toolchanger",
-          "name": "fdm_toolchanger",
-          "nozzleDiameters": []
+          "cover": "/assets/orcaslicer/printers/snapmaker/snapmaker_u1/cover.png"
         }
       ]
     },
@@ -3068,146 +1606,69 @@
       "name": "Sovol",
       "printers": [
         {
-          "id": "Sovol SV01",
-          "name": "Sovol SV01",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV01_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV01_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV01_cover.png"
-        },
-        {
-          "id": "Sovol SV01 Pro",
+          "id": "sovol_sv01_pro",
           "name": "Sovol SV01 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV01 Pro_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV01 Pro_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV01 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv01_pro/cover.png"
         },
         {
-          "id": "Sovol SV02",
+          "id": "sovol_sv01",
+          "name": "Sovol SV01",
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv01/cover.png"
+        },
+        {
+          "id": "sovol_sv02",
           "name": "Sovol SV02",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV02_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV02_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV02_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv02/cover.png"
         },
         {
-          "id": "Sovol SV05",
+          "id": "sovol_sv05",
           "name": "Sovol SV05",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV05_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV05_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV05_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv05/cover.png"
         },
         {
-          "id": "Sovol SV06",
-          "name": "Sovol SV06",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV06_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV06_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV06_cover.png"
-        },
-        {
-          "id": "Sovol SV06 ACE",
+          "id": "sovol_sv06_ace",
           "name": "Sovol SV06 ACE",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV06 ACE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV06 ACE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV06 ACE_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06_ace/cover.png"
         },
         {
-          "id": "Sovol SV06 Plus",
-          "name": "Sovol SV06 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV06 Plus_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV06 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV06 Plus_cover.png"
-        },
-        {
-          "id": "Sovol SV06 Plus ACE",
+          "id": "sovol_sv06_plus_ace",
           "name": "Sovol SV06 Plus ACE",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV06 Plus ACE_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV06 Plus ACE_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV06 Plus ACE_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06_plus_ace/cover.png"
         },
         {
-          "id": "Sovol SV07",
-          "name": "Sovol SV07",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV07_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV07_cover.png"
+          "id": "sovol_sv06_plus",
+          "name": "Sovol SV06 Plus",
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06_plus/cover.png"
         },
         {
-          "id": "Sovol SV07 Plus",
+          "id": "sovol_sv06",
+          "name": "Sovol SV06",
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv06/cover.png"
+        },
+        {
+          "id": "sovol_sv07_plus",
           "name": "Sovol SV07 Plus",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV07 Plus_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV07 Plus_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv07_plus/cover.png"
         },
         {
-          "id": "Sovol SV08",
-          "name": "Sovol SV08",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV08_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV08_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV08_cover.png"
+          "id": "sovol_sv07",
+          "name": "Sovol SV07",
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv07/cover.png"
         },
         {
-          "id": "Sovol SV08 MAX",
+          "id": "sovol_sv08_max",
           "name": "Sovol SV08 MAX",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol SV08 MAX_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol SV08 MAX_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol SV08 MAX_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv08_max/cover.png"
         },
         {
-          "id": "Sovol Zero",
+          "id": "sovol_sv08",
+          "name": "Sovol SV08",
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_sv08/cover.png"
+        },
+        {
+          "id": "sovol_zero",
           "name": "Sovol Zero",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/sovol/Sovol Zero_bed.stl",
-          "bedTexture": "/assets/orcaslicer/sovol/Sovol Zero_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/sovol/Sovol Zero_cover.png"
+          "cover": "/assets/orcaslicer/printers/sovol/sovol_zero/cover.png"
         }
       ]
     },
@@ -3216,36 +1677,24 @@
       "name": "Tiertime",
       "printers": [
         {
-          "id": "Tiertime UP300 HS",
+          "id": "tiertime_up300_hs",
           "name": "Tiertime UP300 HS",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/tiertime/Tiertime UP300 HS_cover.png"
+          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up300_hs/cover.png"
         },
         {
-          "id": "Tiertime UP310 Pro",
+          "id": "tiertime_up310_pro",
           "name": "Tiertime UP310 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/tiertime/Tiertime UP310 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up310_pro/cover.png"
         },
         {
-          "id": "Tiertime UP400 Pro",
+          "id": "tiertime_up400_pro",
           "name": "Tiertime UP400 Pro",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/tiertime/Tiertime UP400 Pro_cover.png"
+          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up400_pro/cover.png"
         },
         {
-          "id": "Tiertime UP600 HS",
+          "id": "tiertime_up600_hs",
           "name": "Tiertime UP600 HS",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/tiertime/Tiertime UP600 HS_cover.png"
+          "cover": "/assets/orcaslicer/printers/tiertime/tiertime_up600_hs/cover.png"
         }
       ]
     },
@@ -3254,14 +1703,9 @@
       "name": "Tronxy",
       "printers": [
         {
-          "id": "Tronxy X5SA 400 Marlin Firmware",
+          "id": "tronxy_x5sa_400_marlin_firmware",
           "name": "Tronxy X5SA 400 Marlin Firmware",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/tronxy/Tronxy X5SA 400 Marlin Firmware_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/tronxy/Tronxy X5SA 400 Marlin Firmware_cover.png"
+          "cover": "/assets/orcaslicer/printers/tronxy/tronxy_x5sa_400_marlin_firmware/cover.png"
         }
       ]
     },
@@ -3270,24 +1714,14 @@
       "name": "TwoTrees",
       "printers": [
         {
-          "id": "TwoTrees SK1",
+          "id": "twotrees_sk1",
           "name": "TwoTrees SK1",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/twotrees/TwoTrees SK1_bed.stl",
-          "cover": "/assets/orcaslicer/twotrees/TwoTrees SK1_cover.png"
+          "cover": "/assets/orcaslicer/printers/twotrees/twotrees_sk1/cover.png"
         },
         {
-          "id": "TwoTrees SP-5 Klipper",
+          "id": "twotrees_sp-5_klipper",
           "name": "TwoTrees SP-5 Klipper",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/twotrees/TwoTrees SP-5 Klipper_bed.stl",
-          "bedTexture": "/assets/orcaslicer/twotrees/TwoTrees SP-5 Klipper_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/twotrees/TwoTrees SP-5 Klipper_cover.png"
+          "cover": "/assets/orcaslicer/printers/twotrees/twotrees_sp-5_klipper/cover.png"
         }
       ]
     },
@@ -3296,15 +1730,9 @@
       "name": "UltiMaker",
       "printers": [
         {
-          "id": "UltiMaker 2",
+          "id": "ultimaker_2",
           "name": "UltiMaker 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/ultimaker/UltiMaker 2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/ultimaker/UltiMaker 2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/ultimaker/UltiMaker 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/ultimaker/ultimaker_2/cover.png"
         }
       ]
     },
@@ -3313,38 +1741,14 @@
       "name": "Vivedino",
       "printers": [
         {
-          "id": "Troodon 2.0 - Klipper",
+          "id": "troodon_2.0_-_klipper",
           "name": "Troodon 2.0 - Klipper",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/vivedino/Troodon 2.0 - Klipper_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/vivedino/Troodon 2.0 - Klipper_cover.png"
+          "cover": "/assets/orcaslicer/printers/vivedino/troodon_2.0_-_klipper/cover.png"
         },
         {
-          "id": "Troodon 2.0 - RRF",
+          "id": "troodon_2.0_-_rrf",
           "name": "Troodon 2.0 - RRF",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedTexture": "/assets/orcaslicer/vivedino/Troodon 2.0 - RRF_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/vivedino/Troodon 2.0 - RRF_cover.png"
-        },
-        {
-          "id": "troodon2klipper",
-          "name": "Troodon2Klipper",
-          "nozzleDiameters": [
-            "0.4"
-          ]
-        },
-        {
-          "id": "troodon2rrf",
-          "name": "Troodon2RRF",
-          "nozzleDiameters": [
-            "0.4"
-          ]
+          "cover": "/assets/orcaslicer/printers/vivedino/troodon_2.0_-_rrf/cover.png"
         }
       ]
     },
@@ -3353,187 +1757,109 @@
       "name": "Volumic",
       "printers": [
         {
-          "id": "EXO42",
-          "name": "EXO42",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO42_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO42_cover.png"
-        },
-        {
-          "id": "EXO42 IDRE",
+          "id": "exo42_idre",
           "name": "EXO42 IDRE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO42 IDRE_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO42 IDRE_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/exo42_idre/cover.png"
         },
         {
-          "id": "EXO42 Performance",
+          "id": "exo42_performance",
           "name": "EXO42 Performance",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO42 Performance_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO42 Performance_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/exo42_performance/cover.png"
         },
         {
-          "id": "EXO42 Stage 2",
+          "id": "exo42_stage_2",
           "name": "EXO42 Stage 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO42 Stage 2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO42 Stage 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/exo42_stage_2/cover.png"
         },
         {
-          "id": "EXO65",
-          "name": "EXO65",
-          "nozzleDiameters": [
-            "0.6"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO65_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO65_cover.png"
+          "id": "exo42",
+          "name": "EXO42",
+          "cover": "/assets/orcaslicer/printers/volumic/exo42/cover.png"
         },
         {
-          "id": "EXO65 IDRE",
+          "id": "exo65_idre",
           "name": "EXO65 IDRE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO65 IDRE_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO65 IDRE_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/exo65_idre/cover.png"
         },
         {
-          "id": "EXO65 Performance",
+          "id": "exo65_performance",
           "name": "EXO65 Performance",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO65 Performance_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO65 Performance_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/exo65_performance/cover.png"
         },
         {
-          "id": "EXO65 Stage 2",
+          "id": "exo65_stage_2",
           "name": "EXO65 Stage 2",
-          "nozzleDiameters": [
-            "0.6"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/EXO65 Stage 2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/EXO65 Stage 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/exo65_stage_2/cover.png"
         },
         {
-          "id": "SH65",
-          "name": "SH65",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/SH65_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/SH65_cover.png"
+          "id": "exo65",
+          "name": "EXO65",
+          "cover": "/assets/orcaslicer/printers/volumic/exo65/cover.png"
         },
         {
-          "id": "SH65 IDRE",
+          "id": "sh65_idre",
           "name": "SH65 IDRE",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/SH65 IDRE_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/SH65 IDRE_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/sh65_idre/cover.png"
         },
         {
-          "id": "SH65 Performance",
+          "id": "sh65_performance",
           "name": "SH65 Performance",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/SH65 Performance_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/SH65 Performance_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/sh65_performance/cover.png"
         },
         {
-          "id": "SH65 Stage 2",
+          "id": "sh65_stage_2",
           "name": "SH65 Stage 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/SH65 Stage 2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/SH65 Stage 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/sh65_stage_2/cover.png"
         },
         {
-          "id": "VS20MK2",
+          "id": "sh65",
+          "name": "SH65",
+          "cover": "/assets/orcaslicer/printers/volumic/sh65/cover.png"
+        },
+        {
+          "id": "vs20mk2",
           "name": "VS20MK2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS20MK2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS20MK2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/vs20mk2/cover.png"
         },
         {
-          "id": "VS30MK2",
+          "id": "vs30mk2",
           "name": "VS30MK2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30MK2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30MK2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/vs30mk2/cover.png"
         },
         {
-          "id": "VS30MK3",
-          "name": "VS30MK3",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30MK3_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30MK3_cover.png"
-        },
-        {
-          "id": "VS30MK3 Stage 2",
+          "id": "vs30mk3_stage_2",
           "name": "VS30MK3 Stage 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30MK3 Stage 2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30MK3 Stage 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/vs30mk3_stage_2/cover.png"
         },
         {
-          "id": "VS30SC",
-          "name": "VS30SC",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30SC_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30SC_cover.png"
+          "id": "vs30mk3",
+          "name": "VS30MK3",
+          "cover": "/assets/orcaslicer/printers/volumic/vs30mk3/cover.png"
         },
         {
-          "id": "VS30SC2",
-          "name": "VS30SC2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30SC2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30SC2_cover.png"
+          "id": "vs30sc2_performance",
+          "name": "VS30SC2 Performance",
+          "cover": "/assets/orcaslicer/printers/volumic/vs30sc2_performance/cover.png"
         },
         {
-          "id": "VS30SC2 Stage 2",
+          "id": "vs30sc2_stage_2",
           "name": "VS30SC2 Stage 2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30SC2 Stage 2_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30SC2 Stage 2_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/vs30sc2_stage_2/cover.png"
         },
         {
-          "id": "VS30ULTRA",
+          "id": "vs30sc2",
+          "name": "VS30SC2",
+          "cover": "/assets/orcaslicer/printers/volumic/vs30sc2/cover.png"
+        },
+        {
+          "id": "vs30sc",
+          "name": "VS30SC",
+          "cover": "/assets/orcaslicer/printers/volumic/vs30sc/cover.png"
+        },
+        {
+          "id": "vs30ultra",
           "name": "VS30ULTRA",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/volumic/VS30ULTRA_bed.stl",
-          "cover": "/assets/orcaslicer/volumic/VS30ULTRA_cover.png"
+          "cover": "/assets/orcaslicer/printers/volumic/vs30ultra/cover.png"
         }
       ]
     },
@@ -3542,91 +1868,44 @@
       "name": "Voron",
       "printers": [
         {
-          "id": "Voron 0.1",
+          "id": "voron_0.1",
           "name": "Voron 0.1",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron 0.1_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron 0.1_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron 0.1_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_0.1/cover.png"
         },
         {
-          "id": "Voron 2.4 250",
+          "id": "voron_2.4_250",
           "name": "Voron 2.4 250",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron 2.4 250_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron 2.4 250_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron 2.4 250_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_2.4_250/cover.png"
         },
         {
-          "id": "Voron 2.4 300",
+          "id": "voron_2.4_300",
           "name": "Voron 2.4 300",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron 2.4 300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron 2.4 300_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron 2.4 300_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_2.4_300/cover.png"
         },
         {
-          "id": "Voron 2.4 350",
+          "id": "voron_2.4_350",
           "name": "Voron 2.4 350",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron 2.4 350_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron 2.4 350_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron 2.4 350_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_2.4_350/cover.png"
         },
         {
-          "id": "Voron Switchwire 250",
+          "id": "voron_switchwire_250",
           "name": "Voron Switchwire 250",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedTexture": "/assets/orcaslicer/voron/Voron Switchwire 250_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron Switchwire 250_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_switchwire_250/cover.png"
         },
         {
-          "id": "Voron Trident 250",
+          "id": "voron_trident_250",
           "name": "Voron Trident 250",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron Trident 250_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron Trident 250_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron Trident 250_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_trident_250/cover.png"
         },
         {
-          "id": "Voron Trident 300",
+          "id": "voron_trident_300",
           "name": "Voron Trident 300",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron Trident 300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron Trident 300_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron Trident 300_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_trident_300/cover.png"
         },
         {
-          "id": "Voron Trident 350",
+          "id": "voron_trident_350",
           "name": "Voron Trident 350",
-          "nozzleDiameters": [
-            "0.15"
-          ],
-          "bedModel": "/assets/orcaslicer/voron/Voron Trident 350_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voron/Voron Trident 350_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voron/Voron Trident 350_cover.png"
+          "cover": "/assets/orcaslicer/printers/voron/voron_trident_350/cover.png"
         }
       ]
     },
@@ -3635,15 +1914,9 @@
       "name": "Voxelab",
       "printers": [
         {
-          "id": "Voxelab Aquila X2",
+          "id": "voxelab_aquila_x2",
           "name": "Voxelab Aquila X2",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/voxelab/Voxelab Aquila X2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/voxelab/Voxelab Aquila X2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/voxelab/Voxelab Aquila X2_cover.png"
+          "cover": "/assets/orcaslicer/printers/voxelab/voxelab_aquila_x2/cover.png"
         }
       ]
     },
@@ -3652,26 +1925,30 @@
       "name": "Vzbot",
       "printers": [
         {
-          "id": "Vzbot 235 AWD",
+          "id": "vzbot_235_awd",
           "name": "Vzbot 235 AWD",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/vzbot/Vzbot 235 AWD_bed.stl",
-          "bedTexture": "/assets/orcaslicer/vzbot/Vzbot 235 AWD_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/vzbot/Vzbot 235 AWD_cover.png"
+          "cover": "/assets/orcaslicer/printers/vzbot/vzbot_235_awd/cover.png"
         },
         {
-          "id": "Vzbot 330 AWD",
+          "id": "vzbot_330_awd",
           "name": "Vzbot 330 AWD",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/vzbot/Vzbot 330 AWD_bed.stl",
-          "bedTexture": "/assets/orcaslicer/vzbot/Vzbot 330 AWD_texture.svg",
-          "bedTextureFormat": "svg",
-          "cover": "/assets/orcaslicer/vzbot/Vzbot 330 AWD_cover.png"
+          "cover": "/assets/orcaslicer/printers/vzbot/vzbot_330_awd/cover.png"
+        }
+      ]
+    },
+    {
+      "id": "wemake3d",
+      "name": "WEMAKE3D",
+      "printers": [
+        {
+          "id": "wemake3d_phoenixprov1",
+          "name": "WEMAKE3D PhoenixProV1",
+          "cover": "/assets/orcaslicer/printers/wemake3d/wemake3d_phoenixprov1/cover.png"
+        },
+        {
+          "id": "wemake3d_tinybotv1",
+          "name": "WEMAKE3D TinyBotV1",
+          "cover": "/assets/orcaslicer/printers/wemake3d/wemake3d_tinybotv1/cover.png"
         }
       ]
     },
@@ -3680,176 +1957,105 @@
       "name": "Wanhao",
       "printers": [
         {
-          "id": "Wanhao D12-300",
+          "id": "wanhao_d12-300",
           "name": "Wanhao D12-300",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "cover": "/assets/orcaslicer/wanhao/Wanhao D12-300_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao/wanhao_d12-300/cover.png"
         }
       ]
     },
     {
-      "id": "wanhao-france",
+      "id": "wanhao_france",
       "name": "Wanhao France",
       "printers": [
         {
-          "id": "D12 230 PRO M2 DIRECT",
+          "id": "d12_230_pro_m2_direct",
           "name": "D12 230 PRO M2 DIRECT",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 230 PRO M2 DIRECT_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 230 PRO M2 DIRECT_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_m2_direct/cover.png"
         },
         {
-          "id": "D12 230 PRO M2 MONO DUAL PoopTool",
+          "id": "d12_230_pro_m2_mono_dual_pooptool",
           "name": "D12 230 PRO M2 MONO DUAL PoopTool",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 230 PRO M2 MONO DUAL PoopTool_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 230 PRO M2 MONO DUAL PoopTool_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_m2_mono_dual_pooptool/cover.png"
         },
         {
-          "id": "D12 230 PRO M2 MONO DUAL",
+          "id": "d12_230_pro_m2_mono_dual",
           "name": "D12 230 PRO M2 MONO DUAL",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 230 PRO M2 MONO DUAL_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 230 PRO M2 MONO DUAL_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_m2_mono_dual/cover.png"
         },
         {
-          "id": "D12 230 PRO SMARTPAD DIRECT",
+          "id": "d12_230_pro_smartpad_direct",
           "name": "D12 230 PRO SMARTPAD DIRECT",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 230 PRO SMARTPAD DIRECT_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 230 PRO SMARTPAD DIRECT_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_smartpad_direct/cover.png"
         },
         {
-          "id": "D12 230 PRO SMARTPAD MONO DUAL PoopTool",
+          "id": "d12_230_pro_smartpad_mono_dual_pooptool",
           "name": "D12 230 PRO SMARTPAD MONO DUAL PoopTool",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 230 PRO SMARTPAD MONO DUAL PoopTool_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 230 PRO SMARTPAD MONO DUAL PoopTool_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_smartpad_mono_dual_pooptool/cover.png"
         },
         {
-          "id": "D12 230 PRO SMARTPAD MONO DUAL",
+          "id": "d12_230_pro_smartpad_mono_dual",
           "name": "D12 230 PRO SMARTPAD MONO DUAL",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 230 PRO SMARTPAD MONO DUAL_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 230 PRO SMARTPAD MONO DUAL_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_230_pro_smartpad_mono_dual/cover.png"
         },
         {
-          "id": "D12 300 PRO M2 DIRECT",
+          "id": "d12_300_pro_m2_direct",
           "name": "D12 300 PRO M2 DIRECT",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 300 PRO M2 DIRECT_bed.stl"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_m2_direct/cover.png"
         },
         {
-          "id": "D12 300 PRO M2 MONO DUAL",
-          "name": "D12 300 PRO M2 MONO DUAL",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 300 PRO M2 MONO DUAL_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 300 PRO M2 MONO DUAL_cover.png"
-        },
-        {
-          "id": "D12 300 PRO M2 MONO DUAL PoopTool",
+          "id": "d12_300_pro_m2_mono_dual_pooptool",
           "name": "D12 300 PRO M2 MONO DUAL PoopTool",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 300 PRO M2 MONO DUAL PoopTool_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 300 PRO M2 MONO DUAL PoopTool_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_m2_mono_dual_pooptool/cover.png"
         },
         {
-          "id": "D12 300 PRO SMARTPAD DIRECT",
+          "id": "d12_300_pro_m2_mono_dual",
+          "name": "D12 300 PRO M2 MONO DUAL",
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_m2_mono_dual/cover.png"
+        },
+        {
+          "id": "d12_300_pro_smartpad_direct",
           "name": "D12 300 PRO SMARTPAD DIRECT",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 300 PRO SMARTPAD DIRECT_bed.stl"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_smartpad_direct/cover.png"
         },
         {
-          "id": "D12 300 PRO SMARTPAD MONO DUAL",
-          "name": "D12 300 PRO SMARTPAD MONO DUAL",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 300 PRO SMARTPAD MONO DUAL_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 300 PRO SMARTPAD MONO DUAL_cover.png"
-        },
-        {
-          "id": "D12 300 PRO SMARTPAD MONO DUAL PoopTool",
+          "id": "d12_300_pro_smartpad_mono_dual_pooptool",
           "name": "D12 300 PRO SMARTPAD MONO DUAL PoopTool",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 300 PRO SMARTPAD MONO DUAL PoopTool_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 300 PRO SMARTPAD MONO DUAL PoopTool_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_smartpad_mono_dual_pooptool/cover.png"
         },
         {
-          "id": "D12 500 PRO SMARTPAD DIRECT",
-          "name": "D12 500 PRO SMARTPAD DIRECT",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 500 PRO SMARTPAD DIRECT_bed.stl"
+          "id": "d12_300_pro_smartpad_mono_dual",
+          "name": "D12 300 PRO SMARTPAD MONO DUAL",
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_300_pro_smartpad_mono_dual/cover.png"
         },
         {
-          "id": "d12-500-pro-m2-direct",
+          "id": "d12_500_pro_m2_direct",
           "name": "D12 500 PRO M2 DIRECT",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/d12-500-pro-m2-direct_bed.stl"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_m2_direct/cover.png"
         },
         {
-          "id": "D12 500 PRO M2 MONO DUAL",
-          "name": "D12 500 PRO M2 MONO DUAL",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 500 PRO M2 MONO DUAL_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 500 PRO M2 MONO DUAL_cover.png"
-        },
-        {
-          "id": "D12 500 PRO M2 MONO DUAL PoopTool",
+          "id": "d12_500_pro_m2_mono_dual_pooptool",
           "name": "D12 500 PRO M2 MONO DUAL PoopTool",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 500 PRO M2 MONO DUAL PoopTool_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 500 PRO M2 MONO DUAL PoopTool_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_m2_mono_dual_pooptool/cover.png"
         },
         {
-          "id": "D12 500 PRO SMARTPAD MONO DUAL",
-          "name": "D12 500 PRO SMARTPAD MONO DUAL",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 500 PRO SMARTPAD MONO DUAL_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 500 PRO SMARTPAD MONO DUAL_cover.png"
+          "id": "d12_500_pro_m2_mono_dual",
+          "name": "D12 500 PRO M2 MONO DUAL",
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_m2_mono_dual/cover.png"
         },
         {
-          "id": "D12 500 PRO SMARTPAD MONO DUAL PoopTool",
+          "id": "d12_500_pro_smartpad_direct",
+          "name": "D12 500 PRO SMARTPAD DIRECT",
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_smartpad_direct/cover.png"
+        },
+        {
+          "id": "d12_500_pro_smartpad_mono_dual_pooptool",
           "name": "D12 500 PRO SMARTPAD MONO DUAL PoopTool",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/wanhao-france/D12 500 PRO SMARTPAD MONO DUAL PoopTool_bed.stl",
-          "cover": "/assets/orcaslicer/wanhao-france/D12 500 PRO SMARTPAD MONO DUAL PoopTool_cover.png"
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_smartpad_mono_dual_pooptool/cover.png"
+        },
+        {
+          "id": "d12_500_pro_smartpad_mono_dual",
+          "name": "D12 500 PRO SMARTPAD MONO DUAL",
+          "cover": "/assets/orcaslicer/printers/wanhao_france/d12_500_pro_smartpad_mono_dual/cover.png"
         }
       ]
     },
@@ -3858,37 +2064,19 @@
       "name": "WonderMaker",
       "printers": [
         {
-          "id": "WonderMaker ZR",
-          "name": "WonderMaker ZR",
-          "nozzleDiameters": [
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/wondermaker/WonderMaker ZR_bed.stl",
-          "cover": "/assets/orcaslicer/wondermaker/WonderMaker ZR_cover.png"
-        },
-        {
-          "id": "WonderMaker ZR Ultra",
-          "name": "WonderMaker ZR Ultra",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2",
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/wondermaker/WonderMaker ZR Ultra_bed.stl",
-          "cover": "/assets/orcaslicer/wondermaker/WonderMaker ZR Ultra_cover.png"
-        },
-        {
-          "id": "WonderMaker ZR Ultra S",
+          "id": "wondermaker_zr_ultra_s",
           "name": "WonderMaker ZR Ultra S",
-          "nozzleDiameters": [
-            "0.2",
-            "0.2",
-            "0.2",
-            "0.2"
-          ],
-          "bedModel": "/assets/orcaslicer/wondermaker/WonderMaker ZR Ultra S_bed.stl",
-          "cover": "/assets/orcaslicer/wondermaker/WonderMaker ZR Ultra S_cover.png"
+          "cover": "/assets/orcaslicer/printers/wondermaker/wondermaker_zr_ultra_s/cover.png"
+        },
+        {
+          "id": "wondermaker_zr_ultra",
+          "name": "WonderMaker ZR Ultra",
+          "cover": "/assets/orcaslicer/printers/wondermaker/wondermaker_zr_ultra/cover.png"
+        },
+        {
+          "id": "wondermaker_zr",
+          "name": "WonderMaker ZR",
+          "cover": "/assets/orcaslicer/printers/wondermaker/wondermaker_zr/cover.png"
         }
       ]
     },
@@ -3897,108 +2085,49 @@
       "name": "Z-Bolt",
       "printers": [
         {
-          "id": "Z-Bolt S1000",
-          "name": "Z-Bolt S1000",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S1000_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S1000_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S1000_cover.png"
-        },
-        {
-          "id": "Z-Bolt S1000 Dual",
+          "id": "z-bolt_s1000_dual",
           "name": "Z-Bolt S1000 Dual",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S1000 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S1000 Dual_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S1000 Dual_cover.png"
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s1000_dual/cover.png"
         },
         {
-          "id": "Z-Bolt S300",
-          "name": "Z-Bolt S300",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S300_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S300_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S300_cover.png"
+          "id": "z-bolt_s1000",
+          "name": "Z-Bolt S1000",
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s1000/cover.png"
         },
         {
-          "id": "Z-Bolt S300 Dual",
+          "id": "z-bolt_s300_dual",
           "name": "Z-Bolt S300 Dual",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S300 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S300 Dual_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S300 Dual_cover.png"
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s300_dual/cover.png"
         },
         {
-          "id": "Z-Bolt S400",
-          "name": "Z-Bolt S400",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S400_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S400_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S400_cover.png"
+          "id": "z-bolt_s300",
+          "name": "Z-Bolt S300",
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s300/cover.png"
         },
         {
-          "id": "Z-Bolt S400 Dual",
+          "id": "z-bolt_s400_dual",
           "name": "Z-Bolt S400 Dual",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S400 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S400 Dual_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S400 Dual_cover.png"
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s400_dual/cover.png"
         },
         {
-          "id": "Z-Bolt S600",
-          "name": "Z-Bolt S600",
-          "nozzleDiameters": [
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S600_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S600_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S600_cover.png"
+          "id": "z-bolt_s400",
+          "name": "Z-Bolt S400",
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s400/cover.png"
         },
         {
-          "id": "Z-Bolt S600 Dual",
+          "id": "z-bolt_s600_dual",
           "name": "Z-Bolt S600 Dual",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S600 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S600 Dual_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S600 Dual_cover.png"
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s600_dual/cover.png"
         },
         {
-          "id": "Z-Bolt S800 Dual",
+          "id": "z-bolt_s600",
+          "name": "Z-Bolt S600",
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s600/cover.png"
+        },
+        {
+          "id": "z-bolt_s800_dual",
           "name": "Z-Bolt S800 Dual",
-          "nozzleDiameters": [
-            "0.4",
-            "0.4"
-          ],
-          "bedModel": "/assets/orcaslicer/z-bolt/Z-Bolt S800 Dual_bed.stl",
-          "bedTexture": "/assets/orcaslicer/z-bolt/Z-Bolt S800 Dual_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/z-bolt/Z-Bolt S800 Dual_cover.png"
+          "cover": "/assets/orcaslicer/printers/z-bolt/z-bolt_s800_dual/cover.png"
         }
       ]
     },
@@ -4009,30 +2138,14 @@
         {
           "id": "tiq2",
           "name": "TiQ2",
-          "nozzleDiameters": [
-            "0.25",
-            "0.4",
-            "0.6",
-            "0.8"
-          ],
-          "bedModel": "/assets/orcaslicer/iq/tiq2_bed.stl",
-          "bedTexture": "/assets/orcaslicer/iq/tiq2_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/iq/tiq2_cover.png"
+          "cover": "/assets/orcaslicer/printers/iq/tiq2/cover.png"
+          ,"bedTexture": "/assets/orcaslicer/printers/iq/tiq2/bed-texture.png"
         },
         {
           "id": "tiq8",
           "name": "TiQ8",
-          "nozzleDiameters": [
-            "0.25",
-            "0.4",
-            "0.6",
-            "0.8"
-          ],
-          "bedModel": "/assets/orcaslicer/iq/tiq8_bed.stl",
-          "bedTexture": "/assets/orcaslicer/iq/tiq8_texture.png",
-          "bedTextureFormat": "png",
-          "cover": "/assets/orcaslicer/iq/tiq8_cover.png"
+          "cover": "/assets/orcaslicer/printers/iq/tiq8/cover.png"
+          ,"bedTexture": "/assets/orcaslicer/printers/iq/tiq8/bed-texture.png"
         }
       ]
     }
