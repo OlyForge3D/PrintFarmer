@@ -127,8 +127,9 @@ function TexturedPrintBed({
 }
 
 /**
- * SVG textured print bed — rasterizes the SVG onto a canvas,
+ * SVG textured print bed — rasterizes the SVG onto a high-res canvas,
  * then creates a CanvasTexture for Three.js.
+ * Resolution is based on bed dimensions (4 pixels per mm) for crisp rendering.
  */
 function SvgTexturedPrintBed({
   width,
@@ -147,10 +148,11 @@ function SvgTexturedPrintBed({
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      // Use the SVG's intrinsic size, clamped for performance
-      const maxDim = 2048;
-      const w = Math.min(img.naturalWidth || 1024, maxDim);
-      const h = Math.min(img.naturalHeight || 1024, maxDim);
+      // Use bed dimensions at 4px/mm for crisp textures, clamped to 4096 for GPU limits
+      const pxPerMm = 4;
+      const maxDim = 4096;
+      const w = Math.min(Math.round(width * pxPerMm), maxDim);
+      const h = Math.min(Math.round(depth * pxPerMm), maxDim);
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
@@ -159,6 +161,9 @@ function SvgTexturedPrintBed({
       ctx.drawImage(img, 0, 0, w, h);
       const tex = new THREE.CanvasTexture(canvas);
       tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.anisotropy = 4;
       setTexture(tex);
     };
     img.src = textureUrl;
