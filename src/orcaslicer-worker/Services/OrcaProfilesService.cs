@@ -379,11 +379,14 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 FilamentProfileDto? profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
                                 if (profile != null)
                                 {
-                                    // Use folder name only if manufacturer wasn't extracted from profile name
+                                    // Use folder name only if manufacturer wasn't extracted from filament_vendor
                                     if (string.IsNullOrEmpty(profile.Manufacturer))
                                     {
                                         profile.Manufacturer = folderName;
                                     }
+
+                                    // Normalize vendor names to match OrcaSlicer UI conventions
+                                    profile.Manufacturer = NormalizeFilamentVendor(profile.Manufacturer);
 
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
@@ -1144,8 +1147,19 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.Name = nameElem.GetString() ?? string.Empty;
         }
 
-        // Extract manufacturer from profile name (e.g., "Bambu ABS @BBL A1" -> "Bambu", "Generic PLA @System" -> "Generic")
-        profile.Manufacturer = ExtractManufacturerFromName(profile.Name);
+        // Extract manufacturer from filament_vendor JSON field (OrcaSlicer stores this as a string array)
+        // e.g., "filament_vendor": ["Bambu Lab"] → "Bambu Lab"
+        if (root.TryGetProperty("filament_vendor", out JsonElement vendorElem))
+        {
+            if (vendorElem.ValueKind == JsonValueKind.Array && vendorElem.GetArrayLength() > 0)
+            {
+                profile.Manufacturer = vendorElem[0].GetString();
+            }
+            else if (vendorElem.ValueKind == JsonValueKind.String)
+            {
+                profile.Manufacturer = vendorElem.GetString();
+            }
+        }
 
         // Extract material type from multiple sources:
         // 1. filament_type property (direct)
@@ -1768,60 +1782,23 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// <summary>
     /// Extracts the manufacturer name from a filament profile name.
     /// OrcaSlicer filament names follow the pattern: "Manufacturer Material @Variant"
-    /// e.g., "Bambu ABS @BBL A1" → "Bambu", "Generic PLA @System" → "Generic",
-    /// "eSUN ABS+ @BBL X1C" → "eSUN", "Polymaker PolyTerra PLA @BBL A1" → "Polymaker"
+    /// <summary>
+    /// Normalizes filament vendor names to match OrcaSlicer UI conventions.
+    /// For example, "Bambu Lab" becomes "Bambu", "OrcaFilamentLibrary" becomes "Generic".
     /// </summary>
-    private static string? ExtractManufacturerFromName(string? name)
+    private static string NormalizeFilamentVendor(string? vendor)
     {
-        if (string.IsNullOrWhiteSpace(name))
+        if (string.IsNullOrWhiteSpace(vendor))
         {
-            return null;
+            return "Generic";
         }
 
-        // Material keywords to split on — the manufacturer is everything before the first material match
-        string[] materials = [
-            "ABS-GF", "ABS-CF", "ASA-GF", "ASA-CF", "ASA-Aero", "ASA-AERO",
-            "PA12-CF", "PA6-CF", "PA6-GF", "PA-CF", "PA-GF",
-            "PAHT-CF", "PAHT-GF", "PPA-CF", "PPA-GF",
-            "PETG-CF", "PETG-GF", "PET-CF",
-            "PC-CF", "PC-GF", "PC-ABS",
-            "PE-CF", "PP-CF", "PP-GF",
-            "PPS-CF", "PPS-GF", "PPS",
-            "ABS", "ASA", "PLA", "PETG", "PET", "TPU", "TPE", "FLEX",
-            "PA", "Nylon", "PC", "PCTG", "PVA", "BVOH", "HIPS", "PP", "CPE", "PEBA",
-            "PVB", "PHA", "CoPE", "Wood", "Metal", "Silk", "Marble", "EVA"
-        ];
-
-        string upper = name.ToUpperInvariant();
-
-        foreach (string material in materials)
+        return vendor.Trim() switch
         {
-            string upperMat = material.ToUpperInvariant();
-
-            // Find " MATERIAL " or " MATERIAL@" boundary in the name
-            int idx = upper.IndexOf(" " + upperMat + " ", StringComparison.Ordinal);
-            if (idx < 0)
-            {
-                idx = upper.IndexOf(" " + upperMat + "@", StringComparison.Ordinal);
-            }
-
-            if (idx < 0 && upper.StartsWith(upperMat + " ", StringComparison.Ordinal))
-            {
-                // Material is the first word — no manufacturer prefix
-                return null;
-            }
-
-            if (idx > 0)
-            {
-                string manufacturer = name[..idx].Trim();
-                if (manufacturer.Length > 0)
-                {
-                    return manufacturer;
-                }
-            }
-        }
-
-        return null;
+            "Bambu Lab" => "Bambu",
+            "OrcaFilamentLibrary" => "Generic",
+            _ => vendor.Trim()
+        };
     }
 
     private static string? ExtractMaterialFromName(string? name)
