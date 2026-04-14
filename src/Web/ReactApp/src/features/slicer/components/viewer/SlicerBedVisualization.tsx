@@ -154,10 +154,8 @@ function TexturedPrintBed({
       receiveShadow
     >
       <boxGeometry args={[width, depth, thickness]} />
-      <meshStandardMaterial 
+      <meshBasicMaterial 
         map={composited}
-        metalness={0.1} 
-        roughness={0.75} 
       />
     </mesh>
   );
@@ -229,10 +227,8 @@ function SvgTexturedPrintBed({
       receiveShadow
     >
       <boxGeometry args={[width, depth, thickness]} />
-      <meshStandardMaterial
+      <meshBasicMaterial
         map={texture}
-        metalness={0.1}
-        roughness={0.75}
       />
     </mesh>
   );
@@ -259,7 +255,7 @@ function PlainPrintBed({
     >
       <boxGeometry args={[width, depth, thickness]} />
       <meshStandardMaterial 
-        color="#1a1a2e"
+        color="#2a2a3a"
         metalness={0.05}
         roughness={0.85}
       />
@@ -1256,17 +1252,16 @@ function BedScene({
 
   return (
     <>
-      {/* Lighting */}
-      <ambientLight intensity={0.25} />
+      {/* Lighting — matched to OrcaSlicer dark theme shader values */}
+      <ambientLight intensity={0.3} />
       <directionalLight 
         position={[width, -depth, height * 2]} 
-        intensity={0.35} 
+        intensity={0.48} 
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
       />
-      <directionalLight position={[-width, depth, height]} intensity={0.2} />
-      <pointLight position={[0, 0, height * 1.5]} intensity={0.1} />
+      <directionalLight position={[-width, depth, height]} intensity={0.18} />
 
       {/* Camera controls */}
       <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
@@ -1358,7 +1353,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
     <div className={`w-full h-full ${className}`}>
       <Canvas
         frameloop="demand"
-        style={{ background: '#141418' }}
+        style={{ background: '#53535a' }}
         gl={{
           antialias: true,
           preserveDrawingBuffer: false,
@@ -1375,8 +1370,8 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
         }}
         onCreated={({ gl, scene }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 0.85;
-          scene.background = new THREE.Color('#141418');
+          gl.toneMappingExposure = 1.0;
+          scene.background = new THREE.Color('#53535a');
         }}
       >
         <Suspense fallback={null}>
