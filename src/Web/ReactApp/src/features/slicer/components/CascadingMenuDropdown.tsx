@@ -56,7 +56,6 @@ export function FilamentProfileDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedMfrs, setExpandedMfrs] = useState<Set<string>>(new Set());
-  const [expandedMats, setExpandedMats] = useState<Set<string>>(new Set());
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -163,14 +162,6 @@ export function FilamentProfileDropdown({
     });
   };
 
-  const toggleMat = (key: string) => {
-    setExpandedMats(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-
   const handleProfileClick = (name: string, source: 'system' | 'custom') => {
     onSelect(name, source);
     setIsOpen(false);
@@ -195,17 +186,6 @@ export function FilamentProfileDropdown({
     if (searchQuery.trim()) return new Set(Object.keys(filteredTree));
     return expandedMfrs;
   }, [searchQuery, filteredTree, expandedMfrs]);
-
-  const effectiveMats = useMemo(() => {
-    if (searchQuery.trim()) {
-      const keys = new Set<string>();
-      for (const mfr of Object.keys(filteredTree)) {
-        for (const mat of Object.keys(filteredTree[mfr])) keys.add(`${mfr}:${mat}`);
-      }
-      return keys;
-    }
-    return expandedMats;
-  }, [searchQuery, filteredTree, expandedMats]);
 
   const selectedProfile = profiles.find(p => p.name === selectedProfileName);
   const displayLabel = selectedProfile?.name || customProfiles.find(p => p.name === selectedProfileName)?.name || '';
@@ -353,7 +333,7 @@ export function FilamentProfileDropdown({
               </div>
             )}
 
-            {/* System profiles: Manufacturer → Material → Profiles */}
+            {/* System profiles: Manufacturer → Material (click to select) */}
             {(Object.keys(filteredTree).length > 0 || filteredCustom.length > 0) && (
               <div className="px-3 py-1.5 text-xs font-medium text-gray-400 border-b border-[#3a3f48] bg-[#252930]">
                 System Presets ({totalFiltered})
@@ -367,7 +347,7 @@ export function FilamentProfileDropdown({
             {Object.keys(filteredTree).sort().map(mfr => {
               const materials = filteredTree[mfr];
               const mfrExpanded = effectiveMfrs.has(mfr);
-              const mfrCount = Object.values(materials).reduce((a, ps) => a + ps.length, 0);
+              const mfrCount = Object.keys(materials).length;
 
               return (
                 <div key={mfr}>
@@ -382,45 +362,26 @@ export function FilamentProfileDropdown({
                     <span className="text-xs text-gray-500 ml-auto">{mfrCount}</span>
                   </button>
 
-                  {/* Material type rows (nested) */}
+                  {/* Material rows — click to select (picks the first profile for this manufacturer+material) */}
                   {mfrExpanded && Object.keys(materials).sort().map(mat => {
-                    const matKey = `${mfr}:${mat}`;
-                    const matExpanded = effectiveMats.has(matKey);
                     const matProfiles = materials[mat];
+                    const representative = matProfiles[0];
+                    const isSelected = matProfiles.some(p => p.name === selectedProfileName);
 
                     return (
-                      <div key={matKey}>
-                        {/* Material row */}
-                        <button
-                          type="button"
-                          onClick={() => toggleMat(matKey)}
-                          className="w-full text-left pl-7 pr-3 py-1 text-sm flex items-center gap-2 text-gray-300 hover:bg-[#353b44]"
-                        >
-                          {chevron(matExpanded)}
-                          <span className="truncate">{mat}</span>
-                          <span className="text-xs text-gray-500 ml-auto">{matProfiles.length}</span>
-                        </button>
-
-                        {/* Individual profiles */}
-                        {matExpanded && matProfiles.map(p => {
-                          const isSelected = selectedProfileName === p.name;
-                          return (
-                            <button
-                              key={p.name}
-                              type="button"
-                              onClick={() => handleProfileClick(p.name, 'system')}
-                              className={`w-full text-left pl-12 pr-3 py-1 text-sm flex items-center gap-2 transition-colors
-                                ${isSelected ? 'text-[#00a98f] bg-[#00a98f]/10' : 'text-gray-200 hover:bg-[#353b44]'}`}
-                            >
-                              {isSelected && checkmark}
-                              <span className="truncate">{p.name}</span>
-                              <span className="text-xs text-gray-500 ml-auto shrink-0">
-                                {p.nozzleTemperature ?? 210}°/{p.bedTemperature ?? 60}°
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <button
+                        key={`${mfr}:${mat}`}
+                        type="button"
+                        onClick={() => handleProfileClick(representative.name, 'system')}
+                        className={`w-full text-left pl-7 pr-3 py-1 text-sm flex items-center gap-2 transition-colors
+                          ${isSelected ? 'text-[#00a98f] bg-[#00a98f]/10' : 'text-gray-300 hover:bg-[#353b44]'}`}
+                      >
+                        {isSelected && checkmark}
+                        <span className="truncate">{mat}</span>
+                        <span className="text-xs text-gray-500 ml-auto shrink-0">
+                          {representative.nozzleTemperature ?? 210}°/{representative.bedTemperature ?? 60}°
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
