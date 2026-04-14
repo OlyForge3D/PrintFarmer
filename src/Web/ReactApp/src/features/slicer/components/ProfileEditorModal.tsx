@@ -19,6 +19,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Alert } from '@/common/components/ui';
 import { FilamentProfileEditor } from '@/features/slicer/components/settings/FilamentProfileEditor';
+import type { FilamentSettingsViewMode } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import { 
   DEFAULT_ORCA_FILAMENT_SETTINGS, 
   type OrcaFilamentSettings,
@@ -106,6 +107,9 @@ export function ProfileEditorModal({
   
   // Track if settings have been modified
   const [hasChanges, setHasChanges] = useState(false);
+  
+  // View mode for filament editor (Simple/Advanced)
+  const [filamentViewMode, setFilamentViewMode] = useState<FilamentSettingsViewMode>('simple');
   
   // Initialize profile name and reset state when modal opens
   React.useEffect(() => {
@@ -201,7 +205,7 @@ export function ProfileEditorModal({
       isOpen={isOpen}
       onClose={onClose}
       title={modalTitle}
-      size="xl"
+      size="full"
       maxHeight="max-h-[85vh]"
       footer={
         <div className="flex items-center justify-between w-full">
@@ -282,7 +286,8 @@ export function ProfileEditorModal({
               setFilamentSettings(settings);
               setHasChanges(true);
             }}
-            initialViewMode="basic"
+            viewMode={filamentViewMode}
+            onViewModeChange={setFilamentViewMode}
           />
         )}
       </div>
