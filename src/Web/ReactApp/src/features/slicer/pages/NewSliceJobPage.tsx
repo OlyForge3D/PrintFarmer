@@ -22,6 +22,7 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
+import { CascadingMenuDropdown, type CascadingMenuSection, type CascadingMenuItem, type CascadingMenuGroup } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
@@ -629,31 +630,54 @@ export const NewSliceJobPage: React.FC = () => {
   }, [selectedPrinterId]);
 
   // Machine profiles for profile selection - use incremental machine profiles
-  // Filament profiles grouped by material type for display
-  const filamentProfilesByMaterial = useMemo(() => {
-    // Use filament profiles from incremental query (already filtered by machine)
+  // Filament profiles grouped by manufacturer → material for cascading menu
+  const filamentMenuSections = useMemo<CascadingMenuSection[]>(() => {
     const profiles = filamentProfilesData ?? [];
-    
-    // Group profiles by material type
-    const grouped: Record<string, OrcaFilamentProfile[]> = {};
-    for (const profile of profiles) {
-      const mat = profile.material || 'Other';
-      if (!grouped[mat]) grouped[mat] = [];
-      grouped[mat].push(profile);
+    const sections: CascadingMenuSection[] = [];
+
+    // Section 1: User presets (custom filament profiles)
+    if (customFilamentProfiles.length > 0) {
+      sections.push({
+        label: 'User Presets',
+        items: customFilamentProfiles.map(p => ({
+          id: `custom:${p.id}`,
+          label: `★ ${p.name}`,
+          selected: selectedFilamentProfileId === p.name,
+        })),
+      });
     }
-    return grouped;
-  }, [filamentProfilesData]);
 
-  // Available material types from the profiles (sorted alphabetically)
-  const availableMaterialTypes = useMemo(() => {
-    return Object.keys(filamentProfilesByMaterial).sort();
-  }, [filamentProfilesByMaterial]);
+    // Section 2: System presets grouped by manufacturer → material type submenu
+    if (profiles.length > 0) {
+      // Group by manufacturer, then by material
+      const byManufacturer: Record<string, Record<string, OrcaFilamentProfile[]>> = {};
+      for (const p of profiles) {
+        const mfr = p.manufacturer || 'Generic';
+        const mat = p.material || 'Other';
+        if (!byManufacturer[mfr]) byManufacturer[mfr] = {};
+        if (!byManufacturer[mfr][mat]) byManufacturer[mfr][mat] = [];
+        byManufacturer[mfr][mat].push(p);
+      }
 
-  // Filament profiles filtered by selected material type
-  const filteredFilamentProfiles = useMemo(() => {
-    if (!selectedFilamentMaterial) return [];
-    return filamentProfilesByMaterial[selectedFilamentMaterial] ?? [];
-  }, [filamentProfilesByMaterial, selectedFilamentMaterial]);
+      const groups: CascadingMenuGroup[] = Object.keys(byManufacturer).sort().map(mfr => {
+        const materials = byManufacturer[mfr];
+        // Flatten all profiles under this manufacturer as children, prefixed with material
+        const children: CascadingMenuItem[] = Object.keys(materials).sort().flatMap(mat =>
+          materials[mat].map(p => ({
+            id: `system:${p.name}`,
+            label: `${mat} — ${p.name}`,
+            detail: `${p.nozzleTemperature ?? 210}°/${p.bedTemperature ?? 60}°`,
+            selected: selectedFilamentProfileId === p.name,
+          }))
+        );
+        return { id: mfr, label: `${mfr} (${children.length})`, children };
+      });
+
+      sections.push({ label: 'System Presets', groups });
+    }
+
+    return sections;
+  }, [filamentProfilesData, customFilamentProfiles, selectedFilamentProfileId]);
 
   // Flat list of all available filament profiles for lookup
   const allFilamentProfiles = useMemo(() => {
@@ -1176,7 +1200,7 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* FILAMENT PROFILE - two-step selection: material type then profile */}
+          {/* FILAMENT PROFILE - cascading dropdown with manufacturer groups */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-sm font-semibold text-pf-text-primary">Filament Profile</label>
@@ -1197,60 +1221,32 @@ export const NewSliceJobPage: React.FC = () => {
               )}
             </div>
             
-            {allFilamentProfiles.length > 0 ? (
+            {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
               <>
-                {/* Side-by-side: Material Type + Profile Selection */}
-                <div className="flex gap-2">
-                  {/* Material Type Selection */}
-                  <div className="w-1/3">
-                    <label className="block text-xs text-pf-text-muted mb-1">Material</label>
-                    <Select
-                      value={selectedFilamentMaterial}
-                      onChange={e => {
-                        setSelectedFilamentMaterial(e.target.value);
-                        setSelectedFilamentProfileId(''); // Reset profile when material changes
-                      }}
-                      className="w-full"
-                    >
-                      <option value="">--</option>
-                      {availableMaterialTypes.map(mat => (
-                        <option key={mat} value={mat}>{mat}</option>
-                      ))}
-                    </Select>
-                  </div>
-
-                  {/* Filament Profile Selection (filtered by material) - Custom profiles first, then system presets */}
-                  <div className="flex-1">
-                    <label className="block text-xs text-pf-text-muted mb-1">Profile</label>
-                    <Select
-                      value={selectedFilamentProfileId}
-                      onChange={e => setSelectedFilamentProfileId(e.target.value)}
-                      disabled={!selectedFilamentMaterial && customFilamentProfiles.length === 0}
-                      className={`w-full ${!selectedFilamentMaterial && customFilamentProfiles.length === 0 ? 'opacity-50' : ''}`}
-                    >
-                      <option value="">-- Select Profile --</option>
-                      {/* Custom profiles first with ★ indicator */}
-                      {customFilamentProfiles.length > 0 && (
-                        <option disabled className="text-pf-text-muted">── My Profiles ──</option>
-                      )}
-                      {customFilamentProfiles.map(profile => (
-                        <option key={`custom-${profile.id}`} value={profile.name}>
-                          ★ {profile.name}
-                        </option>
-                      ))}
-                      {/* System presets divider - only show if there are system profiles */}
-                      {filteredFilamentProfiles.length > 0 && (
-                        <option disabled className="text-pf-text-muted">── System Presets ──</option>
-                      )}
-                      {/* System profiles */}
-                      {filteredFilamentProfiles.map(profile => (
-                        <option key={profile.name} value={profile.name}>
-                          {profile.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                </div>
+                <CascadingMenuDropdown
+                  triggerLabel={selectedFilamentProfile?.name ?? ''}
+                  placeholder="-- Select Filament --"
+                  sections={filamentMenuSections}
+                  disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                  onSelect={(itemId) => {
+                    // itemId is "custom:<id>" or "system:<name>"
+                    if (itemId.startsWith('custom:')) {
+                      const customId = itemId.slice('custom:'.length);
+                      const cp = customFilamentProfiles.find(p => p.id === customId);
+                      if (cp) {
+                        setSelectedFilamentProfileId(cp.name);
+                        setSelectedFilamentMaterial('');
+                      }
+                    } else if (itemId.startsWith('system:')) {
+                      const name = itemId.slice('system:'.length);
+                      const sp = allFilamentProfiles.find(p => p.name === name);
+                      if (sp) {
+                        setSelectedFilamentProfileId(name);
+                        setSelectedFilamentMaterial(sp.material || '');
+                      }
+                    }
+                  }}
+                />
 
                 {/* Show selected profile's temperature info */}
                 {selectedFilamentProfile && (
