@@ -1342,7 +1342,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   onSelectedModelMetricsChange,
   showAxes = true,
   showGridLines = true,
-  backgroundColor = '#2a2a2e',
+  backgroundColor = '#53535a',
   className = '',
   outOfBoundsModelIds,
   layFlatMode = false,
@@ -1353,7 +1353,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
     <div className={`w-full h-full ${className}`}>
       <Canvas
         frameloop="demand"
-        style={{ background: '#53535a' }}
+        style={{ background: backgroundColor }}
         gl={{
           antialias: true,
           preserveDrawingBuffer: false,
