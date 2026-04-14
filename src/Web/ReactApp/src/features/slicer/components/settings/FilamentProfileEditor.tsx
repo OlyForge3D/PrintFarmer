@@ -242,7 +242,7 @@ const FilamentTab: React.FC<TabProps & {
         description="Apply preset temperatures and settings"
         value={settings.filament_type ?? ''}
         onChange={applyPreset}
-        options={[{ value: '', label: '\u2014 select preset \u2014' }, ...materialOptions]}
+        options={[{ value: '', label: '— select preset —' }, ...materialOptions]}
         disabled={disabled}
       />
       {show('name') && (
@@ -260,7 +260,7 @@ const FilamentTab: React.FC<TabProps & {
           type="text"
           icon={<FilamentIcon />}
           label="Type"
-          description="Material type (PLA, PETG, ABS\u2026)"
+          description="Material type (PLA, PETG, ABS…)"
           value={settings.filament_type ?? ''}
           onChange={v => update('filament_type', v)}
           disabled={disabled}
@@ -311,7 +311,7 @@ const FilamentTab: React.FC<TabProps & {
           min={0.5}
           max={3.0}
           step={0.01}
-          unit="g/cm\u00b3"
+          unit="g/cm³"
           disabled={disabled}
         />
       )}
@@ -466,7 +466,7 @@ const FilamentTab: React.FC<TabProps & {
         <SettingRow
           type="number"
           icon={<TemperatureIcon />}
-          label="Nozzle Temp \u2013 First Layer"
+          label="Nozzle Temp – First Layer"
           value={settings.nozzle_temperature_initial_layer ?? 215}
           onChange={v => update('nozzle_temperature_initial_layer', v)}
           min={150}
@@ -480,7 +480,7 @@ const FilamentTab: React.FC<TabProps & {
         <SettingRow
           type="number"
           icon={<TemperatureIcon />}
-          label="Nozzle Temp \u2013 Other Layers"
+          label="Nozzle Temp – Other Layers"
           value={settings.nozzle_temperature ?? 200}
           onChange={v => update('nozzle_temperature', v)}
           min={150}
@@ -494,7 +494,7 @@ const FilamentTab: React.FC<TabProps & {
         <SettingRow
           type="number"
           icon={<TemperatureIcon />}
-          label="Bed Temp \u2013 First Layer"
+          label="Bed Temp – First Layer"
           value={settings.hot_plate_temp_initial_layer ?? 65}
           onChange={v => update('hot_plate_temp_initial_layer', v)}
           min={0}
@@ -508,7 +508,7 @@ const FilamentTab: React.FC<TabProps & {
         <SettingRow
           type="number"
           icon={<TemperatureIcon />}
-          label="Bed Temp \u2013 Other Layers"
+          label="Bed Temp – Other Layers"
           value={settings.hot_plate_temp ?? 60}
           onChange={v => update('hot_plate_temp', v)}
           min={0}
@@ -587,7 +587,7 @@ const FilamentTab: React.FC<TabProps & {
           type="number"
           icon={<PrecisionIcon />}
           label="Pressure Advance"
-          description="PA value (Klipper: 0.02\u20130.08 typical)"
+          description="PA value (Klipper: 0.02–0.08 typical)"
           value={settings.pressure_advance ?? 0.04}
           onChange={v => update('pressure_advance', v)}
           min={0}
@@ -650,7 +650,7 @@ const FilamentTab: React.FC<TabProps & {
           min={1}
           max={30}
           step={0.5}
-          unit="mm\u00b3/s"
+          unit="mm³/s"
           disabled={disabled}
         />
       )}
@@ -1384,7 +1384,7 @@ const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =
             min={0}
             max={30}
             step={0.5}
-            unit="mm\u00b3/s"
+            unit="mm³/s"
             disabled={disabled}
           />
           <SettingRow
@@ -1417,7 +1417,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
         min={0}
         max={500}
         step={1}
-        unit="mm\u00b3"
+        unit="mm³"
         disabled={disabled}
       />
       <SettingRow
@@ -1645,7 +1645,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
         min={0}
         max={500}
         step={10}
-        unit="mm\u00b3"
+        unit="mm³"
         disabled={disabled}
       />
       <SettingRow
@@ -1657,7 +1657,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
         min={0}
         max={5}
         step={0.1}
-        unit="mm\u00b3/s"
+        unit="mm³/s"
         disabled={disabled}
       />
     </div>
@@ -1734,7 +1734,7 @@ const NotesTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
         onChange={e => update('filament_notes', e.target.value)}
         rows={10}
         disabled={disabled}
-        placeholder="Print notes, recommended settings, tips\u2026"
+        placeholder="Print notes, recommended settings, tips…"
       />
     </div>
   );
