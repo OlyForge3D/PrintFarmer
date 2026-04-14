@@ -70,6 +70,21 @@ function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null)
   };
 }
 
+function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | null): Partial<OrcaFilamentSettings> {
+  if (!profile) return DEFAULT_ORCA_FILAMENT_SETTINGS;
+
+  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+
+  return {
+    ...DEFAULT_ORCA_FILAMENT_SETTINGS,
+    filament_type: profile.material || DEFAULT_ORCA_FILAMENT_SETTINGS.filament_type,
+    filament_vendor: profile.manufacturer,
+    nozzle_temperature: profile.nozzleTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.nozzle_temperature,
+    hot_plate_temp: profile.bedTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.hot_plate_temp,
+    ...profileSettings,
+  };
+}
+
 export function ProfileEditorModal({
   isOpen,
   onClose,
@@ -103,11 +118,11 @@ export function ProfileEditorModal({
       // Prefill editor with selected profile values when available
       if (profileType === 'machine') {
         setMachineSettings(convertOrcaMachineProfileToSettings(originalProfile as OrcaMachineProfile | null));
+        setFilamentSettings(DEFAULT_ORCA_FILAMENT_SETTINGS);
       } else {
         setMachineSettings(DEFAULT_ORCA_MACHINE_SETTINGS);
+        setFilamentSettings(convertOrcaFilamentProfileToSettings(originalProfile as OrcaFilamentProfile | null));
       }
-
-      setFilamentSettings(DEFAULT_ORCA_FILAMENT_SETTINGS);
     }
   }, [isOpen, profileType, originalProfile]);
   
