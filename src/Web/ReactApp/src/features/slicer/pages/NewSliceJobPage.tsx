@@ -22,7 +22,7 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
-import { CascadingMenuDropdown, type CascadingMenuSection, type CascadingMenuItem, type CascadingMenuGroup } from '../components/CascadingMenuDropdown';
+import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
@@ -97,6 +97,20 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('');
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
+
+  // Filament filter config (persisted in localStorage)
+  const [filamentFilterConfig, setFilamentFilterConfig] = useState<FilamentFilterConfig>(() => {
+    try {
+      const stored = localStorage.getItem(FILTER_STORAGE_KEY);
+      if (stored) return JSON.parse(stored) as FilamentFilterConfig;
+    } catch { /* ignore */ }
+    return { hiddenManufacturers: [], hiddenMaterials: [] };
+  });
+
+  const handleFilamentFilterChange = useCallback((config: FilamentFilterConfig) => {
+    setFilamentFilterConfig(config);
+    try { localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(config)); } catch { /* ignore */ }
+  }, []);
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>(DEFAULT_ORCA_PROCESS_SETTINGS);
@@ -630,55 +644,6 @@ export const NewSliceJobPage: React.FC = () => {
   }, [selectedPrinterId]);
 
   // Machine profiles for profile selection - use incremental machine profiles
-  // Filament profiles grouped by manufacturer → material for cascading menu
-  const filamentMenuSections = useMemo<CascadingMenuSection[]>(() => {
-    const profiles = filamentProfilesData ?? [];
-    const sections: CascadingMenuSection[] = [];
-
-    // Section 1: User presets (custom filament profiles)
-    if (customFilamentProfiles.length > 0) {
-      sections.push({
-        label: 'User Presets',
-        items: customFilamentProfiles.map(p => ({
-          id: `custom:${p.id}`,
-          label: `★ ${p.name}`,
-          selected: selectedFilamentProfileId === p.name,
-        })),
-      });
-    }
-
-    // Section 2: System presets grouped by manufacturer → material type submenu
-    if (profiles.length > 0) {
-      // Group by manufacturer, then by material
-      const byManufacturer: Record<string, Record<string, OrcaFilamentProfile[]>> = {};
-      for (const p of profiles) {
-        const mfr = p.manufacturer || 'Generic';
-        const mat = p.material || 'Other';
-        if (!byManufacturer[mfr]) byManufacturer[mfr] = {};
-        if (!byManufacturer[mfr][mat]) byManufacturer[mfr][mat] = [];
-        byManufacturer[mfr][mat].push(p);
-      }
-
-      const groups: CascadingMenuGroup[] = Object.keys(byManufacturer).sort().map(mfr => {
-        const materials = byManufacturer[mfr];
-        // Flatten all profiles under this manufacturer as children, prefixed with material
-        const children: CascadingMenuItem[] = Object.keys(materials).sort().flatMap(mat =>
-          materials[mat].map(p => ({
-            id: `system:${p.name}`,
-            label: `${mat} — ${p.name}`,
-            detail: `${p.nozzleTemperature ?? 210}°/${p.bedTemperature ?? 60}°`,
-            selected: selectedFilamentProfileId === p.name,
-          }))
-        );
-        return { id: mfr, label: `${mfr} (${children.length})`, children };
-      });
-
-      sections.push({ label: 'System Presets', groups });
-    }
-
-    return sections;
-  }, [filamentProfilesData, customFilamentProfiles, selectedFilamentProfileId]);
-
   // Flat list of all available filament profiles for lookup
   const allFilamentProfiles = useMemo(() => {
     return filamentProfilesData ?? [];
@@ -1223,27 +1188,20 @@ export const NewSliceJobPage: React.FC = () => {
             
             {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
               <>
-                <CascadingMenuDropdown
-                  triggerLabel={selectedFilamentProfile?.name ?? ''}
-                  placeholder="-- Select Filament --"
-                  sections={filamentMenuSections}
+                <FilamentProfileDropdown
+                  profiles={allFilamentProfiles}
+                  customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                  selectedProfileName={selectedFilamentProfileId}
                   disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
-                  onSelect={(itemId) => {
-                    // itemId is "custom:<id>" or "system:<name>"
-                    if (itemId.startsWith('custom:')) {
-                      const customId = itemId.slice('custom:'.length);
-                      const cp = customFilamentProfiles.find(p => p.id === customId);
-                      if (cp) {
-                        setSelectedFilamentProfileId(cp.name);
-                        setSelectedFilamentMaterial('');
-                      }
-                    } else if (itemId.startsWith('system:')) {
-                      const name = itemId.slice('system:'.length);
+                  filterConfig={filamentFilterConfig}
+                  onFilterConfigChange={handleFilamentFilterChange}
+                  onSelect={(name, source) => {
+                    setSelectedFilamentProfileId(name);
+                    if (source === 'system') {
                       const sp = allFilamentProfiles.find(p => p.name === name);
-                      if (sp) {
-                        setSelectedFilamentProfileId(name);
-                        setSelectedFilamentMaterial(sp.material || '');
-                      }
+                      setSelectedFilamentMaterial(sp?.material || '');
+                    } else {
+                      setSelectedFilamentMaterial('');
                     }
                   }}
                 />
