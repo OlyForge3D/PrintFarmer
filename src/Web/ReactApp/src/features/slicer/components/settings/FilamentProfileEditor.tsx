@@ -389,7 +389,7 @@ const FilamentTab: React.FC<TabProps & {
           min={0}
           max={300}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -403,7 +403,7 @@ const FilamentTab: React.FC<TabProps & {
           min={0}
           max={300}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -417,7 +417,7 @@ const FilamentTab: React.FC<TabProps & {
           min={100}
           max={400}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -431,7 +431,7 @@ const FilamentTab: React.FC<TabProps & {
           min={100}
           max={400}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -472,7 +472,7 @@ const FilamentTab: React.FC<TabProps & {
           min={150}
           max={400}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -486,7 +486,7 @@ const FilamentTab: React.FC<TabProps & {
           min={150}
           max={400}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -500,7 +500,7 @@ const FilamentTab: React.FC<TabProps & {
           min={0}
           max={150}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -514,7 +514,7 @@ const FilamentTab: React.FC<TabProps & {
           min={0}
           max={150}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -539,7 +539,7 @@ const FilamentTab: React.FC<TabProps & {
           min={0}
           max={80}
           step={5}
-          unit="\u00b0C"
+          unit="°C"
           disabled={disabled}
         />
       )}
@@ -1372,7 +1372,7 @@ const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =
             min={0}
             max={400}
             step={5}
-            unit="\u00b0C"
+            unit="°C"
             disabled={disabled}
           />
           <SettingRow
@@ -1477,7 +1477,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
         min={0}
         max={400}
         step={5}
-        unit="\u00b0C"
+        unit="°C"
         disabled={disabled}
       />
       <SettingRow
