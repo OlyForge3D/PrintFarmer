@@ -133,57 +133,62 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
 
   return (
     <div className={`py-2 ${disabled ? 'opacity-50' : ''}`}>
-      {/* Header row with icon, label, reset button, and help */}
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-pf-accent-2">{icon}</span>
+      {/* Horizontal row: label+description left, control right */}
+      <div className="flex items-center gap-4">
+        {/* Left side: icon, label, description */}
+        <div className="flex items-center gap-2 min-w-0 w-2/5 shrink-0">
+          <span className="text-pf-accent-2 shrink-0">{icon}</span>
+          
+          {/* Reset button - shown when setting is modified */}
+          {isModified && onReset && (
+            <Button
+              variant="subtle"
+              type="button"
+              onClick={onReset}
+              className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+                         hover:bg-pf-warning/10 rounded shrink-0"
+              title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+              aria-label={`Reset ${label} to original value`}
+            >
+              <ResetIcon className="w-4 h-4" />
+            </Button>
+          )}
+          
+          {/* Label and description */}
+          <div className="min-w-0">
+            <label 
+              htmlFor={id} 
+              className={`font-medium text-sm transition-colors ${
+                isModified 
+                  ? 'text-pf-warning' 
+                  : 'text-pf-text'
+              }`}
+            >
+              {label}
+            </label>
+            {description && (
+              <p className="text-xs text-pf-text-muted truncate">{description}</p>
+            )}
+          </div>
+          
+          {tooltip && (
+            <Button
+              variant="subtle"
+              type="button"
+              className="p-0.5 shrink-0"
+              title={tooltip}
+              aria-label={`Help for ${label}`}
+            >
+              <HelpIcon className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
         
-        {/* Reset button - shown when setting is modified */}
-        {isModified && onReset && (
-          <Button
-            variant="subtle"
-            type="button"
-            onClick={onReset}
-            className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
-                       hover:bg-pf-warning/10 rounded"
-            title={`Reset to original: ${formatOriginalValue(originalValue)}`}
-            aria-label={`Reset ${label} to original value`}
-          >
-            <ResetIcon className="w-4 h-4" />
-          </Button>
-        )}
-        
-        {/* Label - highlighted in accent color when modified */}
-        <label 
-          htmlFor={id} 
-          className={`font-semibold transition-colors ${
-            isModified 
-              ? 'text-pf-warning' 
-              : 'text-pf-text'
-          }`}
-        >
-          {label}
-        </label>
-        
-        {tooltip && (
-          <Button
-            variant="subtle"
-            type="button"
-            className="p-0.5"
-            title={tooltip}
-            aria-label={`Help for ${label}`}
-          >
-            <HelpIcon className="w-4 h-4" />
-          </Button>
-        )}
+        {/* Right side: control */}
+        <div className="flex-1 min-w-0">
+          {renderControl()}
+        </div>
       </div>
-      
-      {/* Description */}
-      {description && (
-        <p className="text-xs text-pf-text-muted mb-1.5">{description}</p>
-      )}
-      
-      {/* Control */}
-      {renderControl()}
     </div>
   );
 };
