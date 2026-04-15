@@ -149,9 +149,7 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
           <SimpleMachineSettingsPanel
             settings={settings}
             onUpdate={updateSetting}
-            onPresetChange={applyPreset}
             disabled={disabled}
-            presetOptions={presetOptions}
           />
         )}
 
@@ -184,7 +182,7 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
 
             <div className="divide-y divide-pf-border">
               {activeCategory === 'basic_information' && (
-                <BasicInformationTab settings={settings} onUpdate={updateSetting} onPresetChange={applyPreset} disabled={disabled} presetOptions={presetOptions} />
+                <BasicInformationTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
               )}
               {activeCategory === 'machine_gcode' && (
                 <MachineGcodeTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
@@ -220,13 +218,9 @@ interface TabPanelProps {
 // -- Simple mode ----------------------------------------------------------
 
 const SimpleMachineSettingsPanel: React.FC<
-  TabPanelProps & {
-    onPresetChange: (preset: string) => void;
-    presetOptions: Array<{ value: string; label: string }>;
-  }
-> = ({ settings, onUpdate, onPresetChange, disabled, presetOptions }) => (
+  TabPanelProps
+> = ({ settings, onUpdate, disabled }) => (
   <div className="divide-y divide-pf-border">
-    <SettingRow type="select" label="Printer Preset" icon={<BuildVolumeIcon className="w-5 h-5" />} value="" options={presetOptions} onChange={onPresetChange} disabled={disabled} description="Apply a preset configuration" />
     <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
     <div className="py-3">
       <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
@@ -268,17 +262,13 @@ const SimpleMachineSettingsPanel: React.FC<
 // -- Tab 1: Basic Information ---------------------------------------------
 
 const BasicInformationTab: React.FC<
-  TabPanelProps & {
-    onPresetChange: (preset: string) => void;
-    presetOptions: Array<{ value: string; label: string }>;
-  }
-> = ({ settings, onUpdate, onPresetChange, disabled, presetOptions }) => {
+  TabPanelProps
+> = ({ settings, onUpdate, disabled }) => {
   const nozzleTypeOptions = Object.entries(NOZZLE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   const bedTypeOptions = Object.entries(BED_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   const probeTypeOptions = Object.entries(PROBE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
-      <SettingRow type="select" label="Printer Preset" icon={<BuildVolumeIcon className="w-5 h-5" />} value="" options={presetOptions} onChange={onPresetChange} disabled={disabled} />
       <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
       <SettingRow type="text" label="Printer Variant" value={settings.printer_variant ?? ''} onChange={(v) => onUpdate('printer_variant', v)} disabled={disabled} />
       <SettingRow type="text" label="Inherits" value={settings.inherits ?? ''} onChange={(v) => onUpdate('inherits', v)} disabled={disabled} description="Parent profile name" />

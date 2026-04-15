@@ -224,415 +224,142 @@ const FilamentTab: React.FC<TabProps & {
   if (!anyVisible) return <EmptyMode />;
 
   return (
-    <div className="divide-y divide-pf-border">
-      {show('name') && (
-        <SettingRow
-          type="text"
-          icon={<FilamentIcon />}
-          label="Profile Name"
-          value={settings.name ?? ''}
-          onChange={v => update('name', v)}
-          disabled={disabled}
-        />
+    <div className="space-y-3">
+      {/* Basic Information */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Basic Information</h4>
+        <div className="divide-y divide-pf-border">
+          {show('name') && (
+            <SettingRow type="text" icon={<FilamentIcon />} label="Profile Name" value={settings.name ?? ''} onChange={v => update('name', v)} disabled={disabled} />
+          )}
+          {show('filament_type') && (
+            <SettingRow type="text" icon={<FilamentIcon />} label="Type" value={settings.filament_type ?? ''} onChange={v => update('filament_type', v)} disabled={disabled} />
+          )}
+          {show('filament_vendor') && (
+            <SettingRow type="text" icon={<FilamentIcon />} label="Vendor" value={settings.filament_vendor ?? ''} onChange={v => update('filament_vendor', v)} disabled={disabled} />
+          )}
+          {show('default_filament_colour') && (
+            <SettingRow type="color" icon={<FilamentIcon />} label="Default Color" value={settings.default_filament_colour ?? '#3B82F6'} onChange={v => update('default_filament_colour', v)} disabled={disabled} />
+          )}
+          {show('filament_diameter') && (
+            <SettingRow type="number" icon={<PrecisionIcon />} label="Diameter" value={settings.filament_diameter ?? 1.75} onChange={v => update('filament_diameter', v)} min={1.0} max={3.0} step={0.05} unit="mm" disabled={disabled} />
+          )}
+          {show('filament_density') && (
+            <SettingRow type="number" icon={<FilamentIcon />} label="Density" value={settings.filament_density ?? 1.24} onChange={v => update('filament_density', v)} min={0.5} max={3.0} step={0.01} unit="g/cm³" disabled={disabled} />
+          )}
+          {show('filament_adhesiveness_category') && (
+            <SettingRow type="number" icon={<FilamentIcon />} label="Adhesiveness Category" value={settings.filament_adhesiveness_category ?? 0} onChange={v => update('filament_adhesiveness_category', v)} min={0} max={5} step={1} disabled={disabled} />
+          )}
+          {show('temperature_vitrification') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Softening Temperature" value={settings.temperature_vitrification ?? 0} onChange={v => update('temperature_vitrification', v)} min={0} max={300} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('idle_temperature') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Idle Temperature" value={settings.idle_temperature ?? 0} onChange={v => update('idle_temperature', v)} min={0} max={300} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('nozzle_temperature_range_low') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp Min" value={settings.nozzle_temperature_range_low ?? 180} onChange={v => update('nozzle_temperature_range_low', v)} min={100} max={400} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('nozzle_temperature_range_high') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp Max" value={settings.nozzle_temperature_range_high ?? 230} onChange={v => update('nozzle_temperature_range_high', v)} min={100} max={400} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('required_nozzle_HRC') && (
+            <SettingRow type="number" icon={<FilamentIcon />} label="Required Nozzle HRC" value={settings.required_nozzle_HRC ?? 0} onChange={v => update('required_nozzle_HRC', v)} min={0} max={100} step={1} disabled={disabled} />
+          )}
+          {show('filament_soluble') && (
+            <SettingRow type="checkbox" icon={<FilamentIcon />} label="Soluble Material" checked={settings.filament_soluble ?? false} onChange={v => update('filament_soluble', v)} disabled={disabled} />
+          )}
+          {show('filament_is_support') && (
+            <SettingRow type="checkbox" icon={<FilamentIcon />} label="Support Material" checked={settings.filament_is_support ?? false} onChange={v => update('filament_is_support', v)} disabled={disabled} />
+          )}
+        </div>
+      </div>
+
+      {/* Shrinkage */}
+      {(show('filament_shrink') || show('filament_shrinkage_compensation_z')) && (
+        <div>
+          <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Shrinkage Compensation</h4>
+          <div className="divide-y divide-pf-border">
+            {show('filament_shrink') && (
+              <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (XY)" value={settings.filament_shrink ?? 0} onChange={v => update('filament_shrink', v)} min={0} max={10} step={0.1} unit="%" disabled={disabled} />
+            )}
+            {show('filament_shrinkage_compensation_z') && (
+              <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (Z)" value={settings.filament_shrinkage_compensation_z ?? 0} onChange={v => update('filament_shrinkage_compensation_z', v)} min={0} max={10} step={0.1} unit="%" disabled={disabled} />
+            )}
+          </div>
+        </div>
       )}
-      {show('filament_type') && (
-        <SettingRow
-          type="text"
-          icon={<FilamentIcon />}
-          label="Type"
-          description="Material type (PLA, PETG, ABS…)"
-          value={settings.filament_type ?? ''}
-          onChange={v => update('filament_type', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_vendor') && (
-        <SettingRow
-          type="text"
-          icon={<FilamentIcon />}
-          label="Vendor"
-          value={settings.filament_vendor ?? ''}
-          onChange={v => update('filament_vendor', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('default_filament_colour') && (
-        <SettingRow
-          type="color"
-          icon={<FilamentIcon />}
-          label="Default Color"
-          value={settings.default_filament_colour ?? '#3B82F6'}
-          onChange={v => update('default_filament_colour', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_diameter') && (
-        <SettingRow
-          type="number"
-          icon={<PrecisionIcon />}
-          label="Diameter"
-          value={settings.filament_diameter ?? 1.75}
-          onChange={v => update('filament_diameter', v)}
-          min={1.0}
-          max={3.0}
-          step={0.05}
-          unit="mm"
-          disabled={disabled}
-        />
-      )}
-      {show('filament_density') && (
-        <SettingRow
-          type="number"
-          icon={<FilamentIcon />}
-          label="Density"
-          description="Material density for cost/weight calculations"
-          value={settings.filament_density ?? 1.24}
-          onChange={v => update('filament_density', v)}
-          min={0.5}
-          max={3.0}
-          step={0.01}
-          unit="g/cm³"
-          disabled={disabled}
-        />
-      )}
-      {show('filament_adhesiveness_category') && (
-        <SettingRow
-          type="number"
-          icon={<FilamentIcon />}
-          label="Adhesiveness Category"
-          value={settings.filament_adhesiveness_category ?? 0}
-          onChange={v => update('filament_adhesiveness_category', v)}
-          min={0}
-          max={5}
-          step={1}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_shrink') && (
-        <SettingRow
-          type="number"
-          icon={<PrecisionIcon />}
-          label="Shrinkage (XY)"
-          value={settings.filament_shrink ?? 0}
-          onChange={v => update('filament_shrink', v)}
-          min={0}
-          max={10}
-          step={0.1}
-          unit="%"
-          disabled={disabled}
-        />
-      )}
-      {show('filament_shrinkage_compensation_z') && (
-        <SettingRow
-          type="number"
-          icon={<PrecisionIcon />}
-          label="Shrinkage (Z)"
-          value={settings.filament_shrinkage_compensation_z ?? 0}
-          onChange={v => update('filament_shrinkage_compensation_z', v)}
-          min={0}
-          max={10}
-          step={0.1}
-          unit="%"
-          disabled={disabled}
-        />
-      )}
-      {show('filament_soluble') && (
-        <SettingRow
-          type="checkbox"
-          icon={<FilamentIcon />}
-          label="Soluble Material"
-          description="Filament dissolves in water or solvent"
-          checked={settings.filament_soluble ?? false}
-          onChange={v => update('filament_soluble', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_is_support') && (
-        <SettingRow
-          type="checkbox"
-          icon={<FilamentIcon />}
-          label="Support Material"
-          description="This filament is used for supports"
-          checked={settings.filament_is_support ?? false}
-          onChange={v => update('filament_is_support', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('temperature_vitrification') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Softening Temperature"
-          description="Glass transition / vitrification temperature"
-          value={settings.temperature_vitrification ?? 0}
-          onChange={v => update('temperature_vitrification', v)}
-          min={0}
-          max={300}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('idle_temperature') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Idle Temperature"
-          value={settings.idle_temperature ?? 0}
-          onChange={v => update('idle_temperature', v)}
-          min={0}
-          max={300}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('nozzle_temperature_range_low') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Nozzle Temp Min"
-          value={settings.nozzle_temperature_range_low ?? 180}
-          onChange={v => update('nozzle_temperature_range_low', v)}
-          min={100}
-          max={400}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('nozzle_temperature_range_high') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Nozzle Temp Max"
-          value={settings.nozzle_temperature_range_high ?? 230}
-          onChange={v => update('nozzle_temperature_range_high', v)}
-          min={100}
-          max={400}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('required_nozzle_HRC') && (
-        <SettingRow
-          type="number"
-          icon={<FilamentIcon />}
-          label="Required Nozzle HRC"
-          description="Minimum nozzle hardness (Rockwell C)"
-          value={settings.required_nozzle_HRC ?? 0}
-          onChange={v => update('required_nozzle_HRC', v)}
-          min={0}
-          max={100}
-          step={1}
-          disabled={disabled}
-        />
-      )}
-      {show('pellet_flow_coefficient') && (
-        <SettingRow
-          type="number"
-          icon={<FlowIcon />}
-          label="Pellet Flow Coefficient"
-          value={settings.pellet_flow_coefficient ?? 0}
-          onChange={v => update('pellet_flow_coefficient', v)}
-          min={0}
-          max={10}
-          step={0.01}
-          disabled={disabled}
-        />
-      )}
-      {show('nozzle_temperature_initial_layer') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Nozzle Temp – First Layer"
-          value={settings.nozzle_temperature_initial_layer ?? 215}
-          onChange={v => update('nozzle_temperature_initial_layer', v)}
-          min={150}
-          max={400}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('nozzle_temperature') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Nozzle Temp – Other Layers"
-          value={settings.nozzle_temperature ?? 200}
-          onChange={v => update('nozzle_temperature', v)}
-          min={150}
-          max={400}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('hot_plate_temp_initial_layer') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Bed Temp – First Layer"
-          value={settings.hot_plate_temp_initial_layer ?? 65}
-          onChange={v => update('hot_plate_temp_initial_layer', v)}
-          min={0}
-          max={150}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('hot_plate_temp') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Bed Temp – Other Layers"
-          value={settings.hot_plate_temp ?? 60}
-          onChange={v => update('hot_plate_temp', v)}
-          min={0}
-          max={150}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('activate_chamber_temp_control') && (
-        <SettingRow
-          type="checkbox"
-          icon={<TemperatureIcon />}
-          label="Activate Chamber Temperature Control"
-          checked={settings.activate_chamber_temp_control ?? false}
-          onChange={v => update('activate_chamber_temp_control', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('chamber_temperature') && (
-        <SettingRow
-          type="number"
-          icon={<TemperatureIcon />}
-          label="Chamber Temperature"
-          description="Heated enclosure temperature (0 = disabled)"
-          value={settings.chamber_temperature ?? 0}
-          onChange={v => update('chamber_temperature', v)}
-          min={0}
-          max={80}
-          step={5}
-          unit="°C"
-          disabled={disabled}
-        />
-      )}
-      {show('filament_flow_ratio') && (
-        <SettingRow
-          type="number"
-          icon={<FlowIcon />}
-          label="Flow Ratio"
-          description="Extrusion multiplier (1.0 = 100%)"
-          value={settings.filament_flow_ratio ?? 1.0}
-          onChange={v => update('filament_flow_ratio', v)}
-          min={0.5}
-          max={2.0}
-          step={0.01}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_change_length') && (
-        <SettingRow
-          type="number"
-          icon={<RetractionIcon />}
-          label="Filament Ramming Length"
-          value={settings.filament_change_length ?? 0}
-          onChange={v => update('filament_change_length', v)}
-          min={0}
-          max={100}
-          step={1}
-          unit="mm"
-          disabled={disabled}
-        />
-      )}
+
+      {/* Temperature */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Temperature</h4>
+        <div className="divide-y divide-pf-border">
+          {show('nozzle_temperature_initial_layer') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp – First Layer" value={settings.nozzle_temperature_initial_layer ?? 215} onChange={v => update('nozzle_temperature_initial_layer', v)} min={150} max={400} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('nozzle_temperature') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp – Other Layers" value={settings.nozzle_temperature ?? 200} onChange={v => update('nozzle_temperature', v)} min={150} max={400} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('hot_plate_temp_initial_layer') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Bed Temp – First Layer" value={settings.hot_plate_temp_initial_layer ?? 65} onChange={v => update('hot_plate_temp_initial_layer', v)} min={0} max={150} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('hot_plate_temp') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Bed Temp – Other Layers" value={settings.hot_plate_temp ?? 60} onChange={v => update('hot_plate_temp', v)} min={0} max={150} step={5} unit="°C" disabled={disabled} />
+          )}
+          {show('activate_chamber_temp_control') && (
+            <SettingRow type="checkbox" icon={<TemperatureIcon />} label="Chamber Temperature Control" checked={settings.activate_chamber_temp_control ?? false} onChange={v => update('activate_chamber_temp_control', v)} disabled={disabled} />
+          )}
+          {show('chamber_temperature') && (
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Chamber Temperature" value={settings.chamber_temperature ?? 0} onChange={v => update('chamber_temperature', v)} min={0} max={80} step={5} unit="°C" disabled={disabled} />
+          )}
+        </div>
+      </div>
+
+      {/* Flow */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Flow</h4>
+        <div className="divide-y divide-pf-border">
+          {show('filament_flow_ratio') && (
+            <SettingRow type="number" icon={<FlowIcon />} label="Flow Ratio" value={settings.filament_flow_ratio ?? 1.0} onChange={v => update('filament_flow_ratio', v)} min={0.5} max={2.0} step={0.01} disabled={disabled} />
+          )}
+          {show('pellet_flow_coefficient') && (
+            <SettingRow type="number" icon={<FlowIcon />} label="Pellet Flow Coefficient" value={settings.pellet_flow_coefficient ?? 0} onChange={v => update('pellet_flow_coefficient', v)} min={0} max={10} step={0.01} disabled={disabled} />
+          )}
+          {show('filament_adaptive_volumetric_speed') && (
+            <SettingRow type="checkbox" icon={<SpeedIcon />} label="Adaptive Volumetric Speed" checked={settings.filament_adaptive_volumetric_speed ?? false} onChange={v => update('filament_adaptive_volumetric_speed', v)} disabled={disabled} />
+          )}
+          {show('filament_max_volumetric_speed') && (
+            <SettingRow type="number" icon={<SpeedIcon />} label="Max Volumetric Speed" value={settings.filament_max_volumetric_speed ?? 12} onChange={v => update('filament_max_volumetric_speed', v)} min={1} max={30} step={0.5} unit="mm³/s" disabled={disabled} />
+          )}
+          {show('filament_change_length') && (
+            <SettingRow type="number" icon={<RetractionIcon />} label="Filament Ramming Length" value={settings.filament_change_length ?? 0} onChange={v => update('filament_change_length', v)} min={0} max={100} step={1} unit="mm" disabled={disabled} />
+          )}
+        </div>
+      </div>
+
+      {/* Pressure Advance */}
       {show('enable_pressure_advance') && (
-        <SettingRow
-          type="checkbox"
-          icon={<PrecisionIcon />}
-          label="Enable Pressure Advance"
-          description="Compensate for filament pressure lag"
-          checked={settings.enable_pressure_advance ?? false}
-          onChange={v => update('enable_pressure_advance', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('pressure_advance') && settings.enable_pressure_advance && (
-        <SettingRow
-          type="number"
-          icon={<PrecisionIcon />}
-          label="Pressure Advance"
-          description="PA value (Klipper: 0.02–0.08 typical)"
-          value={settings.pressure_advance ?? 0.04}
-          onChange={v => update('pressure_advance', v)}
-          min={0}
-          max={2}
-          step={0.005}
-          disabled={disabled}
-        />
-      )}
-      {show('adaptive_pressure_advance') && settings.enable_pressure_advance && (
-        <SettingRow
-          type="checkbox"
-          icon={<PrecisionIcon />}
-          label="Adaptive Pressure Advance (beta)"
-          checked={settings.adaptive_pressure_advance ?? false}
-          onChange={v => update('adaptive_pressure_advance', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('adaptive_pressure_advance_overhangs') && settings.enable_pressure_advance && (
-        <SettingRow
-          type="checkbox"
-          icon={<PrecisionIcon />}
-          label="Adaptive PA for Overhangs (beta)"
-          checked={settings.adaptive_pressure_advance_overhangs ?? false}
-          onChange={v => update('adaptive_pressure_advance_overhangs', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('adaptive_pressure_advance_bridges') && settings.enable_pressure_advance && (
-        <SettingRow
-          type="number"
-          icon={<PrecisionIcon />}
-          label="PA for Bridges"
-          value={settings.adaptive_pressure_advance_bridges ?? 0}
-          onChange={v => update('adaptive_pressure_advance_bridges', v)}
-          min={0}
-          max={2}
-          step={0.005}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_adaptive_volumetric_speed') && (
-        <SettingRow
-          type="checkbox"
-          icon={<SpeedIcon />}
-          label="Adaptive Volumetric Speed"
-          checked={settings.filament_adaptive_volumetric_speed ?? false}
-          onChange={v => update('filament_adaptive_volumetric_speed', v)}
-          disabled={disabled}
-        />
-      )}
-      {show('filament_max_volumetric_speed') && (
-        <SettingRow
-          type="number"
-          icon={<SpeedIcon />}
-          label="Max Volumetric Speed"
-          description="Maximum extrusion rate for this filament"
-          value={settings.filament_max_volumetric_speed ?? 12}
-          onChange={v => update('filament_max_volumetric_speed', v)}
-          min={1}
-          max={30}
-          step={0.5}
-          unit="mm³/s"
-          disabled={disabled}
-        />
+        <div>
+          <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Pressure Advance</h4>
+          <div className="divide-y divide-pf-border">
+            <SettingRow type="checkbox" icon={<PrecisionIcon />} label="Enable Pressure Advance" checked={settings.enable_pressure_advance ?? false} onChange={v => update('enable_pressure_advance', v)} disabled={disabled} />
+            {settings.enable_pressure_advance && (
+              <>
+                {show('pressure_advance') && (
+                  <SettingRow type="number" icon={<PrecisionIcon />} label="Pressure Advance Value" value={settings.pressure_advance ?? 0.04} onChange={v => update('pressure_advance', v)} min={0} max={2} step={0.005} disabled={disabled} />
+                )}
+                {show('adaptive_pressure_advance') && (
+                  <SettingRow type="checkbox" icon={<PrecisionIcon />} label="Adaptive PA (beta)" checked={settings.adaptive_pressure_advance ?? false} onChange={v => update('adaptive_pressure_advance', v)} disabled={disabled} />
+                )}
+                {show('adaptive_pressure_advance_overhangs') && (
+                  <SettingRow type="checkbox" icon={<PrecisionIcon />} label="Adaptive PA for Overhangs" checked={settings.adaptive_pressure_advance_overhangs ?? false} onChange={v => update('adaptive_pressure_advance_overhangs', v)} disabled={disabled} />
+                )}
+                {show('adaptive_pressure_advance_bridges') && (
+                  <SettingRow type="number" icon={<PrecisionIcon />} label="PA for Bridges" value={settings.adaptive_pressure_advance_bridges ?? 0} onChange={v => update('adaptive_pressure_advance_bridges', v)} min={0} max={2} step={0.005} disabled={disabled} />
+                )}
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
