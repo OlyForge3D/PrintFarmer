@@ -20,27 +20,71 @@ export type MachineCategory =
  * All properties are optional to support partial profiles and progressive editing.
  */
 export interface OrcaMachineSettings {
-  // ── Basic information ─────────────────────────────────────────────────────
-  /** Nozzle tip size shown in Basic view (mm) */
-  nozzle_size?: number;
-  /** Standard or high-flow nozzle volume type */
-  nozzle_volume_type?: 'standard' | 'high_flow';
+  // ── Printable Space ───────────────────────────────────────────────────────
+  /** Excluded bed area coordinates */
+  bed_exclude_area?: string;
   /** Maximum printable height / build volume Z (mm) */
   printable_height?: number;
   /** Whether the printer supports multiple bed surface types */
   support_multi_bed_types?: boolean;
+  /** Best object position X (0-1 normalized) */
+  best_object_pos_x?: number;
+  /** Best object position Y (0-1 normalized) */
+  best_object_pos_y?: number;
+  /** Z offset adjustment (mm) */
+  z_offset?: number;
+  /** Preferred model orientation for slicing (degrees) */
+  preferred_orientation?: number;
+
+  // ── Advanced ──────────────────────────────────────────────────────────────
+  /** Printer structure type (CoreXY, Cartesian, etc.) */
+  printer_structure?: string;
   /** Whether the printer has a pellet extruder mod */
   pellet_modded_printer?: boolean;
+  /** Disable M73 remaining print time command */
+  disable_m73?: boolean;
+  /** G-code thumbnail sizes (e.g., "300x300,32x32") */
+  thumbnails?: string;
+  /** Use relative E distances in G-code */
+  use_relative_e_distances?: boolean;
+  /** Use firmware-side retraction (G10/G11) */
+  use_firmware_retraction?: boolean;
+  /** Time cost multiplier for time estimates */
+  time_cost?: number;
+
+  // ── Cooling Fan ───────────────────────────────────────────────────────────
+  /** Fan speed-up time (seconds) */
+  fan_speedup_time?: number;
+  /** Fan kick-start duration (seconds) */
+  fan_kickstart?: number;
+  /** Only speed up fan for overhangs */
+  fan_speedup_overhangs?: boolean;
+
+  // ── Extruder Clearance ────────────────────────────────────────────────────
+  extruder_clearance_radius?: number;
+  extruder_clearance_height_to_rod?: number;
+  extruder_clearance_height_to_lid?: number;
+
+  // ── Adaptive Bed Mesh ─────────────────────────────────────────────────────
+  bed_mesh_min_x?: number;
+  bed_mesh_min_y?: number;
+  bed_mesh_max_x?: number;
+  bed_mesh_max_y?: number;
+  probe_point_dist_x?: number;
+  probe_point_dist_y?: number;
+  adaptive_bed_mesh_margin?: number;
+
+  // ── Accessory ─────────────────────────────────────────────────────────────
+  /** Nozzle tip size shown in Basic view (mm) */
+  nozzle_size?: number;
+  /** Standard or high-flow nozzle volume type */
+  nozzle_volume_type?: 'standard' | 'high_flow';
   /** Nozzle hardness (Rockwell C scale) */
   nozzle_hrc?: number;
   /** Whether the printer supports closed-loop chamber temperature control */
   support_chamber_temp_control?: boolean;
   /** Whether the printer has an active air filtration system */
   support_air_filtration?: boolean;
-  /** Z offset adjustment (mm) */
-  z_offset?: number;
-  /** Preferred model orientation for slicing */
-  preferred_orientation?: string;
   /** Enable first-layer scan (camera-equipped printers) */
   scan_first_layer?: boolean;
   /** Disable M73 remaining print time command */

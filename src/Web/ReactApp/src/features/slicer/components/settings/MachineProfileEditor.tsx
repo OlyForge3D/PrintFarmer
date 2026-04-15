@@ -260,115 +260,104 @@ const BasicInformationTab: React.FC<
   TabPanelProps
 > = ({ settings, onUpdate, disabled }) => {
   const nozzleTypeOptions = Object.entries(NOZZLE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
-  const bedTypeOptions = Object.entries(BED_TYPE_LABELS).map(([value, label]) => ({ value, label }));
-  const probeTypeOptions = Object.entries(PROBE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
+  const gcodeDialectOptions = Object.entries(GCODE_DIALECT_LABELS).map(([value, label]) => ({ value, label }));
   return (
-    <>
-      <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
-      <SettingRow type="text" label="Printer Variant" value={settings.printer_variant ?? ''} onChange={(v) => onUpdate('printer_variant', v)} disabled={disabled} />
-      <SettingRow type="text" label="Inherits" value={settings.inherits ?? ''} onChange={(v) => onUpdate('inherits', v)} disabled={disabled} description="Parent profile name" />
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
-        <div className="grid grid-cols-3 gap-4">
-          <SettingRow type="number" label="X" value={settings.bed_size_x ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_x', v)} disabled={disabled} />
-          <SettingRow type="number" label="Y" value={settings.bed_size_y ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_y', v)} disabled={disabled} />
-          <SettingRow type="number" label="Z (Height)" value={settings.printable_height ?? 250} min={50} max={1000} step={1} onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
-        </div>
-      </div>
-      <SettingRow type="text" label="Printable Area" value={settings.printable_area ?? ''} onChange={(v) => onUpdate('printable_area', v)} disabled={disabled} description="Corner polygon" />
-      <SettingRow type="select" label="Bed Shape" value={settings.bed_shape ?? 'rectangular'} options={[{ value: 'rectangular', label: 'Rectangular' }, { value: 'circular', label: 'Circular (Delta)' }]} onChange={(v) => onUpdate('bed_shape', v as OrcaMachineSettings['bed_shape'])} disabled={disabled} />
-      <SettingRow type="select" label="Bed Origin" value={settings.bed_origin ?? 'corner'} options={[{ value: 'corner', label: 'Corner (0,0)' }, { value: 'center', label: 'Center' }]} onChange={(v) => onUpdate('bed_origin', v as OrcaMachineSettings['bed_origin'])} disabled={disabled} />
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Nozzle</h4>
-        <div className="space-y-3">
-          <SettingRow type="select" label="Nozzle Size" value={String(settings.nozzle_size ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.25', label: '0.25 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.5', label: '0.5 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }, { value: '1.0', label: '1.0 mm' }]} onChange={(v) => onUpdate('nozzle_size', parseFloat(v))} disabled={disabled} />
-          <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
-          <SettingRow type="select" label="Nozzle Volume Type" value={settings.nozzle_volume_type ?? 'standard'} options={[{ value: 'standard', label: 'Standard' }, { value: 'high_flow', label: 'High Flow' }]} onChange={(v) => onUpdate('nozzle_volume_type', v as OrcaMachineSettings['nozzle_volume_type'])} disabled={disabled} />
-          <SettingRow type="number" label="Nozzle HRC" value={settings.nozzle_hrc ?? 0} min={0} max={100} step={1} onChange={(v) => onUpdate('nozzle_hrc', v)} disabled={disabled} description="Rockwell C; 0 = brass" />
-        </div>
-      </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Print Bed</h4>
-        <div className="space-y-3">
-          <SettingRow type="select" label="Bed Surface Type" value={settings.bed_type ?? 'textured_pei'} options={bedTypeOptions} onChange={(v) => onUpdate('bed_type', v as OrcaMachineSettings['bed_type'])} disabled={disabled} />
-          <SettingRow type="checkbox" label="Has Bed Probe" checked={settings.has_bed_probe ?? true} onChange={(v) => onUpdate('has_bed_probe', v)} disabled={disabled} />
-          {settings.has_bed_probe && (<><SettingRow type="select" label="Probe Type" value={settings.probe_type ?? 'inductive'} options={probeTypeOptions} onChange={(v) => onUpdate('probe_type', v as OrcaMachineSettings['probe_type'])} disabled={disabled} /><SettingRow type="checkbox" label="Mesh Bed Leveling" checked={settings.mesh_bed_leveling ?? true} onChange={(v) => onUpdate('mesh_bed_leveling', v)} disabled={disabled} /></>)}
-          <SettingRow type="text" label="Custom Bed Texture" value={settings.bed_custom_texture ?? ''} onChange={(v) => onUpdate('bed_custom_texture', v)} disabled={disabled} />
-          <SettingRow type="text" label="Custom Bed Model" value={settings.bed_custom_model ?? ''} onChange={(v) => onUpdate('bed_custom_model', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Capabilities</h4>
-        <div className="space-y-3">
+    <div className="space-y-3">
+      {/* ── Printable Space ─────────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Printable Space</h4>
+        <div className="divide-y divide-pf-border">
+          <SettingRow type="text" label="Excluded Bed Area" value={settings.bed_exclude_area ?? ''} onChange={(v) => onUpdate('bed_exclude_area', v)} disabled={disabled} />
+          <SettingRow type="number" label="Printable Height" value={settings.printable_height ?? 250} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Pellet-Modded Printer" checked={settings.pellet_modded_printer ?? false} onChange={(v) => onUpdate('pellet_modded_printer', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Chamber Temp Control" checked={settings.support_chamber_temp_control ?? false} onChange={(v) => onUpdate('support_chamber_temp_control', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Air Filtration" checked={settings.support_air_filtration ?? false} onChange={(v) => onUpdate('support_air_filtration', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Auxiliary Fan" checked={settings.auxiliary_fan ?? false} onChange={(v) => onUpdate('auxiliary_fan', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Temperature Limits</h4>
-        <div className="space-y-3">
-          <SettingRow type="checkbox" label="Heated Bed" checked={settings.has_heated_bed ?? true} onChange={(v) => onUpdate('has_heated_bed', v)} disabled={disabled} />
-          {settings.has_heated_bed && <SettingRow type="number" label="Max Bed Temp" value={settings.max_bed_temperature ?? 110} min={50} max={200} step={5} unit="C" onChange={(v) => onUpdate('max_bed_temperature', v)} disabled={disabled} />}
-          <SettingRow type="checkbox" label="Heated Chamber" checked={settings.has_heated_chamber ?? false} onChange={(v) => onUpdate('has_heated_chamber', v)} disabled={disabled} />
-          {settings.has_heated_chamber && <SettingRow type="number" label="Max Chamber Temp" value={settings.max_chamber_temperature ?? 0} min={0} max={120} step={5} unit="C" onChange={(v) => onUpdate('max_chamber_temperature', v)} disabled={disabled} />}
-          <SettingRow type="number" label="Max Hotend Temp" value={settings.max_hotend_temperature ?? 300} min={200} max={500} step={10} unit="C" onChange={(v) => onUpdate('max_hotend_temperature', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Print Settings</h4>
-        <div className="space-y-3">
-          <SettingRow type="number" label="Z Offset" value={settings.z_offset ?? 0} min={-5} max={5} step={0.01} unit="mm" onChange={(v) => onUpdate('z_offset', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Scan First Layer" checked={settings.scan_first_layer ?? false} onChange={(v) => onUpdate('scan_first_layer', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Disable M73" checked={settings.disable_m73 ?? false} onChange={(v) => onUpdate('disable_m73', v)} disabled={disabled} description="Suppress remaining-time M73 commands" />
-          <SettingRow type="text" label="Thumbnails" value={settings.thumbnails ?? '300x300,32x32'} onChange={(v) => onUpdate('thumbnails', v)} disabled={disabled} />
-          <SettingRow type="text" label="Thumbnails Format" value={settings.thumbnails_format ?? 'PNG'} onChange={(v) => onUpdate('thumbnails_format', v)} disabled={disabled} />
-          <SettingRow type="number" label="Time Cost Multiplier" value={settings.time_cost ?? 1} min={0} max={10} step={0.1} onChange={(v) => onUpdate('time_cost', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Fan</h4>
-        <div className="space-y-3">
-          <SettingRow type="number" label="Cooling Fan Count" value={settings.cooling_fan_count ?? 1} min={0} max={4} step={1} onChange={(v) => onUpdate('cooling_fan_count', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Has Chamber Fan" checked={settings.has_chamber_fan ?? false} onChange={(v) => onUpdate('has_chamber_fan', v)} disabled={disabled} />
-          <SettingRow type="number" label="Fan Max Speed" value={settings.fan_max_speed ?? 100} min={0} max={100} step={5} unit="%" onChange={(v) => onUpdate('fan_max_speed', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Fan Speedup Overhangs" checked={settings.fan_speedup_overhangs ?? false} onChange={(v) => onUpdate('fan_speedup_overhangs', v)} disabled={disabled} />
-          <SettingRow type="number" label="Fan Kickstart Duration" value={settings.fan_kickstart ?? 0} min={0} max={5} step={0.1} unit="s" onChange={(v) => onUpdate('fan_kickstart', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Extruder Clearance</h4>
-        <div className="space-y-3">
-          <SettingRow type="number" label="Clearance Radius" value={settings.extruder_clearance_radius ?? 45} min={0} max={150} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_radius', v)} disabled={disabled} />
-          <div className="grid grid-cols-2 gap-4">
-            <SettingRow type="number" label="Height to Rod" value={settings.extruder_clearance_height_to_rod ?? 36} min={0} max={200} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_height_to_rod', v)} disabled={disabled} />
-            <SettingRow type="number" label="Height to Lid" value={settings.extruder_clearance_height_to_lid ?? 40} min={0} max={200} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_height_to_lid', v)} disabled={disabled} />
+          <div className="py-1">
+            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Best Object Position</h4>
+            <div className="grid grid-cols-2 gap-2 ml-7">
+              <SettingRow type="number" label="X" value={settings.best_object_pos_x ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_x', v)} disabled={disabled} />
+              <SettingRow type="number" label="Y" value={settings.best_object_pos_y ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_y', v)} disabled={disabled} />
+            </div>
           </div>
+          <SettingRow type="number" label="Z Offset" value={settings.z_offset ?? 0} min={-5} max={5} step={0.01} unit="mm" onChange={(v) => onUpdate('z_offset', v)} disabled={disabled} />
+          <SettingRow type="number" label="Preferred Orientation" value={settings.preferred_orientation ?? 0} min={0} max={360} step={1} unit="°" onChange={(v) => onUpdate('preferred_orientation', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Features</h4>
-        <div className="space-y-3">
-          <SettingRow type="checkbox" label="Power Loss Recovery" checked={settings.power_loss_recovery ?? false} onChange={(v) => onUpdate('power_loss_recovery', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Filament Sensor" checked={settings.filament_sensor ?? false} onChange={(v) => onUpdate('filament_sensor', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Auto Bed Leveling" checked={settings.auto_leveling ?? true} onChange={(v) => onUpdate('auto_leveling', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Has Scarf Joint Seam" checked={settings.has_scarf_joint_seam ?? false} onChange={(v) => onUpdate('has_scarf_joint_seam', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Silent Mode" checked={settings.silent_mode ?? false} onChange={(v) => onUpdate('silent_mode', v)} disabled={disabled} />
-          {settings.silent_mode && <SettingRow type="number" label="Silent Mode Max Speed" value={settings.silent_mode_max_speed ?? 100} min={10} max={300} step={5} unit="mm/s" onChange={(v) => onUpdate('silent_mode_max_speed', v)} disabled={disabled} />}
-          <SettingRow type="number" label="Adaptive Bed Mesh Margin" value={settings.adaptive_bed_mesh_margin ?? 2} min={0} max={20} step={1} unit="mm" onChange={(v) => onUpdate('adaptive_bed_mesh_margin', v)} disabled={disabled} />
+
+      {/* ── Advanced ────────────────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Advanced</h4>
+        <div className="divide-y divide-pf-border">
+          <SettingRow type="text" label="Printer Structure" value={settings.printer_structure ?? ''} onChange={(v) => onUpdate('printer_structure', v)} disabled={disabled} />
+          <SettingRow type="select" label="G-code Flavor" value={settings.gcode_flavor ?? 'marlin2'} options={gcodeDialectOptions} onChange={(v) => onUpdate('gcode_flavor', v as OrcaMachineSettings['gcode_flavor'])} disabled={disabled} />
+          <SettingRow type="checkbox" label="Pellet Modded Printer" checked={settings.pellet_modded_printer ?? false} onChange={(v) => onUpdate('pellet_modded_printer', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Disable Set Remaining Print Time" checked={settings.disable_m73 ?? false} onChange={(v) => onUpdate('disable_m73', v)} disabled={disabled} />
+          <SettingRow type="text" label="G-code Thumbnails" value={settings.thumbnails ?? ''} onChange={(v) => onUpdate('thumbnails', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Use Relative E Distances" checked={settings.use_relative_e_distances ?? false} onChange={(v) => onUpdate('use_relative_e_distances', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Use Firmware Retraction" checked={settings.use_firmware_retraction ?? false} onChange={(v) => onUpdate('use_firmware_retraction', v)} disabled={disabled} />
+          <SettingRow type="number" label="Time Cost" value={settings.time_cost ?? 0} min={0} max={100} step={1} unit="money/h" onChange={(v) => onUpdate('time_cost', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-1">
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Physical Dimensions</h4>
-        <div className="grid grid-cols-3 gap-4">
-          <SettingRow type="number" label="Width" value={settings.printer_width ?? 400} min={100} max={2000} step={10} unit="mm" onChange={(v) => onUpdate('printer_width', v)} disabled={disabled} />
-          <SettingRow type="number" label="Depth" value={settings.printer_depth ?? 400} min={100} max={2000} step={10} unit="mm" onChange={(v) => onUpdate('printer_depth', v)} disabled={disabled} />
-          <SettingRow type="number" label="Height" value={settings.printer_height ?? 500} min={100} max={2000} step={10} unit="mm" onChange={(v) => onUpdate('printer_height', v)} disabled={disabled} />
+
+      {/* ── Cooling Fan ─────────────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Cooling Fan</h4>
+        <div className="divide-y divide-pf-border">
+          <SettingRow type="number" label="Fan Speed-up Time" value={settings.fan_speedup_time ?? 0} min={0} max={10} step={0.1} unit="s" onChange={(v) => onUpdate('fan_speedup_time', v)} disabled={disabled} />
+          <SettingRow type="number" label="Fan Kick-start Time" value={settings.fan_kickstart ?? 0} min={0} max={5} step={0.1} unit="s" onChange={(v) => onUpdate('fan_kickstart', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Only Overhangs" checked={settings.fan_speedup_overhangs ?? false} onChange={(v) => onUpdate('fan_speedup_overhangs', v)} disabled={disabled} />
         </div>
       </div>
-    </>
+
+      {/* ── Extruder Clearance ──────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Extruder Clearance</h4>
+        <div className="divide-y divide-pf-border">
+          <SettingRow type="number" label="Radius" value={settings.extruder_clearance_radius ?? 45} min={0} max={150} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_radius', v)} disabled={disabled} />
+          <SettingRow type="number" label="Height to Rod" value={settings.extruder_clearance_height_to_rod ?? 36} min={0} max={200} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_height_to_rod', v)} disabled={disabled} />
+          <SettingRow type="number" label="Height to Lid" value={settings.extruder_clearance_height_to_lid ?? 40} min={0} max={200} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_height_to_lid', v)} disabled={disabled} />
+        </div>
+      </div>
+
+      {/* ── Adaptive Bed Mesh ───────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Adaptive Bed Mesh</h4>
+        <div className="divide-y divide-pf-border">
+          <div className="py-1">
+            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Bed Mesh Min</h4>
+            <div className="grid grid-cols-2 gap-2 ml-7">
+              <SettingRow type="number" label="X" value={settings.bed_mesh_min_x ?? -99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_min_x', v)} disabled={disabled} />
+              <SettingRow type="number" label="Y" value={settings.bed_mesh_min_y ?? -99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_min_y', v)} disabled={disabled} />
+            </div>
+          </div>
+          <div className="py-1">
+            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Bed Mesh Max</h4>
+            <div className="grid grid-cols-2 gap-2 ml-7">
+              <SettingRow type="number" label="X" value={settings.bed_mesh_max_x ?? 99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_max_x', v)} disabled={disabled} />
+              <SettingRow type="number" label="Y" value={settings.bed_mesh_max_y ?? 99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_max_y', v)} disabled={disabled} />
+            </div>
+          </div>
+          <div className="py-1">
+            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Probe Point Distance</h4>
+            <div className="grid grid-cols-2 gap-2 ml-7">
+              <SettingRow type="number" label="X" value={settings.probe_point_dist_x ?? 50} min={1} max={500} step={1} unit="mm" onChange={(v) => onUpdate('probe_point_dist_x', v)} disabled={disabled} />
+              <SettingRow type="number" label="Y" value={settings.probe_point_dist_y ?? 50} min={1} max={500} step={1} unit="mm" onChange={(v) => onUpdate('probe_point_dist_y', v)} disabled={disabled} />
+            </div>
+          </div>
+          <SettingRow type="number" label="Mesh Margin" value={settings.adaptive_bed_mesh_margin ?? 0} min={0} max={50} step={1} unit="mm" onChange={(v) => onUpdate('adaptive_bed_mesh_margin', v)} disabled={disabled} />
+        </div>
+      </div>
+
+      {/* ── Accessory ───────────────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Accessory</h4>
+        <div className="divide-y divide-pf-border">
+          <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
+          <SettingRow type="number" label="Nozzle HRC" value={settings.nozzle_hrc ?? 0} min={0} max={100} step={1} unit="HRC" onChange={(v) => onUpdate('nozzle_hrc', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Auxiliary Part Cooling Fan" checked={settings.auxiliary_fan ?? false} onChange={(v) => onUpdate('auxiliary_fan', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Support Controlling Chamber Temperature" checked={settings.support_chamber_temp_control ?? false} onChange={(v) => onUpdate('support_chamber_temp_control', v)} disabled={disabled} />
+          <SettingRow type="checkbox" label="Support Air Filtration" checked={settings.support_air_filtration ?? false} onChange={(v) => onUpdate('support_air_filtration', v)} disabled={disabled} />
+        </div>
+      </div>
+    </div>
   );
 };
 
