@@ -5,7 +5,7 @@
  */
 import React, { useState, useCallback } from 'react';
 import { Button, Textarea } from '@/common/components/ui';
-import { SettingRow } from './SettingRow';
+import { SettingRow, SectionHeader } from './SettingRow';
 import {
   TemperatureIcon,
   CoolingIcon,
@@ -218,7 +218,7 @@ const FilamentTab: React.FC<TabProps & {
     <div className="space-y-3">
       {/* Basic Information */}
       <div>
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Basic Information</h4>
+        <SectionHeader title="Basic Information" />
         <div className="divide-y divide-pf-border">
           {show('name') && (
             <SettingRow type="text" icon={<FilamentIcon />} label="Profile Name" value={settings.name ?? ''} onChange={v => update('name', v)} disabled={disabled} />
@@ -268,7 +268,7 @@ const FilamentTab: React.FC<TabProps & {
       {/* Shrinkage */}
       {(show('filament_shrink') || show('filament_shrinkage_compensation_z')) && (
         <div>
-          <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Shrinkage Compensation</h4>
+          <SectionHeader title="Shrinkage Compensation" />
           <div className="divide-y divide-pf-border">
             {show('filament_shrink') && (
               <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (XY)" value={settings.filament_shrink ?? 0} onChange={v => update('filament_shrink', v)} min={0} max={10} step={0.1} unit="%" disabled={disabled} />
@@ -282,7 +282,7 @@ const FilamentTab: React.FC<TabProps & {
 
       {/* Temperature */}
       <div>
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Temperature</h4>
+        <SectionHeader title="Temperature" />
         <div className="divide-y divide-pf-border">
           {show('nozzle_temperature_initial_layer') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp – First Layer" value={settings.nozzle_temperature_initial_layer ?? 215} onChange={v => update('nozzle_temperature_initial_layer', v)} min={150} max={400} step={5} unit="°C" disabled={disabled} />
@@ -307,7 +307,7 @@ const FilamentTab: React.FC<TabProps & {
 
       {/* Flow */}
       <div>
-        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Flow</h4>
+        <SectionHeader title="Flow" />
         <div className="divide-y divide-pf-border">
           {show('filament_flow_ratio') && (
             <SettingRow type="number" icon={<FlowIcon />} label="Flow Ratio" value={settings.filament_flow_ratio ?? 1.0} onChange={v => update('filament_flow_ratio', v)} min={0.5} max={2.0} step={0.01} disabled={disabled} />
@@ -330,7 +330,7 @@ const FilamentTab: React.FC<TabProps & {
       {/* Pressure Advance */}
       {show('enable_pressure_advance') && (
         <div>
-          <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Pressure Advance</h4>
+          <SectionHeader title="Pressure Advance" />
           <div className="divide-y divide-pf-border">
             <SettingRow type="checkbox" icon={<PrecisionIcon />} label="Enable Pressure Advance" checked={settings.enable_pressure_advance ?? false} onChange={v => update('enable_pressure_advance', v)} disabled={disabled} />
             {settings.enable_pressure_advance && (
