@@ -581,7 +581,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
     switch (props.type) {
       case 'number':
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center">
             <input
               id={id}
               type="number"
@@ -591,12 +591,12 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
               max={props.max}
               step={props.step ?? 0.01}
               disabled={disabled}
-              className="w-20 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded
+              className={`w-20 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border
                          text-pf-text focus:border-pf-accent-2 focus:outline-hidden
-                         disabled:opacity-50 disabled:cursor-not-allowed"
+                         disabled:opacity-50 disabled:cursor-not-allowed ${props.unit ? 'rounded-l rounded-r-none border-r-0' : 'rounded'}`}
             />
             {props.unit && (
-              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded-sm min-w-10 text-center">
+              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded-l-none rounded-r min-w-10 text-center">
                 {props.unit}
               </span>
             )}
