@@ -15,12 +15,9 @@ import type {
   OrcaMachineSettings,
 } from './machineSettingsTypes';
 import {
-  PRINTER_PRESETS,
   GCODE_DIALECT_LABELS,
   MOTION_TYPE_LABELS,
   NOZZLE_TYPE_LABELS,
-  BED_TYPE_LABELS,
-  PROBE_TYPE_LABELS,
 } from './machineSettingsTypes';
 
 interface MachineProfileEditorProps {
@@ -99,19 +96,6 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
     },
     [settings, onChange],
   );
-
-  const applyPreset = useCallback(
-    (presetName: string) => {
-      const preset = PRINTER_PRESETS[presetName];
-      if (preset) onChange({ ...settings, ...preset });
-    },
-    [settings, onChange],
-  );
-
-  const presetOptions = [
-    { value: '', label: 'Custom' },
-    ...Object.keys(PRINTER_PRESETS).map((name) => ({ value: name, label: name })),
-  ];
 
   const categories: { id: MachineCategory; label: string; icon: React.ReactNode }[] = [
     { id: 'basic_information', label: 'Basic Information', icon: <BuildVolumeIcon className="w-3 h-3 shrink-0" /> },
@@ -270,11 +254,13 @@ const BasicInformationTab: React.FC<
           <SettingRow type="text" label="Excluded Bed Area" value={settings.bed_exclude_area ?? ''} onChange={(v) => onUpdate('bed_exclude_area', v)} disabled={disabled} />
           <SettingRow type="number" label="Printable Height" value={settings.printable_height ?? 250} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
-          <div className="py-1">
-            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Best Object Position</h4>
-            <div className="grid grid-cols-2 gap-2 ml-7">
-              <SettingRow type="number" label="X" value={settings.best_object_pos_x ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_x', v)} disabled={disabled} />
-              <SettingRow type="number" label="Y" value={settings.best_object_pos_y ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_y', v)} disabled={disabled} />
+          <div className="py-1.5">
+            <div className="flex items-center gap-3">
+              <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Best Object Position</span></div>
+              <div className="flex-1 grid grid-cols-2 gap-2">
+                <SettingRow type="number" label="" prefix="X" value={settings.best_object_pos_x ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_x', v)} disabled={disabled} />
+                <SettingRow type="number" label="" prefix="Y" value={settings.best_object_pos_y ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_y', v)} disabled={disabled} />
+              </div>
             </div>
           </div>
           <SettingRow type="number" label="Z Offset" value={settings.z_offset ?? 0} min={-5} max={5} step={0.01} unit="mm" onChange={(v) => onUpdate('z_offset', v)} disabled={disabled} />
@@ -321,25 +307,31 @@ const BasicInformationTab: React.FC<
       <div>
         <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Adaptive Bed Mesh</h4>
         <div className="divide-y divide-pf-border">
-          <div className="py-1">
-            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Bed Mesh Min</h4>
-            <div className="grid grid-cols-2 gap-2 ml-7">
-              <SettingRow type="number" label="X" value={settings.bed_mesh_min_x ?? -99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_min_x', v)} disabled={disabled} />
-              <SettingRow type="number" label="Y" value={settings.bed_mesh_min_y ?? -99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_min_y', v)} disabled={disabled} />
+          <div className="py-1.5">
+            <div className="flex items-center gap-3">
+              <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Bed Mesh Min</span></div>
+              <div className="flex-1 grid grid-cols-2 gap-2">
+                <SettingRow type="number" label="" prefix="X" value={settings.bed_mesh_min_x ?? -99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_min_x', v)} disabled={disabled} />
+                <SettingRow type="number" label="" prefix="Y" value={settings.bed_mesh_min_y ?? -99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_min_y', v)} disabled={disabled} />
+              </div>
             </div>
           </div>
-          <div className="py-1">
-            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Bed Mesh Max</h4>
-            <div className="grid grid-cols-2 gap-2 ml-7">
-              <SettingRow type="number" label="X" value={settings.bed_mesh_max_x ?? 99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_max_x', v)} disabled={disabled} />
-              <SettingRow type="number" label="Y" value={settings.bed_mesh_max_y ?? 99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_max_y', v)} disabled={disabled} />
+          <div className="py-1.5">
+            <div className="flex items-center gap-3">
+              <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Bed Mesh Max</span></div>
+              <div className="flex-1 grid grid-cols-2 gap-2">
+                <SettingRow type="number" label="" prefix="X" value={settings.bed_mesh_max_x ?? 99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_max_x', v)} disabled={disabled} />
+                <SettingRow type="number" label="" prefix="Y" value={settings.bed_mesh_max_y ?? 99999} min={-99999} max={99999} step={1} unit="mm" onChange={(v) => onUpdate('bed_mesh_max_y', v)} disabled={disabled} />
+              </div>
             </div>
           </div>
-          <div className="py-1">
-            <h4 className="text-xs text-pf-text-muted mb-1 ml-7">Probe Point Distance</h4>
-            <div className="grid grid-cols-2 gap-2 ml-7">
-              <SettingRow type="number" label="X" value={settings.probe_point_dist_x ?? 50} min={1} max={500} step={1} unit="mm" onChange={(v) => onUpdate('probe_point_dist_x', v)} disabled={disabled} />
-              <SettingRow type="number" label="Y" value={settings.probe_point_dist_y ?? 50} min={1} max={500} step={1} unit="mm" onChange={(v) => onUpdate('probe_point_dist_y', v)} disabled={disabled} />
+          <div className="py-1.5">
+            <div className="flex items-center gap-3">
+              <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Probe Point Distance</span></div>
+              <div className="flex-1 grid grid-cols-2 gap-2">
+                <SettingRow type="number" label="" prefix="X" value={settings.probe_point_dist_x ?? 50} min={1} max={500} step={1} unit="mm" onChange={(v) => onUpdate('probe_point_dist_x', v)} disabled={disabled} />
+                <SettingRow type="number" label="" prefix="Y" value={settings.probe_point_dist_y ?? 50} min={1} max={500} step={1} unit="mm" onChange={(v) => onUpdate('probe_point_dist_y', v)} disabled={disabled} />
+              </div>
             </div>
           </div>
           <SettingRow type="number" label="Mesh Margin" value={settings.adaptive_bed_mesh_margin ?? 0} min={0} max={50} step={1} unit="mm" onChange={(v) => onUpdate('adaptive_bed_mesh_margin', v)} disabled={disabled} />

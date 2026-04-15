@@ -69,6 +69,8 @@ interface NumberInputSettingProps extends BaseSettingRowProps {
   max?: number;
   step?: number;
   unit?: string;
+  /** Inline prefix inside the input (e.g., "X", "Y") */
+  prefix?: string;
 }
 
 interface TextInputSettingProps extends BaseSettingRowProps {
@@ -135,7 +137,8 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
     <div className={`py-1.5 ${disabled ? 'opacity-50' : ''}`}>
       {/* Horizontal row: label+description left, control right */}
       <div className="flex items-center gap-3">
-        {/* Left side: icon, label, description */}
+        {/* Left side: icon, label, description — hidden when label is empty */}
+        {label && (
         <div className="flex items-center gap-2 min-w-0 w-2/5 shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
           
@@ -183,6 +186,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
             </Button>
           )}
         </div>
+        )}
         
         {/* Right side: control */}
         <div className="flex-1 min-w-0">
@@ -246,7 +250,6 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
                      [&::-moz-range-thumb]:border-pf-bg-0
                      [&::-moz-range-thumb]:cursor-pointer
                      disabled:opacity-50 disabled:cursor-not-allowed"
-          // eslint-disable-next-line react/forbid-dom-props -- dynamic gradient requires inline style
           style={{
             background: `linear-gradient(to right, var(--pf-accent-2) 0%, var(--pf-accent-2) ${percentage}%, var(--pf-border) ${percentage}%, var(--pf-border) 100%)`
           }}
@@ -255,7 +258,6 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
         {/* Current value indicator below thumb */}
         <div 
           className="absolute top-5 transform -translate-x-1/2 text-xs font-bold text-pf-text"
-          // eslint-disable-next-line react/forbid-dom-props -- dynamic position requires inline style
           style={{ left: `${percentage}%` }}
         >
           {value}{unit}
@@ -415,24 +417,32 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
   max,
   step = 0.01,
   unit,
+  prefix,
   disabled,
 }) => {
   return (
     <div className="flex items-center gap-2">
-      <input
-        id={id}
-        type="number"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        min={min}
-        max={max}
-        step={step}
-        disabled={disabled}
-        className="flex-1 px-3 py-1.5 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text text-xs text-right
-                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
-                   disabled:opacity-50 disabled:cursor-not-allowed"
-      />
+      <div className="relative flex-1">
+        {prefix && (
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-pf-text-muted pointer-events-none">
+            {prefix}
+          </span>
+        )}
+        <input
+          id={id}
+          type="number"
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          min={min}
+          max={max}
+          step={step}
+          disabled={disabled}
+          className={`w-full py-1.5 bg-pf-panel border border-pf-border rounded-lg
+                     text-pf-text text-xs text-right
+                     hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
+                     disabled:opacity-50 disabled:cursor-not-allowed ${prefix ? 'pl-7 pr-3' : 'px-3'}`}
+        />
+      </div>
       {unit && (
         <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-sm min-w-12 text-center">
           {unit}
