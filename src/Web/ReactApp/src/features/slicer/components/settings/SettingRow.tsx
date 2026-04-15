@@ -444,7 +444,7 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-l-none rounded-r-lg min-w-10 text-center shrink-0">
+        <span className="text-xs text-pf-text-muted px-2 bg-pf-border rounded-l-none rounded-r-lg min-w-10 text-center shrink-0 self-stretch flex items-center justify-center">
           {unit}
         </span>
       )}
@@ -596,7 +596,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
                          disabled:opacity-50 disabled:cursor-not-allowed ${props.unit ? 'rounded-l rounded-r-none border-r-0' : 'rounded'}`}
             />
             {props.unit && (
-              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded-l-none rounded-r min-w-10 text-center">
+              <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border/50 rounded-l-none rounded-r min-w-10 text-center self-stretch flex items-center justify-center">
                 {props.unit}
               </span>
             )}
