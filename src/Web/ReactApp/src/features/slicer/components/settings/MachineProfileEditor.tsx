@@ -159,7 +159,7 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
 
         {viewMode === 'advanced' && (
           <>
-            <div className="divide-y divide-pf-border">
+            <div className="">
               {activeCategory === 'basic_information' && (
                 <BasicInformationTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
               )}
@@ -199,7 +199,7 @@ interface TabPanelProps {
 const SimpleMachineSettingsPanel: React.FC<
   TabPanelProps
 > = ({ settings, onUpdate, disabled }) => (
-  <div className="divide-y divide-pf-border">
+  <div className="">
     <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
     <div className="py-1">
       <SectionHeader icon={<BuildVolumeIcon className="w-5 h-5" />} title="Build Volume" />
@@ -255,7 +255,7 @@ const BasicInformationTab: React.FC<
       {/* ── Printable Space ─────────────────────────────────────────── */}
       <div>
         <SectionHeader title="Printable Space" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow type="text" label="Excluded Bed Area" value={settings.bed_exclude_area ?? ''} onChange={(v) => onUpdate('bed_exclude_area', v)} disabled={disabled} />
           <SettingRow type="number" label="Printable Height" value={settings.printable_height ?? 250} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
@@ -276,7 +276,7 @@ const BasicInformationTab: React.FC<
       {/* ── Advanced ────────────────────────────────────────────────── */}
       <div>
         <SectionHeader title="Advanced" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow type="text" label="Printer Structure" value={settings.printer_structure ?? ''} onChange={(v) => onUpdate('printer_structure', v)} disabled={disabled} />
           <SettingRow type="select" label="G-code Flavor" value={settings.gcode_flavor ?? 'marlin2'} options={gcodeDialectOptions} onChange={(v) => onUpdate('gcode_flavor', v as OrcaMachineSettings['gcode_flavor'])} disabled={disabled} />
           <SettingRow type="checkbox" label="Pellet Modded Printer" checked={settings.pellet_modded_printer ?? false} onChange={(v) => onUpdate('pellet_modded_printer', v)} disabled={disabled} />
@@ -291,7 +291,7 @@ const BasicInformationTab: React.FC<
       {/* ── Cooling Fan ─────────────────────────────────────────────── */}
       <div>
         <SectionHeader title="Cooling Fan" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow type="number" label="Fan Speed-up Time" value={settings.fan_speedup_time ?? 0} min={0} max={10} step={0.1} unit="s" onChange={(v) => onUpdate('fan_speedup_time', v)} disabled={disabled} />
           <SettingRow type="number" label="Fan Kick-start Time" value={settings.fan_kickstart ?? 0} min={0} max={5} step={0.1} unit="s" onChange={(v) => onUpdate('fan_kickstart', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Only Overhangs" checked={settings.fan_speedup_overhangs ?? false} onChange={(v) => onUpdate('fan_speedup_overhangs', v)} disabled={disabled} />
@@ -301,7 +301,7 @@ const BasicInformationTab: React.FC<
       {/* ── Extruder Clearance ──────────────────────────────────────── */}
       <div>
         <SectionHeader title="Extruder Clearance" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow type="number" label="Radius" value={settings.extruder_clearance_radius ?? 45} min={0} max={150} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_radius', v)} disabled={disabled} />
           <SettingRow type="number" label="Height to Rod" value={settings.extruder_clearance_height_to_rod ?? 36} min={0} max={200} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_height_to_rod', v)} disabled={disabled} />
           <SettingRow type="number" label="Height to Lid" value={settings.extruder_clearance_height_to_lid ?? 40} min={0} max={200} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_height_to_lid', v)} disabled={disabled} />
@@ -311,7 +311,7 @@ const BasicInformationTab: React.FC<
       {/* ── Adaptive Bed Mesh ───────────────────────────────────────── */}
       <div>
         <SectionHeader title="Adaptive Bed Mesh" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <div className="py-1.5">
             <div className="flex items-center gap-3">
               <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Bed Mesh Min</span></div>
@@ -346,7 +346,7 @@ const BasicInformationTab: React.FC<
       {/* ── Accessory ───────────────────────────────────────────────── */}
       <div>
         <SectionHeader title="Accessory" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
           <SettingRow type="number" label="Nozzle HRC" value={settings.nozzle_hrc ?? 0} min={0} max={100} step={1} unit="HRC" onChange={(v) => onUpdate('nozzle_hrc', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Auxiliary Part Cooling Fan" checked={settings.auxiliary_fan ?? false} onChange={(v) => onUpdate('auxiliary_fan', v)} disabled={disabled} />
