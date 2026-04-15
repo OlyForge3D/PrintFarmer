@@ -59,10 +59,29 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
 }
 
 /** Coerce raw settings values: unwrap arrays, parse numeric strings, convert "0"/"1" booleans */
+/** Keys whose array values should be joined into a comma-separated string (not first-element) */
+const ARRAY_JOIN_KEYS = new Set([
+  'bed_exclude_area', 'thumbnails', 'retraction_distances_when_cut',
+  'extruder_offset', 'extruder_printable_area', 'retract_lift_enforce',
+  'z_hop_types', 'compatible_printers', 'compatible_prints',
+]);
+
 function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<string>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, rawValue] of Object.entries(raw)) {
-    let value = Array.isArray(rawValue) && rawValue.length > 0 ? rawValue[0] : rawValue;
+    let value: unknown;
+    if (Array.isArray(rawValue)) {
+      if (ARRAY_JOIN_KEYS.has(key)) {
+        // Join as comma-separated string for display
+        value = rawValue.join(', ');
+      } else if (rawValue.length > 0) {
+        value = rawValue[0];
+      } else {
+        value = rawValue;
+      }
+    } else {
+      value = rawValue;
+    }
     if (typeof value === 'string') {
       if (booleanKeys.has(key)) {
         value = value === '1' || value === 'true';
