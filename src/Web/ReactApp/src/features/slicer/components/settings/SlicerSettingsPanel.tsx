@@ -133,35 +133,11 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     onAdvancedSettingsChange,
   };
 
-  const modeButtonClass = (mode: ProcessSettingsViewMode, pos: 'left' | 'right') => {
-    const roundCls = pos === 'left' ? 'rounded-l-md' : 'rounded-r-md -ml-px';
-    const active = viewMode === mode;
-    return `px-2 py-0.5 text-[10px] font-medium ${roundCls} border transition-colors ${
-      active
-        ? 'bg-pf-accent text-white border-pf-accent'
-        : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-    } disabled:opacity-50`;
-  };
-
   return (
     <div className={`bg-pf-bg-1 rounded-lg ${className}`}>
-      {/* Mode toggle: Simple / Advanced */}
+      {/* Category tabs + Advanced toggle */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-pf-border">
-        <span className="text-[10px] text-pf-text-muted">
-          {categories.length} {categories.length === 1 ? 'tab' : 'tabs'}
-        </span>
-        <div className="flex items-center gap-0">
-          <Button variant="unstyled" size="sm" onClick={() => setViewMode('simple')} disabled={disabled} className={modeButtonClass('simple', 'left')}>
-            Simple
-          </Button>
-          <Button variant="unstyled" size="sm" onClick={() => setViewMode('advanced')} disabled={disabled} className={modeButtonClass('advanced', 'right')}>
-            Advanced
-          </Button>
-        </div>
-      </div>
-
-      {/* Category tabs + panel */}
-      <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist">
+        <div className="flex gap-1 overflow-x-auto">
         {categories.map((cat) => {
           const isDirty = isCategoryDirty?.(cat.id) ?? false;
           const isActive = activeCategory === cat.id;
@@ -175,11 +151,11 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
               aria-controls={`panel-${cat.id}`}
               onClick={() => setActiveCategory(cat.id)}
               disabled={disabled}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
+              className={`px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap relative
                          transition-colors duration-150 cursor-pointer disabled:opacity-50
                          ${isActive
-                           ? 'bg-pf-accent text-white'
-                           : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                           ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40'
+                           : 'text-pf-text-secondary hover:text-pf-text-primary'
                          }
                          ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
             >
@@ -187,12 +163,35 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
               {isDirty && (
                 <span
                   className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
-                  aria-label="Has modified settings"
+                  title="Has modified settings"
                 />
               )}
             </Button>
           );
         })}
+        </div>
+
+        {/* OrcaSlicer-style Advanced toggle: atom icon + pill switch */}
+        <Button
+          variant="unstyled"
+          type="button"
+          onClick={() => setViewMode(viewMode === 'simple' ? 'advanced' : 'simple')}
+          disabled={disabled}
+          className="shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
+          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
+          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
+            <span className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
+              viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
+            }`}>
+              <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
+                viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
+              }`} />
+            </span>
+          </span>
+        </Button>
       </div>
 
       <div className="p-3" id={`panel-${activeCategory}`} role="tabpanel">
