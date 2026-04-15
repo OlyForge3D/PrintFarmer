@@ -20,7 +20,6 @@ import type {
 } from './filamentSettingsTypes';
 import {
   ORCA_FILAMENT_MODE_MAP,
-  MATERIAL_PRESETS,
 } from './filamentSettingsTypes';
 
 // -- Local icon components ---------------------------------------------------
@@ -121,13 +120,6 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
     onChange({ ...settings, [key]: value });
   }, [settings, onChange]);
 
-  const applyPreset = useCallback((presetName: string) => {
-    const preset = MATERIAL_PRESETS[presetName];
-    if (preset) onChange({ ...settings, ...preset });
-  }, [settings, onChange]);
-
-  const materialOptions = Object.keys(MATERIAL_PRESETS).map(mat => ({ value: mat, label: mat }));
-
   const show = (key: keyof OrcaFilamentSettings) => shouldShow(key, viewMode);
 
   return (
@@ -142,7 +134,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
             onClick={() => onViewModeChange?.(mode.id)}
             disabled={disabled}
             className={`flex-1 px-4 py-3 text-sm font-medium rounded-none
-                       ${viewMode === mode.id ? 'border-b-2 !border-pf-accent-2 text-pf-accent-2' : 'text-pf-text-secondary'}`}
+                       ${viewMode === mode.id ? 'border-b-2 border-pf-accent-2! text-pf-accent-2' : 'text-pf-text-secondary'}`}
           >
             {mode.label}
           </Button>
@@ -179,7 +171,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
       {/* Tab Content - fixed height with scroll to prevent modal resizing */}
       <div className="p-4 h-96 overflow-y-auto">
         {activeCategory === 'filament' && (
-          <FilamentTab settings={settings} update={update} applyPreset={applyPreset} materialOptions={materialOptions} disabled={disabled} show={show} />
+          <FilamentTab settings={settings} update={update} disabled={disabled} show={show} />
         )}
         {activeCategory === 'cooling' && (
           <CoolingTab settings={settings} update={update} disabled={disabled} show={show} />
@@ -223,9 +215,7 @@ const EmptyMode: React.FC = () => (
 // -- Filament Tab ------------------------------------------------------------
 
 const FilamentTab: React.FC<TabProps & {
-  applyPreset: (name: string) => void;
-  materialOptions: Array<{ value: string; label: string }>;
-}> = ({ settings, update, disabled, show, applyPreset, materialOptions }) => {
+}> = ({ settings, update, disabled, show }) => {
   const anyVisible = [
     'filament_type', 'name', 'filament_diameter', 'enable_pressure_advance',
     'nozzle_temperature', 'hot_plate_temp', 'chamber_temperature',
@@ -235,17 +225,6 @@ const FilamentTab: React.FC<TabProps & {
 
   return (
     <div className="divide-y divide-pf-border">
-      {/* Material Preset */}
-      <SettingRow
-        type="select"
-        icon={<FilamentIcon />}
-        label="Material Preset"
-        description="Apply preset temperatures and settings"
-        value={settings.filament_type ?? ''}
-        onChange={applyPreset}
-        options={[{ value: '', label: '— select preset —' }, ...materialOptions]}
-        disabled={disabled}
-      />
       {show('name') && (
         <SettingRow
           type="text"

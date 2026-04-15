@@ -76,16 +76,39 @@ function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | nul
 
   const rawSettings = (profile.settings ?? {}) as Record<string, unknown>;
 
-  // Normalize array values to their first element (OrcaSlicer stores some strings as ["value"])
+  // Coerce values from the settings bag:
+  // - Arrays → first element (OrcaSlicer stores some strings as ["value"])
+  // - Numeric strings → numbers (backend serializes all values as strings)
+  // - "0"/"1" for known boolean fields → booleans
+  const booleanKeys = new Set([
+    'enable_pressure_advance', 'adaptive_pressure_advance', 'adaptive_pressure_advance_overhangs',
+    'filament_soluble', 'filament_is_support', 'activate_chamber_temp_control',
+    'filament_adaptive_volumetric_speed', 'reduce_fan_stop_start_freq', 'enable_overhang_bridge_fan',
+    'slow_down_for_layer_cooling', 'dont_slow_down_outer_wall', 'activate_air_filtration',
+    'filament_wipe', 'filament_retract_when_changing_layer', 'filament_long_retractions_when_cut',
+    'enable_volumetric_extrusion', 'set_other_flow_ratios', 'long_retractions_when_ec',
+    'filament_multitool_ramming',
+  ]);
+
   const profileSettings: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(rawSettings)) {
-    profileSettings[key] = Array.isArray(value) && value.length > 0 ? value[0] : value;
+  for (const [key, rawValue] of Object.entries(rawSettings)) {
+    let value = Array.isArray(rawValue) && rawValue.length > 0 ? rawValue[0] : rawValue;
+
+    if (typeof value === 'string') {
+      if (booleanKeys.has(key)) {
+        value = value === '1' || value === 'true';
+      } else if (value !== '' && !isNaN(Number(value))) {
+        value = Number(value);
+      }
+    }
+
+    profileSettings[key] = value;
   }
 
   return {
     ...DEFAULT_ORCA_FILAMENT_SETTINGS,
     ...profileSettings,
-    // Typed overrides AFTER spread so they take precedence over raw array values
+    // Typed overrides AFTER spread so they take precedence over raw values
     filament_type: profile.material || DEFAULT_ORCA_FILAMENT_SETTINGS.filament_type,
     filament_vendor: profile.manufacturer,
     nozzle_temperature: profile.nozzleTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.nozzle_temperature,
