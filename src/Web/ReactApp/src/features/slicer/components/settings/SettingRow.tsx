@@ -421,7 +421,7 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
   disabled,
 }) => {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center">
       <div className="relative flex-1">
         {prefix && (
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-pf-text-muted pointer-events-none">
@@ -437,14 +437,14 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
           max={max}
           step={step}
           disabled={disabled}
-          className={`w-full py-1.5 bg-pf-panel border border-pf-border rounded-lg
+          className={`w-full py-1.5 bg-pf-panel border border-pf-border
                      text-pf-text text-xs text-right
                      hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
-                     disabled:opacity-50 disabled:cursor-not-allowed ${prefix ? 'pl-7 pr-3' : 'px-3'}`}
+                     disabled:opacity-50 disabled:cursor-not-allowed ${unit ? 'rounded-l-lg border-r-0' : 'rounded-lg'} ${prefix ? 'pl-7 pr-3' : 'px-3'}`}
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-sm min-w-12 text-center">
+        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-r-lg min-w-10 text-center shrink-0">
           {unit}
         </span>
       )}
