@@ -77,8 +77,11 @@ function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<str
       } else if (rawValue.length > 0) {
         value = rawValue[0];
       } else {
-        value = rawValue;
+        // Empty array — skip this key so default value is used
+        continue;
       }
+    } else if (rawValue === null || rawValue === undefined) {
+      continue;
     } else {
       value = rawValue;
     }
@@ -89,6 +92,8 @@ function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<str
         value = Number(value);
       }
     }
+    // Skip NaN values so defaults are used
+    if (typeof value === 'number' && isNaN(value)) continue;
     result[key] = value;
   }
   return result;
