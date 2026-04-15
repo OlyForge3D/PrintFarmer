@@ -147,24 +147,24 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
         </div>
 
         {/* OrcaSlicer-style Advanced toggle: atom icon + pill switch */}
-        <div className="flex items-center gap-1 shrink-0 ml-2">
+        <Button
+          variant="unstyled"
+          type="button"
+          onClick={() => handleViewModeChange(viewMode === 'simple' ? 'advanced' : 'simple')}
+          disabled={disabled}
+          className="flex items-center gap-1.5 shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
+          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
+          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
+        >
           <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
-          <Button
-            variant="unstyled"
-            type="button"
-            onClick={() => handleViewModeChange(viewMode === 'simple' ? 'advanced' : 'simple')}
-            disabled={disabled}
-            className={`relative w-8 h-4 rounded-full transition-colors ${
-              viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
-            } disabled:opacity-50`}
-            title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
-            aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
-          >
-            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
-              viewMode === 'advanced' ? 'translate-x-4' : 'translate-x-0.5'
+          <span className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
+            viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
+          }`}>
+            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
+              viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
             }`} />
-          </Button>
-        </div>
+          </span>
+        </Button>
       </div>
 
       <div className="p-2 h-96 overflow-y-auto">
