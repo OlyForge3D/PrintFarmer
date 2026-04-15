@@ -40,13 +40,7 @@ const FilamentIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' 
   </svg>
 );
 
-const GcodeIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <polyline points="16 18 22 12 16 6" />
-    <polyline points="8 6 2 12 8 18" />
-    <line x1="10" y1="3" x2="14" y2="21" opacity="0.5" />
-  </svg>
-);
+// GcodeIcon removed — G-code sections now use SectionHeader without icons
 
 const LinkIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -282,7 +276,7 @@ const FilamentTab: React.FC<TabProps & {
 
       {/* Temperature */}
       <div>
-        <SectionHeader title="Temperature" />
+        <SectionHeader title="Print temperature" />
         <div className="">
           {show('nozzle_temperature_initial_layer') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp – First Layer" value={settings.nozzle_temperature_initial_layer ?? 215} onChange={v => update('nozzle_temperature_initial_layer', v)} min={150} max={400} step={5} unit="°C" disabled={disabled} />
@@ -290,12 +284,22 @@ const FilamentTab: React.FC<TabProps & {
           {show('nozzle_temperature') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp – Other Layers" value={settings.nozzle_temperature ?? 200} onChange={v => update('nozzle_temperature', v)} min={150} max={400} step={5} unit="°C" disabled={disabled} />
           )}
+        </div>
+      </div>
+      <div>
+        <SectionHeader title="Bed temperature" />
+        <div className="">
           {show('hot_plate_temp_initial_layer') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Bed Temp – First Layer" value={settings.hot_plate_temp_initial_layer ?? 65} onChange={v => update('hot_plate_temp_initial_layer', v)} min={0} max={150} step={5} unit="°C" disabled={disabled} />
           )}
           {show('hot_plate_temp') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Bed Temp – Other Layers" value={settings.hot_plate_temp ?? 60} onChange={v => update('hot_plate_temp', v)} min={0} max={150} step={5} unit="°C" disabled={disabled} />
           )}
+        </div>
+      </div>
+      <div>
+        <SectionHeader title="Print chamber temperature" />
+        <div className="">
           {show('activate_chamber_temp_control') && (
             <SettingRow type="checkbox" icon={<TemperatureIcon />} label="Chamber Temperature Control" checked={settings.activate_chamber_temp_control ?? false} onChange={v => update('activate_chamber_temp_control', v)} disabled={disabled} />
           )}
@@ -307,7 +311,7 @@ const FilamentTab: React.FC<TabProps & {
 
       {/* Flow */}
       <div>
-        <SectionHeader title="Flow" />
+        <SectionHeader title="Flow ratio and Pressure Advance" />
         <div className="">
           {show('filament_flow_ratio') && (
             <SettingRow type="number" icon={<FlowIcon />} label="Flow Ratio" value={settings.filament_flow_ratio ?? 1.0} onChange={v => update('filament_flow_ratio', v)} min={0.5} max={2.0} step={0.01} disabled={disabled} />
@@ -315,22 +319,28 @@ const FilamentTab: React.FC<TabProps & {
           {show('pellet_flow_coefficient') && (
             <SettingRow type="number" icon={<FlowIcon />} label="Pellet Flow Coefficient" value={settings.pellet_flow_coefficient ?? 0} onChange={v => update('pellet_flow_coefficient', v)} min={0} max={10} step={0.01} disabled={disabled} />
           )}
-          {show('filament_adaptive_volumetric_speed') && (
-            <SettingRow type="checkbox" icon={<SpeedIcon />} label="Adaptive Volumetric Speed" checked={settings.filament_adaptive_volumetric_speed ?? false} onChange={v => update('filament_adaptive_volumetric_speed', v)} disabled={disabled} />
-          )}
-          {show('filament_max_volumetric_speed') && (
-            <SettingRow type="number" icon={<SpeedIcon />} label="Max Volumetric Speed" value={settings.filament_max_volumetric_speed ?? 12} onChange={v => update('filament_max_volumetric_speed', v)} min={1} max={30} step={0.5} unit="mm³/s" disabled={disabled} />
-          )}
           {show('filament_change_length') && (
             <SettingRow type="number" icon={<RetractionIcon />} label="Filament Ramming Length" value={settings.filament_change_length ?? 0} onChange={v => update('filament_change_length', v)} min={0} max={100} step={1} unit="mm" disabled={disabled} />
           )}
         </div>
       </div>
 
-      {/* Pressure Advance */}
+      {/* Volumetric speed limitation */}
+      <div>
+        <SectionHeader title="Volumetric speed limitation" />
+        <div className="">
+          {show('filament_adaptive_volumetric_speed') && (
+            <SettingRow type="checkbox" icon={<SpeedIcon />} label="Adaptive Volumetric Speed" checked={settings.filament_adaptive_volumetric_speed ?? false} onChange={v => update('filament_adaptive_volumetric_speed', v)} disabled={disabled} />
+          )}
+          {show('filament_max_volumetric_speed') && (
+            <SettingRow type="number" icon={<SpeedIcon />} label="Max Volumetric Speed" value={settings.filament_max_volumetric_speed ?? 12} onChange={v => update('filament_max_volumetric_speed', v)} min={1} max={30} step={0.5} unit="mm³/s" disabled={disabled} />
+          )}
+        </div>
+      </div>
+
+      {/* Pressure Advance (part of Flow ratio and Pressure Advance) */}
       {show('enable_pressure_advance') && (
         <div>
-          <SectionHeader title="Pressure Advance" />
           <div className="">
             <SettingRow type="checkbox" icon={<PrecisionIcon />} label="Enable Pressure Advance" checked={settings.enable_pressure_advance ?? false} onChange={v => update('enable_pressure_advance', v)} disabled={disabled} />
             {settings.enable_pressure_advance && (
@@ -368,6 +378,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
 
   return (
     <div className="">
+      <SectionHeader title="Cooling for specific layer" />
       {show('close_fan_the_first_x_layers') && (
         <SettingRow
           type="number"
@@ -396,6 +407,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
           disabled={disabled}
         />
       )}
+      <SectionHeader title="Part cooling fan" />
       {show('fan_min_speed') && (
         <SettingRow
           type="slider"
@@ -564,6 +576,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
           disabled={disabled}
         />
       )}
+      <SectionHeader title="Auxiliary part cooling fan" />
       {show('additional_cooling_fan_speed') && (
         <SettingRow
           type="number"
@@ -578,6 +591,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
           disabled={disabled}
         />
       )}
+      <SectionHeader title="Exhaust fan" />
       {show('activate_air_filtration') && (
         <SettingRow
           type="checkbox"
@@ -632,6 +646,7 @@ const SettingOverridesTab: React.FC<TabProps> = ({ settings, update, disabled, s
 
   return (
     <div className="">
+      <SectionHeader title="Retraction" />
       {show('filament_retraction_length') && (
         <SettingRow
           type="number"
@@ -818,6 +833,7 @@ const SettingOverridesTab: React.FC<TabProps> = ({ settings, update, disabled, s
           disabled={disabled}
         />
       )}
+      <SectionHeader title="Ironing" />
       {show('filament_ironing_flow') && (
         <SettingRow
           type="number"
@@ -899,13 +915,7 @@ const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =
   return (
     <div className="space-y-4">
       <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
-          <GcodeIcon className="w-4 h-4" />
-          Start G-code
-        </label>
-        <p className="text-xs text-pf-text-secondary mb-2">
-          G-code inserted at the start of each print using this filament
-        </p>
+        <SectionHeader title="Filament start G-code" />
         <Textarea
           value={settings.filament_start_gcode ?? ''}
           onChange={e => update('filament_start_gcode', e.target.value)}
@@ -917,13 +927,7 @@ const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =
       </div>
 
       <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
-          <GcodeIcon className="w-4 h-4" />
-          End G-code
-        </label>
-        <p className="text-xs text-pf-text-secondary mb-2">
-          G-code inserted at the end of each print using this filament
-        </p>
+        <SectionHeader title="Filament end G-code" />
         <Textarea
           value={settings.filament_end_gcode ?? ''}
           onChange={e => update('filament_end_gcode', e.target.value)}
@@ -1106,6 +1110,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
 
   return (
     <div className="">
+      <SectionHeader title="Wipe tower parameters" />
       <SettingRow
         type="number"
         icon={<FlowIcon />}
@@ -1178,6 +1183,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
         unit="°C"
         disabled={disabled}
       />
+      <SectionHeader title="Multi Filament" />
       <SettingRow
         type="checkbox"
         icon={<RetractionIcon />}
@@ -1198,6 +1204,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
         unit="mm"
         disabled={disabled}
       />
+      <SectionHeader title="Tool change parameters with single extruder MM printers" />
       <SettingRow
         type="number"
         icon={<SpeedIcon />}

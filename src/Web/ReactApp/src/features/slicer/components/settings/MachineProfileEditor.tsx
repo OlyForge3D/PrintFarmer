@@ -406,6 +406,7 @@ const MachineGcodeTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled
 const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) => (
   <>
     <div className="py-1">
+      <SectionHeader title="Single extruder multi-material setup" />
       <div className="space-y-3">
         <SettingRow type="checkbox" label="Single Extruder Multi-Material" checked={settings.single_extruder_multi_material ?? false} onChange={(v) => onUpdate('single_extruder_multi_material', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Single Extruder MM Priming" checked={settings.single_extruder_multi_material_priming ?? false} onChange={(v) => onUpdate('single_extruder_multi_material_priming', v)} disabled={disabled} />
@@ -418,7 +419,7 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
       </div>
     </div>
     <div className="py-1">
-      <SectionHeader title="Cooling Tube &amp; Parking" />
+      <SectionHeader title="Single extruder multi-material parameters" />
       <div className="grid grid-cols-2 gap-4">
         <SettingRow type="number" label="Cooling Tube Retraction" value={settings.cooling_tube_retraction ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('cooling_tube_retraction', v)} disabled={disabled} />
         <SettingRow type="number" label="Cooling Tube Length" value={settings.cooling_tube_length ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('cooling_tube_length', v)} disabled={disabled} />
@@ -427,7 +428,7 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
       </div>
     </div>
     <div className="py-1">
-      <SectionHeader title="Filament Change Timing" />
+      <SectionHeader title="Advanced" />
       <div className="grid grid-cols-3 gap-4">
         <SettingRow type="number" label="Load Time" value={settings.machine_load_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_load_filament_time', v)} disabled={disabled} />
         <SettingRow type="number" label="Unload Time" value={settings.machine_unload_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_unload_filament_time', v)} disabled={disabled} />
@@ -473,7 +474,7 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
         </div>
       </div>
       <div className="py-1">
-        <SectionHeader title="Nozzle" />
+        <SectionHeader title="Basic information" />
         <div className="space-y-3">
           <SettingRow type="select" label="Nozzle Diameter" value={String(settings.nozzle_diameter ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }]} onChange={(v) => onUpdate('nozzle_diameter', parseFloat(v))} disabled={disabled} />
           <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
@@ -529,6 +530,15 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
           <SettingRow type="checkbox" label="Travel Slope" checked={settings.travel_slope ?? false} onChange={(v) => onUpdate('travel_slope', v)} disabled={disabled} />
         </div>
       </div>
+      <div className="py-1">
+        <SectionHeader title="Retraction when switching material" />
+        <div className="space-y-3">
+          <SettingRow type="number" label="Retraction Length" value={settings.retract_length_toolchange ?? 10} min={0} max={100} step={0.5} unit="mm" onChange={(v) => onUpdate('retract_length_toolchange', v)} disabled={disabled} />
+          <SettingRow type="number" label="Extra Length on Restart" value={settings.retract_restart_extra_toolchange ?? 0} min={-5} max={10} step={0.1} unit="mm" onChange={(v) => onUpdate('retract_restart_extra_toolchange', v)} disabled={disabled} />
+          <SettingRow type="number" label="Long Retraction When Cut" value={settings.long_retractions_when_cut ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('long_retractions_when_cut', v)} disabled={disabled} />
+          <SettingRow type="text" label="Retraction Distances When Cut" value={settings.retraction_distances_when_cut ?? ''} onChange={(v) => onUpdate('retraction_distances_when_cut', v)} disabled={disabled} />
+        </div>
+      </div>
     </>
   );
 };
@@ -539,12 +549,15 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
   const motionTypeOptions = Object.entries(MOTION_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
-      <div className="py-3 space-y-3">
-        <SettingRow type="checkbox" label="Emit Machine Limits to G-code" checked={settings.emit_machine_limits_to_gcode ?? true} onChange={(v) => onUpdate('emit_machine_limits_to_gcode', v)} disabled={disabled} />
-        <SettingRow type="select" label="Motion Type" value={settings.motion_type ?? 'cartesian'} options={motionTypeOptions} onChange={(v) => onUpdate('motion_type', v as OrcaMachineSettings['motion_type'])} disabled={disabled} />
+      <div className="py-1">
+        <SectionHeader title="Advanced" />
+        <div className="space-y-3">
+          <SettingRow type="checkbox" label="Emit Machine Limits to G-code" checked={settings.emit_machine_limits_to_gcode ?? true} onChange={(v) => onUpdate('emit_machine_limits_to_gcode', v)} disabled={disabled} />
+          <SettingRow type="select" label="Motion Type" value={settings.motion_type ?? 'cartesian'} options={motionTypeOptions} onChange={(v) => onUpdate('motion_type', v as OrcaMachineSettings['motion_type'])} disabled={disabled} />
+        </div>
       </div>
       <div className="py-1">
-        <SectionHeader icon={<SpeedIcon className="w-5 h-5" />} title="Max Speeds" />
+        <SectionHeader icon={<SpeedIcon className="w-5 h-5" />} title="Speed limitation" />
         <div className="space-y-3">
           <SettingRow type="slider" label="Max Print Speed" value={settings.max_print_speed ?? 250} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_print_speed', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
@@ -556,7 +569,7 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         </div>
       </div>
       <div className="py-1">
-        <SectionHeader icon={<AccelerationIcon className="w-5 h-5" />} title="Max Accelerations" />
+        <SectionHeader icon={<AccelerationIcon className="w-5 h-5" />} title="Acceleration limitation" />
         <div className="grid grid-cols-2 gap-4">
           <SettingRow type="number" label="Accel X" value={settings.machine_max_acceleration_x ?? 3000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_x', v)} disabled={disabled} />
           <SettingRow type="number" label="Accel Y" value={settings.machine_max_acceleration_y ?? 3000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_y', v)} disabled={disabled} />
@@ -570,7 +583,7 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         </div>
       </div>
       <div className="py-1">
-        <SectionHeader title="Max Jerk" />
+        <SectionHeader title="Jerk limitation" />
         <div className="grid grid-cols-2 gap-4">
           <SettingRow type="number" label="Jerk X" value={settings.machine_max_jerk_x ?? 8} min={0} max={50} step={0.5} unit="mm/s" onChange={(v) => onUpdate('machine_max_jerk_x', v)} disabled={disabled} />
           <SettingRow type="number" label="Jerk Y" value={settings.machine_max_jerk_y ?? 8} min={0} max={50} step={0.5} unit="mm/s" onChange={(v) => onUpdate('machine_max_jerk_y', v)} disabled={disabled} />
@@ -591,7 +604,9 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="number" label="Travel Jerk" value={settings.travel_jerk ?? 8} min={0} max={30} step={0.5} unit="mm/s" onChange={(v) => onUpdate('travel_jerk', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3 space-y-3">
+      <div className="py-1">
+        <SectionHeader title="Resonance Avoidance" />
+        <div className="space-y-3">
         <SettingRow type="checkbox" label="Resonance Avoidance" checked={settings.resonance_avoidance ?? false} onChange={(v) => onUpdate('resonance_avoidance', v)} disabled={disabled} />
         {settings.resonance_avoidance && (
           <div className="grid grid-cols-2 gap-4">
@@ -601,6 +616,7 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         )}
         <SettingRow type="checkbox" label="Arc Movement (G2/G3)" checked={settings.support_arc_movement ?? false} onChange={(v) => onUpdate('support_arc_movement', v)} disabled={disabled} />
         {settings.support_arc_movement && <SettingRow type="number" label="Arc Resolution" value={settings.arc_resolution ?? 0.1} min={0.01} max={1} step={0.01} unit="mm" onChange={(v) => onUpdate('arc_resolution', v)} disabled={disabled} />}
+        </div>
       </div>
     </>
   );
