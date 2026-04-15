@@ -114,12 +114,12 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
   ];
 
   const categories: { id: MachineCategory; label: string; icon: React.ReactNode }[] = [
-    { id: 'basic_information', label: 'Basic Information', icon: <BuildVolumeIcon className="w-4 h-4" /> },
-    { id: 'machine_gcode', label: 'Machine G-code', icon: <GcodeIcon className="w-4 h-4" /> },
-    { id: 'multimaterial', label: 'Multimaterial', icon: <MultimaterialIcon className="w-4 h-4" /> },
-    { id: 'extruder', label: 'Extruder', icon: <NozzleIcon className="w-4 h-4" /> },
-    { id: 'motion_ability', label: 'Motion Ability', icon: <MotionIcon className="w-4 h-4" /> },
-    { id: 'notes', label: 'Notes', icon: <NotesIcon className="w-4 h-4" /> },
+    { id: 'basic_information', label: 'Basic Information', icon: <BuildVolumeIcon className="w-3 h-3 shrink-0" /> },
+    { id: 'machine_gcode', label: 'Machine G-code', icon: <GcodeIcon className="w-3 h-3 shrink-0" /> },
+    { id: 'multimaterial', label: 'Multimaterial', icon: <MultimaterialIcon className="w-3 h-3 shrink-0" /> },
+    { id: 'extruder', label: 'Extruder', icon: <NozzleIcon className="w-3 h-3 shrink-0" /> },
+    { id: 'motion_ability', label: 'Motion Ability', icon: <MotionIcon className="w-3 h-3 shrink-0" /> },
+    { id: 'notes', label: 'Notes', icon: <NotesIcon className="w-3 h-3 shrink-0" /> },
   ];
 
   return (
@@ -138,12 +138,11 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
                 size="sm"
                 onClick={() => setActiveCategory(cat.id)}
                 disabled={disabled}
-                className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap relative
+                className={`px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap relative
                            ${activeCategory === cat.id ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40' : 'text-pf-text-secondary hover:text-pf-text-primary'}
                            ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
               >
-                {cat.icon}
-                {cat.label}
+                <span className="inline-flex items-center gap-1">{cat.icon}{cat.label}</span>
                 {isDirty && (
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange" aria-label="Modified" />
                 )}
