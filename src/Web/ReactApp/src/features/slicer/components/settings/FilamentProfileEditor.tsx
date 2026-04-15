@@ -176,8 +176,8 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
         })}
       </div>
 
-      {/* Tab Content */}
-      <div className="p-4">
+      {/* Tab Content - fixed height with scroll to prevent modal resizing */}
+      <div className="p-4 h-96 overflow-y-auto">
         {activeCategory === 'filament' && (
           <FilamentTab settings={settings} update={update} applyPreset={applyPreset} materialOptions={materialOptions} disabled={disabled} show={show} />
         )}

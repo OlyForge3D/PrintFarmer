@@ -274,7 +274,7 @@ export function ProfileEditorModal({
       )}
       
       {/* Profile Editor Content */}
-      <div className="min-h-100">
+      <div>
         {profileType === 'machine' && (
           <MachineProfileEditor
             settings={machineSettings}
