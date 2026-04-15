@@ -132,9 +132,9 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
   };
 
   return (
-    <div className={`py-2 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`py-1.5 ${disabled ? 'opacity-50' : ''}`}>
       {/* Horizontal row: label+description left, control right */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         {/* Left side: icon, label, description */}
         <div className="flex items-center gap-2 min-w-0 w-2/5 shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
@@ -158,7 +158,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           <div className="min-w-0">
             <label 
               htmlFor={id} 
-              className={`font-medium text-sm transition-colors ${
+              className={`font-medium text-xs transition-colors ${
                 isModified 
                   ? 'text-pf-warning' 
                   : 'text-pf-text'
@@ -298,7 +298,7 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="w-full px-4 py-3 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text appearance-none bg-none cursor-pointer
+                   text-pf-text text-xs appearance-none bg-none cursor-pointer
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
       >
@@ -428,13 +428,13 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         max={max}
         step={step}
         disabled={disabled}
-        className="flex-1 px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text text-right
+        className="flex-1 px-3 py-1.5 bg-pf-panel border border-pf-border rounded-lg
+                   text-pf-text text-xs text-right
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
       />
       {unit && (
-        <span className="text-sm text-pf-text-muted px-2 py-2 bg-pf-border rounded-sm">
+        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-sm min-w-12 text-center">
           {unit}
         </span>
       )}
@@ -458,8 +458,8 @@ const TextInputControl: React.FC<TextInputSettingProps & { id: string }> = ({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       disabled={disabled}
-      className="w-full px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
-                 text-pf-text
+      className="w-full px-3 py-1.5 bg-pf-panel border border-pf-border rounded-lg
+                 text-pf-text text-xs
                  hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                  disabled:opacity-50 disabled:cursor-not-allowed"
     />
