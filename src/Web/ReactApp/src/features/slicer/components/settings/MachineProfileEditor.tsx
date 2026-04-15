@@ -202,11 +202,16 @@ const SimpleMachineSettingsPanel: React.FC<
   <div className="divide-y divide-pf-border">
     <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
     <div className="py-1">
-      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
-      <div className="grid grid-cols-3 gap-4">
-        <SettingRow type="number" label="X" value={settings.bed_size_x ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_x', v)} disabled={disabled} />
-        <SettingRow type="number" label="Y" value={settings.bed_size_y ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_y', v)} disabled={disabled} />
-        <SettingRow type="number" label="Z" value={settings.printable_height ?? 250} min={50} max={1000} step={1} onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume</h4>
+      <div className="py-1.5">
+        <div className="flex items-center gap-3">
+          <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Dimensions</span></div>
+          <div className="flex-1 grid grid-cols-3 gap-2">
+            <SettingRow type="number" label="" prefix="X" value={settings.bed_size_x ?? 220} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('bed_size_x', v)} disabled={disabled} />
+            <SettingRow type="number" label="" prefix="Y" value={settings.bed_size_y ?? 220} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('bed_size_y', v)} disabled={disabled} />
+            <SettingRow type="number" label="" prefix="Z" value={settings.printable_height ?? 250} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
+          </div>
+        </div>
       </div>
     </div>
     <div className="py-1">
