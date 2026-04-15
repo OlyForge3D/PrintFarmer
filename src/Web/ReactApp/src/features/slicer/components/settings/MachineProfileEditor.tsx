@@ -113,11 +113,6 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
     ...Object.keys(PRINTER_PRESETS).map((name) => ({ value: name, label: name })),
   ];
 
-  const viewModes: { id: MachineSettingsViewMode; label: string }[] = [
-    { id: 'simple', label: 'Simple' },
-    { id: 'advanced', label: 'Advanced' },
-  ];
-
   const categories: { id: MachineCategory; label: string; icon: React.ReactNode }[] = [
     { id: 'basic_information', label: 'Basic Information', icon: <BuildVolumeIcon className="w-4 h-4" /> },
     { id: 'machine_gcode', label: 'Machine G-code', icon: <GcodeIcon className="w-4 h-4" /> },
@@ -129,22 +124,48 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
-      <div className="flex border-b border-pf-border">
-        {viewModes.map((mode) => (
-          <Button
-            key={mode.id}
-            variant={viewMode === mode.id ? 'tab' : 'subtle'}
-            type="button"
-            onClick={() => setViewMode(mode.id)}
-            disabled={disabled}
-            className={`flex-1 px-4 py-3 text-sm font-medium rounded-none${viewMode === mode.id ? ' rounded-t-lg' : ''}`}
-          >
-            {mode.label}
-          </Button>
-        ))}
+      {/* View Mode Toggle + Category Tabs */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
+        {/* Category tabs - only shown in Advanced mode */}
+        <div className="flex gap-1 overflow-x-auto">
+          {viewMode === 'advanced' ? categories.map((cat) => {
+            const isDirty = isCategoryDirty?.(cat.id) ?? false;
+            return (
+              <Button
+                key={cat.id}
+                variant="unstyled"
+                type="button"
+                size="sm"
+                onClick={() => setActiveCategory(cat.id)}
+                disabled={disabled}
+                className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap relative
+                           ${activeCategory === cat.id ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40' : 'text-pf-text-secondary hover:text-pf-text-primary'}
+                           ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
+              >
+                {cat.icon}
+                {cat.label}
+                {isDirty && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange" aria-label="Modified" />
+                )}
+              </Button>
+            );
+          }) : <span className="text-[10px] text-pf-text-muted">Machine</span>}
+        </div>
+
+        {/* Simple/Advanced pill toggle */}
+        <div className="flex items-center gap-0 shrink-0 ml-2">
+          <Button variant="unstyled" size="sm" onClick={() => setViewMode('simple')} disabled={disabled}
+            className={`px-2 py-0.5 text-[10px] font-medium rounded-l-md border transition-colors ${
+              viewMode === 'simple' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
+            }`}>Simple</Button>
+          <Button variant="unstyled" size="sm" onClick={() => setViewMode('advanced')} disabled={disabled}
+            className={`px-2 py-0.5 text-[10px] font-medium rounded-r-md -ml-px border transition-colors ${
+              viewMode === 'advanced' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
+            }`}>Advanced</Button>
+        </div>
       </div>
 
-      <div className="p-4">
+      <div className="p-4 h-96 overflow-y-auto">
         {viewMode === 'simple' && (
           <SimpleMachineSettingsPanel
             settings={settings}
@@ -155,31 +176,6 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
 
         {viewMode === 'advanced' && (
           <>
-            <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
-              {categories.map((cat) => {
-                const isDirty = isCategoryDirty?.(cat.id) ?? false;
-                return (
-                  <Button
-                    key={cat.id}
-                    variant={activeCategory === cat.id ? 'tab' : 'subtle'}
-                    type="button"
-                    onClick={() => setActiveCategory(cat.id)}
-                    disabled={disabled}
-                    className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative${isDirty ? ' ring-1 ring-pf-accent-orange' : ''}`}
-                  >
-                    {cat.icon}
-                    {cat.label}
-                    {isDirty && (
-                      <span
-                        className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
-                        aria-label="Has modified settings"
-                      />
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
-
             <div className="divide-y divide-pf-border">
               {activeCategory === 'basic_information' && (
                 <BasicInformationTab settings={settings} onUpdate={updateSetting} disabled={disabled} />

@@ -89,11 +89,6 @@ const CATEGORY_TABS: { id: FilamentCategory; label: string }[] = [
   { id: 'notes', label: 'Notes' },
 ];
 
-const VIEW_MODE_TABS: { id: FilamentSettingsViewMode; label: string }[] = [
-  { id: 'simple', label: 'Simple' },
-  { id: 'advanced', label: 'Advanced' },
-];
-
 // -- Helpers -----------------------------------------------------------------
 
 function shouldShow(key: keyof OrcaFilamentSettings, viewMode: FilamentSettingsViewMode): boolean {
@@ -124,48 +119,44 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
-      {/* View Mode Tabs */}
-      <div className="flex border-b border-pf-border">
-        {VIEW_MODE_TABS.map(mode => (
-          <Button
-            key={mode.id}
-            variant={viewMode === mode.id ? 'tab' : 'subtle'}
-            type="button"
-            onClick={() => onViewModeChange?.(mode.id)}
-            disabled={disabled}
-            className={`flex-1 px-4 py-3 text-sm font-medium rounded-none
-                       ${viewMode === mode.id ? 'border-b-2 border-pf-accent-2! text-pf-accent-2' : 'text-pf-text-secondary'}`}
-          >
-            {mode.label}
-          </Button>
-        ))}
-      </div>
+      {/* View Mode Toggle + Category Tabs */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
+        {/* Category tabs - only shown in Advanced mode */}
+        <div className="flex gap-1 overflow-x-auto">
+          {viewMode === 'advanced' ? CATEGORY_TABS.map(cat => {
+            const isDirty = isCategoryDirty?.(cat.id) ?? false;
+            return (
+              <Button
+                key={cat.id}
+                variant="unstyled"
+                type="button"
+                size="sm"
+                onClick={() => setActiveCategory(cat.id)}
+                disabled={disabled}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap relative
+                           ${activeCategory === cat.id ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40' : 'text-pf-text-secondary hover:text-pf-text-primary'}
+                           ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
+              >
+                {cat.label}
+                {isDirty && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange" aria-label="Modified" />
+                )}
+              </Button>
+            );
+          }) : <span className="text-[10px] text-pf-text-muted">Filament</span>}
+        </div>
 
-      {/* Category Tabs */}
-      <div className="flex gap-1 px-4 pt-3 overflow-x-auto pb-1">
-        {CATEGORY_TABS.map(cat => {
-          const isDirty = isCategoryDirty?.(cat.id) ?? false;
-          return (
-            <Button
-              key={cat.id}
-              variant={activeCategory === cat.id ? 'tab' : 'subtle'}
-              type="button"
-              onClick={() => setActiveCategory(cat.id)}
-              disabled={disabled}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
-                         ${activeCategory === cat.id ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40' : ''}
-                         ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
-            >
-              {cat.label}
-              {isDirty && (
-                <span
-                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
-                  aria-label="Has modified settings"
-                />
-              )}
-            </Button>
-          );
-        })}
+        {/* Simple/Advanced pill toggle */}
+        <div className="flex items-center gap-0 shrink-0 ml-2">
+          <Button variant="unstyled" size="sm" onClick={() => onViewModeChange?.('simple')} disabled={disabled}
+            className={`px-2 py-0.5 text-[10px] font-medium rounded-l-md border transition-colors ${
+              viewMode === 'simple' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
+            }`}>Simple</Button>
+          <Button variant="unstyled" size="sm" onClick={() => onViewModeChange?.('advanced')} disabled={disabled}
+            className={`px-2 py-0.5 text-[10px] font-medium rounded-r-md -ml-px border transition-colors ${
+              viewMode === 'advanced' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
+            }`}>Advanced</Button>
+        </div>
       </div>
 
       {/* Tab Content - fixed height with scroll to prevent modal resizing */}
