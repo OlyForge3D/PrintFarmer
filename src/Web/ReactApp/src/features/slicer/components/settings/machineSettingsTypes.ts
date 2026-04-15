@@ -123,6 +123,8 @@ export interface OrcaMachineSettings {
   single_extruder_multi_material?: boolean;
   /** Use manual filament-change procedure instead of automated swap */
   manual_filament_change?: boolean;
+  /** Bed temperature formula for multi-material */
+  bed_temperature_formula?: string;
   /** Purge excess filament into the prime/wipe tower */
   purge_in_prime_tower?: boolean;
   /** Enable filament tip ramming on retract */
@@ -271,6 +273,10 @@ export interface OrcaMachineSettings {
   machine_max_speed_e?: number;
   max_print_speed?: number;
   machine_max_acceleration_travel?: number;
+  /** Max acceleration while extruding (mm/s²) */
+  machine_max_acceleration_extruding?: number;
+  /** Max acceleration while retracting (mm/s²) */
+  machine_max_acceleration_retracting?: number;
   max_junction_deviation?: number;
 
   // Cooling
@@ -288,6 +294,10 @@ export interface OrcaMachineSettings {
   pause_print_gcode?: string;
   printing_by_object_gcode?: string;
   timelapse_gcode?: string;
+  /** G-code injected when extrusion role changes */
+  change_extrusion_role_gcode?: string;
+  /** Custom G-code template for user macros */
+  template_custom_gcode?: string;
 
   // Features / misc
   silent_mode?: boolean;

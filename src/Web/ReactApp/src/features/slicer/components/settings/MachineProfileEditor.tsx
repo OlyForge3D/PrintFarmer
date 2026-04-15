@@ -373,7 +373,9 @@ const MachineGcodeTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled
     { key: 'before_layer_change_gcode', label: 'Before Layer Change G-code', rows: 6 },
     { key: 'layer_change_gcode', label: 'Layer Change G-code', rows: 6 },
     { key: 'toolchange_gcode', label: 'Change Filament G-code', rows: 6 },
+    { key: 'change_extrusion_role_gcode', label: 'Change Extrusion Role G-code', rows: 4 },
     { key: 'pause_print_gcode', label: 'Pause Print G-code', rows: 4 },
+    { key: 'template_custom_gcode', label: 'Template Custom G-code', rows: 4 },
     { key: 'printing_by_object_gcode', label: 'Printing By Object G-code', rows: 4 },
     { key: 'timelapse_gcode', label: 'Timelapse G-code', rows: 4 },
   ];
@@ -412,6 +414,7 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         <SettingRow type="checkbox" label="Single Extruder MM Priming" checked={settings.single_extruder_multi_material_priming ?? false} onChange={(v) => onUpdate('single_extruder_multi_material_priming', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Multi-Material Support" checked={settings.support_multi_material ?? false} onChange={(v) => onUpdate('support_multi_material', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Manual Filament Change" checked={settings.manual_filament_change ?? false} onChange={(v) => onUpdate('manual_filament_change', v)} disabled={disabled} />
+        <SettingRow type="text" label="Bed Temperature Formula" value={settings.bed_temperature_formula ?? ''} onChange={(v) => onUpdate('bed_temperature_formula', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Purge in Prime Tower" checked={settings.purge_in_prime_tower ?? false} onChange={(v) => onUpdate('purge_in_prime_tower', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Enable Filament Ramming" checked={settings.enable_filament_ramming ?? false} onChange={(v) => onUpdate('enable_filament_ramming', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="High Current on Filament Swap" checked={settings.high_current_on_filament_swap ?? false} onChange={(v) => onUpdate('high_current_on_filament_swap', v)} disabled={disabled} />
@@ -486,6 +489,7 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
           <SettingRow type="number" label="Min Layer Height" value={settings.min_layer_height ?? 0.08} min={0.01} max={0.5} step={0.01} unit="mm" onChange={(v) => onUpdate('min_layer_height', v)} disabled={disabled} />
           <SettingRow type="number" label="Max Layer Height" value={settings.max_layer_height ?? 0.28} min={0.05} max={2.0} step={0.01} unit="mm" onChange={(v) => onUpdate('max_layer_height', v)} disabled={disabled} />
         </div>
+        <SettingRow type="number" label="Extruder Printable Height" value={settings.extruder_printable_height ?? 0} min={0} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('extruder_printable_height', v)} disabled={disabled} description="Per-extruder height limit; 0 = use machine height" />
       </div>
       <div className="py-1">
         <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Retraction</h4>
@@ -507,6 +511,7 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
         <div className="space-y-3">
           <SettingRow type="slider" label="Z Hop Height" value={settings.z_hop ?? 0.2} min={0} max={5} step={0.05} unit="mm" onChange={(v) => onUpdate('z_hop', v)} disabled={disabled} />
           <SettingRow type="text" label="Z Hop Types" value={settings.z_hop_types ?? ''} onChange={(v) => onUpdate('z_hop_types', v)} disabled={disabled} />
+          <SettingRow type="text" label="Retract Lift Enforce" value={settings.retract_lift_enforce ?? ''} onChange={(v) => onUpdate('retract_lift_enforce', v)} disabled={disabled} description="Enforce Z-lift on specified features" />
           <div className="grid grid-cols-2 gap-4">
             <SettingRow type="number" label="Lift Above Z" value={settings.retract_lift_above ?? 0} min={0} max={50} step={0.1} unit="mm" onChange={(v) => onUpdate('retract_lift_above', v)} disabled={disabled} />
             <SettingRow type="number" label="Lift Below Z" value={settings.retract_lift_below ?? 0} min={0} max={50} step={0.1} unit="mm" onChange={(v) => onUpdate('retract_lift_below', v)} disabled={disabled} />
@@ -562,7 +567,9 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="number" label="Accel E" value={settings.machine_max_acceleration_e ?? 5000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_e', v)} disabled={disabled} />
         </div>
         <div className="mt-3">
-          <SettingRow type="number" label="Accel Travel" value={settings.machine_max_acceleration_travel ?? 5000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_travel', v)} disabled={disabled} />
+          <SettingRow type="number" label="Accel Travel" value={settings.machine_max_acceleration_travel ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_travel', v)} disabled={disabled} />
+          <SettingRow type="number" label="Accel Extruding" value={settings.machine_max_acceleration_extruding ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_extruding', v)} disabled={disabled} />
+          <SettingRow type="number" label="Accel Retracting" value={settings.machine_max_acceleration_retracting ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_retracting', v)} disabled={disabled} />
         </div>
       </div>
       <div className="py-1">
