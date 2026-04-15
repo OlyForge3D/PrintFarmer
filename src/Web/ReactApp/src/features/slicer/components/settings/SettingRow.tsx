@@ -444,7 +444,7 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border min-w-10 text-center shrink-0">
+        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-r-lg min-w-10 text-center shrink-0">
           {unit}
         </span>
       )}
