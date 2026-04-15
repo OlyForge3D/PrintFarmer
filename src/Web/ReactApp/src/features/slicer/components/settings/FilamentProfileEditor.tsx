@@ -115,9 +115,9 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
       {/* View Mode Toggle + Category Tabs */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        {/* Category tabs - only shown in Advanced mode */}
+        {/* Category tabs - filtered by view mode */}
         <div className="flex gap-1 overflow-x-auto">
-          {viewMode === 'advanced' ? CATEGORY_TABS.map(cat => {
+          {(viewMode === 'advanced' ? CATEGORY_TABS : CATEGORY_TABS.filter(c => ['filament', 'cooling'].includes(c.id))).map(cat => {
             const isDirty = isCategoryDirty?.(cat.id) ?? false;
             return (
               <Button
@@ -137,20 +137,30 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
                 )}
               </Button>
             );
-          }) : <span className="text-[10px] text-pf-text-muted">Filament</span>}
+          })}
         </div>
 
-        {/* Simple/Advanced pill toggle */}
-        <div className="flex items-center gap-0 shrink-0 ml-2">
-          <Button variant="unstyled" size="sm" onClick={() => onViewModeChange?.('simple')} disabled={disabled}
-            className={`px-2 py-0.5 text-[10px] font-medium rounded-l-md border transition-colors ${
-              viewMode === 'simple' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-            }`}>Simple</Button>
-          <Button variant="unstyled" size="sm" onClick={() => onViewModeChange?.('advanced')} disabled={disabled}
-            className={`px-2 py-0.5 text-[10px] font-medium rounded-r-md -ml-px border transition-colors ${
-              viewMode === 'advanced' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-            }`}>Advanced</Button>
-        </div>
+        {/* OrcaSlicer-style Advanced toggle (atom icon) */}
+        <Button
+          variant="unstyled"
+          type="button"
+          onClick={() => {
+            const newMode = viewMode === 'simple' ? 'advanced' : 'simple';
+            onViewModeChange?.(newMode);
+            // Reset to first visible tab if current is hidden
+            if (newMode === 'simple' && !['filament', 'cooling'].includes(activeCategory)) {
+              setActiveCategory('filament');
+            }
+          }}
+          disabled={disabled}
+          className={`shrink-0 ml-2 p-1 rounded transition-colors ${
+            viewMode === 'advanced' ? 'text-pf-accent-2' : 'text-pf-text-muted hover:text-pf-text-secondary'
+          }`}
+          title={viewMode === 'simple' ? 'Switch to Advanced' : 'Switch to Simple'}
+          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
+        >
+          <img src="/icons/orcaslicer-advanced.svg" alt="Advanced" className="w-5 h-5" />
+        </Button>
       </div>
 
       {/* Tab Content - fixed height with scroll to prevent modal resizing */}
@@ -410,7 +420,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
       <SectionHeader title="Part cooling fan" />
       {show('fan_min_speed') && (
         <SettingRow
-          type="slider"
+          type="number"
           icon={<CoolingIcon />}
           label="Min Fan Speed"
           value={settings.fan_min_speed ?? 35}
@@ -439,7 +449,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
       )}
       {show('fan_max_speed') && (
         <SettingRow
-          type="slider"
+          type="number"
           icon={<CoolingIcon />}
           label="Max Fan Speed"
           value={settings.fan_max_speed ?? 100}

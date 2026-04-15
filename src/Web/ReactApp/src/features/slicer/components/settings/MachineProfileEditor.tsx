@@ -2,7 +2,7 @@
  * OrcaSlicer-style Machine Profile Editor
  * Simple | Advanced view modes with 6-tab SimplyPrint-style layout.
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Button, FormField, Textarea } from '@/common/components/ui';
 import { SettingRow, SectionHeader } from './SettingRow';
 import {
@@ -97,22 +97,33 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
     [settings, onChange],
   );
 
-  const categories: { id: MachineCategory; label: string; icon: React.ReactNode }[] = [
-    { id: 'basic_information', label: 'Basic Information', icon: <BuildVolumeIcon className="w-3 h-3 shrink-0" /> },
-    { id: 'machine_gcode', label: 'Machine G-code', icon: <GcodeIcon className="w-3 h-3 shrink-0" /> },
-    { id: 'multimaterial', label: 'Multimaterial', icon: <MultimaterialIcon className="w-3 h-3 shrink-0" /> },
-    { id: 'extruder', label: 'Extruder', icon: <NozzleIcon className="w-3 h-3 shrink-0" /> },
-    { id: 'motion_ability', label: 'Motion Ability', icon: <MotionIcon className="w-3 h-3 shrink-0" /> },
-    { id: 'notes', label: 'Notes', icon: <NotesIcon className="w-3 h-3 shrink-0" /> },
-  ];
+  const categories = useMemo(() => [
+    { id: 'basic_information' as MachineCategory, label: 'Basic Information', icon: <BuildVolumeIcon className="w-3 h-3 shrink-0" />, simpleVisible: true },
+    { id: 'machine_gcode' as MachineCategory, label: 'Machine G-code', icon: <GcodeIcon className="w-3 h-3 shrink-0" />, simpleVisible: false },
+    { id: 'multimaterial' as MachineCategory, label: 'Multimaterial', icon: <MultimaterialIcon className="w-3 h-3 shrink-0" />, simpleVisible: false },
+    { id: 'extruder' as MachineCategory, label: 'Extruder', icon: <NozzleIcon className="w-3 h-3 shrink-0" />, simpleVisible: true },
+    { id: 'motion_ability' as MachineCategory, label: 'Motion Ability', icon: <MotionIcon className="w-3 h-3 shrink-0" />, simpleVisible: true },
+    { id: 'notes' as MachineCategory, label: 'Notes', icon: <NotesIcon className="w-3 h-3 shrink-0" />, simpleVisible: false },
+  ], []);
+
+  const visibleCategories = viewMode === 'simple' ? categories.filter(c => c.simpleVisible) : categories;
+
+  // Reset to first visible tab when switching modes
+  const handleViewModeChange = useCallback((mode: MachineSettingsViewMode) => {
+    setViewMode(mode);
+    const visible = mode === 'simple' ? categories.filter(c => c.simpleVisible) : categories;
+    if (!visible.find(c => c.id === activeCategory)) {
+      setActiveCategory(visible[0].id);
+    }
+  }, [activeCategory, categories]);
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
       {/* View Mode Toggle + Category Tabs */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        {/* Category tabs - only shown in Advanced mode */}
+        {/* Category tabs */}
         <div className="flex gap-1 overflow-x-auto">
-          {viewMode === 'advanced' ? categories.map((cat) => {
+          {visibleCategories.map((cat) => {
             const isDirty = isCategoryDirty?.(cat.id) ?? false;
             return (
               <Button
@@ -132,55 +143,46 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
                 )}
               </Button>
             );
-          }) : <span className="text-[10px] text-pf-text-muted">Machine</span>}
+          })}
         </div>
 
-        {/* Simple/Advanced pill toggle */}
-        <div className="flex items-center gap-0 shrink-0 ml-2">
-          <Button variant="unstyled" size="sm" onClick={() => setViewMode('simple')} disabled={disabled}
-            className={`px-2 py-0.5 text-[10px] font-medium rounded-l-md border transition-colors ${
-              viewMode === 'simple' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-            }`}>Simple</Button>
-          <Button variant="unstyled" size="sm" onClick={() => setViewMode('advanced')} disabled={disabled}
-            className={`px-2 py-0.5 text-[10px] font-medium rounded-r-md -ml-px border transition-colors ${
-              viewMode === 'advanced' ? 'bg-pf-accent text-white border-pf-accent' : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-            }`}>Advanced</Button>
-        </div>
+        {/* OrcaSlicer-style Advanced toggle (atom icon) */}
+        <Button
+          variant="unstyled"
+          type="button"
+          onClick={() => handleViewModeChange(viewMode === 'simple' ? 'advanced' : 'simple')}
+          disabled={disabled}
+          className={`shrink-0 ml-2 p-1 rounded transition-colors ${
+            viewMode === 'advanced' ? 'text-pf-accent-2' : 'text-pf-text-muted hover:text-pf-text-secondary'
+          }`}
+          title={viewMode === 'simple' ? 'Switch to Advanced' : 'Switch to Simple'}
+          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
+        >
+          <img src="/icons/orcaslicer-advanced.svg" alt="Advanced" className="w-5 h-5" />
+        </Button>
       </div>
 
       <div className="p-2 h-96 overflow-y-auto">
-        {viewMode === 'simple' && (
-          <SimpleMachineSettingsPanel
-            settings={settings}
-            onUpdate={updateSetting}
-            disabled={disabled}
-          />
-        )}
-
-        {viewMode === 'advanced' && (
-          <>
-            <div className="">
-              {activeCategory === 'basic_information' && (
-                <BasicInformationTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
-              )}
-              {activeCategory === 'machine_gcode' && (
-                <MachineGcodeTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
-              )}
-              {activeCategory === 'multimaterial' && (
-                <MultimaterialTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
-              )}
-              {activeCategory === 'extruder' && (
-                <ExtruderTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
-              )}
-              {activeCategory === 'motion_ability' && (
-                <MotionAbilityTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
-              )}
-              {activeCategory === 'notes' && (
-                <NotesTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
-              )}
-            </div>
-          </>
-        )}
+        <div className="">
+          {activeCategory === 'basic_information' && (
+            <BasicInformationTab settings={settings} onUpdate={updateSetting} disabled={disabled} viewMode={viewMode} />
+          )}
+          {activeCategory === 'machine_gcode' && (
+            <MachineGcodeTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
+          )}
+          {activeCategory === 'multimaterial' && (
+            <MultimaterialTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
+          )}
+          {activeCategory === 'extruder' && (
+            <ExtruderTab settings={settings} onUpdate={updateSetting} disabled={disabled} viewMode={viewMode} />
+          )}
+          {activeCategory === 'motion_ability' && (
+            <MotionAbilityTab settings={settings} onUpdate={updateSetting} disabled={disabled} viewMode={viewMode} />
+          )}
+          {activeCategory === 'notes' && (
+            <NotesTab settings={settings} onUpdate={updateSetting} disabled={disabled} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -192,61 +194,15 @@ interface TabPanelProps {
   settings: Partial<OrcaMachineSettings>;
   onUpdate: <K extends keyof OrcaMachineSettings>(key: K, value: OrcaMachineSettings[K]) => void;
   disabled: boolean;
+  viewMode?: MachineSettingsViewMode;
 }
-
-// -- Simple mode ----------------------------------------------------------
-
-const SimpleMachineSettingsPanel: React.FC<
-  TabPanelProps
-> = ({ settings, onUpdate, disabled }) => (
-  <div className="">
-    <div className="py-1">
-      <SectionHeader icon={<BuildVolumeIcon className="w-5 h-5" />} title="Build Volume" />
-      <div className="py-1.5">
-        <div className="flex items-center gap-3">
-          <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Dimensions</span></div>
-          <div className="flex-1 grid grid-cols-3 gap-2">
-            <SettingRow type="number" label="" prefix="X" value={settings.bed_size_x ?? 220} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('bed_size_x', v)} disabled={disabled} />
-            <SettingRow type="number" label="" prefix="Y" value={settings.bed_size_y ?? 220} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('bed_size_y', v)} disabled={disabled} />
-            <SettingRow type="number" label="" prefix="Z" value={settings.printable_height ?? 250} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
-          </div>
-        </div>
-      </div>
-    </div>
-    <div className="py-1">
-      <SectionHeader icon={<NozzleIcon className="w-5 h-5" />} title="Nozzle" />
-      <div className="space-y-3">
-        <SettingRow type="select" label="Nozzle Size" value={String(settings.nozzle_size ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.25', label: '0.25 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.5', label: '0.5 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }, { value: '1.0', label: '1.0 mm' }]} onChange={(v) => onUpdate('nozzle_size', parseFloat(v))} disabled={disabled} />
-        <SettingRow type="select" label="Nozzle Volume Type" value={settings.nozzle_volume_type ?? 'standard'} options={[{ value: 'standard', label: 'Standard' }, { value: 'high_flow', label: 'High Flow' }]} onChange={(v) => onUpdate('nozzle_volume_type', v as OrcaMachineSettings['nozzle_volume_type'])} disabled={disabled} />
-        <SettingRow type="number" label="Nozzle HRC" value={settings.nozzle_hrc ?? 0} min={0} max={100} step={1} onChange={(v) => onUpdate('nozzle_hrc', v)} disabled={disabled} description="Rockwell C; 0 = brass" />
-      </div>
-    </div>
-    <div className="py-1">
-      <SectionHeader title="Capabilities" />
-      <div className="space-y-3">
-        <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Pellet-Modded Printer" checked={settings.pellet_modded_printer ?? false} onChange={(v) => onUpdate('pellet_modded_printer', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Chamber Temp Control" checked={settings.support_chamber_temp_control ?? false} onChange={(v) => onUpdate('support_chamber_temp_control', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Air Filtration" checked={settings.support_air_filtration ?? false} onChange={(v) => onUpdate('support_air_filtration', v)} disabled={disabled} />
-      </div>
-    </div>
-    <div className="py-1">
-      <SectionHeader title="Retraction" />
-      <div className="space-y-3">
-        <SettingRow type="slider" label="Retraction Length" value={settings.retraction_length ?? 0.8} min={0} max={10} step={0.1} unit="mm" onChange={(v) => onUpdate('retraction_length', v)} disabled={disabled} />
-        <SettingRow type="slider" label="Z Hop" value={settings.z_hop ?? 0.2} min={0} max={2} step={0.05} unit="mm" onChange={(v) => onUpdate('z_hop', v)} disabled={disabled} />
-        <SettingRow type="number" label="Long Retraction (Cutter)" value={settings.long_retractions_when_cut ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('long_retractions_when_cut', v)} disabled={disabled} />
-        <SettingRow type="text" label="Retraction Distances (Cut)" value={settings.retraction_distances_when_cut ?? ''} onChange={(v) => onUpdate('retraction_distances_when_cut', v)} disabled={disabled} description="Comma-separated" />
-      </div>
-    </div>
-  </div>
-);
 
 // -- Tab 1: Basic Information ---------------------------------------------
 
 const BasicInformationTab: React.FC<
   TabPanelProps
-> = ({ settings, onUpdate, disabled }) => {
+> = ({ settings, onUpdate, disabled, viewMode = 'advanced' }) => {
+  const adv = viewMode === 'advanced';
   const nozzleTypeOptions = Object.entries(NOZZLE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   const gcodeDialectOptions = Object.entries(GCODE_DIALECT_LABELS).map(([value, label]) => ({ value, label }));
   return (
@@ -255,24 +211,29 @@ const BasicInformationTab: React.FC<
       <div>
         <SectionHeader title="Printable Space" />
         <div className="">
-          <SettingRow type="text" label="Excluded Bed Area" value={settings.bed_exclude_area ?? ''} onChange={(v) => onUpdate('bed_exclude_area', v)} disabled={disabled} />
+          {adv && <SettingRow type="text" label="Excluded Bed Area" value={settings.bed_exclude_area ?? ''} onChange={(v) => onUpdate('bed_exclude_area', v)} disabled={disabled} />}
           <SettingRow type="number" label="Printable Height" value={settings.printable_height ?? 250} min={50} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
-          <div className="py-1.5">
-            <div className="flex items-center gap-3">
-              <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Best Object Position</span></div>
-              <div className="flex-1 grid grid-cols-2 gap-2">
-                <SettingRow type="number" label="" prefix="X" value={settings.best_object_pos_x ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_x', v)} disabled={disabled} />
-                <SettingRow type="number" label="" prefix="Y" value={settings.best_object_pos_y ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_y', v)} disabled={disabled} />
+          {adv && (
+            <>
+              <div className="py-1.5">
+                <div className="flex items-center gap-3">
+                  <div className="w-2/5 shrink-0"><span className="text-xs font-medium text-pf-text">Best Object Position</span></div>
+                  <div className="flex-1 grid grid-cols-2 gap-2">
+                    <SettingRow type="number" label="" prefix="X" value={settings.best_object_pos_x ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_x', v)} disabled={disabled} />
+                    <SettingRow type="number" label="" prefix="Y" value={settings.best_object_pos_y ?? 0.5} min={0} max={1} step={0.05} onChange={(v) => onUpdate('best_object_pos_y', v)} disabled={disabled} />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <SettingRow type="number" label="Z Offset" value={settings.z_offset ?? 0} min={-5} max={5} step={0.01} unit="mm" onChange={(v) => onUpdate('z_offset', v)} disabled={disabled} />
-          <SettingRow type="number" label="Preferred Orientation" value={settings.preferred_orientation ?? 0} min={0} max={360} step={1} unit="°" onChange={(v) => onUpdate('preferred_orientation', v)} disabled={disabled} />
+              <SettingRow type="number" label="Z Offset" value={settings.z_offset ?? 0} min={-5} max={5} step={0.01} unit="mm" onChange={(v) => onUpdate('z_offset', v)} disabled={disabled} />
+              <SettingRow type="number" label="Preferred Orientation" value={settings.preferred_orientation ?? 0} min={0} max={360} step={1} unit="°" onChange={(v) => onUpdate('preferred_orientation', v)} disabled={disabled} />
+            </>
+          )}
         </div>
       </div>
 
-      {/* ── Advanced ────────────────────────────────────────────────── */}
+      {/* ── Advanced (all Advanced-only) ─────────────────────────────── */}
+      {adv && (<>
       <div>
         <SectionHeader title="Advanced" />
         <div className="">
@@ -287,7 +248,7 @@ const BasicInformationTab: React.FC<
         </div>
       </div>
 
-      {/* ── Cooling Fan ─────────────────────────────────────────────── */}
+      {/* ── Cooling Fan (Advanced) ──────────────────────────────────── */}
       <div>
         <SectionHeader title="Cooling Fan" />
         <div className="">
@@ -353,6 +314,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="checkbox" label="Support Air Filtration" checked={settings.support_air_filtration ?? false} onChange={(v) => onUpdate('support_air_filtration', v)} disabled={disabled} />
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };
@@ -458,10 +421,12 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
 
 // -- Tab 4: Extruder ------------------------------------------------------
 
-const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) => {
+const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled, viewMode = 'advanced' }) => {
+  const adv = viewMode === 'advanced';
   const nozzleTypeOptions = Object.entries(NOZZLE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
+      {adv && (<>
       <div className="py-1">
         <SectionHeader icon={<NozzleIcon className="w-5 h-5" />} title="Extruder" />
         <div className="space-y-3">
@@ -488,47 +453,39 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
         </div>
         <SettingRow type="number" label="Extruder Printable Height" value={settings.extruder_printable_height ?? 0} min={0} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('extruder_printable_height', v)} disabled={disabled} description="Per-extruder height limit; 0 = use machine height" />
       </div>
+      </>)}
       <div className="py-1">
         <SectionHeader title="Retraction" />
         <div className="space-y-3">
-          <SettingRow type="slider" label="Retraction Length" value={settings.retraction_length ?? 0.8} min={0} max={10} step={0.1} unit="mm" onChange={(v) => onUpdate('retraction_length', v)} disabled={disabled} />
-          <SettingRow type="slider" label="Retraction Speed" value={settings.retraction_speed ?? 35} min={1} max={150} step={1} unit="mm/s" onChange={(v) => onUpdate('retraction_speed', v)} disabled={disabled} />
-          <SettingRow type="slider" label="Deretraction Speed" value={settings.deretraction_speed ?? 25} min={1} max={150} step={1} unit="mm/s" onChange={(v) => onUpdate('deretraction_speed', v)} disabled={disabled} />
+          <SettingRow type="number" label="Retraction Length" value={settings.retraction_length ?? 0.8} min={0} max={10} step={0.1} unit="mm" onChange={(v) => onUpdate('retraction_length', v)} disabled={disabled} />
+          {adv && (<>
+          <SettingRow type="number" label="Retraction Speed" value={settings.retraction_speed ?? 35} min={1} max={150} step={1} unit="mm/s" onChange={(v) => onUpdate('retraction_speed', v)} disabled={disabled} />
+          <SettingRow type="number" label="Deretraction Speed" value={settings.deretraction_speed ?? 25} min={1} max={150} step={1} unit="mm/s" onChange={(v) => onUpdate('deretraction_speed', v)} disabled={disabled} />
           <SettingRow type="number" label="Retract Restart Extra" value={settings.retract_restart_extra ?? 0} min={-2} max={2} step={0.01} unit="mm" onChange={(v) => onUpdate('retract_restart_extra', v)} disabled={disabled} />
           <SettingRow type="number" label="Retraction Min Travel" value={settings.retraction_minimum_travel ?? 2} min={0} max={20} step={0.5} unit="mm" onChange={(v) => onUpdate('retraction_minimum_travel', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Retract When Changing Layer" checked={settings.retract_when_changing_layer ?? false} onChange={(v) => onUpdate('retract_when_changing_layer', v)} disabled={disabled} />
-          <div className="grid grid-cols-2 gap-4">
-            <SettingRow type="number" label="Length (Toolchange)" value={settings.retract_length_toolchange ?? 10} min={0} max={30} step={0.5} unit="mm" onChange={(v) => onUpdate('retract_length_toolchange', v)} disabled={disabled} />
-            <SettingRow type="number" label="Restart Extra (Toolchange)" value={settings.retract_restart_extra_toolchange ?? 0} min={0} max={5} step={0.1} unit="mm" onChange={(v) => onUpdate('retract_restart_extra_toolchange', v)} disabled={disabled} />
-          </div>
+          <SettingRow type="checkbox" label="Wipe on Retract" checked={settings.wipe ?? false} onChange={(v) => onUpdate('wipe', v)} disabled={disabled} />
+          <SettingRow type="number" label="Wipe Distance" value={settings.wipe_distance ?? 0} min={0} max={10} step={0.5} unit="mm" onChange={(v) => onUpdate('wipe_distance', v)} disabled={disabled} />
+          <SettingRow type="number" label="Retract Before Wipe" value={settings.retract_before_wipe ?? 0} min={0} max={100} step={1} unit="%" onChange={(v) => onUpdate('retract_before_wipe', v)} disabled={disabled} />
+          </>)}
         </div>
       </div>
       <div className="py-1">
         <SectionHeader title="Z-Hop" />
         <div className="space-y-3">
-          <SettingRow type="slider" label="Z Hop Height" value={settings.z_hop ?? 0.2} min={0} max={5} step={0.05} unit="mm" onChange={(v) => onUpdate('z_hop', v)} disabled={disabled} />
+          <SettingRow type="number" label="Z Hop Height" value={settings.z_hop ?? 0.2} min={0} max={5} step={0.05} unit="mm" onChange={(v) => onUpdate('z_hop', v)} disabled={disabled} />
+          {adv && (<>
           <SettingRow type="text" label="Z Hop Types" value={settings.z_hop_types ?? ''} onChange={(v) => onUpdate('z_hop_types', v)} disabled={disabled} />
           <SettingRow type="text" label="Retract Lift Enforce" value={settings.retract_lift_enforce ?? ''} onChange={(v) => onUpdate('retract_lift_enforce', v)} disabled={disabled} description="Enforce Z-lift on specified features" />
+          <SettingRow type="checkbox" label="Travel Slope" checked={settings.travel_slope ?? false} onChange={(v) => onUpdate('travel_slope', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
             <SettingRow type="number" label="Lift Above Z" value={settings.retract_lift_above ?? 0} min={0} max={50} step={0.1} unit="mm" onChange={(v) => onUpdate('retract_lift_above', v)} disabled={disabled} />
             <SettingRow type="number" label="Lift Below Z" value={settings.retract_lift_below ?? 0} min={0} max={50} step={0.1} unit="mm" onChange={(v) => onUpdate('retract_lift_below', v)} disabled={disabled} />
           </div>
+          </>)}
         </div>
       </div>
-      <div className="py-1">
-        <SectionHeader title="Wipe" />
-        <div className="space-y-3">
-          <SettingRow type="checkbox" label="Wipe on Retract" checked={settings.wipe ?? false} onChange={(v) => onUpdate('wipe', v)} disabled={disabled} />
-          <div className="grid grid-cols-2 gap-4">
-            <SettingRow type="number" label="Wipe Distance" value={settings.wipe_distance ?? 0} min={0} max={10} step={0.5} unit="mm" onChange={(v) => onUpdate('wipe_distance', v)} disabled={disabled} />
-            <SettingRow type="number" label="Wipe Speed" value={settings.wipe_speed ?? 80} min={5} max={300} step={5} unit="mm/s" onChange={(v) => onUpdate('wipe_speed', v)} disabled={disabled} />
-          </div>
-          <SettingRow type="slider" label="Retract Before Wipe" value={settings.retract_before_wipe ?? 0} min={0} max={100} step={1} unit="%" onChange={(v) => onUpdate('retract_before_wipe', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Wipe Before External Loop" checked={settings.wipe_before_external_loop ?? false} onChange={(v) => onUpdate('wipe_before_external_loop', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Wipe On Loops" checked={settings.wipe_on_loops ?? false} onChange={(v) => onUpdate('wipe_on_loops', v)} disabled={disabled} />
-          <SettingRow type="checkbox" label="Travel Slope" checked={settings.travel_slope ?? false} onChange={(v) => onUpdate('travel_slope', v)} disabled={disabled} />
-        </div>
-      </div>
+      {adv && (
       <div className="py-1">
         <SectionHeader title="Retraction when switching material" />
         <div className="space-y-3">
@@ -538,16 +495,19 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
           <SettingRow type="text" label="Retraction Distances When Cut" value={settings.retraction_distances_when_cut ?? ''} onChange={(v) => onUpdate('retraction_distances_when_cut', v)} disabled={disabled} />
         </div>
       </div>
+      )}
     </>
   );
 };
 
 // -- Tab 5: Motion Ability ------------------------------------------------
 
-const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) => {
+const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled, viewMode = 'advanced' }) => {
+  const adv = viewMode === 'advanced';
   const motionTypeOptions = Object.entries(MOTION_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
+      {adv && (
       <div className="py-1">
         <SectionHeader title="Advanced" />
         <div className="space-y-3">
@@ -555,10 +515,11 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="select" label="Motion Type" value={settings.motion_type ?? 'cartesian'} options={motionTypeOptions} onChange={(v) => onUpdate('motion_type', v as OrcaMachineSettings['motion_type'])} disabled={disabled} />
         </div>
       </div>
+      )}
       <div className="py-1">
         <SectionHeader icon={<SpeedIcon className="w-5 h-5" />} title="Speed limitation" />
         <div className="space-y-3">
-          <SettingRow type="slider" label="Max Print Speed" value={settings.max_print_speed ?? 250} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_print_speed', v)} disabled={disabled} />
+          <SettingRow type="number" label="Max Print Speed" value={settings.max_print_speed ?? 250} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_print_speed', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
             <SettingRow type="number" label="Max Speed X" value={settings.machine_max_speed_x ?? 300} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('machine_max_speed_x', v)} disabled={disabled} />
             <SettingRow type="number" label="Max Speed Y" value={settings.machine_max_speed_y ?? 300} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('machine_max_speed_y', v)} disabled={disabled} />
@@ -576,7 +537,7 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="number" label="Accel E" value={settings.machine_max_acceleration_e ?? 5000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_e', v)} disabled={disabled} />
         </div>
         <div className="mt-3">
-          <SettingRow type="number" label="Accel Travel" value={settings.machine_max_acceleration_travel ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_travel', v)} disabled={disabled} />
+          {adv && <SettingRow type="number" label="Accel Travel" value={settings.machine_max_acceleration_travel ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_travel', v)} disabled={disabled} />}
           <SettingRow type="number" label="Accel Extruding" value={settings.machine_max_acceleration_extruding ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_extruding', v)} disabled={disabled} />
           <SettingRow type="number" label="Accel Retracting" value={settings.machine_max_acceleration_retracting ?? 5000} min={100} max={50000} step={100} unit="mm/s²" onChange={(v) => onUpdate('machine_max_acceleration_retracting', v)} disabled={disabled} />
         </div>
@@ -590,9 +551,10 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="number" label="Jerk E" value={settings.machine_max_jerk_e ?? 2.5} min={0} max={20} step={0.5} unit="mm/s" onChange={(v) => onUpdate('machine_max_jerk_e', v)} disabled={disabled} />
         </div>
         <div className="mt-3">
-          <SettingRow type="number" label="Max Junction Deviation" value={settings.max_junction_deviation ?? 0.013} min={0} max={1} step={0.001} unit="mm" onChange={(v) => onUpdate('max_junction_deviation', v)} disabled={disabled} description="Alternative to jerk" />
+          {adv && <SettingRow type="number" label="Max Junction Deviation" value={settings.max_junction_deviation ?? 0.013} min={0} max={1} step={0.001} unit="mm" onChange={(v) => onUpdate('max_junction_deviation', v)} disabled={disabled} description="Alternative to jerk" />}
         </div>
       </div>
+      {adv && (<>
       <div className="py-1">
         <SectionHeader title="Travel" />
         <div className="space-y-3">
@@ -617,6 +579,7 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         {settings.support_arc_movement && <SettingRow type="number" label="Arc Resolution" value={settings.arc_resolution ?? 0.1} min={0.01} max={1} step={0.01} unit="mm" onChange={(v) => onUpdate('arc_resolution', v)} disabled={disabled} />}
         </div>
       </div>
+      </>)}
     </>
   );
 };
