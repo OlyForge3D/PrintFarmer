@@ -142,7 +142,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
             onClick={() => onViewModeChange?.(mode.id)}
             disabled={disabled}
             className={`flex-1 px-4 py-3 text-sm font-medium rounded-none
-                       ${viewMode === mode.id ? 'rounded-t-lg' : ''}`}
+                       ${viewMode === mode.id ? 'border-b-2 !border-pf-accent-2 text-pf-accent-2' : 'text-pf-text-secondary'}`}
           >
             {mode.label}
           </Button>
@@ -161,6 +161,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
               onClick={() => setActiveCategory(cat.id)}
               disabled={disabled}
               className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
+                         ${activeCategory === cat.id ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40' : ''}
                          ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
             >
               {cat.label}
