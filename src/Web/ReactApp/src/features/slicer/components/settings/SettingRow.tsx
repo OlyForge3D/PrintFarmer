@@ -440,11 +440,11 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
           className={`w-full py-1.5 bg-pf-panel border border-pf-border
                      text-pf-text text-xs text-right
                      hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
-                     disabled:opacity-50 disabled:cursor-not-allowed ${unit ? 'rounded-l-lg border-r-0' : 'rounded-lg'} ${prefix ? 'pl-7 pr-3' : 'px-3'}`}
+                     disabled:opacity-50 disabled:cursor-not-allowed ${unit ? 'rounded-l-lg rounded-r-none border-r-0' : 'rounded-lg'} ${prefix ? 'pl-7 pr-3' : 'px-3'}`}
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-r-lg min-w-10 text-center shrink-0">
+        <span className="text-xs text-pf-text-muted px-2 py-1.5 bg-pf-border rounded-l-none rounded-r-lg min-w-10 text-center shrink-0">
           {unit}
         </span>
       )}
