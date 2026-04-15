@@ -670,7 +670,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
         
         <label 
           htmlFor={id} 
-          className={`text-sm transition-colors ${
+          className={`text-xs transition-colors ${
             isModified 
               ? 'text-pf-warning font-medium' 
               : 'text-pf-text'
@@ -690,6 +690,19 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
 /**
  * Section header for grouping compact settings
  */
+interface SectionHeaderProps {
+  icon?: React.ReactNode;
+  title: string;
+}
+
+/** Reusable section header — used in machine, filament, and process editors */
+export const SectionHeader: React.FC<SectionHeaderProps> = ({ icon, title }) => (
+  <h4 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2">
+    {icon && <span className="text-pf-accent-2">{icon}</span>}
+    {title}
+  </h4>
+);
+
 interface SettingSectionProps {
   icon?: React.ReactNode;
   title: string;
