@@ -164,7 +164,7 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
         </div>
       </div>
 
-      <div className="p-4 h-96 overflow-y-auto">
+      <div className="p-2 h-96 overflow-y-auto">
         {viewMode === 'simple' && (
           <SimpleMachineSettingsPanel
             settings={settings}
@@ -217,24 +217,24 @@ const SimpleMachineSettingsPanel: React.FC<
 > = ({ settings, onUpdate, disabled }) => (
   <div className="divide-y divide-pf-border">
     <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
       <div className="grid grid-cols-3 gap-4">
         <SettingRow type="number" label="X" value={settings.bed_size_x ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_x', v)} disabled={disabled} />
         <SettingRow type="number" label="Y" value={settings.bed_size_y ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_y', v)} disabled={disabled} />
         <SettingRow type="number" label="Z" value={settings.printable_height ?? 250} min={50} max={1000} step={1} onChange={(v) => onUpdate('printable_height', v)} disabled={disabled} />
       </div>
     </div>
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Nozzle</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Nozzle</h4>
       <div className="space-y-3">
         <SettingRow type="select" label="Nozzle Size" value={String(settings.nozzle_size ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.25', label: '0.25 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.5', label: '0.5 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }, { value: '1.0', label: '1.0 mm' }]} onChange={(v) => onUpdate('nozzle_size', parseFloat(v))} disabled={disabled} />
         <SettingRow type="select" label="Nozzle Volume Type" value={settings.nozzle_volume_type ?? 'standard'} options={[{ value: 'standard', label: 'Standard' }, { value: 'high_flow', label: 'High Flow' }]} onChange={(v) => onUpdate('nozzle_volume_type', v as OrcaMachineSettings['nozzle_volume_type'])} disabled={disabled} />
         <SettingRow type="number" label="Nozzle HRC" value={settings.nozzle_hrc ?? 0} min={0} max={100} step={1} onChange={(v) => onUpdate('nozzle_hrc', v)} disabled={disabled} description="Rockwell C; 0 = brass" />
       </div>
     </div>
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3">Capabilities</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Capabilities</h4>
       <div className="space-y-3">
         <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Pellet-Modded Printer" checked={settings.pellet_modded_printer ?? false} onChange={(v) => onUpdate('pellet_modded_printer', v)} disabled={disabled} />
@@ -242,8 +242,8 @@ const SimpleMachineSettingsPanel: React.FC<
         <SettingRow type="checkbox" label="Air Filtration" checked={settings.support_air_filtration ?? false} onChange={(v) => onUpdate('support_air_filtration', v)} disabled={disabled} />
       </div>
     </div>
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3">Retraction</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Retraction</h4>
       <div className="space-y-3">
         <SettingRow type="slider" label="Retraction Length" value={settings.retraction_length ?? 0.8} min={0} max={10} step={0.1} unit="mm" onChange={(v) => onUpdate('retraction_length', v)} disabled={disabled} />
         <SettingRow type="slider" label="Z Hop" value={settings.z_hop ?? 0.2} min={0} max={2} step={0.05} unit="mm" onChange={(v) => onUpdate('z_hop', v)} disabled={disabled} />
@@ -267,8 +267,8 @@ const BasicInformationTab: React.FC<
       <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
       <SettingRow type="text" label="Printer Variant" value={settings.printer_variant ?? ''} onChange={(v) => onUpdate('printer_variant', v)} disabled={disabled} />
       <SettingRow type="text" label="Inherits" value={settings.inherits ?? ''} onChange={(v) => onUpdate('inherits', v)} disabled={disabled} description="Parent profile name" />
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><BuildVolumeIcon className="w-5 h-5" />Build Volume (mm)</h4>
         <div className="grid grid-cols-3 gap-4">
           <SettingRow type="number" label="X" value={settings.bed_size_x ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_x', v)} disabled={disabled} />
           <SettingRow type="number" label="Y" value={settings.bed_size_y ?? 220} min={50} max={1000} step={1} onChange={(v) => onUpdate('bed_size_y', v)} disabled={disabled} />
@@ -278,8 +278,8 @@ const BasicInformationTab: React.FC<
       <SettingRow type="text" label="Printable Area" value={settings.printable_area ?? ''} onChange={(v) => onUpdate('printable_area', v)} disabled={disabled} description="Corner polygon" />
       <SettingRow type="select" label="Bed Shape" value={settings.bed_shape ?? 'rectangular'} options={[{ value: 'rectangular', label: 'Rectangular' }, { value: 'circular', label: 'Circular (Delta)' }]} onChange={(v) => onUpdate('bed_shape', v as OrcaMachineSettings['bed_shape'])} disabled={disabled} />
       <SettingRow type="select" label="Bed Origin" value={settings.bed_origin ?? 'corner'} options={[{ value: 'corner', label: 'Corner (0,0)' }, { value: 'center', label: 'Center' }]} onChange={(v) => onUpdate('bed_origin', v as OrcaMachineSettings['bed_origin'])} disabled={disabled} />
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Nozzle</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Nozzle</h4>
         <div className="space-y-3">
           <SettingRow type="select" label="Nozzle Size" value={String(settings.nozzle_size ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.25', label: '0.25 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.5', label: '0.5 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }, { value: '1.0', label: '1.0 mm' }]} onChange={(v) => onUpdate('nozzle_size', parseFloat(v))} disabled={disabled} />
           <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
@@ -287,8 +287,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="number" label="Nozzle HRC" value={settings.nozzle_hrc ?? 0} min={0} max={100} step={1} onChange={(v) => onUpdate('nozzle_hrc', v)} disabled={disabled} description="Rockwell C; 0 = brass" />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Print Bed</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Print Bed</h4>
         <div className="space-y-3">
           <SettingRow type="select" label="Bed Surface Type" value={settings.bed_type ?? 'textured_pei'} options={bedTypeOptions} onChange={(v) => onUpdate('bed_type', v as OrcaMachineSettings['bed_type'])} disabled={disabled} />
           <SettingRow type="checkbox" label="Has Bed Probe" checked={settings.has_bed_probe ?? true} onChange={(v) => onUpdate('has_bed_probe', v)} disabled={disabled} />
@@ -297,8 +297,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="text" label="Custom Bed Model" value={settings.bed_custom_model ?? ''} onChange={(v) => onUpdate('bed_custom_model', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Capabilities</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Capabilities</h4>
         <div className="space-y-3">
           <SettingRow type="checkbox" label="Support Multi Bed Types" checked={settings.support_multi_bed_types ?? false} onChange={(v) => onUpdate('support_multi_bed_types', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Pellet-Modded Printer" checked={settings.pellet_modded_printer ?? false} onChange={(v) => onUpdate('pellet_modded_printer', v)} disabled={disabled} />
@@ -307,8 +307,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="checkbox" label="Auxiliary Fan" checked={settings.auxiliary_fan ?? false} onChange={(v) => onUpdate('auxiliary_fan', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Temperature Limits</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Temperature Limits</h4>
         <div className="space-y-3">
           <SettingRow type="checkbox" label="Heated Bed" checked={settings.has_heated_bed ?? true} onChange={(v) => onUpdate('has_heated_bed', v)} disabled={disabled} />
           {settings.has_heated_bed && <SettingRow type="number" label="Max Bed Temp" value={settings.max_bed_temperature ?? 110} min={50} max={200} step={5} unit="C" onChange={(v) => onUpdate('max_bed_temperature', v)} disabled={disabled} />}
@@ -317,8 +317,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="number" label="Max Hotend Temp" value={settings.max_hotend_temperature ?? 300} min={200} max={500} step={10} unit="C" onChange={(v) => onUpdate('max_hotend_temperature', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Print Settings</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Print Settings</h4>
         <div className="space-y-3">
           <SettingRow type="number" label="Z Offset" value={settings.z_offset ?? 0} min={-5} max={5} step={0.01} unit="mm" onChange={(v) => onUpdate('z_offset', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Scan First Layer" checked={settings.scan_first_layer ?? false} onChange={(v) => onUpdate('scan_first_layer', v)} disabled={disabled} />
@@ -328,8 +328,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="number" label="Time Cost Multiplier" value={settings.time_cost ?? 1} min={0} max={10} step={0.1} onChange={(v) => onUpdate('time_cost', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Fan</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Fan</h4>
         <div className="space-y-3">
           <SettingRow type="number" label="Cooling Fan Count" value={settings.cooling_fan_count ?? 1} min={0} max={4} step={1} onChange={(v) => onUpdate('cooling_fan_count', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Has Chamber Fan" checked={settings.has_chamber_fan ?? false} onChange={(v) => onUpdate('has_chamber_fan', v)} disabled={disabled} />
@@ -338,8 +338,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="number" label="Fan Kickstart Duration" value={settings.fan_kickstart ?? 0} min={0} max={5} step={0.1} unit="s" onChange={(v) => onUpdate('fan_kickstart', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Extruder Clearance</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Extruder Clearance</h4>
         <div className="space-y-3">
           <SettingRow type="number" label="Clearance Radius" value={settings.extruder_clearance_radius ?? 45} min={0} max={150} step={1} unit="mm" onChange={(v) => onUpdate('extruder_clearance_radius', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
@@ -348,8 +348,8 @@ const BasicInformationTab: React.FC<
           </div>
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Features</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Features</h4>
         <div className="space-y-3">
           <SettingRow type="checkbox" label="Power Loss Recovery" checked={settings.power_loss_recovery ?? false} onChange={(v) => onUpdate('power_loss_recovery', v)} disabled={disabled} />
           <SettingRow type="checkbox" label="Filament Sensor" checked={settings.filament_sensor ?? false} onChange={(v) => onUpdate('filament_sensor', v)} disabled={disabled} />
@@ -360,8 +360,8 @@ const BasicInformationTab: React.FC<
           <SettingRow type="number" label="Adaptive Bed Mesh Margin" value={settings.adaptive_bed_mesh_margin ?? 2} min={0} max={20} step={1} unit="mm" onChange={(v) => onUpdate('adaptive_bed_mesh_margin', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Physical Dimensions</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Physical Dimensions</h4>
         <div className="grid grid-cols-3 gap-4">
           <SettingRow type="number" label="Width" value={settings.printer_width ?? 400} min={100} max={2000} step={10} unit="mm" onChange={(v) => onUpdate('printer_width', v)} disabled={disabled} />
           <SettingRow type="number" label="Depth" value={settings.printer_depth ?? 400} min={100} max={2000} step={10} unit="mm" onChange={(v) => onUpdate('printer_depth', v)} disabled={disabled} />
@@ -396,7 +396,7 @@ const MachineGcodeTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled
         <SettingRow type="checkbox" label="Use Firmware Retraction" checked={settings.use_firmware_retraction ?? false} onChange={(v) => onUpdate('use_firmware_retraction', v)} disabled={disabled} />
       </div>
       {gcodeFields.map(({ key, label, rows }) => (
-        <div key={key as string} className="py-3">
+        <div key={key as string} className="py-1">
           <FormField label={label} htmlFor={key as string}>
             <Textarea
               id={key as string}
@@ -417,7 +417,7 @@ const MachineGcodeTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled
 
 const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) => (
   <>
-    <div className="py-3">
+    <div className="py-1">
       <div className="space-y-3">
         <SettingRow type="checkbox" label="Single Extruder Multi-Material" checked={settings.single_extruder_multi_material ?? false} onChange={(v) => onUpdate('single_extruder_multi_material', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Single Extruder MM Priming" checked={settings.single_extruder_multi_material_priming ?? false} onChange={(v) => onUpdate('single_extruder_multi_material_priming', v)} disabled={disabled} />
@@ -428,8 +428,8 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         <SettingRow type="checkbox" label="High Current on Filament Swap" checked={settings.high_current_on_filament_swap ?? false} onChange={(v) => onUpdate('high_current_on_filament_swap', v)} disabled={disabled} />
       </div>
     </div>
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3">Cooling Tube &amp; Parking</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Cooling Tube &amp; Parking</h4>
       <div className="grid grid-cols-2 gap-4">
         <SettingRow type="number" label="Cooling Tube Retraction" value={settings.cooling_tube_retraction ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('cooling_tube_retraction', v)} disabled={disabled} />
         <SettingRow type="number" label="Cooling Tube Length" value={settings.cooling_tube_length ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('cooling_tube_length', v)} disabled={disabled} />
@@ -437,16 +437,16 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         <SettingRow type="number" label="Extra Loading Move" value={settings.extra_loading_move ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('extra_loading_move', v)} disabled={disabled} />
       </div>
     </div>
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3">Filament Change Timing</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Filament Change Timing</h4>
       <div className="grid grid-cols-3 gap-4">
         <SettingRow type="number" label="Load Time" value={settings.machine_load_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_load_filament_time', v)} disabled={disabled} />
         <SettingRow type="number" label="Unload Time" value={settings.machine_unload_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_unload_filament_time', v)} disabled={disabled} />
         <SettingRow type="number" label="Tool Change Time" value={settings.machine_tool_change_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_tool_change_time', v)} disabled={disabled} />
       </div>
     </div>
-    <div className="py-3">
-      <h4 className="text-sm font-medium text-pf-text-primary mb-3">Wipe Tower</h4>
+    <div className="py-1">
+      <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Wipe Tower</h4>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-4">
           <SettingRow type="select" label="Tower Type" value={settings.wipe_tower_type ?? 'sparse'} options={[{ value: 'sparse', label: 'Sparse' }, { value: 'dense', label: 'Dense' }]} onChange={(v) => onUpdate('wipe_tower_type', v as OrcaMachineSettings['wipe_tower_type'])} disabled={disabled} />
@@ -473,8 +473,8 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
   const nozzleTypeOptions = Object.entries(NOZZLE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Extruder</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><NozzleIcon className="w-5 h-5" />Extruder</h4>
         <div className="space-y-3">
           <SettingRow type="number" label="Extruder Count" value={settings.extruder_count ?? 1} min={1} max={8} step={1} onChange={(v) => onUpdate('extruder_count', v)} disabled={disabled} />
           <SettingRow type="select" label="Extruder Type" value={settings.extruder_type ?? 'direct_drive'} options={[{ value: 'direct_drive', label: 'Direct Drive' }, { value: 'bowden', label: 'Bowden' }]} onChange={(v) => onUpdate('extruder_type', v as OrcaMachineSettings['extruder_type'])} disabled={disabled} />
@@ -483,23 +483,23 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
           <SettingRow type="text" label="Extruder Colour" value={settings.extruder_colour ?? '#FF8000'} onChange={(v) => onUpdate('extruder_colour', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Nozzle</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Nozzle</h4>
         <div className="space-y-3">
           <SettingRow type="select" label="Nozzle Diameter" value={String(settings.nozzle_diameter ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }]} onChange={(v) => onUpdate('nozzle_diameter', parseFloat(v))} disabled={disabled} />
           <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
           <SettingRow type="number" label="Nozzle Volume" value={settings.nozzle_volume ?? 0} min={0} max={50} step={0.5} unit="mm3" onChange={(v) => onUpdate('nozzle_volume', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Layer Height Limits</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Layer Height Limits</h4>
         <div className="grid grid-cols-2 gap-4">
           <SettingRow type="number" label="Min Layer Height" value={settings.min_layer_height ?? 0.08} min={0.01} max={0.5} step={0.01} unit="mm" onChange={(v) => onUpdate('min_layer_height', v)} disabled={disabled} />
           <SettingRow type="number" label="Max Layer Height" value={settings.max_layer_height ?? 0.28} min={0.05} max={2.0} step={0.01} unit="mm" onChange={(v) => onUpdate('max_layer_height', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Retraction</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Retraction</h4>
         <div className="space-y-3">
           <SettingRow type="slider" label="Retraction Length" value={settings.retraction_length ?? 0.8} min={0} max={10} step={0.1} unit="mm" onChange={(v) => onUpdate('retraction_length', v)} disabled={disabled} />
           <SettingRow type="slider" label="Retraction Speed" value={settings.retraction_speed ?? 35} min={1} max={150} step={1} unit="mm/s" onChange={(v) => onUpdate('retraction_speed', v)} disabled={disabled} />
@@ -513,8 +513,8 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
           </div>
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Z-Hop</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Z-Hop</h4>
         <div className="space-y-3">
           <SettingRow type="slider" label="Z Hop Height" value={settings.z_hop ?? 0.2} min={0} max={5} step={0.05} unit="mm" onChange={(v) => onUpdate('z_hop', v)} disabled={disabled} />
           <SettingRow type="text" label="Z Hop Types" value={settings.z_hop_types ?? ''} onChange={(v) => onUpdate('z_hop_types', v)} disabled={disabled} />
@@ -524,8 +524,8 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) 
           </div>
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Wipe</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Wipe</h4>
         <div className="space-y-3">
           <SettingRow type="checkbox" label="Wipe on Retract" checked={settings.wipe ?? false} onChange={(v) => onUpdate('wipe', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
@@ -552,8 +552,8 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         <SettingRow type="checkbox" label="Emit Machine Limits to G-code" checked={settings.emit_machine_limits_to_gcode ?? true} onChange={(v) => onUpdate('emit_machine_limits_to_gcode', v)} disabled={disabled} />
         <SettingRow type="select" label="Motion Type" value={settings.motion_type ?? 'cartesian'} options={motionTypeOptions} onChange={(v) => onUpdate('motion_type', v as OrcaMachineSettings['motion_type'])} disabled={disabled} />
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><SpeedIcon className="w-5 h-5" />Max Speeds</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><SpeedIcon className="w-5 h-5" />Max Speeds</h4>
         <div className="space-y-3">
           <SettingRow type="slider" label="Max Print Speed" value={settings.max_print_speed ?? 250} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_print_speed', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
@@ -564,8 +564,8 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           </div>
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3 flex items-center gap-2"><AccelerationIcon className="w-5 h-5" />Max Accelerations</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1 flex items-center gap-2"><AccelerationIcon className="w-5 h-5" />Max Accelerations</h4>
         <div className="grid grid-cols-2 gap-4">
           <SettingRow type="number" label="Accel X" value={settings.machine_max_acceleration_x ?? 3000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_x', v)} disabled={disabled} />
           <SettingRow type="number" label="Accel Y" value={settings.machine_max_acceleration_y ?? 3000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_y', v)} disabled={disabled} />
@@ -576,8 +576,8 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="number" label="Accel Travel" value={settings.machine_max_acceleration_travel ?? 5000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('machine_max_acceleration_travel', v)} disabled={disabled} />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Max Jerk</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Max Jerk</h4>
         <div className="grid grid-cols-2 gap-4">
           <SettingRow type="number" label="Jerk X" value={settings.machine_max_jerk_x ?? 8} min={0} max={50} step={0.5} unit="mm/s" onChange={(v) => onUpdate('machine_max_jerk_x', v)} disabled={disabled} />
           <SettingRow type="number" label="Jerk Y" value={settings.machine_max_jerk_y ?? 8} min={0} max={50} step={0.5} unit="mm/s" onChange={(v) => onUpdate('machine_max_jerk_y', v)} disabled={disabled} />
@@ -588,8 +588,8 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
           <SettingRow type="number" label="Max Junction Deviation" value={settings.max_junction_deviation ?? 0.013} min={0} max={1} step={0.001} unit="mm" onChange={(v) => onUpdate('max_junction_deviation', v)} disabled={disabled} description="Alternative to jerk" />
         </div>
       </div>
-      <div className="py-3">
-        <h4 className="text-sm font-medium text-pf-text-primary mb-3">Travel</h4>
+      <div className="py-1">
+        <h4 className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wide mb-1">Travel</h4>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-4">
             <SettingRow type="number" label="Travel Speed" value={settings.travel_speed ?? 200} min={50} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('travel_speed', v)} disabled={disabled} />
@@ -616,7 +616,7 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
 // -- Tab 6: Notes ---------------------------------------------------------
 
 const NotesTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) => (
-  <div className="py-3">
+  <div className="py-1">
     <FormField label="Printer Notes" htmlFor="printer_notes">
       <Textarea
         id="printer_notes"

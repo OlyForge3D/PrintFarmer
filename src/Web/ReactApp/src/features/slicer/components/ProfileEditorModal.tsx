@@ -58,29 +58,53 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
   return `${baseName} (Custom)`;
 }
 
+/** Coerce raw settings values: unwrap arrays, parse numeric strings, convert "0"/"1" booleans */
+function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<string>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, rawValue] of Object.entries(raw)) {
+    let value = Array.isArray(rawValue) && rawValue.length > 0 ? rawValue[0] : rawValue;
+    if (typeof value === 'string') {
+      if (booleanKeys.has(key)) {
+        value = value === '1' || value === 'true';
+      } else if (value !== '' && !isNaN(Number(value))) {
+        value = Number(value);
+      }
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
 function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null): Partial<OrcaMachineSettings> {
   if (!profile) return DEFAULT_ORCA_MACHINE_SETTINGS;
 
-  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+  const machineBooleanKeys = new Set([
+    'support_multi_bed_types', 'pellet_modded_printer', 'support_chamber_temp_control',
+    'support_air_filtration', 'scan_first_layer', 'disable_m73', 'use_relative_e_distances',
+    'use_firmware_retraction', 'fan_speedup_overhangs', 'auxiliary_fan',
+    'single_extruder_multi_material', 'manual_filament_change', 'purge_in_prime_tower',
+    'enable_filament_ramming', 'high_current_on_filament_swap', 'retract_when_changing_layer',
+    'wipe', 'travel_slope', 'emit_machine_limits_to_gcode', 'resonance_avoidance',
+    'wipe_before_external_loop',
+  ]);
+
+  const profileSettings = coerceSettingsValues(
+    (profile.settings ?? {}) as Record<string, unknown>,
+    machineBooleanKeys,
+  );
 
   return {
     ...DEFAULT_ORCA_MACHINE_SETTINGS,
+    ...profileSettings,
     printer_model: profile.printerModel ?? '',
     nozzle_diameter: profile.nozzleDiameter ?? DEFAULT_ORCA_MACHINE_SETTINGS.nozzle_diameter,
-    ...profileSettings,
   };
 }
 
 function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | null): Partial<OrcaFilamentSettings> {
   if (!profile) return DEFAULT_ORCA_FILAMENT_SETTINGS;
 
-  const rawSettings = (profile.settings ?? {}) as Record<string, unknown>;
-
-  // Coerce values from the settings bag:
-  // - Arrays → first element (OrcaSlicer stores some strings as ["value"])
-  // - Numeric strings → numbers (backend serializes all values as strings)
-  // - "0"/"1" for known boolean fields → booleans
-  const booleanKeys = new Set([
+  const filamentBooleanKeys = new Set([
     'enable_pressure_advance', 'adaptive_pressure_advance', 'adaptive_pressure_advance_overhangs',
     'filament_soluble', 'filament_is_support', 'activate_chamber_temp_control',
     'filament_adaptive_volumetric_speed', 'reduce_fan_stop_start_freq', 'enable_overhang_bridge_fan',
@@ -90,25 +114,14 @@ function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | nul
     'filament_multitool_ramming',
   ]);
 
-  const profileSettings: Record<string, unknown> = {};
-  for (const [key, rawValue] of Object.entries(rawSettings)) {
-    let value = Array.isArray(rawValue) && rawValue.length > 0 ? rawValue[0] : rawValue;
-
-    if (typeof value === 'string') {
-      if (booleanKeys.has(key)) {
-        value = value === '1' || value === 'true';
-      } else if (value !== '' && !isNaN(Number(value))) {
-        value = Number(value);
-      }
-    }
-
-    profileSettings[key] = value;
-  }
+  const profileSettings = coerceSettingsValues(
+    (profile.settings ?? {}) as Record<string, unknown>,
+    filamentBooleanKeys,
+  );
 
   return {
     ...DEFAULT_ORCA_FILAMENT_SETTINGS,
     ...profileSettings,
-    // Typed overrides AFTER spread so they take precedence over raw values
     filament_type: profile.material || DEFAULT_ORCA_FILAMENT_SETTINGS.filament_type,
     filament_vendor: profile.manufacturer,
     nozzle_temperature: profile.nozzleTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.nozzle_temperature,
