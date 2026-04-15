@@ -219,7 +219,7 @@ const FilamentTab: React.FC<TabProps & {
       {/* Basic Information */}
       <div>
         <SectionHeader title="Basic Information" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           {show('name') && (
             <SettingRow type="text" icon={<FilamentIcon />} label="Profile Name" value={settings.name ?? ''} onChange={v => update('name', v)} disabled={disabled} />
           )}
@@ -269,7 +269,7 @@ const FilamentTab: React.FC<TabProps & {
       {(show('filament_shrink') || show('filament_shrinkage_compensation_z')) && (
         <div>
           <SectionHeader title="Shrinkage Compensation" />
-          <div className="divide-y divide-pf-border">
+          <div className="">
             {show('filament_shrink') && (
               <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (XY)" value={settings.filament_shrink ?? 0} onChange={v => update('filament_shrink', v)} min={0} max={10} step={0.1} unit="%" disabled={disabled} />
             )}
@@ -283,7 +283,7 @@ const FilamentTab: React.FC<TabProps & {
       {/* Temperature */}
       <div>
         <SectionHeader title="Temperature" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           {show('nozzle_temperature_initial_layer') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp – First Layer" value={settings.nozzle_temperature_initial_layer ?? 215} onChange={v => update('nozzle_temperature_initial_layer', v)} min={150} max={400} step={5} unit="°C" disabled={disabled} />
           )}
@@ -308,7 +308,7 @@ const FilamentTab: React.FC<TabProps & {
       {/* Flow */}
       <div>
         <SectionHeader title="Flow" />
-        <div className="divide-y divide-pf-border">
+        <div className="">
           {show('filament_flow_ratio') && (
             <SettingRow type="number" icon={<FlowIcon />} label="Flow Ratio" value={settings.filament_flow_ratio ?? 1.0} onChange={v => update('filament_flow_ratio', v)} min={0.5} max={2.0} step={0.01} disabled={disabled} />
           )}
@@ -331,7 +331,7 @@ const FilamentTab: React.FC<TabProps & {
       {show('enable_pressure_advance') && (
         <div>
           <SectionHeader title="Pressure Advance" />
-          <div className="divide-y divide-pf-border">
+          <div className="">
             <SettingRow type="checkbox" icon={<PrecisionIcon />} label="Enable Pressure Advance" checked={settings.enable_pressure_advance ?? false} onChange={v => update('enable_pressure_advance', v)} disabled={disabled} />
             {settings.enable_pressure_advance && (
               <>
@@ -367,7 +367,7 @@ const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =>
   if (!anyVisible) return <EmptyMode />;
 
   return (
-    <div className="divide-y divide-pf-border">
+    <div className="">
       {show('close_fan_the_first_x_layers') && (
         <SettingRow
           type="number"
@@ -631,7 +631,7 @@ const SettingOverridesTab: React.FC<TabProps> = ({ settings, update, disabled, s
   if (!anyVisible) return <EmptyMode />;
 
   return (
-    <div className="divide-y divide-pf-border">
+    <div className="">
       {show('filament_retraction_length') && (
         <SettingRow
           type="number"
@@ -934,11 +934,11 @@ const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =
         />
       </div>
 
-      <div className="divide-y divide-pf-border border border-pf-border rounded-lg">
+      <div className="border border-pf-border rounded-lg">
         <div className="px-4 py-2">
           <h4 className="text-sm font-medium text-pf-text-primary">Per-Feature Flow Ratios</h4>
         </div>
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow
             type="checkbox"
             icon={<FlowIcon />}
@@ -965,11 +965,11 @@ const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) =
         </div>
       </div>
 
-      <div className="divide-y divide-pf-border border border-pf-border rounded-lg">
+      <div className="border border-pf-border rounded-lg">
         <div className="px-4 py-2">
           <h4 className="text-sm font-medium text-pf-text-primary">Miscellaneous</h4>
         </div>
-        <div className="divide-y divide-pf-border">
+        <div className="">
           <SettingRow
             type="number"
             icon={<FilamentIcon />}
@@ -1105,7 +1105,7 @@ const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show
   if (!show('filament_minimal_purge_on_wipe_tower')) return <EmptyMode />;
 
   return (
-    <div className="divide-y divide-pf-border">
+    <div className="">
       <SettingRow
         type="number"
         icon={<FlowIcon />}
