@@ -74,15 +74,22 @@ function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null)
 function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | null): Partial<OrcaFilamentSettings> {
   if (!profile) return DEFAULT_ORCA_FILAMENT_SETTINGS;
 
-  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+  const rawSettings = (profile.settings ?? {}) as Record<string, unknown>;
+
+  // Normalize array values to their first element (OrcaSlicer stores some strings as ["value"])
+  const profileSettings: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rawSettings)) {
+    profileSettings[key] = Array.isArray(value) && value.length > 0 ? value[0] : value;
+  }
 
   return {
     ...DEFAULT_ORCA_FILAMENT_SETTINGS,
+    ...profileSettings,
+    // Typed overrides AFTER spread so they take precedence over raw array values
     filament_type: profile.material || DEFAULT_ORCA_FILAMENT_SETTINGS.filament_type,
     filament_vendor: profile.manufacturer,
     nozzle_temperature: profile.nozzleTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.nozzle_temperature,
     hot_plate_temp: profile.bedTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.hot_plate_temp,
-    ...profileSettings,
   };
 }
 
@@ -205,7 +212,7 @@ export function ProfileEditorModal({
       isOpen={isOpen}
       onClose={onClose}
       title={modalTitle}
-      size="full"
+      size="xl"
       maxHeight="max-h-[85vh]"
       footer={
         <div className="flex items-center justify-between w-full">
