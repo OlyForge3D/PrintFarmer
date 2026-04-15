@@ -152,17 +152,19 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
             }
           }}
           disabled={disabled}
-          className="flex items-center gap-1.5 shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
+          className="shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
           title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
           aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
         >
-          <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
-          <span className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
-            viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
-          }`}>
-            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
-              viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
-            }`} />
+          <span className="inline-flex items-center gap-1.5">
+            <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
+            <span className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
+              viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
+            }`}>
+              <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
+                viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
+              }`} />
+            </span>
           </span>
         </Button>
       </div>
