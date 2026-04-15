@@ -43,6 +43,11 @@ public class OrcaProfilesService : ISlicerProfilesService
     private readonly Dictionary<string, Dictionary<string, string>> _profilePathLookupCache = new();
     private readonly Lock _pathLookupCacheLock = new();
 
+    // Cache for filesystem-based profile lookups (fallback when manifest doesn't contain the parent)
+    // Key: manufacturer directory path, Value: dictionary of profile name → full file path
+    private readonly Dictionary<string, Dictionary<string, string>> _filesystemLookupCache = new();
+    private readonly Lock _filesystemLookupCacheLock = new();
+
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
     private List<MachineModelProfileDto>? _allMachineModelProfilesCache;
     private List<MachineProfileDto>? _allMachineProfilesCache;
@@ -828,7 +833,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     /// <summary>
     /// Find a parent profile by looking up its name in the manufacturer's manifest file.
-    /// The {Manufacturer}.json file contains name → sub_path mappings for all profiles.
+    /// Falls back to filesystem scan within the manufacturer directory, then across all manufacturers.
     /// </summary>
     private string? FindParentProfile(string childFilePath, string parentProfileName)
     {
@@ -842,22 +847,101 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         string manufacturerName = Path.GetFileName(manufacturerDir);
 
-        // Build or retrieve the profile path lookup for this manufacturer
+        // 1. Look up in the manufacturer's manifest (fast path - most profiles are here)
         Dictionary<string, string>? lookup = GetOrBuildProfilePathLookup(manufacturerName, manufacturerDir);
-        if (lookup == null)
-        {
-            _logger.LogDebug("No manifest found for manufacturer '{ManufacturerName}'", manufacturerName);
-            return null;
-        }
-
-        // Look up the parent profile name in the manifest
-        if (lookup.TryGetValue(parentProfileName, out string? parentPath))
+        if (lookup != null && lookup.TryGetValue(parentProfileName, out string? parentPath))
         {
             return parentPath;
         }
 
-        // Not found in manifest - this is expected for some base profiles that may be shared
-        _logger.LogDebug("Parent profile '{ParentProfileName}' not found in {ManufacturerName} manifest", parentProfileName, manufacturerName);
+        // 2. Fallback: scan the manufacturer's directory recursively for a matching .json file
+        //    Handles profiles on disk but not listed in the manifest
+        Dictionary<string, string> fsLookup = GetOrBuildFilesystemLookup(manufacturerDir);
+        if (fsLookup.TryGetValue(parentProfileName, out string? fsPath))
+        {
+            _logger.LogDebug("Found parent profile '{ParentProfileName}' via filesystem scan in {ManufacturerName}", parentProfileName, manufacturerName);
+            return fsPath;
+        }
+
+        // 3. Fallback: search across ALL manufacturer directories
+        //    Handles cross-manufacturer inheritance (e.g., Elegoo inheriting fdm_filament_tpu from BBL)
+        string? crossMfgPath = FindParentProfileAcrossManufacturers(parentProfileName, manufacturerDir);
+        if (crossMfgPath != null)
+        {
+            _logger.LogDebug("Found parent profile '{ParentProfileName}' in different manufacturer directory: {Path}", parentProfileName, crossMfgPath);
+            return crossMfgPath;
+        }
+
+        _logger.LogDebug("Parent profile '{ParentProfileName}' not found in {ManufacturerName} or any other manufacturer", parentProfileName, manufacturerName);
+        return null;
+    }
+
+    /// <summary>
+    /// Build or retrieve a filesystem-based lookup for a manufacturer directory.
+    /// Scans all .json files recursively and maps filename (without extension) → full path.
+    /// </summary>
+    private Dictionary<string, string> GetOrBuildFilesystemLookup(string manufacturerDir)
+    {
+        lock (_filesystemLookupCacheLock)
+        {
+            if (_filesystemLookupCache.TryGetValue(manufacturerDir, out Dictionary<string, string>? cached))
+            {
+                return cached;
+            }
+        }
+
+        Dictionary<string, string> lookup = new(StringComparer.Ordinal);
+
+        try
+        {
+            foreach (string filePath in Directory.EnumerateFiles(manufacturerDir, "*.json", SearchOption.AllDirectories))
+            {
+                string profileName = Path.GetFileNameWithoutExtension(filePath);
+
+                // First occurrence wins (avoids overwriting with duplicates)
+                lookup.TryAdd(profileName, filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Failed to scan manufacturer directory {Dir}: {Message}", manufacturerDir, ex.Message);
+        }
+
+        lock (_filesystemLookupCacheLock)
+        {
+            _filesystemLookupCache[manufacturerDir] = lookup;
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// Search across all manufacturer directories for a parent profile by filename.
+    /// Skips the specified manufacturer directory (already searched).
+    /// </summary>
+    private string? FindParentProfileAcrossManufacturers(string parentProfileName, string excludeManufacturerDir)
+    {
+        try
+        {
+            foreach (string mfgDir in Directory.EnumerateDirectories(_orcaProfilesPath))
+            {
+                if (string.Equals(Path.GetFullPath(mfgDir), Path.GetFullPath(excludeManufacturerDir), StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> fsLookup = GetOrBuildFilesystemLookup(mfgDir);
+                if (fsLookup.TryGetValue(parentProfileName, out string? path))
+                {
+                    return path;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Failed to search across manufacturer directories: {Message}", ex.Message);
+        }
+
         return null;
     }
 
@@ -1782,6 +1866,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// <summary>
     /// Extracts the manufacturer name from a filament profile name.
     /// OrcaSlicer filament names follow the pattern: "Manufacturer Material @Variant"
+    /// </summary>
     /// <summary>
     /// Normalizes filament vendor names to match OrcaSlicer UI conventions.
     /// For example, "Bambu Lab" becomes "Bambu", "OrcaFilamentLibrary" becomes "Generic".

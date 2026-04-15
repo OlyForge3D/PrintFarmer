@@ -21,12 +21,10 @@ import { Button, Input, Alert } from '@/common/components/ui';
 import { FilamentProfileEditor } from '@/features/slicer/components/settings/FilamentProfileEditor';
 import type { FilamentSettingsViewMode } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import { 
-  DEFAULT_ORCA_FILAMENT_SETTINGS, 
   type OrcaFilamentSettings,
 } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import { MachineProfileEditor } from '@/features/slicer/components/settings/MachineProfileEditor';
 import { 
-  DEFAULT_ORCA_MACHINE_SETTINGS,
   type OrcaMachineSettings,
 } from '@/features/slicer/components/settings/machineSettingsTypes';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
@@ -100,7 +98,7 @@ function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<str
 }
 
 function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null): Partial<OrcaMachineSettings> {
-  if (!profile) return DEFAULT_ORCA_MACHINE_SETTINGS;
+  if (!profile) return {};
 
   const machineBooleanKeys = new Set([
     'support_multi_bed_types', 'pellet_modded_printer', 'support_chamber_temp_control',
@@ -118,15 +116,14 @@ function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null)
   );
 
   return {
-    ...DEFAULT_ORCA_MACHINE_SETTINGS,
     ...profileSettings,
     printer_model: profile.printerModel ?? '',
-    nozzle_diameter: profile.nozzleDiameter ?? DEFAULT_ORCA_MACHINE_SETTINGS.nozzle_diameter,
+    nozzle_diameter: profile.nozzleDiameter,
   };
 }
 
 function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | null): Partial<OrcaFilamentSettings> {
-  if (!profile) return DEFAULT_ORCA_FILAMENT_SETTINGS;
+  if (!profile) return {};
 
   const filamentBooleanKeys = new Set([
     'enable_pressure_advance', 'adaptive_pressure_advance', 'adaptive_pressure_advance_overhangs',
@@ -144,12 +141,11 @@ function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | nul
   );
 
   return {
-    ...DEFAULT_ORCA_FILAMENT_SETTINGS,
     ...profileSettings,
-    filament_type: profile.material || DEFAULT_ORCA_FILAMENT_SETTINGS.filament_type,
+    filament_type: profile.material || '',
     filament_vendor: profile.manufacturer,
-    nozzle_temperature: profile.nozzleTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.nozzle_temperature,
-    hot_plate_temp: profile.bedTemperature ?? DEFAULT_ORCA_FILAMENT_SETTINGS.hot_plate_temp,
+    nozzle_temperature: profile.nozzleTemperature,
+    hot_plate_temp: profile.bedTemperature,
   };
 }
 
@@ -169,8 +165,8 @@ export function ProfileEditorModal({
   const [saveError, setSaveError] = useState<string | null>(null);
   
   // Settings state for each profile type
-  const [machineSettings, setMachineSettings] = useState<Partial<OrcaMachineSettings>>(DEFAULT_ORCA_MACHINE_SETTINGS);
-  const [filamentSettings, setFilamentSettings] = useState<Partial<OrcaFilamentSettings>>(DEFAULT_ORCA_FILAMENT_SETTINGS);
+  const [machineSettings, setMachineSettings] = useState<Partial<OrcaMachineSettings>>({});
+  const [filamentSettings, setFilamentSettings] = useState<Partial<OrcaFilamentSettings>>({});
   
   // Track if settings have been modified
   const [hasChanges, setHasChanges] = useState(false);
@@ -189,9 +185,9 @@ export function ProfileEditorModal({
       // Prefill editor with selected profile values when available
       if (profileType === 'machine') {
         setMachineSettings(convertOrcaMachineProfileToSettings(originalProfile as OrcaMachineProfile | null));
-        setFilamentSettings(DEFAULT_ORCA_FILAMENT_SETTINGS);
+        setFilamentSettings({});
       } else {
-        setMachineSettings(DEFAULT_ORCA_MACHINE_SETTINGS);
+        setMachineSettings({});
         setFilamentSettings(convertOrcaFilamentProfileToSettings(originalProfile as OrcaFilamentProfile | null));
       }
     }
