@@ -16,7 +16,6 @@ import type {
 } from './machineSettingsTypes';
 import {
   GCODE_DIALECT_LABELS,
-  MOTION_TYPE_LABELS,
   NOZZLE_TYPE_LABELS,
 } from './machineSettingsTypes';
 
@@ -330,7 +329,6 @@ const BasicInformationTab: React.FC<
 // -- Tab 2: Machine G-code ------------------------------------------------
 
 const MachineGcodeTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled }) => {
-  const gcodeDialectOptions = Object.entries(GCODE_DIALECT_LABELS).map(([value, label]) => ({ value, label }));
   const gcodeFields: Array<{ key: keyof OrcaMachineSettings; label: string; rows: number }> = [
     { key: 'file_start_gcode', label: 'File Start G-code', rows: 4 },
     { key: 'wrapping_detection_gcode', label: 'Wrapping Detection G-code', rows: 4 },
@@ -347,11 +345,6 @@ const MachineGcodeTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled
   ];
   return (
     <>
-      <SettingRow type="select" label="G-code Flavor" icon={<GcodeIcon className="w-5 h-5" />} value={settings.gcode_flavor ?? 'marlin2'} options={gcodeDialectOptions} onChange={(v) => onUpdate('gcode_flavor', v as OrcaMachineSettings['gcode_flavor'])} disabled={disabled} />
-      <div className="py-3 space-y-3">
-        <SettingRow type="checkbox" label="Use Relative E Distances" checked={settings.use_relative_e_distances ?? false} onChange={(v) => onUpdate('use_relative_e_distances', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Use Firmware Retraction" checked={settings.use_firmware_retraction ?? false} onChange={(v) => onUpdate('use_firmware_retraction', v)} disabled={disabled} />
-      </div>
       {gcodeFields.map(({ key, label, rows }) => (
         <div key={key as string} className="py-1">
           <FormField label={label} htmlFor={key as string}>
@@ -378,49 +371,34 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
       <SectionHeader title="Single extruder multi-material setup" />
       <div className="space-y-3">
         <SettingRow type="checkbox" label="Single Extruder Multi-Material" checked={settings.single_extruder_multi_material ?? false} onChange={(v) => onUpdate('single_extruder_multi_material', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Single Extruder MM Priming" checked={settings.single_extruder_multi_material_priming ?? false} onChange={(v) => onUpdate('single_extruder_multi_material_priming', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Multi-Material Support" checked={settings.support_multi_material ?? false} onChange={(v) => onUpdate('support_multi_material', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Manual Filament Change" checked={settings.manual_filament_change ?? false} onChange={(v) => onUpdate('manual_filament_change', v)} disabled={disabled} />
         <SettingRow type="text" label="Bed Temperature Formula" value={settings.bed_temperature_formula ?? ''} onChange={(v) => onUpdate('bed_temperature_formula', v)} disabled={disabled} />
+      </div>
+    </div>
+    <div className="py-1">
+      <SectionHeader title="Wipe tower" />
+      <div className="space-y-3">
+        <SettingRow type="select" label="Wipe Tower Type" value={settings.wipe_tower_type ?? 'sparse'} options={[{ value: 'sparse', label: 'Sparse' }, { value: 'dense', label: 'Dense' }]} onChange={(v) => onUpdate('wipe_tower_type', v as OrcaMachineSettings['wipe_tower_type'])} disabled={disabled} />
         <SettingRow type="checkbox" label="Purge in Prime Tower" checked={settings.purge_in_prime_tower ?? false} onChange={(v) => onUpdate('purge_in_prime_tower', v)} disabled={disabled} />
         <SettingRow type="checkbox" label="Enable Filament Ramming" checked={settings.enable_filament_ramming ?? false} onChange={(v) => onUpdate('enable_filament_ramming', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="High Current on Filament Swap" checked={settings.high_current_on_filament_swap ?? false} onChange={(v) => onUpdate('high_current_on_filament_swap', v)} disabled={disabled} />
       </div>
     </div>
     <div className="py-1">
       <SectionHeader title="Single extruder multi-material parameters" />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-3">
         <SettingRow type="number" label="Cooling Tube Retraction" value={settings.cooling_tube_retraction ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('cooling_tube_retraction', v)} disabled={disabled} />
         <SettingRow type="number" label="Cooling Tube Length" value={settings.cooling_tube_length ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('cooling_tube_length', v)} disabled={disabled} />
         <SettingRow type="number" label="Parking Pos Retraction" value={settings.parking_pos_retraction ?? 0} min={0} max={100} step={1} unit="mm" onChange={(v) => onUpdate('parking_pos_retraction', v)} disabled={disabled} />
         <SettingRow type="number" label="Extra Loading Move" value={settings.extra_loading_move ?? 0} min={0} max={50} step={0.5} unit="mm" onChange={(v) => onUpdate('extra_loading_move', v)} disabled={disabled} />
+        <SettingRow type="checkbox" label="High Current on Filament Swap" checked={settings.high_current_on_filament_swap ?? false} onChange={(v) => onUpdate('high_current_on_filament_swap', v)} disabled={disabled} />
       </div>
     </div>
     <div className="py-1">
       <SectionHeader title="Advanced" />
-      <div className="grid grid-cols-3 gap-4">
-        <SettingRow type="number" label="Load Time" value={settings.machine_load_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_load_filament_time', v)} disabled={disabled} />
-        <SettingRow type="number" label="Unload Time" value={settings.machine_unload_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_unload_filament_time', v)} disabled={disabled} />
-        <SettingRow type="number" label="Tool Change Time" value={settings.machine_tool_change_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_tool_change_time', v)} disabled={disabled} />
-      </div>
-    </div>
-    <div className="py-1">
-      <SectionHeader title="Wipe Tower" />
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-4">
-          <SettingRow type="select" label="Tower Type" value={settings.wipe_tower_type ?? 'sparse'} options={[{ value: 'sparse', label: 'Sparse' }, { value: 'dense', label: 'Dense' }]} onChange={(v) => onUpdate('wipe_tower_type', v as OrcaMachineSettings['wipe_tower_type'])} disabled={disabled} />
-          <SettingRow type="select" label="Wall Type" value={settings.wipe_tower_wall_type ?? 'single'} options={[{ value: 'single', label: 'Single' }, { value: 'double', label: 'Double' }]} onChange={(v) => onUpdate('wipe_tower_wall_type', v as OrcaMachineSettings['wipe_tower_wall_type'])} disabled={disabled} />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <SettingRow type="number" label="Bridging" value={settings.wipe_tower_bridging ?? 10} min={1} max={20} step={0.5} unit="mm" onChange={(v) => onUpdate('wipe_tower_bridging', v)} disabled={disabled} />
-          <SettingRow type="number" label="Max Purge Speed" value={settings.wipe_tower_max_purge_speed ?? 60} min={10} max={200} step={5} unit="mm/s" onChange={(v) => onUpdate('wipe_tower_max_purge_speed', v)} disabled={disabled} />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <SettingRow type="number" label="Rib Width" value={settings.wipe_tower_rib_width ?? 0} min={0} max={5} step={0.1} unit="mm" onChange={(v) => onUpdate('wipe_tower_rib_width', v)} disabled={disabled} />
-          <SettingRow type="number" label="Extra Rib Length" value={settings.wipe_tower_extra_rib_length ?? 0} min={0} max={10} step={0.5} unit="mm" onChange={(v) => onUpdate('wipe_tower_extra_rib_length', v)} disabled={disabled} />
-        </div>
-        <SettingRow type="checkbox" label="No Sparse Layers" checked={settings.wipe_tower_no_sparse_layers ?? false} onChange={(v) => onUpdate('wipe_tower_no_sparse_layers', v)} disabled={disabled} />
-        <SettingRow type="checkbox" label="Fillet Wall" checked={settings.wipe_tower_fillet_wall ?? false} onChange={(v) => onUpdate('wipe_tower_fillet_wall', v)} disabled={disabled} />
+        <SettingRow type="number" label="Load Filament Time" value={settings.machine_load_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_load_filament_time', v)} disabled={disabled} />
+        <SettingRow type="number" label="Unload Filament Time" value={settings.machine_unload_filament_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_unload_filament_time', v)} disabled={disabled} />
+        <SettingRow type="number" label="Tool Change Time" value={settings.machine_tool_change_time ?? 0} min={0} max={120} step={1} unit="s" onChange={(v) => onUpdate('machine_tool_change_time', v)} disabled={disabled} />
       </div>
     </div>
   </>
@@ -430,35 +408,29 @@ const MultimaterialTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
 
 const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled, viewMode = 'advanced' }) => {
   const adv = viewMode === 'advanced';
-  const nozzleTypeOptions = Object.entries(NOZZLE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
       {adv && (<>
       <div className="py-1">
-        <SectionHeader icon={<NozzleIcon className="w-5 h-5" />} title="Extruder" />
-        <div className="space-y-3">
-          <SettingRow type="number" label="Extruder Count" value={settings.extruder_count ?? 1} min={1} max={8} step={1} onChange={(v) => onUpdate('extruder_count', v)} disabled={disabled} />
-          <SettingRow type="select" label="Extruder Type" value={settings.extruder_type ?? 'direct_drive'} options={[{ value: 'direct_drive', label: 'Direct Drive' }, { value: 'bowden', label: 'Bowden' }]} onChange={(v) => onUpdate('extruder_type', v as OrcaMachineSettings['extruder_type'])} disabled={disabled} />
-          <SettingRow type="number" label="Extrusion Multiplier" value={settings.extrusion_multiplier ?? 1.0} min={0.5} max={2.0} step={0.01} onChange={(v) => onUpdate('extrusion_multiplier', v)} disabled={disabled} />
-          <SettingRow type="text" label="Extruder Offset" value={settings.extruder_offset ?? '0x0'} onChange={(v) => onUpdate('extruder_offset', v)} disabled={disabled} />
-          <SettingRow type="text" label="Extruder Colour" value={settings.extruder_colour ?? '#FF8000'} onChange={(v) => onUpdate('extruder_colour', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
         <SectionHeader title="Basic information" />
         <div className="space-y-3">
           <SettingRow type="select" label="Nozzle Diameter" value={String(settings.nozzle_diameter ?? 0.4)} options={[{ value: '0.2', label: '0.2 mm' }, { value: '0.4', label: '0.4 mm' }, { value: '0.6', label: '0.6 mm' }, { value: '0.8', label: '0.8 mm' }]} onChange={(v) => onUpdate('nozzle_diameter', parseFloat(v))} disabled={disabled} />
-          <SettingRow type="select" label="Nozzle Type" value={settings.nozzle_type ?? 'brass'} options={nozzleTypeOptions} onChange={(v) => onUpdate('nozzle_type', v as OrcaMachineSettings['nozzle_type'])} disabled={disabled} />
-          <SettingRow type="number" label="Nozzle Volume" value={settings.nozzle_volume ?? 0} min={0} max={50} step={0.5} unit="mm3" onChange={(v) => onUpdate('nozzle_volume', v)} disabled={disabled} />
+          <SettingRow type="number" label="Nozzle Volume" value={settings.nozzle_volume ?? 0} min={0} max={50} step={0.5} unit="mm³" onChange={(v) => onUpdate('nozzle_volume', v)} disabled={disabled} />
+          <SettingRow type="number" label="Extruder Printable Height" value={settings.extruder_printable_height ?? 0} min={0} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('extruder_printable_height', v)} disabled={disabled} />
         </div>
       </div>
       <div className="py-1">
         <SectionHeader title="Layer Height Limits" />
-        <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-3">
           <SettingRow type="number" label="Min Layer Height" value={settings.min_layer_height ?? 0.08} min={0.01} max={0.5} step={0.01} unit="mm" onChange={(v) => onUpdate('min_layer_height', v)} disabled={disabled} />
           <SettingRow type="number" label="Max Layer Height" value={settings.max_layer_height ?? 0.28} min={0.05} max={2.0} step={0.01} unit="mm" onChange={(v) => onUpdate('max_layer_height', v)} disabled={disabled} />
         </div>
-        <SettingRow type="number" label="Extruder Printable Height" value={settings.extruder_printable_height ?? 0} min={0} max={1000} step={1} unit="mm" onChange={(v) => onUpdate('extruder_printable_height', v)} disabled={disabled} description="Per-extruder height limit; 0 = use machine height" />
+      </div>
+      <div className="py-1">
+        <SectionHeader title="Position" />
+        <div className="space-y-3">
+          <SettingRow type="text" label="Extruder Offset" value={settings.extruder_offset ?? '0x0'} onChange={(v) => onUpdate('extruder_offset', v)} disabled={disabled} />
+        </div>
       </div>
       </>)}
       <div className="py-1">
@@ -511,7 +483,6 @@ const ExtruderTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled, vi
 
 const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disabled, viewMode = 'advanced' }) => {
   const adv = viewMode === 'advanced';
-  const motionTypeOptions = Object.entries(MOTION_TYPE_LABELS).map(([value, label]) => ({ value, label }));
   return (
     <>
       {adv && (
@@ -519,14 +490,12 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
         <SectionHeader title="Advanced" />
         <div className="space-y-3">
           <SettingRow type="checkbox" label="Emit Machine Limits to G-code" checked={settings.emit_machine_limits_to_gcode ?? true} onChange={(v) => onUpdate('emit_machine_limits_to_gcode', v)} disabled={disabled} />
-          <SettingRow type="select" label="Motion Type" value={settings.motion_type ?? 'cartesian'} options={motionTypeOptions} onChange={(v) => onUpdate('motion_type', v as OrcaMachineSettings['motion_type'])} disabled={disabled} />
         </div>
       </div>
       )}
       <div className="py-1">
         <SectionHeader icon={<SpeedIcon className="w-5 h-5" />} title="Speed limitation" />
         <div className="space-y-3">
-          <SettingRow type="number" label="Max Print Speed" value={settings.max_print_speed ?? 250} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_print_speed', v)} disabled={disabled} />
           <div className="grid grid-cols-2 gap-4">
             <SettingRow type="number" label="Max Speed X" value={settings.machine_max_speed_x ?? 300} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('machine_max_speed_x', v)} disabled={disabled} />
             <SettingRow type="number" label="Max Speed Y" value={settings.machine_max_speed_y ?? 300} min={10} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('machine_max_speed_y', v)} disabled={disabled} />
@@ -563,27 +532,15 @@ const MotionAbilityTab: React.FC<TabPanelProps> = ({ settings, onUpdate, disable
       </div>
       {adv && (<>
       <div className="py-1">
-        <SectionHeader title="Travel" />
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-4">
-            <SettingRow type="number" label="Travel Speed" value={settings.travel_speed ?? 200} min={50} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('travel_speed', v)} disabled={disabled} />
-            <SettingRow type="number" label="Travel Acceleration" value={settings.travel_acceleration ?? 5000} min={100} max={50000} step={100} unit="mm/s2" onChange={(v) => onUpdate('travel_acceleration', v)} disabled={disabled} />
-          </div>
-          <SettingRow type="number" label="Travel Jerk" value={settings.travel_jerk ?? 8} min={0} max={30} step={0.5} unit="mm/s" onChange={(v) => onUpdate('travel_jerk', v)} disabled={disabled} />
-        </div>
-      </div>
-      <div className="py-1">
         <SectionHeader title="Resonance Avoidance" />
         <div className="space-y-3">
-        <SettingRow type="checkbox" label="Resonance Avoidance" checked={settings.resonance_avoidance ?? false} onChange={(v) => onUpdate('resonance_avoidance', v)} disabled={disabled} />
-        {settings.resonance_avoidance && (
-          <div className="grid grid-cols-2 gap-4">
-            <SettingRow type="number" label="Min Speed" value={settings.min_resonance_avoidance_speed ?? 0} min={0} max={500} step={5} unit="mm/s" onChange={(v) => onUpdate('min_resonance_avoidance_speed', v)} disabled={disabled} />
-            <SettingRow type="number" label="Max Speed" value={settings.max_resonance_avoidance_speed ?? 300} min={0} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_resonance_avoidance_speed', v)} disabled={disabled} />
-          </div>
-        )}
-        <SettingRow type="checkbox" label="Arc Movement (G2/G3)" checked={settings.support_arc_movement ?? false} onChange={(v) => onUpdate('support_arc_movement', v)} disabled={disabled} />
-        {settings.support_arc_movement && <SettingRow type="number" label="Arc Resolution" value={settings.arc_resolution ?? 0.1} min={0.01} max={1} step={0.01} unit="mm" onChange={(v) => onUpdate('arc_resolution', v)} disabled={disabled} />}
+          <SettingRow type="checkbox" label="Resonance Avoidance" checked={settings.resonance_avoidance ?? false} onChange={(v) => onUpdate('resonance_avoidance', v)} disabled={disabled} />
+          {settings.resonance_avoidance && (
+            <div className="grid grid-cols-2 gap-4">
+              <SettingRow type="number" label="Min Speed" value={settings.min_resonance_avoidance_speed ?? 0} min={0} max={500} step={5} unit="mm/s" onChange={(v) => onUpdate('min_resonance_avoidance_speed', v)} disabled={disabled} />
+              <SettingRow type="number" label="Max Speed" value={settings.max_resonance_avoidance_speed ?? 300} min={0} max={1000} step={10} unit="mm/s" onChange={(v) => onUpdate('max_resonance_avoidance_speed', v)} disabled={disabled} />
+            </div>
+          )}
         </div>
       </div>
       </>)}
