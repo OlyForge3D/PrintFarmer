@@ -200,7 +200,6 @@ const SimpleMachineSettingsPanel: React.FC<
   TabPanelProps
 > = ({ settings, onUpdate, disabled }) => (
   <div className="">
-    <SettingRow type="text" label="Printer Model" icon={<BuildVolumeIcon className="w-5 h-5" />} value={settings.printer_model ?? ''} onChange={(v) => onUpdate('printer_model', v)} disabled={disabled} />
     <div className="py-1">
       <SectionHeader icon={<BuildVolumeIcon className="w-5 h-5" />} title="Build Volume" />
       <div className="py-1.5">
