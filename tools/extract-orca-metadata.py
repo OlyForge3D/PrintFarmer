@@ -82,6 +82,10 @@ def _clean_default_value(raw: str) -> Optional[str]:
     raw = re.sub(r'^\{\s*', '', raw)
     raw = re.sub(r'\s*\}$', '', raw)
     raw = raw.strip()
+    # Strip C++ float literal suffix: "5.0f" → "5.0", "1.f" → "1."
+    raw = re.sub(r'(\d)f$', r'\1', raw)
+    # Normalize trailing dot: "0." → "0", "10." → "10"
+    raw = re.sub(r'(\d)\.$', r'\1', raw)
     return raw if raw else None
 
 
