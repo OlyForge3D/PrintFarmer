@@ -27,8 +27,58 @@ export interface SettingMetadata {
   category?: string;
 }
 
+/**
+ * Shared infill pattern options — reused by sparse_infill_pattern,
+ * top/bottom_surface_pattern, and internal_solid_infill_pattern.
+ * Values sourced from OrcaSlicer PrintConfig.cpp s_keys_map_InfillPattern.
+ */
+const INFILL_PATTERNS: Array<{ value: string; label: string }> = [
+  { value: 'rectilinear', label: 'Rectilinear' },
+  { value: 'alignedrectilinear', label: 'Aligned Rectilinear' },
+  { value: 'monotonic', label: 'Monotonic' },
+  { value: 'monotonicline', label: 'Monotonic Lines' },
+  { value: 'concentric', label: 'Concentric' },
+  { value: 'grid', label: 'Grid' },
+  { value: 'triangles', label: 'Triangles' },
+  { value: 'tri-hexagon', label: 'Tri-Hexagon' },
+  { value: 'cubic', label: 'Cubic' },
+  { value: 'adaptivecubic', label: 'Adaptive Cubic' },
+  { value: 'quartercubic', label: 'Quarter Cubic' },
+  { value: 'supportcubic', label: 'Support Cubic' },
+  { value: 'lightning', label: 'Lightning' },
+  { value: 'line', label: 'Line' },
+  { value: 'honeycomb', label: 'Honeycomb' },
+  { value: '3dhoneycomb', label: '3D Honeycomb' },
+  { value: 'lateral-honeycomb', label: 'Lateral Honeycomb' },
+  { value: 'lateral-lattice', label: 'Lateral Lattice' },
+  { value: 'crosshatch', label: 'Cross Hatch' },
+  { value: 'zigzag', label: 'Zig-Zag' },
+  { value: 'crosszag', label: 'Cross-Zag' },
+  { value: 'lockedzag', label: 'Locked-Zag' },
+  { value: 'gyroid', label: 'Gyroid' },
+  { value: 'hilbertcurve', label: 'Hilbert Curve' },
+  { value: 'archimedeanchords', label: 'Archimedean Chords' },
+  { value: 'octagramspiral', label: 'Octagram Spiral' },
+  { value: 'tpmsd', label: 'TPMS-D' },
+  { value: 'tpmsfk', label: 'TPMS-FK' },
+];
+
+/** Surface-specific patterns (top/bottom/internal solid) */
+const SURFACE_PATTERNS: Array<{ value: string; label: string }> = [
+  { value: 'monotonic', label: 'Monotonic' },
+  { value: 'monotonicline', label: 'Monotonic Lines' },
+  { value: 'concentric', label: 'Concentric' },
+  { value: 'rectilinear', label: 'Rectilinear' },
+  { value: 'alignedrectilinear', label: 'Aligned Rectilinear' },
+  { value: 'hilbertcurve', label: 'Hilbert Curve' },
+  { value: 'archimedeanchords', label: 'Archimedean Chords' },
+  { value: 'octagramspiral', label: 'Octagram Spiral' },
+  { value: 'zigzag', label: 'Zig-Zag' },
+];
+
 /** Known enum options for settings that use select dropdowns */
 const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
+  // ── Machine settings ────────────────────────────────────────────────
   printer_structure: [
     { value: 'undefine', label: 'Undefined' },
     { value: 'corexy', label: 'CoreXY' },
@@ -41,19 +91,79 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'klipper', label: 'Klipper' },
     { value: 'reprapfirmware', label: 'RepRapFirmware' },
     { value: 'marlin2', label: 'Marlin 2' },
+    { value: 'reprap', label: 'RepRap/Sprinter' },
+    { value: 'repetier', label: 'Repetier' },
+    { value: 'smoothie', label: 'Smoothie' },
+    { value: 'sailfish', label: 'Sailfish' },
+    { value: 'makerware', label: 'MakerWare' },
+    { value: 'teacup', label: 'Teacup' },
+    { value: 'mach3', label: 'Mach3' },
+    { value: 'machinekit', label: 'Machinekit' },
+    { value: 'no-extrusion', label: 'No extrusion' },
   ],
   nozzle_type: [
     { value: 'undefine', label: 'Undefined' },
     { value: 'hardened_steel', label: 'Hardened Steel' },
     { value: 'stainless_steel', label: 'Stainless Steel' },
+    { value: 'tungsten_carbide', label: 'Tungsten Carbide' },
     { value: 'brass', label: 'Brass' },
   ],
   bed_type: [
+    { value: 'Default Plate', label: 'Default Plate' },
+    { value: 'SuperTack Plate', label: 'SuperTack Plate' },
     { value: 'Cool Plate', label: 'Cool Plate' },
     { value: 'Engineering Plate', label: 'Engineering Plate' },
     { value: 'High Temp Plate', label: 'High Temp Plate' },
     { value: 'Textured PEI Plate', label: 'Textured PEI Plate' },
+    { value: 'Textured Cool Plate', label: 'Textured Cool Plate' },
   ],
+  bed_temperature_formula: [
+    { value: 'by_first_filament', label: 'By first filament' },
+    { value: 'by_highest_temp', label: 'By highest temperature' },
+  ],
+  enable_power_loss_recovery: [
+    { value: 'printer_configuration', label: 'Printer configuration' },
+    { value: 'enable', label: 'Enable' },
+    { value: 'disable', label: 'Disable' },
+  ],
+  wipe_tower_type: [
+    { value: 'type1', label: 'Normal' },
+    { value: 'type2', label: 'Slim' },
+  ],
+  wipe_tower_wall_type: [
+    { value: 'rectangle', label: 'Rectangle' },
+    { value: 'cone', label: 'Cone' },
+    { value: 'rib', label: 'Rib' },
+  ],
+
+  // ── Filament settings ───────────────────────────────────────────────
+  filament_type: [
+    { value: 'PLA', label: 'PLA' },
+    { value: 'PLA-CF', label: 'PLA-CF' },
+    { value: 'PLA-AERO', label: 'PLA-AERO' },
+    { value: 'ABS', label: 'ABS' },
+    { value: 'ASA', label: 'ASA' },
+    { value: 'PETG', label: 'PETG' },
+    { value: 'PETG-CF', label: 'PETG-CF' },
+    { value: 'PET-CF', label: 'PET-CF' },
+    { value: 'TPU', label: 'TPU' },
+    { value: 'PA', label: 'PA (Nylon)' },
+    { value: 'PA-CF', label: 'PA-CF' },
+    { value: 'PA6-CF', label: 'PA6-CF' },
+    { value: 'PC', label: 'PC' },
+    { value: 'HIPS', label: 'HIPS' },
+    { value: 'PVA', label: 'PVA' },
+    { value: 'PP', label: 'PP' },
+    { value: 'PHA', label: 'PHA' },
+    { value: 'BVOH', label: 'BVOH' },
+  ],
+  filament_map_mode: [
+    { value: 'Auto For Flush', label: 'Auto (for flush)' },
+    { value: 'Auto For Match', label: 'Auto (for match)' },
+    { value: 'Manual', label: 'Manual' },
+  ],
+
+  // ── Process: Seam & walls ──────────────────────────────────────────
   seam_position: [
     { value: 'nearest', label: 'Nearest' },
     { value: 'aligned', label: 'Aligned' },
@@ -71,27 +181,34 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'outer wall/inner wall', label: 'Outer/Inner' },
     { value: 'inner-outer-inner wall', label: 'Inner-Outer-Inner' },
   ],
+  wall_generator: [
+    { value: 'classic', label: 'Classic' },
+    { value: 'arachne', label: 'Arachne' },
+  ],
+  wall_direction: [
+    { value: 'ccw', label: 'Counter-clockwise' },
+    { value: 'cw', label: 'Clockwise' },
+  ],
+
+  // ── Process: Infill patterns ───────────────────────────────────────
+  sparse_infill_pattern: INFILL_PATTERNS,
+  top_surface_pattern: SURFACE_PATTERNS,
+  bottom_surface_pattern: SURFACE_PATTERNS,
+  internal_solid_infill_pattern: SURFACE_PATTERNS,
+
+  // ── Process: Ironing ───────────────────────────────────────────────
   ironing_type: [
-    { value: 'no_ironing', label: 'No ironing' },
+    { value: 'no ironing', label: 'No ironing' },
     { value: 'top', label: 'Top surfaces' },
     { value: 'topmost', label: 'Topmost surface' },
-    { value: 'all_solid', label: 'All solid surfaces' },
+    { value: 'solid', label: 'All solid surfaces' },
   ],
   ironing_pattern: [
     { value: 'rectilinear', label: 'Rectilinear' },
     { value: 'concentric', label: 'Concentric' },
   ],
-  wall_generator: [
-    { value: 'classic', label: 'Classic' },
-    { value: 'arachne', label: 'Arachne' },
-  ],
-  brim_type: [
-    { value: 'no_brim', label: 'No brim' },
-    { value: 'outer_only', label: 'Outer brim only' },
-    { value: 'inner_only', label: 'Inner brim only' },
-    { value: 'outer_and_inner', label: 'Outer and inner brim' },
-    { value: 'auto_brim', label: 'Auto' },
-  ],
+
+  // ── Process: Support ───────────────────────────────────────────────
   support_type: [
     { value: 'normal(auto)', label: 'Normal (auto)' },
     { value: 'tree(auto)', label: 'Tree (auto)' },
@@ -103,24 +220,118 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'grid', label: 'Grid' },
     { value: 'snug', label: 'Snug' },
     { value: 'organic', label: 'Organic' },
+    { value: 'tree_slim', label: 'Tree (slim)' },
+    { value: 'tree_strong', label: 'Tree (strong)' },
+    { value: 'tree_hybrid', label: 'Tree (hybrid)' },
   ],
+  support_base_pattern: [
+    { value: 'default', label: 'Default' },
+    { value: 'rectilinear', label: 'Rectilinear' },
+    { value: 'rectilinear-grid', label: 'Rectilinear Grid' },
+    { value: 'honeycomb', label: 'Honeycomb' },
+    { value: 'lightning', label: 'Lightning' },
+    { value: 'hollow', label: 'Hollow' },
+  ],
+  support_interface_pattern: [
+    { value: 'auto', label: 'Auto' },
+    { value: 'rectilinear', label: 'Rectilinear' },
+    { value: 'concentric', label: 'Concentric' },
+    { value: 'rectilinear_interlaced', label: 'Rectilinear Interlaced' },
+    { value: 'grid', label: 'Grid' },
+  ],
+  support_ironing_pattern: [
+    { value: 'rectilinear', label: 'Rectilinear' },
+    { value: 'concentric', label: 'Concentric' },
+  ],
+  support_pillar_connection_mode: [
+    { value: 'zigzag', label: 'Zig-zag' },
+    { value: 'cross', label: 'Cross' },
+    { value: 'dynamic', label: 'Dynamic' },
+  ],
+
+  // ── Process: Brim & skirt ──────────────────────────────────────────
+  brim_type: [
+    { value: 'no_brim', label: 'No brim' },
+    { value: 'outer_only', label: 'Outer brim only' },
+    { value: 'inner_only', label: 'Inner brim only' },
+    { value: 'outer_and_inner', label: 'Outer and inner brim' },
+    { value: 'auto_brim', label: 'Auto' },
+    { value: 'brim_ears', label: 'Brim ears' },
+    { value: 'painted', label: 'Painted' },
+  ],
+  skirt_type: [
+    { value: 'combined', label: 'Combined' },
+    { value: 'perobject', label: 'Per object' },
+  ],
+
+  // ── Process: Fuzzy skin ────────────────────────────────────────────
+  fuzzy_skin: [
+    { value: 'none', label: 'None' },
+    { value: 'external', label: 'Outside wall' },
+    { value: 'all', label: 'All walls' },
+    { value: 'allwalls', label: 'All walls (incl. inner)' },
+  ],
+  fuzzy_skin_mode: [
+    { value: 'displacement', label: 'Displacement' },
+    { value: 'extrusion', label: 'Extrusion' },
+    { value: 'combined', label: 'Combined' },
+  ],
+  fuzzy_skin_noise_type: [
+    { value: 'classic', label: 'Classic' },
+    { value: 'perlin', label: 'Perlin' },
+    { value: 'billow', label: 'Billow' },
+    { value: 'ridgedmulti', label: 'Ridged Multi' },
+    { value: 'voronoi', label: 'Voronoi' },
+  ],
+
+  // ── Process: Other enums ───────────────────────────────────────────
   slicing_mode: [
     { value: 'regular', label: 'Regular' },
     { value: 'even_odd', label: 'Even-odd' },
     { value: 'close_holes', label: 'Close holes' },
   ],
-  fuzzy_skin: [
-    { value: 'none', label: 'None' },
-    { value: 'external', label: 'Outside wall' },
-    { value: 'all', label: 'All walls' },
-  ],
   print_sequence: [
-    { value: 'by_layer', label: 'By layer' },
-    { value: 'by_object', label: 'By object' },
+    { value: 'by layer', label: 'By layer' },
+    { value: 'by object', label: 'By object' },
+  ],
+  print_order: [
+    { value: 'default', label: 'Default' },
+    { value: 'as_obj_list', label: 'As object list' },
   ],
   timelapse_type: [
     { value: '0', label: 'Traditional' },
     { value: '1', label: 'Smooth' },
+  ],
+  draft_shield: [
+    { value: 'disabled', label: 'Disabled' },
+    { value: 'enabled', label: 'Enabled' },
+  ],
+  counterbore_hole_bridging: [
+    { value: 'none', label: 'None' },
+    { value: 'partiallybridge', label: 'Partially bridged' },
+    { value: 'sacrificiallayer', label: 'Sacrificial layer' },
+  ],
+  dont_filter_internal_bridges: [
+    { value: 'disabled', label: 'Disabled' },
+    { value: 'limited', label: 'Limited filtering' },
+    { value: 'nofilter', label: 'No filtering' },
+  ],
+  enable_extra_bridge_layer: [
+    { value: 'disabled', label: 'Disabled' },
+    { value: 'external_bridge_only', label: 'External bridge only' },
+    { value: 'internal_bridge_only', label: 'Internal bridge only' },
+    { value: 'apply_to_all', label: 'Apply to all' },
+  ],
+  ensure_vertical_shell_thickness: [
+    { value: 'none', label: 'None' },
+    { value: 'ensure_critical_only', label: 'Critical only' },
+    { value: 'ensure_moderate', label: 'Moderate' },
+    { value: 'ensure_all', label: 'All' },
+  ],
+  gap_fill_target: [
+    { value: 'everywhere', label: 'Everywhere' },
+    { value: 'topbottom', label: 'Top and bottom surfaces' },
+    { value: 'nowhere', label: 'Nowhere' },
   ],
 };
 
@@ -178,7 +389,9 @@ const OrcaIcon: React.FC<{ icon: string }> = ({ icon }) => (
 function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' | 'select' | 'textarea' | 'point' {
   if (meta.gui_type === 'color') return 'color';
   if (TEXTAREA_KEYS.has(meta.key)) return 'textarea';
-  if (KNOWN_ENUMS[meta.key] || meta.type === 'enum' || meta.gui_type === 'enum_open') return 'select';
+  if (KNOWN_ENUMS[meta.key] || meta.type === 'enum'
+    || (meta.gui_type === 'enum_open' && !['float', 'int', 'percent', 'float_or_percent'].includes(meta.type))
+  ) return 'select';
   if (meta.type === 'point') return 'point';
   switch (meta.type) {
     case 'bool':

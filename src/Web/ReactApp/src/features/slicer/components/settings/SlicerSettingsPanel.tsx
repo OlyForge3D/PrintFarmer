@@ -26,6 +26,8 @@ interface SlicerSettingsPanelProps {
   advancedSettings?: Record<string, unknown>;
   /** Called when dynamic advanced settings change */
   onAdvancedSettingsChange?: (settings: Record<string, unknown>) => void;
+  /** Original settings snapshot for change tracking (orange labels + reset buttons) */
+  originalSettings?: Record<string, unknown>;
 }
 
 /**
@@ -38,6 +40,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   initialViewMode = 'simple',
   disabled = false,
   className = '',
+  originalSettings,
 }) => {
   // Adapt MetadataProfileEditor's per-field onUpdate to the batch onChange API
   const handleUpdate = useCallback(
@@ -55,6 +58,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       initialViewMode={initialViewMode}
       disabled={disabled}
       className={className}
+      originalSettings={originalSettings}
     />
   );
 };
