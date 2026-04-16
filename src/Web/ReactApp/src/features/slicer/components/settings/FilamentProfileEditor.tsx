@@ -59,6 +59,40 @@ const NotesIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) 
   </svg>
 );
 
+/** OrcaSlicer material type list — from MaterialType::all() in MaterialType.cpp */
+const ORCA_FILAMENT_TYPES = [
+  'PLA', 'PLA-AERO', 'PLA-CF',
+  'PETG', 'PETG-CF', 'PETG-GF',
+  'PET', 'PET-CF', 'PET-GF',
+  'ABS', 'ABS-CF', 'ABS-GF',
+  'ASA', 'ASA-CF', 'ASA-GF', 'ASA-AERO',
+  'PA', 'PA-CF', 'PA-GF',
+  'PA6', 'PA6-CF', 'PA6-GF',
+  'PA11', 'PA11-CF', 'PA11-GF',
+  'PA12', 'PA12-CF', 'PA12-GF',
+  'PAHT', 'PAHT-CF', 'PAHT-GF',
+  'PC', 'PC-ABS', 'PC-CF', 'PC-PBT',
+  'PCTG',
+  'PE', 'PE-CF', 'PE-GF',
+  'PEEK', 'PEEK-CF', 'PEEK-GF',
+  'PEKK', 'PEKK-CF',
+  'PEI-9085', 'PEI-9085-CF', 'PEI-9085-GF',
+  'PEI-1010', 'PEI-1010-CF', 'PEI-1010-GF',
+  'PES',
+  'PHA',
+  'PI',
+  'POM',
+  'PP', 'PP-CF', 'PP-GF',
+  'PPA-CF', 'PPA-GF',
+  'PPS', 'PPS-CF',
+  'PPSU', 'PSU',
+  'PVA', 'PVB', 'PVDF',
+  'SBS',
+  'TPU',
+  'BVOH', 'CoPE', 'EVA', 'FLEX', 'HIPS',
+  'PCL', 'TPI',
+] as const;
+
 // -- Types -------------------------------------------------------------------
 
 interface FilamentProfileEditorProps {
@@ -234,7 +268,9 @@ const FilamentTab: React.FC<TabProps & {
             <SettingRow type="text" icon={<FilamentIcon />} label="Profile Name" value={settings.name ?? ''} onChange={v => update('name', v)} disabled={disabled} />
           )}
           {show('filament_type') && (
-            <SettingRow type="text" icon={<FilamentIcon />} label="Type" value={settings.filament_type ?? ''} onChange={v => update('filament_type', v)} disabled={disabled} />
+            <SettingRow type="select" icon={<FilamentIcon />} label="Type" value={settings.filament_type ?? 'PLA'}
+              options={ORCA_FILAMENT_TYPES.map(t => ({ value: t, label: t }))}
+              onChange={v => update('filament_type', v)} disabled={disabled} />
           )}
           {show('filament_vendor') && (
             <SettingRow type="text" icon={<FilamentIcon />} label="Vendor" value={settings.filament_vendor ?? ''} onChange={v => update('filament_vendor', v)} disabled={disabled} />
