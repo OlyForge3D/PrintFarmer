@@ -225,7 +225,7 @@ const FilamentTab: React.FC<TabProps & {
   if (!anyVisible) return <EmptyMode />;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       {/* Basic Information */}
       <div>
         <SectionHeader title="Basic Information" />

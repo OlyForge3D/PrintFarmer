@@ -134,7 +134,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
   };
 
   return (
-    <div className={`py-1.5 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`py-0.5 ${disabled ? 'opacity-50' : ''}`}>
       {/* Horizontal row: label+description left, control right */}
       <div className="flex items-center gap-3">
         {/* Left side: icon, label, description — hidden when label is empty */}
@@ -650,7 +650,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
   };
 
   return (
-    <div className={`flex items-center justify-between py-1.5 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center justify-between py-0.5 ${disabled ? 'opacity-50' : ''}`}>
       {/* Label with optional reset button */}
       <div className="flex items-center gap-1.5">
         {/* Reset button - shown when setting is modified */}
