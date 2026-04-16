@@ -20,7 +20,7 @@ export interface SettingMetadata {
   unit?: string;
   min?: number;
   max?: number;
-  mode?: 'simple' | 'advanced';
+  mode?: 'simple' | 'advanced' | 'developer';
   default?: string;
   gui_type?: 'color' | 'enum_open';
   enum_values?: string[];
@@ -249,6 +249,8 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
     return section.fields.filter((f) => {
       const meta = allSettings[f.key];
       if (!meta) return false;
+      // Always hide developer-only fields (PrintFarmer has no developer mode)
+      if (meta.mode === 'developer') return false;
       if (viewMode === 'simple' && meta.mode === 'advanced') return false;
       return true;
     });
