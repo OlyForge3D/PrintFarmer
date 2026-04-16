@@ -312,7 +312,7 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full px-4 py-3 bg-pf-panel border border-pf-border rounded-lg
+        className="w-full px-3 py-1.5 bg-pf-panel border border-pf-border rounded-lg
                    text-pf-text text-xs appearance-none bg-none cursor-pointer
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"

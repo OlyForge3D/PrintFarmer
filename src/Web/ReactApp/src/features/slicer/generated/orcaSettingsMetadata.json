@@ -675,6 +675,7 @@
         "coType": "coStrings",
         "label": "Default color",
         "tooltip": "Default filament color.\\nRight click to reset value to system default.",
+        "mode": "advanced",
         "default": "",
         "gui_type": "color"
       },
@@ -787,6 +788,7 @@
         "label": "Adhesiveness Category",
         "tooltip": "Filament category.",
         "min": 0,
+        "mode": "developer",
         "default": "0"
       },
       "filament_change_length": {
@@ -797,6 +799,7 @@
         "tooltip": "When changing the extruder, it is recommended to extrude a certain length of filament from the original extruder. This helps minimize nozzle oozing.",
         "unit": "mm",
         "min": 0,
+        "mode": "advanced",
         "default": "10"
       },
       "filament_colour": {
@@ -1115,6 +1118,7 @@
         "coType": "coInts",
         "label": "Filament printable",
         "tooltip": "The filament is printable in extruder.",
+        "mode": "developer",
         "default": "3"
       },
       "filament_ramming_parameters": {
@@ -1469,6 +1473,7 @@
         "tooltip": "Minimum HRC of nozzle required to print the filament. Zero means no checking of nozzle's HRC.",
         "min": 0,
         "max": 500,
+        "mode": "developer",
         "default": "0"
       },
       "retraction_distances_when_ec": {
@@ -2265,6 +2270,7 @@
         "label": "Mesh margin",
         "tooltip": "This option determines the additional distance by which the adaptive bed mesh area should be expanded in the XY directions.",
         "unit": "mm",
+        "mode": "advanced",
         "default": "0"
       },
       "auxiliary_fan": {
@@ -2322,6 +2328,7 @@
         "tooltip": "This option sets the preferred distance between probe points (grid size) for the X and Y directions, with the default being 50mm for both X and Y.",
         "unit": "mm",
         "min": 0,
+        "mode": "advanced",
         "default": "50, 50"
       },
       "bed_temperature_formula": {
@@ -2501,6 +2508,7 @@
         "unit": "mm",
         "min": 0,
         "max": 1000,
+        "mode": "advanced",
         "default": "0"
       },
       "fan_kickstart": {
@@ -2733,6 +2741,7 @@
         "tooltip": "Maximum speed of resonance avoidance.",
         "unit": "mm/s",
         "min": 0,
+        "mode": "advanced",
         "default": "120"
       },
       "min_layer_height": {
@@ -2754,6 +2763,7 @@
         "tooltip": "Minimum speed of resonance avoidance.",
         "unit": "mm/s",
         "min": 0,
+        "mode": "advanced",
         "default": "70"
       },
       "nozzle_diameter": {
@@ -2776,6 +2786,7 @@
         "unit": "HRC",
         "min": 0,
         "max": 500,
+        "mode": "developer",
         "default": "0"
       },
       "nozzle_type": {
@@ -2813,6 +2824,7 @@
         "coType": "coBool",
         "label": "Pellet Modded Printer",
         "tooltip": "Enable this option if your printer uses pellets instead of filaments.",
+        "mode": "simple",
         "default": "false"
       },
       "preferred_orientation": {
@@ -2859,7 +2871,8 @@
         "type": "string",
         "coType": "coString",
         "label": "Between Object G-code",
-        "tooltip": "Insert G-code between objects. This parameter will only come into effect when you print your models object by object."
+        "tooltip": "Insert G-code between objects. This parameter will only come into effect when you print your models object by object.",
+        "mode": "advanced"
       },
       "purge_in_prime_tower": {
         "key": "purge_in_prime_tower",
@@ -2876,6 +2889,7 @@
         "coType": "coBool",
         "label": "Resonance avoidance",
         "tooltip": "By reducing the speed of the outer wall to avoid the resonance zone of the printer, ringing on the surface of the model are avoided.\\nPlease turn this option off when testing ringing.",
+        "mode": "advanced",
         "default": "false"
       },
       "retract_before_wipe": {
@@ -3077,6 +3091,7 @@
         "tooltip": "The printer cost per hour.",
         "unit": "money/h",
         "min": 0,
+        "mode": "advanced",
         "default": "0"
       },
       "time_lapse_gcode": {
@@ -3208,6 +3223,7 @@
         "tooltip": "Positive values can increase the size of the rib wall, while negative values can reduce the size. However, the size of the rib wall can not be smaller than that determined by the cleaning volume.",
         "unit": "mm",
         "max": 300,
+        "mode": "advanced",
         "default": "0"
       },
       "wipe_tower_extra_spacing": {
@@ -3239,6 +3255,7 @@
         "coType": "coBool",
         "label": "Fillet wall",
         "tooltip": "The wall of prime tower will fillet.",
+        "mode": "advanced",
         "default": "true"
       },
       "wipe_tower_max_purge_speed": {
@@ -3270,6 +3287,7 @@
         "unit": "mm",
         "min": 0,
         "max": 300,
+        "mode": "advanced",
         "default": "8"
       },
       "wipe_tower_rotation_angle": {
@@ -3318,6 +3336,7 @@
         "type": "string",
         "coType": "coString",
         "label": "Clumping detection G-code",
+        "mode": "advanced",
         "default": ""
       },
       "z_hop": {
@@ -4922,6 +4941,7 @@
         "coType": "coBool",
         "label": "Align infill direction to model",
         "tooltip": "Aligns infill and surface fill directions to follow the model's orientation on the build plate. When enabled, fill directions rotate with the model to maintain optimal strength characteristics.",
+        "mode": "advanced",
         "category": "Strength",
         "default": "false"
       },
@@ -5249,6 +5269,7 @@
         "tooltip": "The number of layers on which the elephant foot compensation will be active. The first layer will be shrunk by the elephant foot compensation value, then the next layers will be linearly shrunk less, up to the layer indicated by this value.",
         "unit": "layers",
         "min": 1,
+        "mode": "advanced",
         "category": "Quality",
         "default": "1"
       },
@@ -5322,6 +5343,7 @@
         "coType": "coBool",
         "label": "Enable clumping detection",
         "tooltip": "Enable clumping detection",
+        "mode": "advanced",
         "default": "false"
       },
       "ensure_vertical_shell_thickness": {
@@ -5358,6 +5380,7 @@
         "coType": "coString",
         "label": "Insert solid layers",
         "tooltip": "Insert solid infill at specific layers. Use N to insert every Nth layer, N#K to insert K consecutive solid layers every N layers (K is optional, e.g. '5#' equals '5#1'), or a comma-separated list (e.g. 1,7,9) to insert at explicit layers. Layers are 1-based.",
+        "mode": "advanced",
         "category": "Strength"
       },
       "extrusion_rate_smoothing_external_perimeter_only": {
@@ -5716,6 +5739,7 @@
         "unit": "mm",
         "min": 0,
         "max": 100,
+        "mode": "advanced",
         "category": "Strength",
         "default": "1.0"
       },
@@ -5727,6 +5751,7 @@
         "tooltip": "The angle of the infill angled lines. 60° will result in a pure honeycomb.",
         "min": 15,
         "max": 75,
+        "mode": "advanced",
         "category": "Strength",
         "default": "60"
       },
@@ -5739,6 +5764,7 @@
         "unit": "mm",
         "min": 0,
         "max": 10,
+        "mode": "advanced",
         "category": "Strength",
         "default": "0.4"
       },
@@ -5922,6 +5948,7 @@
         "coType": "coBool",
         "label": "Use beam interlocking",
         "tooltip": "Generate interlocking beam structure at the locations where different filaments touch. This improves the adhesion between filaments, especially models printed in different materials.",
+        "mode": "advanced",
         "category": "Advanced",
         "default": "false"
       },
@@ -5932,6 +5959,7 @@
         "label": "Interlocking beam layers",
         "tooltip": "The height of the beams of the interlocking structure, measured in number of layers. Less layers is stronger, but more prone to defects.",
         "min": 1,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "2"
       },
@@ -5943,6 +5971,7 @@
         "tooltip": "The width of the interlocking structure beams.",
         "unit": "mm",
         "min": 0.01,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "0.8"
       },
@@ -5953,6 +5982,7 @@
         "label": "Interlocking boundary avoidance",
         "tooltip": "The distance from the outside of a model where interlocking structures will not be generated, measured in cells.",
         "min": 0,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "2"
       },
@@ -5963,6 +5993,7 @@
         "label": "Interlocking depth",
         "tooltip": "The distance from the boundary between filaments to generate interlocking structure, measured in cells. Too few cells will result in poor adhesion.",
         "min": 1,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "2"
       },
@@ -5974,6 +6005,7 @@
         "tooltip": "Orientation of interlock beams.",
         "min": 0,
         "max": 360,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "22.5"
       },
@@ -6090,6 +6122,7 @@
         "tooltip": "The angle of ironing lines offset from the top surface.",
         "min": 0,
         "max": 359,
+        "mode": "advanced",
         "category": "Quality",
         "default": "0"
       },
@@ -6099,6 +6132,7 @@
         "coType": "coBool",
         "label": "Fixed ironing angle",
         "tooltip": "Use a fixed absolute angle for ironing.",
+        "mode": "advanced",
         "category": "Quality",
         "default": "false"
       },
@@ -6124,6 +6158,7 @@
         "unit": "mm",
         "min": 0,
         "max": 100,
+        "mode": "advanced",
         "category": "Quality",
         "default": "0"
       },
@@ -6176,6 +6211,7 @@
         "coType": "coBool",
         "label": "Print infill first",
         "tooltip": "Order of wall/infill. When the tickbox is unchecked the walls are printed first, which works best in most cases.\\n\\nPrinting infill first may help with extreme overhangs as the walls have the neighbouring infill to adhere to. However, the infill will slightly push out the printed walls where it is attached to them, resulting in a worse external surface finish. It can also cause the infill to shine through the external surfaces of the part.",
+        "mode": "advanced",
         "category": "Quality",
         "default": "false"
       },
@@ -6187,6 +6223,7 @@
         "tooltip": "The angle of the first set of Lateral lattice elements in the Z direction. Zero is vertical.",
         "min": -75,
         "max": 75,
+        "mode": "advanced",
         "category": "Strength",
         "default": "-45"
       },
@@ -6198,6 +6235,7 @@
         "tooltip": "The angle of the second set of Lateral lattice elements in the Z direction. Zero is vertical.",
         "min": -75,
         "max": 75,
+        "mode": "advanced",
         "category": "Strength",
         "default": "45"
       },
@@ -6312,7 +6350,7 @@
         "tooltip": "Width of the wall that will replace thin features (according to the Minimum feature size) of the model. If the Minimum wall width is thinner than the thickness of the feature, the wall will become as thick as the feature itself. It's expressed as a percentage over nozzle diameter.",
         "unit": "%",
         "min": 0,
-        "mode": "advanced",
+        "mode": "simple",
         "category": "Quality",
         "default": "85"
       },
@@ -6383,6 +6421,7 @@
         "tooltip": "Interlocking depth of a segmented region. It will be ignored if \"mmu_segmented_region_max_width\" is zero or if \"mmu_segmented_region_interlocking_depth                     \"is bigger than \"mmu_segmented_region_max_width\". Zero disables this feature.",
         "unit": "mm",
         "min": 0,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "0."
       },
@@ -6394,6 +6433,7 @@
         "tooltip": "Maximum width of a segmented region. Zero disables this feature.",
         "unit": "mm",
         "min": 0,
+        "mode": "advanced",
         "category": "Advanced",
         "default": "0."
       },
@@ -6603,6 +6643,7 @@
         "coType": "coBool",
         "label": "Precise Z height",
         "tooltip": "Enable this to get precise Z height of object after slicing. It will get the precise object height by fine-tuning the layer heights of the last few layers. Note that this is an experimental parameter.",
+        "mode": "advanced",
         "category": "Quality",
         "default": "0"
       },
@@ -6647,6 +6688,7 @@
         "coType": "coBool",
         "label": "Internal ribs",
         "tooltip": "Enable internal ribs to increase the stability of the prime tower.",
+        "mode": "advanced",
         "default": "false"
       },
       "prime_tower_infill_gap": {
@@ -6657,6 +6699,7 @@
         "tooltip": "Infill gap.",
         "unit": "%",
         "min": 100,
+        "mode": "advanced",
         "default": "150"
       },
       "prime_tower_skip_points": {
@@ -6665,6 +6708,7 @@
         "coType": "coBool",
         "label": "Skip points",
         "tooltip": "The wall of prime tower will skip the start points of wipe path.",
+        "mode": "advanced",
         "default": "true"
       },
       "prime_tower_width": {
@@ -6985,6 +7029,7 @@
         "unit": "%",
         "min": 0,
         "max": 100,
+        "mode": "advanced",
         "category": "Strength",
         "default": "25"
       },
@@ -6996,6 +7041,7 @@
         "tooltip": "Adjust the line width of the selected skeleton paths.",
         "unit": "mm",
         "min": 0,
+        "mode": "advanced",
         "category": "Strength",
         "default": "100, true"
       },
@@ -7021,6 +7067,7 @@
         "unit": "mm",
         "min": 0,
         "max": 100,
+        "mode": "advanced",
         "category": "Strength",
         "default": "2.0"
       },
@@ -7032,6 +7079,7 @@
         "tooltip": "Adjust the line width of the selected skin paths.",
         "unit": "mm",
         "min": 0,
+        "mode": "advanced",
         "category": "Strength",
         "default": "100, true"
       },
@@ -7215,6 +7263,7 @@
         "coType": "coString",
         "label": "Solid infill rotation template",
         "tooltip": "This parameter adds a rotation of solid infill direction to each layer according to the specified template. The template is a comma-separated list of angles in degrees, e.g. '0,90'. The first angle is applied to the first layer, the second angle to the second layer, and so on. If there are more layers than angles, the angles will be repeated. Note that not all solid infill patterns support rotation.",
+        "mode": "advanced",
         "category": "Strength",
         "default": ""
       },
@@ -7292,6 +7341,7 @@
         "coType": "coString",
         "label": "Sparse infill rotation template",
         "tooltip": "Rotate the sparse infill direction per layer using a template of angles. Enter comma-separated degrees (e.g., '0,30,60,90'). Angles are applied in order by layer and repeat when the list ends. Advanced syntax is supported: '+5' rotates +5° every layer; '+5#5' rotates +5° every 5 layers. See the Wiki for details. When a template is set, the standard infill direction setting is ignored. Note: some infill patterns (e.g., Gyroid) control rotation themselves; use with care.",
+        "mode": "advanced",
         "category": "Strength",
         "default": ""
       },
@@ -7506,6 +7556,7 @@
         "coType": "coBool",
         "label": "Support critical regions only",
         "tooltip": "Only create support for critical regions including sharp tail, cantilever, etc.",
+        "mode": "advanced",
         "category": "Support",
         "default": "false"
       },
@@ -7968,6 +8019,7 @@
         "coType": "coBool",
         "label": "Symmetric infill Y axis",
         "tooltip": "If the model has two parts that are symmetric about the Y axis, and you want these parts to have symmetric textures, please click this option on one of the parts.",
+        "mode": "advanced",
         "category": "Strength",
         "default": "false"
       },
@@ -8199,6 +8251,7 @@
         "unit": "mm",
         "min": 1.0,
         "max": 10,
+        "mode": "advanced",
         "category": "Support",
         "default": "5."
       },
@@ -8223,6 +8276,7 @@
         "unit": "mm",
         "min": 1.0,
         "max": 10,
+        "mode": "advanced",
         "category": "Support",
         "default": "2."
       },
@@ -8235,6 +8289,7 @@
         "unit": "mm",
         "min": 1.0,
         "max": 10,
+        "mode": "advanced",
         "category": "Support",
         "default": "5."
       },
@@ -8247,6 +8302,7 @@
         "unit": "mm",
         "min": 1.0,
         "max": 10,
+        "mode": "advanced",
         "category": "Support",
         "default": "1."
       },
@@ -8476,6 +8532,7 @@
         "tooltip": "Positive values can increase the size of the rib wall, while negative values can reduce the size. However, the size of the rib wall can not be smaller than that determined by the cleaning volume.",
         "unit": "mm",
         "max": 300,
+        "mode": "advanced",
         "default": "0"
       },
       "wipe_tower_extra_spacing": {
@@ -8507,6 +8564,7 @@
         "coType": "coBool",
         "label": "Fillet wall",
         "tooltip": "The wall of prime tower will fillet.",
+        "mode": "advanced",
         "default": "true"
       },
       "wipe_tower_max_purge_speed": {
@@ -8538,6 +8596,7 @@
         "unit": "mm",
         "min": 0,
         "max": 300,
+        "mode": "advanced",
         "default": "8"
       },
       "wipe_tower_rotation_angle": {

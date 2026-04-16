@@ -171,7 +171,7 @@ def parse_print_config(filepath: str) -> dict:
 
         # Extract mode
         for mode_cpp, mode_str in MODE_MAP.items():
-            if f'def->mode = {mode_cpp}' in block_text or f'def->mode={mode_cpp}' in block_text:
+            if re.search(rf'def->mode\s*=\s*{mode_cpp}', block_text):
                 entry['mode'] = mode_str
                 break
 
