@@ -1,0 +1,336 @@
+/**
+ * Metadata-driven profile setting renderer.
+ *
+ * Reads orcaSettingsMetadata.json at build time and renders every field
+ * through the existing SettingRow component — zero hand-coded field lists.
+ */
+import React, { useState, useCallback, useMemo } from 'react';
+import { Button } from '@/common/components/ui';
+import { SettingRow, SectionHeader } from './SettingRow';
+import metadata from '../../generated/orcaSettingsMetadata.json';
+
+// ── Metadata type definitions ───────────────────────────────────────────
+
+export interface SettingMetadata {
+  key: string;
+  type: string;            // bool | float | int | percent | string
+  coType: string;           // coFloat | coFloats | coBool | coInt | coString | …
+  label: string;
+  tooltip?: string;
+  unit?: string;
+  min?: number;
+  max?: number;
+  mode?: 'simple' | 'advanced';
+  default?: string;
+  gui_type?: 'color' | 'enum_open';
+  category?: string;
+}
+
+export interface FieldRef {
+  key: string;
+  compound: boolean;
+}
+
+export interface SectionLayout {
+  name: string;
+  icon: string;
+  fields: FieldRef[];
+}
+
+export interface TabLayout {
+  name: string;
+  icon: string;
+  sections: SectionLayout[];
+}
+
+export interface ProfileTypeMetadata {
+  tabs: TabLayout[];
+  settings: Record<string, SettingMetadata>;
+}
+
+type ProfileType = 'filament' | 'machine' | 'process';
+type ViewMode = 'simple' | 'advanced';
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+/** Blue-tinted OrcaSlicer section icon */
+const OrcaIcon: React.FC<{ icon: string }> = ({ icon }) => (
+  <img
+    src={`/icons/orca/${icon}.svg`}
+    alt=""
+    width={16}
+    height={16}
+    className="shrink-0 filter-[invert(35%)_sepia(90%)_saturate(500%)_hue-rotate(190deg)_brightness(95%)]"
+  />
+);
+
+/** Map metadata type + gui_type to the SettingRow control type */
+function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' {
+  if (meta.gui_type === 'color') return 'color';
+  switch (meta.type) {
+    case 'bool':
+      return 'checkbox';
+    case 'float':
+    case 'int':
+    case 'percent':
+      return 'number';
+    default:
+      return 'text';
+  }
+}
+
+/** Coerce raw settings value to a number, falling back to metadata default */
+function toNumber(raw: unknown, meta: SettingMetadata): number {
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'string') {
+    const n = parseFloat(raw);
+    if (!isNaN(n)) return n;
+  }
+  const d = parseFloat(meta.default ?? '0');
+  return isNaN(d) ? 0 : d;
+}
+
+function toBool(raw: unknown, meta: SettingMetadata): boolean {
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'string') return raw === 'true' || raw === '1';
+  return meta.default === 'true';
+}
+
+function toString(raw: unknown, meta: SettingMetadata): string {
+  if (raw === undefined || raw === null) return meta.default ?? '';
+  return String(raw);
+}
+
+// ── MetadataSection ─────────────────────────────────────────────────────
+
+interface MetadataSectionProps {
+  section: SectionLayout;
+  allSettings: Record<string, SettingMetadata>;
+  values: Record<string, unknown>;
+  onUpdate: (key: string, value: unknown) => void;
+  viewMode: ViewMode;
+  disabled: boolean;
+}
+
+const MetadataSection: React.FC<MetadataSectionProps> = ({
+  section,
+  allSettings,
+  values,
+  onUpdate,
+  viewMode,
+  disabled,
+}) => {
+  // Resolve visible fields: filter by mode and existence in settings dict
+  const visibleFields = useMemo(() => {
+    return section.fields.filter((f) => {
+      const meta = allSettings[f.key];
+      if (!meta) return false;
+      if (viewMode === 'simple' && meta.mode === 'advanced') return false;
+      return true;
+    });
+  }, [section.fields, allSettings, viewMode]);
+
+  if (visibleFields.length === 0) return null;
+
+  return (
+    <div>
+      <SectionHeader
+        icon={<OrcaIcon icon={section.icon} />}
+        title={section.name}
+      />
+      <div>
+        {visibleFields.map((field) => {
+          const meta = allSettings[field.key];
+          const controlType = resolveControlType(meta);
+
+          switch (controlType) {
+            case 'checkbox':
+              return (
+                <SettingRow
+                  key={field.key}
+                  type="checkbox"
+                  label={meta.label}
+                  tooltip={meta.tooltip}
+                  checked={toBool(values[field.key], meta)}
+                  onChange={(v) => onUpdate(field.key, v)}
+                  disabled={disabled}
+                />
+              );
+            case 'number':
+              return (
+                <SettingRow
+                  key={field.key}
+                  type="number"
+                  label={meta.label}
+                  tooltip={meta.tooltip}
+                  value={toNumber(values[field.key], meta)}
+                  min={meta.min}
+                  max={meta.max}
+                  step={meta.type === 'int' ? 1 : 0.1}
+                  unit={meta.unit}
+                  onChange={(v) => onUpdate(field.key, v)}
+                  disabled={disabled}
+                />
+              );
+            case 'color':
+              return (
+                <SettingRow
+                  key={field.key}
+                  type="color"
+                  label={meta.label}
+                  tooltip={meta.tooltip}
+                  value={toString(values[field.key], meta)}
+                  onChange={(v) => onUpdate(field.key, v)}
+                  disabled={disabled}
+                />
+              );
+            default:
+              return (
+                <SettingRow
+                  key={field.key}
+                  type="text"
+                  label={meta.label}
+                  tooltip={meta.tooltip}
+                  value={toString(values[field.key], meta)}
+                  onChange={(v) => onUpdate(field.key, v)}
+                  disabled={disabled}
+                />
+              );
+          }
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ── MetadataTab ─────────────────────────────────────────────────────────
+
+interface MetadataTabProps {
+  tab: TabLayout;
+  allSettings: Record<string, SettingMetadata>;
+  values: Record<string, unknown>;
+  onUpdate: (key: string, value: unknown) => void;
+  viewMode: ViewMode;
+  disabled: boolean;
+}
+
+const MetadataTab: React.FC<MetadataTabProps> = ({
+  tab,
+  allSettings,
+  values,
+  onUpdate,
+  viewMode,
+  disabled,
+}) => (
+  <div className="space-y-1">
+    {tab.sections.map((section) => (
+      <MetadataSection
+        key={section.name}
+        section={section}
+        allSettings={allSettings}
+        values={values}
+        onUpdate={onUpdate}
+        viewMode={viewMode}
+        disabled={disabled}
+      />
+    ))}
+  </div>
+);
+
+// ── MetadataProfileEditor (top-level) ───────────────────────────────────
+
+export interface MetadataProfileEditorProps {
+  profileType: ProfileType;
+  settings: Record<string, unknown>;
+  onUpdate: (key: string, value: unknown) => void;
+  initialViewMode?: ViewMode;
+  disabled?: boolean;
+  className?: string;
+}
+
+export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
+  profileType,
+  settings,
+  onUpdate,
+  initialViewMode = 'simple',
+  disabled = false,
+  className = '',
+}) => {
+  const profileMeta = (metadata as Record<string, ProfileTypeMetadata>)[profileType];
+  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
+  const [activeTabIdx, setActiveTabIdx] = useState(0);
+
+  const handleToggleMode = useCallback(() => {
+    setViewMode((m) => (m === 'simple' ? 'advanced' : 'simple'));
+  }, []);
+
+  const tabs = profileMeta.tabs;
+  const activeTab = tabs[activeTabIdx] ?? tabs[0];
+
+  return (
+    <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
+      {/* Tab bar + Advanced toggle */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
+        <div className="flex gap-1 overflow-x-auto">
+          {tabs.map((tab, idx) => (
+            <Button
+              key={tab.name}
+              variant="unstyled"
+              type="button"
+              size="sm"
+              onClick={() => setActiveTabIdx(idx)}
+              disabled={disabled}
+              className={`px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap
+                ${idx === activeTabIdx
+                  ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary'}`}
+            >
+              <span className="inline-flex items-center gap-1">
+                <OrcaIcon icon={tab.icon} />
+                {tab.name}
+              </span>
+            </Button>
+          ))}
+        </div>
+
+        {/* Advanced toggle — matches MachineProfileEditor pattern */}
+        <Button
+          variant="unstyled"
+          type="button"
+          onClick={handleToggleMode}
+          disabled={disabled}
+          className="shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
+          title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}
+          aria-label={`Switch to ${viewMode === 'simple' ? 'Advanced' : 'Simple'} mode`}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
+            <span
+              className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
+                viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all ${
+                  viewMode === 'advanced' ? 'left-3.5' : 'left-0.5'
+                }`}
+              />
+            </span>
+          </span>
+        </Button>
+      </div>
+
+      {/* Active tab content */}
+      <div className="p-2 h-96 overflow-y-auto">
+        <MetadataTab
+          tab={activeTab}
+          allSettings={profileMeta.settings}
+          values={settings}
+          onUpdate={onUpdate}
+          viewMode={viewMode}
+          disabled={disabled}
+        />
+      </div>
+    </div>
+  );
+};

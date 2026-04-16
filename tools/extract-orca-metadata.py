@@ -206,16 +206,104 @@ def parse_print_config(filepath: str) -> dict:
 
 # ── Tab.cpp parser ─────────────────────────────────────────────────────────
 
+
+def _expand_vector_loops(body: str) -> str:
+    """Expand C++ for-range loops over inline string vectors.
+
+    Handles patterns like:
+        const std::vector<std::string> axes{ "x", "y", "z", "e" };
+        for (const std::string &axis : axes) {
+            append_option_line(optgroup, "machine_max_acceleration_" + axis, "...");
+        }
+    Produces expanded lines with the concatenated key for each value.
+    """
+    # Step 1: collect inline vector declarations
+    vec_pattern = re.compile(
+        r'(?:const\s+)?std::vector<std::string>\s+(\w+)\s*\{([^}]+)\}',
+    )
+    vectors: dict[str, list[str]] = {}
+    for m in vec_pattern.finditer(body):
+        var_name = m.group(1)
+        values = re.findall(r'"([^"]*)"', m.group(2))
+        vectors[var_name] = values
+
+    if not vectors:
+        return body
+
+    # Step 2: find for-range loops over known vectors and expand them
+    result_lines: list[str] = []
+    lines = body.split('\n')
+    i = 0
+    while i < len(lines):
+        # Match: for (const std::string &var : vec_name)
+        loop_match = re.search(
+            r'for\s*\(\s*(?:const\s+)?(?:auto|std::string)\s*[&]?\s*(\w+)\s*:\s*(\w+)\s*\)',
+            lines[i],
+        )
+        if loop_match:
+            loop_var = loop_match.group(1)
+            vec_name = loop_match.group(2)
+            if vec_name in vectors:
+                # Find the loop body (between braces)
+                loop_body_lines: list[str] = []
+                # Skip to opening brace
+                j = i
+                found_open = False
+                while j < len(lines):
+                    if '{' in lines[j]:
+                        found_open = True
+                        j += 1
+                        break
+                    j += 1
+                if not found_open:
+                    result_lines.append(lines[i])
+                    i += 1
+                    continue
+                # Collect until closing brace
+                depth = 1
+                while j < len(lines) and depth > 0:
+                    for ch in lines[j]:
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                    if depth > 0:
+                        loop_body_lines.append(lines[j])
+                    j += 1
+                # Expand: for each vector value, substitute the variable
+                for val in vectors[vec_name]:
+                    for body_line in loop_body_lines:
+                        # Handle "prefix_" + var concatenation
+                        expanded = re.sub(
+                            rf'"([^"]*?)"\s*\+\s*{re.escape(loop_var)}',
+                            lambda mm: f'"{mm.group(1)}{val}"',
+                            body_line,
+                        )
+                        # Handle bare variable reference (e.g., append_option_line(og, var, ...))
+                        expanded = re.sub(
+                            rf'\b{re.escape(loop_var)}\b',
+                            f'"{val}"',
+                            expanded,
+                        )
+                        result_lines.append(expanded)
+                i = j
+                continue
+        result_lines.append(lines[i])
+        i += 1
+    return '\n'.join(result_lines)
+
+
 def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> list:
     """Parse Tab.cpp to extract the tab/section/field layout for a specific tab class."""
     with open(filepath, 'r', encoding='utf-8') as f:
         content = strip_block_comments(f.read())
 
-    # Find the method
-    start = content.find(f'void {method_name}()')
-    if start < 0:
+    # Find the method — support any return type (void, PageShp, etc.)
+    m = re.search(rf'^\w[\w:*&<> ]*\s+{re.escape(method_name)}\s*\(', content, re.MULTILINE)
+    if not m:
         print(f"Warning: {method_name} not found in {filepath}", file=sys.stderr)
         return []
+    start = m.start()
 
     # Extract until next top-level void
     rest = content[start:]
@@ -230,6 +318,10 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
                 end = i
                 break
     method_body = rest[:end + 1]
+
+    # Pre-process: expand C++ for-range loops over inline string vectors
+    method_body = _expand_vector_loops(method_body)
+
     lines = method_body.split('\n')
 
     tabs = []
@@ -293,6 +385,15 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
             })
             continue
 
+        # append_option_line(optgroup, "field_name", ...) — used in kinematics page
+        m = re.search(r'append_option_line\(\s*\w+\s*,\s*"([^"]+)"', stripped)
+        if m and current_section:
+            current_section['fields'].append({
+                'key': m.group(1),
+                'compound': False,
+            })
+            continue
+
         # append_line variant
         m = re.search(r'append_line\(\s*(\w+)\s*\)', stripped)
         if m:
@@ -307,6 +408,26 @@ def parse_filament_tabs(filepath: str) -> list:
     overrides = parse_tab_layout(filepath, 'TabFilament::add_filament_overrides_page')
     if overrides:
         tabs.extend(overrides)
+    return tabs
+
+
+def parse_process_tabs(filepath: str) -> list:
+    """Parse process (print) tab layout from TabPrint::build."""
+    return parse_tab_layout(filepath, 'TabPrint::build')
+
+
+def parse_machine_tabs(filepath: str) -> list:
+    """Parse machine tab layout from multiple TabPrinter methods."""
+    # Main tabs: Basic information, Machine G-code, Notes
+    tabs = parse_tab_layout(filepath, 'TabPrinter::build_fff')
+    # Motion ability (kinematics) — built via separate method
+    kinematics = parse_tab_layout(filepath, 'TabPrinter::build_kinematics_page')
+    if kinematics:
+        tabs.extend(kinematics)
+    # Multimaterial + Extruder pages — built via build_unregular_pages
+    unregular = parse_tab_layout(filepath, 'TabPrinter::build_unregular_pages')
+    if unregular:
+        tabs.extend(unregular)
     return tabs
 
 
@@ -355,15 +476,17 @@ def main():
     all_settings = parse_print_config(print_config_path)
     print(f"  Found {len(all_settings)} total settings", file=sys.stderr)
 
-    # Parse Tab.cpp for filament layout
+    # Parse Tab.cpp for tab layouts
     if os.path.exists(tab_path):
-        print(f"Parsing {tab_path} for filament tab layout...", file=sys.stderr)
+        print(f"Parsing {tab_path} for tab layouts...", file=sys.stderr)
         filament_tabs = parse_filament_tabs(tab_path)
-        machine_tabs = parse_tab_layout(tab_path, 'TabPrinter::build_fff')
-        print(f"  Found {len(filament_tabs)} filament tabs, {len(machine_tabs)} machine tabs", file=sys.stderr)
+        machine_tabs = parse_machine_tabs(tab_path)
+        process_tabs = parse_process_tabs(tab_path)
+        print(f"  Found {len(filament_tabs)} filament tabs, {len(machine_tabs)} machine tabs, {len(process_tabs)} process tabs", file=sys.stderr)
     else:
         filament_tabs = []
         machine_tabs = []
+        process_tabs = []
 
     # Find icons
     icons = find_icon_files(src_path)
@@ -404,6 +527,24 @@ def main():
         if key in all_settings:
             machine_metadata[key] = all_settings[key]
 
+    # Build process-related settings
+    process_keys = set()
+    for tab in process_tabs:
+        for section in tab['sections']:
+            for field in section['fields']:
+                process_keys.add(field['key'])
+    # Also include known process-prefixed settings not in tabs
+    for key in all_settings:
+        if key.startswith('support_') or key.startswith('tree_support_') or key.startswith('brim_') or key.startswith('skirt_'):
+            process_keys.add(key)
+
+    process_metadata = {}
+    for key in sorted(process_keys):
+        if key in all_settings:
+            process_metadata[key] = all_settings[key]
+        else:
+            process_metadata[key] = {'key': key, 'label': key, 'type': 'unknown'}
+
     result = {
         '_meta': {
             'source': 'OrcaSlicer PrintConfig.cpp + Tab.cpp',
@@ -411,6 +552,7 @@ def main():
             'totalSettings': len(all_settings),
             'filamentSettings': len(filament_metadata),
             'machineSettings': len(machine_metadata),
+            'processSettings': len(process_metadata),
         },
         'filament': {
             'tabs': filament_tabs,
@@ -419,6 +561,10 @@ def main():
         'machine': {
             'tabs': machine_tabs,
             'settings': machine_metadata,
+        },
+        'process': {
+            'tabs': process_tabs,
+            'settings': process_metadata,
         },
         'icons': {k: v for k, v in icons.items() if k.startswith('param_') or k.startswith('custom-gcode_')},
     }
