@@ -183,7 +183,12 @@ def parse_print_config(filepath: str) -> dict:
         # Extract default value
         m = re.search(r'set_default_value\(new\s+ConfigOption\w+\s*[{(]\s*([^})]+)\s*[})]', block_text)
         if m:
-            entry['default'] = m.group(1).strip().strip('"')
+            raw_default = m.group(1).strip().strip('"')
+            # Clean Vec2d(x, y) → "x, y"
+            vec_match = re.match(r'Vec2d\(\s*(.+)', raw_default)
+            if vec_match:
+                raw_default = vec_match.group(1).rstrip(')')
+            entry['default'] = raw_default
 
         # Extract gui_type
         if 'f_enum_open' in block_text:

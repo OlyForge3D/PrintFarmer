@@ -5,7 +5,7 @@
  * through the existing SettingRow component — zero hand-coded field lists.
  */
 import React, { useState, useCallback, useMemo } from 'react';
-import { Button } from '@/common/components/ui';
+import { Button, Textarea } from '@/common/components/ui';
 import { SettingRow, SectionHeader } from './SettingRow';
 import metadata from '../../generated/orcaSettingsMetadata.json';
 
@@ -30,7 +30,7 @@ export interface SettingMetadata {
 /** Known enum options for settings that use select dropdowns */
 const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
   printer_structure: [
-    { value: 'undefine', label: 'Undefine' },
+    { value: 'undefine', label: 'Undefined' },
     { value: 'corexy', label: 'CoreXY' },
     { value: 'i3', label: 'I3' },
     { value: 'hbot', label: 'Hbot' },
@@ -43,7 +43,7 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'marlin2', label: 'Marlin 2' },
   ],
   nozzle_type: [
-    { value: 'undefine', label: 'Undefine' },
+    { value: 'undefine', label: 'Undefined' },
     { value: 'hardened_steel', label: 'Hardened Steel' },
     { value: 'stainless_steel', label: 'Stainless Steel' },
     { value: 'brass', label: 'Brass' },
@@ -105,10 +105,11 @@ const OrcaIcon: React.FC<{ icon: string }> = ({ icon }) => (
 );
 
 /** Map metadata type + gui_type to the SettingRow control type */
-function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' | 'select' | 'textarea' {
+function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' | 'select' | 'textarea' | 'point' {
   if (meta.gui_type === 'color') return 'color';
   if (TEXTAREA_KEYS.has(meta.key)) return 'textarea';
   if (KNOWN_ENUMS[meta.key] || meta.type === 'enum' || meta.gui_type === 'enum_open') return 'select';
+  if (meta.type === 'point') return 'point';
   switch (meta.type) {
     case 'bool':
       return 'checkbox';
@@ -136,6 +137,16 @@ function toBool(raw: unknown, meta: SettingMetadata): boolean {
   if (typeof raw === 'boolean') return raw;
   if (typeof raw === 'string') return raw === 'true' || raw === '1';
   return meta.default === 'true';
+}
+
+/** Parse a point value "x,y" or "0x0" into [x, y] */
+function parsePoint(raw: unknown, meta: SettingMetadata): [number, number] {
+  const str = raw != null ? String(raw) : (meta.default ?? '0, 0');
+  // Handle "0x0", "0,0", "0, 0" formats
+  const parts = str.split(/[x,]\s*/);
+  const x = parseFloat(parts[0] ?? '0');
+  const y = parseFloat(parts[1] ?? '0');
+  return [isNaN(x) ? 0 : x, isNaN(y) ? 0 : y];
 }
 
 function toString(raw: unknown, meta: SettingMetadata): string {
@@ -245,16 +256,59 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
             }
             case 'textarea':
               return (
-                <SettingRow
-                  key={field.key}
-                  type="textarea"
-                  label={meta.label}
-                  tooltip={meta.tooltip}
-                  value={toString(values[field.key], meta)}
-                  onChange={(v) => onUpdate(field.key, v)}
-                  disabled={disabled}
-                />
+                <div key={field.key} className="py-0.5">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
+                    {meta.tooltip && (
+                      <span className="text-pf-text-muted cursor-help" title={meta.tooltip}>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                      </span>
+                    )}
+                  </div>
+                  <Textarea
+                    rows={8}
+                    value={toString(values[field.key], meta)}
+                    onChange={(e) => onUpdate(field.key, e.target.value)}
+                    disabled={disabled}
+                    className="font-mono text-sm"
+                  />
+                </div>
               );
+            case 'point': {
+              const [px, py] = parsePoint(values[field.key], meta);
+              return (
+                <div key={field.key} className="flex items-center gap-3 py-0.5">
+                  <div className="flex items-center gap-1.5 w-2/5 shrink-0">
+                    <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
+                    {meta.tooltip && (
+                      <span className="text-pf-text-muted cursor-help" title={meta.tooltip}>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="text-xs text-pf-text-muted">X</span>
+                    <input
+                      type="number"
+                      title={`${meta.label} X`}
+                      className="flex-1 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded"
+                      value={px}
+                      onChange={(e) => onUpdate(field.key, `${e.target.value},${py}`)}
+                      disabled={disabled}
+                    />
+                    <span className="text-xs text-pf-text-muted">Y</span>
+                    <input
+                      type="number"
+                      title={`${meta.label} Y`}
+                      className="flex-1 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded"
+                      value={py}
+                      onChange={(e) => onUpdate(field.key, `${px},${e.target.value}`)}
+                      disabled={disabled}
+                    />
+                  </div>
+                </div>
+              );
+            }
             default:
               return (
                 <SettingRow
@@ -327,7 +381,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   disabled = false,
   className = '',
 }) => {
-  const profileMeta = (metadata as Record<string, ProfileTypeMetadata>)[profileType];
+  const profileMeta = (metadata as unknown as Record<string, ProfileTypeMetadata>)[profileType];
   const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 

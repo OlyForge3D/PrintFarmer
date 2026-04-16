@@ -2292,7 +2292,7 @@
         "label": "Bed exclude area",
         "tooltip": "Unprintable area in XY plane. For example, X1 Series printers use the front left corner to cut filament during filament change. The area is expressed as polygon by points in following format: \"XxY, XxY, ...\"",
         "mode": "advanced",
-        "default": "Vec2d(0, 0"
+        "default": "0, 0"
       },
       "bed_mesh_max": {
         "key": "bed_mesh_max",
@@ -2302,7 +2302,7 @@
         "tooltip": "This option sets the max point for the allowed bed mesh area. Due to the probe's XY offset, most printers are unable to probe the entire bed. To ensure the probe point does not go outside the bed area, the minimum and maximum points of the bed mesh should be set appropriately. OrcaSlicer ensures that adaptive_bed_mesh_min/adaptive_bed_mesh_max values do not exceed these min/max points. This information can usually be obtained from your printer manufacturer. The default setting is (99999, 99999), which means there are no limits, thus allowing probing across the entire bed.",
         "unit": "mm",
         "mode": "advanced",
-        "default": "Vec2d(99999, 99999"
+        "default": "99999, 99999"
       },
       "bed_mesh_min": {
         "key": "bed_mesh_min",
@@ -2312,7 +2312,7 @@
         "tooltip": "This option sets the min point for the allowed bed mesh area. Due to the probe's XY offset, most printers are unable to probe the entire bed. To ensure the probe point does not go outside the bed area, the minimum and maximum points of the bed mesh should be set appropriately. OrcaSlicer ensures that adaptive_bed_mesh_min/adaptive_bed_mesh_max values do not exceed these min/max points. This information can usually be obtained from your printer manufacturer. The default setting is (-99999, -99999), which means there are no limits, thus allowing probing across the entire bed.",
         "unit": "mm",
         "mode": "advanced",
-        "default": "Vec2d(-99999, -99999"
+        "default": "-99999, -99999"
       },
       "bed_mesh_probe_distance": {
         "key": "bed_mesh_probe_distance",
@@ -2322,7 +2322,7 @@
         "tooltip": "This option sets the preferred distance between probe points (grid size) for the X and Y directions, with the default being 50mm for both X and Y.",
         "unit": "mm",
         "min": 0,
-        "default": "Vec2d(50, 50"
+        "default": "50, 50"
       },
       "bed_temperature_formula": {
         "key": "bed_temperature_formula",
@@ -2347,7 +2347,7 @@
         "label": "Best object position",
         "tooltip": "Best auto arranging position in range [0,1] w.r.t. bed shape.",
         "mode": "advanced",
-        "default": "Vec2d(0.5, 0.5"
+        "default": "0.5, 0.5"
       },
       "change_extrusion_role_gcode": {
         "key": "change_extrusion_role_gcode",
@@ -2483,7 +2483,7 @@
         "label": "Extruder offset",
         "unit": "mm",
         "mode": "advanced",
-        "default": "Vec2d(0,0"
+        "default": "0,0"
       },
       "extruder_printable_area": {
         "key": "extruder_printable_area",
