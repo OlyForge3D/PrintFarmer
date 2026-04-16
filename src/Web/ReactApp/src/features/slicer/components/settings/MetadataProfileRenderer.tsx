@@ -30,7 +30,7 @@ export interface SettingMetadata {
 /** Known enum options for settings that use select dropdowns */
 const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
   printer_structure: [
-    { value: 'undefine', label: 'Undefine' },
+    { value: 'undefine', label: 'Undefined' },
     { value: 'corexy', label: 'CoreXY' },
     { value: 'i3', label: 'I3' },
     { value: 'hbot', label: 'Hbot' },
@@ -43,7 +43,7 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'marlin2', label: 'Marlin 2' },
   ],
   nozzle_type: [
-    { value: 'undefine', label: 'Undefine' },
+    { value: 'undefine', label: 'Undefined' },
     { value: 'hardened_steel', label: 'Hardened Steel' },
     { value: 'stainless_steel', label: 'Stainless Steel' },
     { value: 'brass', label: 'Brass' },
