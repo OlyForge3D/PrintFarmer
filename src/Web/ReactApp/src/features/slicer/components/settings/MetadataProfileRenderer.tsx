@@ -30,7 +30,7 @@ export interface SettingMetadata {
 /** Known enum options for settings that use select dropdowns */
 const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
   printer_structure: [
-    { value: 'undefine', label: 'Undefined' },
+    { value: 'undefine', label: 'Undefine' },
     { value: 'corexy', label: 'CoreXY' },
     { value: 'i3', label: 'I3' },
     { value: 'hbot', label: 'Hbot' },
@@ -43,7 +43,7 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'marlin2', label: 'Marlin 2' },
   ],
   nozzle_type: [
-    { value: 'undefine', label: 'Undefined' },
+    { value: 'undefine', label: 'Undefine' },
     { value: 'hardened_steel', label: 'Hardened Steel' },
     { value: 'stainless_steel', label: 'Stainless Steel' },
     { value: 'brass', label: 'Brass' },
@@ -53,6 +53,74 @@ const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'Engineering Plate', label: 'Engineering Plate' },
     { value: 'High Temp Plate', label: 'High Temp Plate' },
     { value: 'Textured PEI Plate', label: 'Textured PEI Plate' },
+  ],
+  seam_position: [
+    { value: 'nearest', label: 'Nearest' },
+    { value: 'aligned', label: 'Aligned' },
+    { value: 'aligned_back', label: 'Aligned back' },
+    { value: 'back', label: 'Back' },
+    { value: 'random', label: 'Random' },
+  ],
+  seam_slope_type: [
+    { value: 'none', label: 'None' },
+    { value: 'external', label: 'Contour' },
+    { value: 'all', label: 'Contour and hole' },
+  ],
+  wall_sequence: [
+    { value: 'inner wall/outer wall', label: 'Inner/Outer' },
+    { value: 'outer wall/inner wall', label: 'Outer/Inner' },
+    { value: 'inner-outer-inner wall', label: 'Inner-Outer-Inner' },
+  ],
+  ironing_type: [
+    { value: 'no_ironing', label: 'No ironing' },
+    { value: 'top', label: 'Top surfaces' },
+    { value: 'topmost', label: 'Topmost surface' },
+    { value: 'all_solid', label: 'All solid surfaces' },
+  ],
+  ironing_pattern: [
+    { value: 'rectilinear', label: 'Rectilinear' },
+    { value: 'concentric', label: 'Concentric' },
+  ],
+  wall_generator: [
+    { value: 'classic', label: 'Classic' },
+    { value: 'arachne', label: 'Arachne' },
+  ],
+  brim_type: [
+    { value: 'no_brim', label: 'No brim' },
+    { value: 'outer_only', label: 'Outer brim only' },
+    { value: 'inner_only', label: 'Inner brim only' },
+    { value: 'outer_and_inner', label: 'Outer and inner brim' },
+    { value: 'auto_brim', label: 'Auto' },
+  ],
+  support_type: [
+    { value: 'normal(auto)', label: 'Normal (auto)' },
+    { value: 'tree(auto)', label: 'Tree (auto)' },
+    { value: 'normal(manual)', label: 'Normal (manual)' },
+    { value: 'tree(manual)', label: 'Tree (manual)' },
+  ],
+  support_style: [
+    { value: 'default', label: 'Default' },
+    { value: 'grid', label: 'Grid' },
+    { value: 'snug', label: 'Snug' },
+    { value: 'organic', label: 'Organic' },
+  ],
+  slicing_mode: [
+    { value: 'regular', label: 'Regular' },
+    { value: 'even_odd', label: 'Even-odd' },
+    { value: 'close_holes', label: 'Close holes' },
+  ],
+  fuzzy_skin: [
+    { value: 'none', label: 'None' },
+    { value: 'external', label: 'Outside wall' },
+    { value: 'all', label: 'All walls' },
+  ],
+  print_sequence: [
+    { value: 'by_layer', label: 'By layer' },
+    { value: 'by_object', label: 'By object' },
+  ],
+  timelapse_type: [
+    { value: '0', label: 'Traditional' },
+    { value: '1', label: 'Smooth' },
   ],
 };
 
@@ -118,6 +186,7 @@ function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'tex
     case 'float':
     case 'int':
     case 'percent':
+    case 'float_or_percent':
       return 'number';
     default:
       return 'text';
@@ -221,8 +290,8 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   value={toNumber(values[field.key], meta)}
                   min={meta.min}
                   max={meta.max}
-                  step={meta.type === 'int' ? 1 : 0.1}
-                  unit={meta.unit}
+                  step={meta.type === 'int' ? 1 : 0.01}
+                  unit={meta.type === 'float_or_percent' ? 'mm or %' : meta.unit}
                   onChange={(v) => onUpdate(field.key, v)}
                   disabled={disabled}
                 />
