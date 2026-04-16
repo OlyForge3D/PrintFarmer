@@ -157,8 +157,8 @@ export function ProfileEditorModal({
       isOpen={isOpen}
       onClose={onClose}
       title={modalTitle}
-      width="max-w-4xl"
-      maxHeight="max-h-[85vh]"
+      width="max-w-5xl"
+      maxHeight="max-h-[95vh]"
       footer={
         <div className="flex items-center justify-between w-full">
           <div className="text-sm text-pf-text-muted">
