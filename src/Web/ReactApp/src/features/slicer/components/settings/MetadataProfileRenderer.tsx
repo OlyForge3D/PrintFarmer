@@ -462,7 +462,8 @@ function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'tex
   if (KNOWN_ENUMS[meta.key] || meta.type === 'enum'
     || (meta.gui_type === 'enum_open' && !['float', 'int', 'percent', 'float_or_percent'].includes(meta.type))
   ) return 'select';
-  if (meta.type === 'point') return 'point';
+  // coPoints = polygon/multi-point → render as text; coPoint = single X,Y pair
+  if (meta.type === 'point' && meta.coType !== 'coPoints') return 'point';
   switch (meta.type) {
     case 'bool':
       return 'checkbox';
@@ -676,24 +677,28 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <span className="text-xs text-pf-text-muted">X</span>
-                    <input
-                      type="number"
-                      title={`${meta.label} X`}
-                      className="flex-1 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded"
-                      value={px}
-                      onChange={(e) => onUpdate(field.key, `${e.target.value},${py}`)}
-                      disabled={disabled}
-                    />
-                    <span className="text-xs text-pf-text-muted">Y</span>
-                    <input
-                      type="number"
-                      title={`${meta.label} Y`}
-                      className="flex-1 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded"
-                      value={py}
-                      onChange={(e) => onUpdate(field.key, `${px},${e.target.value}`)}
-                      disabled={disabled}
-                    />
+                    <div className="flex-1 flex items-center bg-pf-panel border border-pf-border rounded overflow-hidden">
+                      <span className="px-2 text-xs text-pf-text-muted select-none">X</span>
+                      <input
+                        type="number"
+                        title={`${meta.label} X`}
+                        className="flex-1 px-1 py-1 text-sm text-right bg-transparent border-none outline-none"
+                        value={px}
+                        onChange={(e) => onUpdate(field.key, `${e.target.value},${py}`)}
+                        disabled={disabled}
+                      />
+                    </div>
+                    <div className="flex-1 flex items-center bg-pf-panel border border-pf-border rounded overflow-hidden">
+                      <span className="px-2 text-xs text-pf-text-muted select-none">Y</span>
+                      <input
+                        type="number"
+                        title={`${meta.label} Y`}
+                        className="flex-1 px-1 py-1 text-sm text-right bg-transparent border-none outline-none"
+                        value={py}
+                        onChange={(e) => onUpdate(field.key, `${px},${e.target.value}`)}
+                        disabled={disabled}
+                      />
+                    </div>
                   </div>
                   <div className="w-7 shrink-0 flex justify-center">
                     {isModified && (
