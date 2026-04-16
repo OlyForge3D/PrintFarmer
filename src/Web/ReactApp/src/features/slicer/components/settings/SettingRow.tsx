@@ -208,6 +208,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
               type="button"
               className="p-0.5 shrink-0"
               title={tooltip}
+              onClick={() => { /* native title tooltip handles display */ }}
               aria-label={`Help for ${label}`}
             >
               <HelpIcon className="w-4 h-4" />
@@ -529,7 +530,7 @@ const ColorInputControl: React.FC<ColorInputSettingProps & { id: string }> = ({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="flex-1 px-3 py-2 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text font-mono text-sm uppercase
+                   text-pf-text font-mono text-xs uppercase
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
         placeholder="#000000"
@@ -620,7 +621,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
               max={props.max}
               step={props.step ?? 0.01}
               disabled={disabled}
-              className={`w-20 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border
+              className={`w-20 px-2 py-1 text-xs text-right bg-pf-panel border border-pf-border
                          text-pf-text focus:border-pf-accent-2 focus:outline-hidden
                          disabled:opacity-50 disabled:cursor-not-allowed ${props.unit ? 'rounded-l rounded-r-none border-r-0' : 'rounded'}`}
             />
@@ -639,7 +640,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             value={props.value}
             onChange={(e) => props.onChange(e.target.value)}
             disabled={disabled}
-            className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
+            className="w-32 px-2 py-1 text-xs bg-pf-panel border border-pf-border rounded
                        text-pf-text cursor-pointer focus:border-pf-accent-2 focus:outline-hidden
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -668,7 +669,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             onChange={(e) => props.onChange(e.target.value)}
             placeholder={props.placeholder}
             disabled={disabled}
-            className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
+            className="w-32 px-2 py-1 text-xs bg-pf-panel border border-pf-border rounded
                        text-pf-text focus:border-pf-accent-2 focus:outline-hidden
                        disabled:opacity-50 disabled:cursor-not-allowed"
           />
@@ -765,7 +766,7 @@ const TextareaControl: React.FC<TextareaSettingProps & { id: string }> = ({
     id={id}
     title="G-code editor"
     className="w-full px-3 py-2 bg-pf-panel border border-pf-border rounded-lg
-               text-sm text-pf-text-primary font-mono resize-y
+               text-xs text-pf-text-primary font-mono resize-y
                focus:border-pf-accent-2 focus:outline-none focus:ring-1 focus:ring-pf-accent-2/30"
     rows={rows}
     value={value}
