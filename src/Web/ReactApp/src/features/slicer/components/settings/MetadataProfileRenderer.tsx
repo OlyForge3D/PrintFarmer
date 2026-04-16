@@ -6,7 +6,7 @@
  */
 import React, { useState, useCallback, useMemo } from 'react';
 import { Button, Textarea } from '@/common/components/ui';
-import { SettingRow, SectionHeader } from './SettingRow';
+import { SettingRow, SectionHeader, ResetIcon } from './SettingRow';
 import metadata from '../../generated/orcaSettingsMetadata.json';
 
 // ── Metadata type definitions ───────────────────────────────────────────
@@ -273,7 +273,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
           // Change tracking: compare current value to original
           const origVal = originalValues?.[field.key];
           const curVal = values[field.key];
-          const isModified = originalValues !== undefined && origVal !== undefined && String(curVal) !== String(origVal);
+          const isModified = originalValues !== undefined && origVal !== undefined && JSON.stringify(curVal) !== JSON.stringify(origVal);
           const resetProps = isModified ? {
             isModified: true,
             originalValue: origVal,
@@ -343,13 +343,31 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
               );
             }
             case 'textarea': {
-              // Skip label when section has only one textarea (section header IS the label)
               const showLabel = visibleFields.length > 1;
               return (
                 <div key={field.key} className="py-0.5">
-                  {showLabel && (
+                  {(showLabel || isModified) && (
                     <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
+                      {showLabel && (
+                        <span
+                          className={`text-xs ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
+                          title={meta.tooltip}
+                        >
+                          {meta.label}
+                        </span>
+                      )}
+                      {isModified && (
+                        <Button
+                          variant="subtle"
+                          type="button"
+                          onClick={() => onUpdate(field.key, origVal)}
+                          className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors hover:bg-pf-warning/10 rounded shrink-0"
+                          title="Reset to original"
+                          aria-label={`Reset ${meta.label} to original value`}
+                        >
+                          <ResetIcon className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   )}
                   <Textarea
@@ -365,11 +383,16 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
             case 'point': {
               const [px, py] = parsePoint(values[field.key], meta);
               return (
-                <div key={field.key} className="flex items-center gap-3 py-0.5">
-                  <div className="flex items-center gap-1.5 w-2/5 shrink-0">
-                    <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
+                <div key={field.key} className="flex items-center gap-2 py-0.5">
+                  <div className="flex items-center gap-1.5 w-1/2 shrink-0">
+                    <span
+                      className={`text-xs ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
+                      title={meta.tooltip}
+                    >
+                      {meta.label}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2 flex-1">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
                     <span className="text-xs text-pf-text-muted">X</span>
                     <input
                       type="number"
@@ -388,6 +411,20 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                       onChange={(e) => onUpdate(field.key, `${px},${e.target.value}`)}
                       disabled={disabled}
                     />
+                  </div>
+                  <div className="w-7 shrink-0 flex justify-center">
+                    {isModified && (
+                      <Button
+                        variant="subtle"
+                        type="button"
+                        onClick={() => onUpdate(field.key, origVal)}
+                        className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors hover:bg-pf-warning/10 rounded"
+                        title="Reset to original"
+                        aria-label={`Reset ${meta.label} to original value`}
+                      >
+                        <ResetIcon className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -482,7 +519,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   const activeTab = tabs[activeTabIdx] ?? tabs[0];
 
   return (
-    <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
+    <div className={`bg-pf-bg-1 rounded-lg border border-pf-border flex flex-col ${className}`}>
       {/* Tab bar + Advanced toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
         <div className="flex gap-1 overflow-x-auto">
@@ -532,7 +569,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       </div>
 
       {/* Active tab content */}
-      <div className="p-2 h-96 overflow-y-auto">
+      <div className="p-2 flex-1 min-h-0 overflow-y-auto">
         <MetadataTab
           tab={activeTab}
           allSettings={profileMeta.settings}

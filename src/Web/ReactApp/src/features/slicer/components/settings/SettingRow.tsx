@@ -7,7 +7,7 @@ import React, { useId } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
 
 /** Reset icon - circular arrow matching OrcaSlicer's style */
-const ResetIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+export const ResetIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
     <path d="M3 3v5h5" />
@@ -151,35 +151,30 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           {label && (
             <div className="flex items-center gap-2 mb-1">
               <span className="text-pf-accent-2 shrink-0">{icon}</span>
-              <label htmlFor={id} className="font-medium text-xs text-pf-text" title={tooltip}>{label}</label>
+              <label htmlFor={id} className={`font-medium text-xs transition-colors ${isModified ? 'text-pf-warning' : 'text-pf-text'}`} title={tooltip}>{label}</label>
+              {isModified && onReset && (
+                <Button
+                  variant="subtle"
+                  type="button"
+                  onClick={onReset}
+                  className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors hover:bg-pf-warning/10 rounded shrink-0"
+                  title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+                  aria-label={`Reset ${label} to original value`}
+                >
+                  <ResetIcon className="w-4 h-4" />
+                </Button>
+              )}
             </div>
           )}
           {renderControl()}
         </div>
       ) : (
-      /* Horizontal row: label+description left, control right */
-      <div className="flex items-center gap-3">
-        {/* Left side: icon, label, description — hidden when label is empty */}
+      /* Horizontal row: [label] [control] [reset button] */
+      <div className="flex items-center gap-2">
+        {/* Left: icon + label */}
         {label && (
-        <div className="flex items-center gap-2 min-w-0 w-2/5 shrink-0">
+        <div className="flex items-center gap-2 min-w-0 w-1/2 shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
-          
-          {/* Reset button - shown when setting is modified */}
-          {isModified && onReset && (
-            <Button
-              variant="subtle"
-              type="button"
-              onClick={onReset}
-              className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
-                         hover:bg-pf-warning/10 rounded shrink-0"
-              title={`Reset to original: ${formatOriginalValue(originalValue)}`}
-              aria-label={`Reset ${label} to original value`}
-            >
-              <ResetIcon className="w-4 h-4" />
-            </Button>
-          )}
-          
-          {/* Label and description */}
           <div className="min-w-0">
             <label 
               htmlFor={id} 
@@ -196,13 +191,29 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
               <p className="text-xs text-pf-text-muted truncate">{description}</p>
             )}
           </div>
-          
           </div>
         )}
         
-        {/* Right side: control */}
+        {/* Center: control */}
         <div className="flex-1 min-w-0" title={tooltip}>
           {renderControl()}
+        </div>
+
+        {/* Right: reset button (fixed spacer for alignment) */}
+        <div className="w-7 shrink-0 flex justify-center">
+          {isModified && onReset && (
+            <Button
+              variant="subtle"
+              type="button"
+              onClick={onReset}
+              className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+                         hover:bg-pf-warning/10 rounded"
+              title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+              aria-label={`Reset ${label} to original value`}
+            >
+              <ResetIcon className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </div>
       )}
@@ -663,24 +674,9 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
   };
 
   return (
-    <div className={`flex items-center justify-between py-0.5 ${disabled ? 'opacity-50' : ''}`}>
-      {/* Label with optional reset button */}
-      <div className="flex items-center gap-1.5">
-        {/* Reset button - shown when setting is modified */}
-        {isModified && onReset && (
-          <Button
-            variant="subtle"
-            type="button"
-            onClick={onReset}
-            className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
-                       hover:bg-pf-warning/10 rounded"
-            title={`Reset to original: ${formatOriginalValue(originalValue)}`}
-            aria-label={`Reset ${label} to original value`}
-          >
-            <ResetIcon className="w-3.5 h-3.5" />
-          </Button>
-        )}
-        
+    <div className={`flex items-center gap-2 py-0.5 ${disabled ? 'opacity-50' : ''}`}>
+      {/* Label */}
+      <div className="flex items-center gap-1.5 flex-1 min-w-0">
         <label 
           htmlFor={id} 
           className={`text-xs transition-colors ${
@@ -696,6 +692,23 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
       
       {/* Control */}
       {renderControl()}
+
+      {/* Reset button spacer */}
+      <div className="w-6 shrink-0 flex justify-center">
+        {isModified && onReset && (
+          <Button
+            variant="subtle"
+            type="button"
+            onClick={onReset}
+            className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+                       hover:bg-pf-warning/10 rounded"
+            title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+            aria-label={`Reset ${label} to original value`}
+          >
+            <ResetIcon className="w-3.5 h-3.5" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 };
