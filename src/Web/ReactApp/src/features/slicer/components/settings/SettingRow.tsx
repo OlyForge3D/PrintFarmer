@@ -5,7 +5,6 @@
  */
 import React, { useId } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
-import { HelpIcon } from './SlicerSettingIcons';
 
 /** Reset icon - circular arrow matching OrcaSlicer's style */
 const ResetIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -152,12 +151,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           {label && (
             <div className="flex items-center gap-2 mb-1">
               <span className="text-pf-accent-2 shrink-0">{icon}</span>
-              <label htmlFor={id} className="font-medium text-xs text-pf-text">{label}</label>
-              {tooltip && (
-                <span className="text-pf-text-muted cursor-help" title={tooltip}>
-                  <HelpIcon className="w-3.5 h-3.5" />
-                </span>
-              )}
+              <label htmlFor={id} className="font-medium text-xs text-pf-text" title={tooltip}>{label}</label>
             </div>
           )}
           {renderControl()}
@@ -189,6 +183,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           <div className="min-w-0">
             <label 
               htmlFor={id} 
+              title={tooltip}
               className={`font-medium text-xs transition-colors ${
                 isModified 
                   ? 'text-pf-warning' 
@@ -202,23 +197,11 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
             )}
           </div>
           
-          {tooltip && (
-            <Button
-              variant="subtle"
-              type="button"
-              className="p-0.5 shrink-0"
-              title={tooltip}
-              onClick={() => { /* native title tooltip handles display */ }}
-              aria-label={`Help for ${label}`}
-            >
-              <HelpIcon className="w-4 h-4" />
-            </Button>
-          )}
-        </div>
+          </div>
         )}
         
         {/* Right side: control */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0" title={tooltip}>
           {renderControl()}
         </div>
       </div>
