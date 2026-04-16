@@ -68,20 +68,12 @@ function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<str
   const result: Record<string, unknown> = {};
   for (const [key, rawValue] of Object.entries(raw)) {
     let value: unknown;
-    // Backend may return array values as JSON-encoded strings — parse them first
-    let effectiveValue = rawValue;
-    if (typeof rawValue === 'string' && rawValue.trimStart().startsWith('[')) {
-      try {
-        const parsed = JSON.parse(rawValue);
-        if (Array.isArray(parsed)) effectiveValue = parsed;
-      } catch { /* not valid JSON, leave as string */ }
-    }
-    if (Array.isArray(effectiveValue)) {
+    if (Array.isArray(rawValue)) {
       if (ARRAY_JOIN_KEYS.has(key)) {
         // Join as comma-separated string for display
-        value = effectiveValue.join(', ');
-      } else if (effectiveValue.length > 0) {
-        value = effectiveValue[0];
+        value = rawValue.join(', ');
+      } else if (rawValue.length > 0) {
+        value = rawValue[0];
       } else {
         // Empty array — skip this key so default value is used
         continue;

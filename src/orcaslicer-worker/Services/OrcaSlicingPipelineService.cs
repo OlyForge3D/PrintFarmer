@@ -675,7 +675,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// (start with '[') are written as native arrays.
     /// Keys with values that would fail OrcaSlicer's CLI validator are sanitized.
     /// </summary>
-    internal static string SettingsDictToNativeJson(Dictionary<string, string>? settings)
+    internal static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
         if (settings == null || settings.Count == 0)
         {
@@ -690,12 +690,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            foreach (KeyValuePair<string, string> kvp in settings)
+            foreach (KeyValuePair<string, object> kvp in settings)
             {
                 writer.WritePropertyName(kvp.Key);
-                string value = kvp.Value ?? string.Empty;
 
-                // Arrays stored as raw JSON text (e.g. "[\"0.4\"]") — write as native array
+                // List<string> values — write as native JSON array
+                if (kvp.Value is IList<string> list)
+                {
+                    writer.WriteStartArray();
+                    foreach (string item in list)
+                    {
+                        writer.WriteStringValue(item);
+                    }
+                    writer.WriteEndArray();
+                    continue;
+                }
+
+                string value = kvp.Value?.ToString() ?? string.Empty;
+
+                // Legacy: raw JSON array text (e.g. "[\"0.4\"]") — write as native array
                 if (value.Length > 0 && value[0] == '[')
                 {
                     try
@@ -728,7 +741,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Also injects defaults for fields required by OrcaSlicer 2.3.2+ CLI
     /// that weren't present in older profiles.
     /// </summary>
-    private static void SanitizeForCli(Dictionary<string, string> settings)
+    private static void SanitizeForCli(Dictionary<string, object> settings)
     {
         // Speed fields: 0 means "auto" in profiles but CLI requires ≥ 1
         string[] speedKeys =
@@ -739,7 +752,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         foreach (string key in speedKeys)
         {
-            if (settings.TryGetValue(key, out string? val) && val == "0")
+            if (settings.TryGetValue(key, out object? val) && val?.ToString() == "0")
             {
                 settings[key] = "1";
             }
@@ -750,12 +763,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // (exit 139) when looking up extruder defaults.
         if (!settings.ContainsKey("extruder_type"))
         {
-            settings["extruder_type"] = "[\"Direct Drive\"]";
+            settings["extruder_type"] = new List<string> { "Direct Drive" };
         }
 
         if (!settings.ContainsKey("nozzle_volume_type"))
         {
-            settings["nozzle_volume_type"] = "[\"Standard\"]";
+            settings["nozzle_volume_type"] = new List<string> { "Standard" };
         }
     }
 }

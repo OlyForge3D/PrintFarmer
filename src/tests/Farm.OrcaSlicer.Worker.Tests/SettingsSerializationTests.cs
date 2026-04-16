@@ -70,19 +70,69 @@ public class SettingsSerializationTests
     private static string RoundTrip(string inputJson)
     {
         using JsonDocument doc = JsonDocument.Parse(inputJson);
-        Dictionary<string, string> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
         return OrcaSlicingPipelineService.SettingsDictToNativeJson(settings);
     }
 
     [Fact]
-    public void ArrayValues_StoredAsJsonText_WrittenAsNativeArrays()
+    public void SerializeElementToDict_ArrayValues_StoredAsTypedLists()
     {
-        // Arrays are stored as raw JSON text strings in Dictionary<string, string>
-        var dict = new Dictionary<string, string>
+        const string json = """{"nozzle_diameter": ["0.4"], "printable_area": ["0x0","300x0"], "post_process": []}""";
+        using JsonDocument doc = JsonDocument.Parse(json);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+
+        settings["nozzle_diameter"].Should().BeOfType<List<string>>()
+            .Which.Should().ContainSingle().Which.Should().Be("0.4");
+        settings["printable_area"].Should().BeOfType<List<string>>()
+            .Which.Should().HaveCount(2);
+        settings["post_process"].Should().BeOfType<List<string>>()
+            .Which.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SerializeElementToDict_ScalarValues_StoredAsStrings()
+    {
+        const string json = """{"name": "test", "auxiliary_fan": true, "adaptive_layer_height": false, "z_offset": 0.5}""";
+        using JsonDocument doc = JsonDocument.Parse(json);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+
+        settings["name"].Should().Be("test");
+        settings["auxiliary_fan"].Should().Be("1");
+        settings["adaptive_layer_height"].Should().Be("0");
+        settings["z_offset"].Should().Be("0.5");
+    }
+
+    [Fact]
+    public void SerializeElementToDict_MotionLimits_StoredAsTypedArrays()
+    {
+        const string json = """
         {
-            ["nozzle_diameter"] = "[\"0.4\"]",
-            ["printable_area"] = "[\"0x0\",\"300x0\",\"300x300\",\"0x300\"]",
-            ["post_process"] = "[]",
+            "machine_max_speed_x": ["500", "200"],
+            "machine_max_acceleration_x": ["20000", "20000"],
+            "machine_max_jerk_x": ["9", "9"],
+            "retraction_length": ["0.8"]
+        }
+        """;
+        using JsonDocument doc = JsonDocument.Parse(json);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+
+        var speedX = settings["machine_max_speed_x"].Should().BeOfType<List<string>>().Subject;
+        speedX.Should().HaveCount(2);
+        speedX[0].Should().Be("500");
+        speedX[1].Should().Be("200");
+
+        var accelX = settings["machine_max_acceleration_x"].Should().BeOfType<List<string>>().Subject;
+        accelX[0].Should().Be("20000");
+    }
+
+    [Fact]
+    public void ArrayValues_WrittenAsNativeArrays()
+    {
+        var dict = new Dictionary<string, object>
+        {
+            ["nozzle_diameter"] = new List<string> { "0.4" },
+            ["printable_area"] = new List<string> { "0x0", "300x0", "300x300", "0x300" },
+            ["post_process"] = new List<string>(),
             ["scalar_value"] = "50%",
         };
 

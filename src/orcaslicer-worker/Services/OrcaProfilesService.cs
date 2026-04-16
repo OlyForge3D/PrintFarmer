@@ -1681,18 +1681,15 @@ public class OrcaProfilesService : ISlicerProfilesService
         return null;
     }
 
-    internal static Dictionary<string, string> SerializeElementToDict(JsonElement elem)
+    internal static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
-        Dictionary<string, string> dict = [];
+        Dictionary<string, object> dict = [];
         try
         {
             if (elem.ValueKind == JsonValueKind.Object)
             {
                 foreach (JsonProperty prop in elem.EnumerateObject())
                 {
-                    // All values stored as plain strings.
-                    // Arrays are serialized as JSON text (e.g. "[\"0.4\"]") and
-                    // re-parsed at write time by SettingsDictToNativeJson.
                     dict[prop.Name] = prop.Value.ValueKind switch
                     {
                         JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
@@ -1700,7 +1697,10 @@ public class OrcaProfilesService : ISlicerProfilesService
                         JsonValueKind.False => "0",
                         JsonValueKind.Number => prop.Value.GetRawText(),
 
-                        // Arrays/objects: store as raw JSON text for later parsing
+                        // Arrays: deserialize to List<string> so they serialize as proper JSON arrays
+                        JsonValueKind.Array => DeserializeJsonArray(prop.Value),
+
+                        // Objects: store as raw JSON text
                         _ => prop.Value.GetRawText()
                     };
                 }
@@ -1712,6 +1712,24 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         return dict;
+    }
+
+    /// <summary>
+    /// Converts a JSON array element to a <see cref="List{T}"/> of strings.
+    /// OrcaSlicer profile arrays always contain string or numeric elements.
+    /// </summary>
+    private static List<string> DeserializeJsonArray(JsonElement arrayElem)
+    {
+        var list = new List<string>();
+        foreach (JsonElement item in arrayElem.EnumerateArray())
+        {
+            list.Add(item.ValueKind switch
+            {
+                JsonValueKind.String => item.GetString() ?? string.Empty,
+                _ => item.GetRawText()
+            });
+        }
+        return list;
     }
 
     private static void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)

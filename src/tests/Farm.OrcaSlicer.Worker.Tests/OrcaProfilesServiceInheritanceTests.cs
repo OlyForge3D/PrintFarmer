@@ -184,11 +184,9 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         // Parent array values should survive in the settings dict
         profile.Settings.Should().ContainKey("machine_max_speed_x");
 
-        // Verify array structure is preserved
-        string rawValue = profile.Settings["machine_max_speed_x"].ToString()!;
-        using var doc = JsonDocument.Parse(rawValue);
-        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
-        doc.RootElement.GetArrayLength().Should().Be(2);
+        // Verify array structure is preserved as a typed List<string>
+        profile.Settings["machine_max_speed_x"].Should().BeOfType<List<string>>()
+            .Which.Should().HaveCount(2);
     }
 
     // ──────────────────────────────────────────────────────────────────────

@@ -516,14 +516,14 @@ public abstract class HttpJobPollerService(
                 int applied = 0;
                 foreach (JsonProperty prop in overridesElem.EnumerateObject())
                 {
-                    // Store as plain string value, matching SerializeElementToDict format
+                    // Store as properly-typed value, matching SerializeElementToDict format
                     profile.ProcessProfile.Settings[prop.Name] = prop.Value.ValueKind switch
                     {
                         JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
                         JsonValueKind.True => "1",
                         JsonValueKind.False => "0",
                         JsonValueKind.Number => prop.Value.GetRawText(),
-                        _ => prop.Value.GetRawText()
+                        _ => (object)prop.Value.GetRawText()
                     };
                     applied++;
                 }
