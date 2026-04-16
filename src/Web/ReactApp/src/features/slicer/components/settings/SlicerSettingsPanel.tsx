@@ -250,13 +250,6 @@ const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
     </SettingSection>
 
     {isAdvanced && (
-      <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Sequence">
-        <CompactSettingRow type="select" label="First layer filament sequence" value={settings.first_layer_sequence_choice ?? 'default'} onChange={(v) => onUpdate('first_layer_sequence_choice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
-        <CompactSettingRow type="select" label="Other layers filament sequence" value={settings.other_layers_sequence_choice ?? 'default'} onChange={(v) => onUpdate('other_layers_sequence_choice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
-      </SettingSection>
-    )}
-
-    {isAdvanced && (
       <>
         <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Seam (advanced)">
           <CompactSettingRow type="number" label="Seam gap" value={settings.seam_gap ?? 0} onChange={(v) => onUpdate('seam_gap', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
