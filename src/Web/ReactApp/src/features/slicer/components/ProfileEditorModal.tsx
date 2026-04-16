@@ -18,18 +18,9 @@ import React, { useState, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Alert } from '@/common/components/ui';
-import { FilamentProfileEditor } from '@/features/slicer/components/settings/FilamentProfileEditor';
-import type { FilamentSettingsViewMode } from '@/features/slicer/components/settings/filamentSettingsTypes';
-import { 
-  type OrcaFilamentSettings,
-} from '@/features/slicer/components/settings/filamentSettingsTypes';
-import { MachineProfileEditor } from '@/features/slicer/components/settings/MachineProfileEditor';
-import { 
-  type OrcaMachineSettings,
-} from '@/features/slicer/components/settings/machineSettingsTypes';
+import { MetadataProfileEditor } from '@/features/slicer/components/settings/MetadataProfileRenderer';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
-import type { MachineSettingsViewMode } from '@/features/slicer/components/settings/machineSettingsTypes';
 
 export type ProfileType = 'machine' | 'filament';
 
@@ -45,7 +36,7 @@ interface ProfileEditorModalProps {
   /** Callback when custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
   /** Initial view mode for the editor panel */
-  initialViewMode?: MachineSettingsViewMode;
+  initialViewMode?: 'simple' | 'advanced';
 }
 
 /**
@@ -56,97 +47,14 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
   return `${baseName} (Custom)`;
 }
 
-/** Coerce raw settings values: unwrap arrays, parse numeric strings, convert "0"/"1" booleans */
-/** Keys whose array values should be joined into a comma-separated string (not first-element) */
-const ARRAY_JOIN_KEYS = new Set([
-  'bed_exclude_area', 'thumbnails', 'retraction_distances_when_cut',
-  'extruder_offset', 'extruder_printable_area', 'retract_lift_enforce',
-  'z_hop_types', 'compatible_printers', 'compatible_prints',
-]);
-
-function coerceSettingsValues(raw: Record<string, unknown>, booleanKeys: Set<string>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, rawValue] of Object.entries(raw)) {
-    let value: unknown;
-    if (Array.isArray(rawValue)) {
-      if (ARRAY_JOIN_KEYS.has(key)) {
-        // Join as comma-separated string for display
-        value = rawValue.join(', ');
-      } else if (rawValue.length > 0) {
-        value = rawValue[0];
-      } else {
-        // Empty array — skip this key so default value is used
-        continue;
-      }
-    } else if (rawValue === null || rawValue === undefined) {
-      continue;
-    } else {
-      value = rawValue;
-    }
-    if (typeof value === 'string') {
-      if (booleanKeys.has(key)) {
-        value = value === '1' || value === 'true';
-      } else if (value !== '' && !isNaN(Number(value))) {
-        value = Number(value);
-      }
-    }
-    // Skip NaN values so defaults are used
-    if (typeof value === 'number' && isNaN(value)) continue;
-    result[key] = value;
-  }
-  return result;
-}
-
-function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null): Partial<OrcaMachineSettings> {
+/**
+ * Extract settings from a profile DTO.
+ * The backend now returns properly-typed values (arrays as List<string>,
+ * scalars as strings) so no frontend coercion is needed.
+ */
+function extractSettings(profile: OrcaMachineProfile | OrcaFilamentProfile | null): Record<string, unknown> {
   if (!profile) return {};
-
-  const machineBooleanKeys = new Set([
-    'support_multi_bed_types', 'pellet_modded_printer', 'support_chamber_temp_control',
-    'support_air_filtration', 'scan_first_layer', 'disable_m73', 'use_relative_e_distances',
-    'use_firmware_retraction', 'fan_speedup_overhangs', 'auxiliary_fan',
-    'single_extruder_multi_material', 'manual_filament_change', 'purge_in_prime_tower',
-    'enable_filament_ramming', 'high_current_on_filament_swap', 'retract_when_changing_layer',
-    'wipe', 'travel_slope', 'emit_machine_limits_to_gcode', 'resonance_avoidance',
-    'wipe_before_external_loop',
-  ]);
-
-  const profileSettings = coerceSettingsValues(
-    (profile.settings ?? {}) as Record<string, unknown>,
-    machineBooleanKeys,
-  );
-
-  return {
-    ...profileSettings,
-    printer_model: profile.printerModel ?? '',
-    nozzle_diameter: profile.nozzleDiameter,
-  };
-}
-
-function convertOrcaFilamentProfileToSettings(profile: OrcaFilamentProfile | null): Partial<OrcaFilamentSettings> {
-  if (!profile) return {};
-
-  const filamentBooleanKeys = new Set([
-    'enable_pressure_advance', 'adaptive_pressure_advance', 'adaptive_pressure_advance_overhangs',
-    'filament_soluble', 'filament_is_support', 'activate_chamber_temp_control',
-    'filament_adaptive_volumetric_speed', 'reduce_fan_stop_start_freq', 'enable_overhang_bridge_fan',
-    'slow_down_for_layer_cooling', 'dont_slow_down_outer_wall', 'activate_air_filtration',
-    'filament_wipe', 'filament_retract_when_changing_layer', 'filament_long_retractions_when_cut',
-    'enable_volumetric_extrusion', 'set_other_flow_ratios', 'long_retractions_when_ec',
-    'filament_multitool_ramming',
-  ]);
-
-  const profileSettings = coerceSettingsValues(
-    (profile.settings ?? {}) as Record<string, unknown>,
-    filamentBooleanKeys,
-  );
-
-  return {
-    ...profileSettings,
-    filament_type: profile.material || '',
-    filament_vendor: profile.manufacturer,
-    nozzle_temperature: profile.nozzleTemperature,
-    hot_plate_temp: profile.bedTemperature,
-  };
+  return { ...(profile.settings ?? {}) };
 }
 
 export function ProfileEditorModal({
@@ -164,15 +72,11 @@ export function ProfileEditorModal({
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   
-  // Settings state for each profile type
-  const [machineSettings, setMachineSettings] = useState<Partial<OrcaMachineSettings>>({});
-  const [filamentSettings, setFilamentSettings] = useState<Partial<OrcaFilamentSettings>>({});
+  // Unified settings state — works for all profile types
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
   
   // Track if settings have been modified
   const [hasChanges, setHasChanges] = useState(false);
-  
-  // View mode for filament editor (Simple/Advanced)
-  const [filamentViewMode, setFilamentViewMode] = useState<FilamentSettingsViewMode>('simple');
   
   // Initialize profile name and reset state when modal opens
   React.useEffect(() => {
@@ -181,34 +85,19 @@ export function ProfileEditorModal({
       setShowSaveForm(false);
       setSaveError(null);
       setHasChanges(false);
-
-      // Prefill editor with selected profile values when available
-      if (profileType === 'machine') {
-        setMachineSettings(convertOrcaMachineProfileToSettings(originalProfile as OrcaMachineProfile | null));
-        setFilamentSettings({});
-      } else {
-        setMachineSettings({});
-        setFilamentSettings(convertOrcaFilamentProfileToSettings(originalProfile as OrcaFilamentProfile | null));
-      }
+      setSettings(extractSettings(originalProfile));
     }
   }, [isOpen, profileType, originalProfile]);
   
-  // Get current settings based on profile type
-  const getCurrentSettings = React.useCallback(() => {
-    switch (profileType) {
-      case 'machine':
-        return machineSettings;
-      case 'filament':
-        return filamentSettings;
-      default:
-        return {};
-    }
-  }, [profileType, machineSettings, filamentSettings]);
+  // Handle individual setting updates
+  const handleUpdate = React.useCallback((key: string, value: unknown) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+    setHasChanges(true);
+  }, []);
   
   // Save mutation using uploadProfile
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const settings = getCurrentSettings();
       const response = await slicerProfilesService.uploadProfile({
         name: profileName.trim(),
         profileType,
@@ -329,30 +218,14 @@ export function ProfileEditorModal({
         </div>
       )}
       
-      {/* Profile Editor Content */}
+      {/* Profile Editor Content — metadata-driven, all profile types */}
       <div>
-        {profileType === 'machine' && (
-          <MachineProfileEditor
-            settings={machineSettings}
-            onChange={(settings) => {
-              setMachineSettings(settings);
-              setHasChanges(true);
-            }}
-            initialViewMode={initialViewMode}
-          />
-        )}
-        
-        {profileType === 'filament' && (
-          <FilamentProfileEditor
-            settings={filamentSettings}
-            onChange={(settings) => {
-              setFilamentSettings(settings);
-              setHasChanges(true);
-            }}
-            viewMode={filamentViewMode}
-            onViewModeChange={setFilamentViewMode}
-          />
-        )}
+        <MetadataProfileEditor
+          profileType={profileType}
+          settings={settings}
+          onUpdate={handleUpdate}
+          initialViewMode={initialViewMode}
+        />
       </div>
     </Modal>
   );
