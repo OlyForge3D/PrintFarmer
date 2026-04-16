@@ -173,13 +173,13 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
       <div className="flex items-center gap-2">
         {/* Left: icon + label */}
         {label && (
-        <div className="flex items-center gap-2 min-w-0 w-1/2 shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 w-2/5 shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
           <div className="min-w-0">
             <label 
               htmlFor={id} 
               title={tooltip}
-              className={`font-medium text-xs transition-colors ${
+              className={`font-medium text-xs leading-tight truncate block transition-colors ${
                 isModified 
                   ? 'text-pf-warning' 
                   : 'text-pf-text'
@@ -323,7 +323,7 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full px-3 py-1.5 bg-pf-panel border border-pf-border rounded-lg
+        className="w-full px-2 py-1 bg-pf-panel border border-pf-border rounded-lg
                    text-pf-text text-xs appearance-none bg-none cursor-pointer
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
@@ -336,8 +336,8 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
       </select>
       
       {/* Custom dropdown arrow */}
-      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
-        <svg className="w-5 h-5 text-pf-text-muted" viewBox="0 0 20 20" fill="currentColor">
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+        <svg className="w-4 h-4 text-pf-text-muted" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
         </svg>
       </div>
@@ -461,14 +461,14 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
           max={max}
           step={step}
           disabled={disabled}
-          className={`w-full py-1.5 bg-pf-panel border border-pf-border
+          className={`w-full py-1 bg-pf-panel border border-pf-border
                      text-pf-text text-xs text-right
                      hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
-                     disabled:opacity-50 disabled:cursor-not-allowed ${unit ? 'rounded-l-lg rounded-r-none border-r-0' : 'rounded-lg'} ${prefix ? 'pl-7 pr-3' : 'px-3'}`}
+                     disabled:opacity-50 disabled:cursor-not-allowed ${unit ? 'rounded-l-lg rounded-r-none border-r-0' : 'rounded-lg'} ${prefix ? 'pl-6 pr-2' : 'px-2'}`}
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted pl-1.5 pr-2 bg-pf-border rounded-l-none rounded-r-lg w-20 shrink-0 self-stretch flex items-center">
+        <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-l-none rounded-r-lg w-14 shrink-0 self-stretch flex items-center">
           {unit}
         </span>
       )}
@@ -492,7 +492,7 @@ const TextInputControl: React.FC<TextInputSettingProps & { id: string }> = ({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       disabled={disabled}
-      className="w-full px-3 py-1.5 bg-pf-panel border border-pf-border rounded-lg
+      className="w-full px-2 py-1 bg-pf-panel border border-pf-border rounded-lg
                  text-pf-text text-xs
                  hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                  disabled:opacity-50 disabled:cursor-not-allowed"
