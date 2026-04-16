@@ -7,15 +7,13 @@
  */
 import React, { useCallback } from 'react';
 import { MetadataProfileEditor } from './MetadataProfileRenderer';
-import type { OrcaProcessSettings, ProcessSettingsViewMode, SettingsCategory } from './slicerSettingsTypes';
+import type { OrcaProcessSettings, SettingsCategory } from './slicerSettingsTypes';
 
 interface SlicerSettingsPanelProps {
   /** Current settings values */
   settings: OrcaProcessSettings;
   /** Called when any setting changes */
   onChange: (settings: Partial<OrcaProcessSettings>) => void;
-  /** Initial view mode */
-  initialViewMode?: ProcessSettingsViewMode;
   /** Disable all controls */
   disabled?: boolean;
   /** Custom class name */
@@ -37,7 +35,6 @@ interface SlicerSettingsPanelProps {
 export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   settings,
   onChange,
-  initialViewMode = 'simple',
   disabled = false,
   className = '',
   originalSettings,
@@ -55,7 +52,6 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       profileType="process"
       settings={settings as unknown as Record<string, unknown>}
       onUpdate={handleUpdate}
-      initialViewMode={initialViewMode}
       disabled={disabled}
       className={className}
       originalSettings={originalSettings}

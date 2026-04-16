@@ -4,9 +4,10 @@
  * Reads orcaSettingsMetadata.json at build time and renders every field
  * through the existing SettingRow component — zero hand-coded field lists.
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button, Textarea } from '@/common/components/ui';
 import { SettingRow, SectionHeader, ResetIcon } from './SettingRow';
+import { useSlicerViewMode } from '../../hooks/useSlicerViewMode';
 import metadata from '../../generated/orcaSettingsMetadata.json';
 
 // ── Metadata type definitions ───────────────────────────────────────────
@@ -775,7 +776,6 @@ export interface MetadataProfileEditorProps {
   settings: Record<string, unknown>;
   originalSettings?: Record<string, unknown>;
   onUpdate: (key: string, value: unknown) => void;
-  initialViewMode?: ViewMode;
   disabled?: boolean;
   className?: string;
 }
@@ -785,17 +785,12 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   settings,
   originalSettings,
   onUpdate,
-  initialViewMode = 'simple',
   disabled = false,
   className = '',
 }) => {
   const profileMeta = (metadata as unknown as Record<string, ProfileTypeMetadata>)[profileType];
-  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
+  const [viewMode, toggleViewMode] = useSlicerViewMode();
   const [activeTabIdx, setActiveTabIdx] = useState(0);
-
-  const handleToggleMode = useCallback(() => {
-    setViewMode((m) => (m === 'simple' ? 'advanced' : 'simple'));
-  }, []);
 
   // Filter tabs to only show those with visible fields in the current view mode
   const visibleTabs = useMemo(() => {
@@ -846,7 +841,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
         <Button
           variant="unstyled"
           type="button"
-          onClick={handleToggleMode}
+          onClick={toggleViewMode}
           disabled={disabled}
           className="shrink-0 ml-2 p-0.5 rounded transition-colors hover:bg-pf-bg-2 disabled:opacity-50"
           title={viewMode === 'simple' ? 'Show advanced parameters' : 'Hide advanced parameters'}

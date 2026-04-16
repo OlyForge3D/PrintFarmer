@@ -35,8 +35,6 @@ interface ProfileEditorModalProps {
   originalProfile: OrcaMachineProfile | OrcaFilamentProfile | null;
   /** Callback when custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
-  /** Initial view mode for the editor panel */
-  initialViewMode?: 'simple' | 'advanced';
 }
 
 /**
@@ -63,7 +61,6 @@ export function ProfileEditorModal({
   profileType,
   originalProfile,
   onSaveSuccess,
-  initialViewMode = 'simple',
 }: ProfileEditorModalProps) {
   const queryClient = useQueryClient();
   
@@ -228,7 +225,6 @@ export function ProfileEditorModal({
           settings={settings}
           originalSettings={originalSettings}
           onUpdate={handleUpdate}
-          initialViewMode={initialViewMode}
         />
       </div>
     </Modal>
