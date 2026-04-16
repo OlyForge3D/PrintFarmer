@@ -252,3 +252,113 @@ Confirmed 7 inline select boxes populated with correct options in live browser:
 - Metadata JSON restructuring is powerful but requires careful section extraction to maintain logical grouping
 - Global persisted state with cross-component sync needs both CustomEvent (same-tab) and storage event (cross-tab)
 - Always promote critical fields to Simple mode when creating new tabs — otherwise empty-tab filter hides the tab entirely
+
+## 2026-01-14: Machine Profile Tab Audit — Critical Issues Found
+
+**Role:** Frontend Audit  
+**Status:** ❌ BROKEN — Extruder tab missing, tab order wrong  
+**Requested by:** Jeff Papiez
+
+**Findings:**
+
+1. **Missing Extruder Tab** — CRITICAL
+   - Extruder tab is completely absent from `orcaSettingsMetadata.json`
+   - Expected to be at position 3 (after Multimaterial), does not exist
+   - Retraction and z-hop settings scattered across Multimaterial tab instead
+
+2. **Incorrect Tab Order**
+   - **Expected:** Basic Information → Machine G-Code → Multimaterial → Extruder → Motion Ability → Notes
+   - **Actual:** Basic information → Machine G-code → Notes → Motion ability → Multimaterial
+   - Notes should be LAST (position 5), currently position 2
+   - Motion Ability should be position 4, currently position 3
+   - Multimaterial should be position 2, currently position 5
+
+3. **Simple Mode Visibility** (Works Correctly)
+   - Tabs with 0 simple settings correctly hidden in Simple mode
+   - Machine G-code (0 simple) — hidden ✓
+   - Notes (0 simple) — hidden ✓
+   - Basic Information (3 simple) — visible ✓
+   - Motion Ability (2 simple) — visible ✓
+   - Multimaterial (2 simple) — visible ✓
+
+4. **Missing Settings Definitions**
+   - Motion Ability tab references settings that don't exist in metadata:
+     - `machine_max_speed_x/y/z/e` — referenced but undefined
+     - `machine_max_acceleration_x/y/z/e` — referenced but undefined
+     - `machine_max_jerk_x/y/z/e` — referenced but undefined
+   - These cause warnings during rendering
+
+5. **Orphaned Settings**
+   - `retraction_distances_when_ec` [advanced] — not assigned to any tab
+
+**Tab Breakdown:**
+
+- **Basic Information** (Tab 0): 33 settings (3 simple, 26 advanced, 4 developer) — VISIBLE IN SIMPLE ✓
+- **Machine G-Code** (Tab 1): 12 settings (0 simple, 12 advanced) — HIDDEN IN SIMPLE ✓
+- **Notes** (Tab 2): 1 setting (0 simple, 1 advanced) — HIDDEN IN SIMPLE ✓ — ❌ WRONG POSITION
+- **Motion Ability** (Tab 3): 8 settings (2 simple, 6 advanced) — VISIBLE IN SIMPLE ✓ — ❌ WRONG POSITION
+- **Multimaterial** (Tab 4): 40 settings (2 simple, 36 advanced, 2 developer) — VISIBLE IN SIMPLE ✓ — ❌ WRONG POSITION
+  - Contains Retraction (9 settings) and Z-Hop (6 settings) that should be in Extruder tab
+- **Extruder** (Tab MISSING): Should contain nozzle diameter, retraction, z-hop settings
+
+**Root Cause:**
+Metadata extraction from OrcaSlicer likely failed to extract Extruder tab structure, resulting in:
+- Tab order shuffle
+- Extruder settings dumped into Multimaterial as fallback
+- Missing machine_max_* settings definitions
+
+**Impact:**
+- Users cannot find Extruder tab in UI (neither Simple nor Advanced mode)
+- Tab order confusing and doesn't match OrcaSlicer standard
+- Retraction settings buried in wrong tab
+
+**Next Steps:**
+1. Re-extract metadata from OrcaSlicer with corrected parsing
+2. Add Extruder tab at position 3
+3. Reorder existing tabs to match expected order
+4. Move retraction/z-hop sections from Multimaterial to Extruder
+5. Define missing machine_max_* settings
+6. Assign orphaned `retraction_distances_when_ec` to appropriate tab
+
+**Detailed analysis:** `.squad/decisions/inbox/ripley-machine-tabs-audit.md`
+
+## 2026-04-07: Machine Profile Editor — Extruder Tab Restoration
+
+**Role:** Frontend / OrcaSlicer Metadata Integration  
+**Status:** ✅ COMPLETE
+
+**Issue:** Machine profile editor missing critical Extruder tab. Tab order was wrong, and 12 machine_max_* settings were undefined but referenced in UI sections.
+
+**Root cause:**
+- OrcaSlicer creates Extruder tab dynamically via index-based for loop
+- Extraction script only handles declarative tab creation
+- Index-based loops that dynamically build page names were not extracted
+- Missing machine_max_speed/acceleration/jerk settings caused empty fields
+
+**Solution implemented:**
+1. Enhanced extraction script to manually construct Extruder tab
+2. Fixed metadata JSON with 12 missing settings and proper tab ordering
+3. Promoted key settings to Simple mode for better UX
+
+**Files changed:**
+- tools/extract-orca-metadata.py
+- src/Web/ReactApp/src/features/slicer/generated/orcaSettingsMetadata.json
+
+**Testing:**
+- ✅ TypeScript: 0 errors
+- ✅ ESLint: 0 errors
+- ✅ React tests: 1710/1710 passing
+
+**Learnings:**
+- OrcaSlicer tab creation patterns vary (declarative vs dynamic)
+- Extraction script needs special handling for loop-based tabs
+- Tab order matters: Basic Info, G-Code, Multimaterial, Extruder, Motion, Notes
+- All referenced settings MUST exist in metadata
+
+**Pattern for future regeneration:**
+1. Run extraction script
+2. Verify Extruder tab present with 6 sections
+3. Verify machine_max_* settings defined
+4. Check tab order matches OrcaSlicer
+5. Run full test suite
+
