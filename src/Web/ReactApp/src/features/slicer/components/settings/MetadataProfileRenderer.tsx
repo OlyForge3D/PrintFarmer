@@ -231,6 +231,7 @@ interface MetadataSectionProps {
   section: SectionLayout;
   allSettings: Record<string, SettingMetadata>;
   values: Record<string, unknown>;
+  originalValues?: Record<string, unknown>;
   onUpdate: (key: string, value: unknown) => void;
   viewMode: ViewMode;
   disabled: boolean;
@@ -240,6 +241,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
   section,
   allSettings,
   values,
+  originalValues,
   onUpdate,
   viewMode,
   disabled,
@@ -268,6 +270,15 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
         {visibleFields.map((field) => {
           const meta = allSettings[field.key];
           const controlType = resolveControlType(meta);
+          // Change tracking: compare current value to original
+          const origVal = originalValues?.[field.key];
+          const curVal = values[field.key];
+          const isModified = originalValues !== undefined && origVal !== undefined && String(curVal) !== String(origVal);
+          const resetProps = isModified ? {
+            isModified: true,
+            originalValue: origVal,
+            onReset: () => onUpdate(field.key, origVal),
+          } : {};
 
           switch (controlType) {
             case 'checkbox':
@@ -280,6 +291,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   checked={toBool(values[field.key], meta)}
                   onChange={(v) => onUpdate(field.key, v)}
                   disabled={disabled}
+                  {...resetProps}
                 />
               );
             case 'number':
@@ -296,6 +308,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   unit={meta.type === 'float_or_percent' ? 'mm or %' : meta.unit}
                   onChange={(v) => onUpdate(field.key, v)}
                   disabled={disabled}
+                  {...resetProps}
                 />
               );
             case 'color':
@@ -308,6 +321,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   value={toString(values[field.key], meta)}
                   onChange={(v) => onUpdate(field.key, v)}
                   disabled={disabled}
+                  {...resetProps}
                 />
               );
             case 'select': {
@@ -324,6 +338,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   options={options}
                   onChange={(v) => onUpdate(field.key, v)}
                   disabled={disabled}
+                  {...resetProps}
                 />
               );
             }
@@ -387,6 +402,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   value={toString(values[field.key], meta)}
                   onChange={(v) => onUpdate(field.key, v)}
                   disabled={disabled}
+                  {...resetProps}
                 />
               );
           }
@@ -402,6 +418,7 @@ interface MetadataTabProps {
   tab: TabLayout;
   allSettings: Record<string, SettingMetadata>;
   values: Record<string, unknown>;
+  originalValues?: Record<string, unknown>;
   onUpdate: (key: string, value: unknown) => void;
   viewMode: ViewMode;
   disabled: boolean;
@@ -411,6 +428,7 @@ const MetadataTab: React.FC<MetadataTabProps> = ({
   tab,
   allSettings,
   values,
+  originalValues,
   onUpdate,
   viewMode,
   disabled,
@@ -422,6 +440,7 @@ const MetadataTab: React.FC<MetadataTabProps> = ({
         section={section}
         allSettings={allSettings}
         values={values}
+        originalValues={originalValues}
         onUpdate={onUpdate}
         viewMode={viewMode}
         disabled={disabled}
@@ -435,6 +454,7 @@ const MetadataTab: React.FC<MetadataTabProps> = ({
 export interface MetadataProfileEditorProps {
   profileType: ProfileType;
   settings: Record<string, unknown>;
+  originalSettings?: Record<string, unknown>;
   onUpdate: (key: string, value: unknown) => void;
   initialViewMode?: ViewMode;
   disabled?: boolean;
@@ -444,6 +464,7 @@ export interface MetadataProfileEditorProps {
 export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   profileType,
   settings,
+  originalSettings,
   onUpdate,
   initialViewMode = 'simple',
   disabled = false,
@@ -516,6 +537,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
           tab={activeTab}
           allSettings={profileMeta.settings}
           values={settings}
+          originalValues={originalSettings}
           onUpdate={onUpdate}
           viewMode={viewMode}
           disabled={disabled}

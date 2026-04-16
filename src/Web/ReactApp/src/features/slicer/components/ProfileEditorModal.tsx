@@ -74,6 +74,7 @@ export function ProfileEditorModal({
   
   // Unified settings state — works for all profile types
   const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [originalSettings, setOriginalSettings] = useState<Record<string, unknown>>({});
   
   // Track if settings have been modified
   const [hasChanges, setHasChanges] = useState(false);
@@ -85,7 +86,9 @@ export function ProfileEditorModal({
       setShowSaveForm(false);
       setSaveError(null);
       setHasChanges(false);
-      setSettings(extractSettings(originalProfile));
+      const extracted = extractSettings(originalProfile);
+      setSettings(extracted);
+      setOriginalSettings(extracted);
     }
   }, [isOpen, profileType, originalProfile]);
   
@@ -223,6 +226,7 @@ export function ProfileEditorModal({
         <MetadataProfileEditor
           profileType={profileType}
           settings={settings}
+          originalSettings={originalSettings}
           onUpdate={handleUpdate}
           initialViewMode={initialViewMode}
         />
