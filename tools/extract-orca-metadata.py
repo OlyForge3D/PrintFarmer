@@ -500,18 +500,74 @@ def parse_machine_tabs(filepath: str) -> list:
     """Parse machine tab layout from multiple TabPrinter methods."""
     # Main tabs: Basic information, Machine G-code, Notes
     tabs = parse_tab_layout(filepath, 'TabPrinter::build_fff')
+    # Multimaterial + Extruder pages — built via build_unregular_pages.
+    # Note: OrcaSlicer creates the Extruder page with a dynamic name
+    # (wxString::Format("Extruder %d", i+1)) rather than L("..."),
+    # inside an index-based for loop, which parse_tab_layout cannot extract.
+    # So we manually construct the Extruder tab based on the known structure.
+    unregular = parse_tab_layout(filepath, 'TabPrinter::build_unregular_pages')
+    if unregular:
+        # Multimaterial tab is parsed correctly, but Extruder tab is not
+        # The Extruder tab has sections that are currently under Multimaterial
+        # We need to manually create it and move those sections
+        multimaterial_tab = None
+        for tab in unregular:
+            if tab['name'] == 'Multimaterial':
+                multimaterial_tab = tab
+                break
+        
+        if multimaterial_tab:
+            # Create Extruder tab
+            extruder_tab = {
+                'name': 'Extruder',
+                'icon': 'custom-gcode_extruder',
+                'sections': []
+            }
+            
+            # Sections that belong in Extruder (from Tab.cpp line ~4940):
+            # Basic information, Layer height limits, Position, Retraction, Z-Hop, 
+            # Retraction when switching material
+            extruder_section_names = {
+                'Basic information', 'Layer height limits', 'Position',
+                'Retraction', 'Z-Hop', 'Retraction when switching material'
+            }
+            
+            # Move sections from Multimaterial to Extruder
+            remaining_mm_sections = []
+            for section in multimaterial_tab['sections']:
+                if section['name'] in extruder_section_names:
+                    extruder_tab['sections'].append(section)
+                else:
+                    remaining_mm_sections.append(section)
+            
+            multimaterial_tab['sections'] = remaining_mm_sections
+            
+            # Insert Extruder tab after Multimaterial
+            mm_idx = unregular.index(multimaterial_tab)
+            unregular.insert(mm_idx + 1, extruder_tab)
+        
+        tabs.extend(unregular)
+    
     # Motion ability (kinematics) — built via separate method
     kinematics = parse_tab_layout(filepath, 'TabPrinter::build_kinematics_page')
     if kinematics:
         tabs.extend(kinematics)
-    # Multimaterial + Extruder pages — built via build_unregular_pages.
-    # Note: OrcaSlicer creates the Extruder page with a dynamic name
-    # (wxString::Format("Extruder %d", i+1)) rather than L("..."),
-    # so parse_tab_layout's dynamic tab page matcher is needed here.
-    unregular = parse_tab_layout(filepath, 'TabPrinter::build_unregular_pages')
-    if unregular:
-        tabs.extend(unregular)
-    return tabs
+    
+    # Reorder tabs to match OrcaSlicer UI order:
+    # Basic information, Machine G-code, Multimaterial, Extruder, Motion ability, Notes
+    tab_order = ['Basic information', 'Machine G-code', 'Multimaterial', 'Extruder', 'Motion ability', 'Notes']
+    tabs_by_name = {tab['name']: tab for tab in tabs}
+    ordered_tabs = []
+    for name in tab_order:
+        if name in tabs_by_name:
+            ordered_tabs.append(tabs_by_name[name])
+    
+    # Add any remaining tabs not in the predefined order
+    for tab in tabs:
+        if tab not in ordered_tabs:
+            ordered_tabs.append(tab)
+    
+    return ordered_tabs
 
 
 # ── Icon extractor ─────────────────────────────────────────────────────────

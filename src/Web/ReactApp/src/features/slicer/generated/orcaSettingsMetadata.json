@@ -4,7 +4,7 @@
     "generator": "tools/extract-orca-metadata.py",
     "totalSettings": 781,
     "filamentSettings": 108,
-    "machineSettings": 113,
+    "machineSettings": 125,
     "processSettings": 344
   },
   "filament": {
@@ -606,7 +606,7 @@
         "coType": "coInts",
         "label": "Chamber temperature",
         "tooltip": "For high-temperature materials like ABS, ASA, PC, and PA, a higher chamber temperature can help suppress or reduce warping and potentially lead to higher interlayer bonding strength. However, at the same time, a higher chamber temperature will reduce the efficiency of air filtration for ABS and ASA.\\n\\nFor PLA, PETG, TPU, PVA, and other low-temperature materials, this option should be disabled (set to 0) as the chamber temperature should be low to avoid extruder clogging caused by material softening at the heat break.\\n\\nIf enabled, this parameter also sets a G-code variable named chamber_temperature, which can be used to pass the desired chamber temperature to your print start macro, or a heat soak macro like this: PRINT_START (other variables) CHAMBER_TEMP=[chamber_temperature]. This may be useful if your printer does not support M141/M191 commands, or if you desire to handle heat soaking in the print start macro if no active chamber heater is installed.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "default": "0"
       },
@@ -656,7 +656,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Cool Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "35"
@@ -667,7 +667,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Cool Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 120,
         "default": "35"
@@ -724,7 +724,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Engineering Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "45"
@@ -735,7 +735,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Engineering Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "45"
@@ -872,7 +872,7 @@
         "coType": "coFloats",
         "label": "Density",
         "tooltip": "Filament density. For statistics only.",
-        "unit": "g/cm³",
+        "unit": "g/cm\u00b3",
         "min": 0,
         "mode": "advanced",
         "default": "0"
@@ -925,7 +925,7 @@
         "coType": "coInts",
         "label": "Flush temperature",
         "tooltip": "Temperature when flushing filament. 0 indicates the upper bound of the recommended nozzle temperature range.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "mode": "advanced",
         "default": "0"
@@ -936,7 +936,7 @@
         "coType": "coFloats",
         "label": "Flush volumetric speed",
         "tooltip": "Volumetric speed when flushing filament. 0 indicates the max volumetric speed.",
-        "unit": "mm³/s",
+        "unit": "mm\u00b3/s",
         "min": 0,
         "max": 200,
         "mode": "advanced",
@@ -1048,7 +1048,7 @@
         "coType": "coFloats",
         "label": "Max volumetric speed",
         "tooltip": "This setting stands for how much volume of filament can be melted and extruded per second. Printing speed is limited by max volumetric speed, in case of too high and unreasonable speed setting. Can't be zero.",
-        "unit": "mm³/s",
+        "unit": "mm\u00b3/s",
         "min": 0,
         "mode": "advanced",
         "default": "2"
@@ -1059,7 +1059,7 @@
         "coType": "coFloats",
         "label": "Minimal purge on wipe tower",
         "tooltip": "After a tool change, the exact position of the newly loaded filament inside the nozzle may not be known, and the filament pressure is likely not yet stable. Before purging the print head into an infill or a sacrificial object, Orca Slicer will always prime this amount of material into the wipe tower to produce successive infill or sacrificial object extrusions reliably.",
-        "unit": "mm³",
+        "unit": "mm\u00b3",
         "min": 0,
         "mode": "advanced",
         "default": "15"
@@ -1085,7 +1085,7 @@
         "coType": "coFloats",
         "label": "Multi-tool ramming flow",
         "tooltip": "Flow used for ramming the filament before the tool change.",
-        "unit": "mm³/s",
+        "unit": "mm\u00b3/s",
         "min": 0,
         "mode": "advanced",
         "default": "10"
@@ -1096,7 +1096,7 @@
         "coType": "coFloats",
         "label": "Multi-tool ramming volume",
         "tooltip": "The volume to be rammed before the tool change.",
-        "unit": "mm³",
+        "unit": "mm\u00b3",
         "min": 0,
         "mode": "advanced",
         "default": "10"
@@ -1247,7 +1247,7 @@
         "coType": "coInts",
         "label": "Interface layer print temperature",
         "tooltip": "Print temperature for prime tower interface layer (where different materials meet). If set to -1, use max recommended nozzle temperature.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": -1,
         "mode": "advanced",
         "default": "-1"
@@ -1269,7 +1269,7 @@
         "coType": "coFloats",
         "label": "Tower ironing area",
         "tooltip": "Ironing area for prime tower interface layer (where different materials meet).",
-        "unit": "mm²",
+        "unit": "mm\u00b2",
         "min": 0,
         "mode": "advanced",
         "default": "4"
@@ -1332,7 +1332,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the High Temp Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "45"
@@ -1343,7 +1343,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the High Temp Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "max": 300,
         "default": "45"
       },
@@ -1353,7 +1353,7 @@
         "coType": "coInts",
         "label": "Idle temperature",
         "tooltip": "Nozzle temperature when the tool is currently not used in multi-tool setups. This is only used when 'Ooze prevention' is active in Print Settings. Set to 0 to disable.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "default": "0"
       },
@@ -1395,7 +1395,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Nozzle temperature for layers after the initial one.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "default": "200"
       },
@@ -1405,7 +1405,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Nozzle temperature for printing the first layer when using this filament.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "default": "200"
       },
@@ -1414,7 +1414,7 @@
         "type": "int",
         "coType": "coInts",
         "label": "Max",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "default": "240"
       },
@@ -1423,7 +1423,7 @@
         "type": "int",
         "coType": "coInts",
         "label": "Min",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "default": "190"
       },
@@ -1533,7 +1533,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Cool Plate SuperTack.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 120,
         "default": "35"
@@ -1544,7 +1544,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Cool Plate SuperTack.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 120,
         "default": "35"
@@ -1567,7 +1567,7 @@
         "coType": "coInts",
         "label": "Softening temperature",
         "tooltip": "The material softens at this temperature, so when the bed temperature is equal to or greater than this, it's highly recommended to open the front door and/or remove the upper glass to avoid clogging.",
-        "unit": "℃",
+        "unit": "\u2103",
         "mode": "simple",
         "default": "100"
       },
@@ -1577,7 +1577,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Textured Cool Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "40"
@@ -1588,7 +1588,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Textured Cool Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 120,
         "default": "40"
@@ -1599,7 +1599,7 @@
         "coType": "coInts",
         "label": "Other layers",
         "tooltip": "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Textured PEI Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "45"
@@ -1610,7 +1610,7 @@
         "coType": "coInts",
         "label": "First layer",
         "tooltip": "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Textured PEI Plate.",
-        "unit": "℃",
+        "unit": "\u2103",
         "min": 0,
         "max": 300,
         "default": "45"
@@ -1920,138 +1920,6 @@
         ]
       },
       {
-        "name": "Notes",
-        "icon": "custom-gcode_note",
-        "sections": [
-          {
-            "name": "Notes",
-            "icon": "note",
-            "fields": [
-              {
-                "key": "printer_notes",
-                "compound": true
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "name": "Motion ability",
-        "icon": "custom-gcode_motion",
-        "sections": [
-          {
-            "name": "Advanced",
-            "icon": "param_advanced",
-            "fields": [
-              {
-                "key": "emit_machine_limits_to_gcode",
-                "compound": false
-              }
-            ]
-          },
-          {
-            "name": "Resonance Avoidance",
-            "icon": "param_resonance_avoidance",
-            "fields": [
-              {
-                "key": "resonance_avoidance",
-                "compound": false
-              },
-              {
-                "key": "min_resonance_avoidance_speed",
-                "compound": true
-              },
-              {
-                "key": "max_resonance_avoidance_speed",
-                "compound": true
-              }
-            ]
-          },
-          {
-            "name": "Speed limitation",
-            "icon": "param_speed",
-            "fields": [
-              {
-                "key": "machine_max_speed_x",
-                "compound": false
-              },
-              {
-                "key": "machine_max_speed_y",
-                "compound": false
-              },
-              {
-                "key": "machine_max_speed_z",
-                "compound": false
-              },
-              {
-                "key": "machine_max_speed_e",
-                "compound": false
-              }
-            ]
-          },
-          {
-            "name": "Acceleration limitation",
-            "icon": "param_acceleration",
-            "fields": [
-              {
-                "key": "machine_max_acceleration_x",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_y",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_z",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_e",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_extruding",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_retracting",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_travel",
-                "compound": false
-              }
-            ]
-          },
-          {
-            "name": "Jerk limitation",
-            "icon": "param_jerk",
-            "fields": [
-              {
-                "key": "machine_max_junction_deviation",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_x",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_y",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_z",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_e",
-                "compound": false
-              }
-            ]
-          }
-        ]
-      },
-      {
         "name": "Multimaterial",
         "icon": "custom-gcode_multi_material",
         "sections": [
@@ -2134,7 +2002,13 @@
                 "compound": false
               }
             ]
-          },
+          }
+        ]
+      },
+      {
+        "name": "Extruder",
+        "icon": "custom-gcode_extruder",
+        "sections": [
           {
             "name": "Basic information",
             "icon": "param_information",
@@ -2272,6 +2146,138 @@
               {
                 "key": "retraction_distances_when_cut",
                 "compound": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Motion ability",
+        "icon": "custom-gcode_motion",
+        "sections": [
+          {
+            "name": "Advanced",
+            "icon": "param_advanced",
+            "fields": [
+              {
+                "key": "emit_machine_limits_to_gcode",
+                "compound": false
+              }
+            ]
+          },
+          {
+            "name": "Resonance Avoidance",
+            "icon": "param_resonance_avoidance",
+            "fields": [
+              {
+                "key": "resonance_avoidance",
+                "compound": false
+              },
+              {
+                "key": "min_resonance_avoidance_speed",
+                "compound": true
+              },
+              {
+                "key": "max_resonance_avoidance_speed",
+                "compound": true
+              }
+            ]
+          },
+          {
+            "name": "Speed limitation",
+            "icon": "param_speed",
+            "fields": [
+              {
+                "key": "machine_max_speed_x",
+                "compound": false
+              },
+              {
+                "key": "machine_max_speed_y",
+                "compound": false
+              },
+              {
+                "key": "machine_max_speed_z",
+                "compound": false
+              },
+              {
+                "key": "machine_max_speed_e",
+                "compound": false
+              }
+            ]
+          },
+          {
+            "name": "Acceleration limitation",
+            "icon": "param_acceleration",
+            "fields": [
+              {
+                "key": "machine_max_acceleration_x",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_y",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_z",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_e",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_extruding",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_retracting",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_travel",
+                "compound": false
+              }
+            ]
+          },
+          {
+            "name": "Jerk limitation",
+            "icon": "param_jerk",
+            "fields": [
+              {
+                "key": "machine_max_junction_deviation",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_x",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_y",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_z",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_e",
+                "compound": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Notes",
+        "icon": "custom-gcode_note",
+        "sections": [
+          {
+            "name": "Notes",
+            "icon": "note",
+            "fields": [
+              {
+                "key": "printer_notes",
+                "compound": true
               }
             ]
           }
@@ -2624,7 +2630,7 @@
         "type": "float",
         "coType": "coFloats",
         "tooltip": "Maximum acceleration for extruding (M204 P)",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "simple",
         "category": "Machine limits",
@@ -2636,7 +2642,7 @@
         "type": "float",
         "coType": "coFloats",
         "tooltip": "Maximum acceleration for retracting (M204 R)",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "simple",
         "category": "Machine limits",
@@ -2648,7 +2654,7 @@
         "type": "float",
         "coType": "coFloats",
         "tooltip": "Maximum acceleration for travel (M204 T), it only applies to Marlin 2.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Machine limits",
@@ -2792,7 +2798,7 @@
         "tooltip": "The diameter of nozzle.",
         "unit": "mm",
         "max": 100,
-        "mode": "advanced",
+        "mode": "simple",
         "default": "0.4"
       },
       "nozzle_hrc": {
@@ -2822,7 +2828,7 @@
         "coType": "coFloats",
         "label": "Nozzle volume",
         "tooltip": "Volume of nozzle between the cutter and the end of nozzle.",
-        "unit": "mm³",
+        "unit": "mm\u00b3",
         "mode": "advanced",
         "default": "0.0"
       },
@@ -2852,7 +2858,7 @@
         "coType": "coFloat",
         "label": "Preferred orientation",
         "tooltip": "Automatically orient STL files on the Z axis upon initial import.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": -360,
         "max": 360,
         "mode": "advanced",
@@ -3038,7 +3044,7 @@
         "label": "Retraction Speed",
         "tooltip": "Speed for retracting filament from the nozzle.",
         "unit": "mm/s",
-        "mode": "advanced",
+        "mode": "simple",
         "default": "30"
       },
       "scan_first_layer": {
@@ -3126,8 +3132,8 @@
         "type": "float",
         "coType": "coFloats",
         "label": "Traveling angle",
-        "tooltip": "Traveling angle for Slope and Spiral Z-hop type. Setting it to 90° results in Normal Lift.",
-        "unit": "°",
+        "tooltip": "Traveling angle for Slope and Spiral Z-hop type. Setting it to 90\u00b0 results in Normal Lift.",
+        "unit": "\u00b0",
         "min": 1,
         "max": 90,
         "mode": "advanced",
@@ -3219,7 +3225,7 @@
         "coType": "coFloat",
         "label": "Stabilization cone apex angle",
         "tooltip": "Angle at the apex of the cone that is used to stabilize the wipe tower. Larger angle means wider base.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0.0,
         "max": 90.0,
         "mode": "advanced",
@@ -3318,7 +3324,7 @@
         "coType": "coFloat",
         "label": "Wipe tower rotation angle",
         "tooltip": "Wipe tower rotation angle with respect to X axis.",
-        "unit": "°",
+        "unit": "\u00b0",
         "mode": "advanced",
         "default": "0"
       },
@@ -3391,6 +3397,150 @@
         "unit": "mm",
         "mode": "advanced",
         "default": "0"
+      },
+      "machine_max_speed_x": {
+        "key": "machine_max_speed_x",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed X",
+        "tooltip": "Maximum speed of X axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "500, 200"
+      },
+      "machine_max_acceleration_x": {
+        "key": "machine_max_acceleration_x",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration X",
+        "tooltip": "Maximum acceleration of the X axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "1000, 1000"
+      },
+      "machine_max_jerk_x": {
+        "key": "machine_max_jerk_x",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk X",
+        "tooltip": "Maximum jerk of the X axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "10, 10"
+      },
+      "machine_max_speed_y": {
+        "key": "machine_max_speed_y",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed Y",
+        "tooltip": "Maximum speed of Y axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "500, 200"
+      },
+      "machine_max_acceleration_y": {
+        "key": "machine_max_acceleration_y",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration Y",
+        "tooltip": "Maximum acceleration of the Y axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "1000, 1000"
+      },
+      "machine_max_jerk_y": {
+        "key": "machine_max_jerk_y",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk Y",
+        "tooltip": "Maximum jerk of the Y axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "10, 10"
+      },
+      "machine_max_speed_z": {
+        "key": "machine_max_speed_z",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed Z",
+        "tooltip": "Maximum speed of Z axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "12, 12"
+      },
+      "machine_max_acceleration_z": {
+        "key": "machine_max_acceleration_z",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration Z",
+        "tooltip": "Maximum acceleration of the Z axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "500, 200"
+      },
+      "machine_max_jerk_z": {
+        "key": "machine_max_jerk_z",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk Z",
+        "tooltip": "Maximum jerk of the Z axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "0.2, 0.4"
+      },
+      "machine_max_speed_e": {
+        "key": "machine_max_speed_e",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed E",
+        "tooltip": "Maximum speed of E axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "120, 120"
+      },
+      "machine_max_acceleration_e": {
+        "key": "machine_max_acceleration_e",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration E",
+        "tooltip": "Maximum acceleration of the E axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "5000, 5000"
+      },
+      "machine_max_jerk_e": {
+        "key": "machine_max_jerk_e",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk E",
+        "tooltip": "Maximum jerk of the E axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "2.5, 2.5"
       }
     }
   },
@@ -5036,7 +5186,7 @@
         "coType": "coFloatOrPercent",
         "label": "Bridge",
         "tooltip": "Acceleration of bridges. If the value is expressed as a percentage (e.g. 50%), it will be calculated based on the outer wall acceleration.",
-        "unit": "mm/s² or %",
+        "unit": "mm/s\u00b2 or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -5047,8 +5197,8 @@
         "type": "float",
         "coType": "coFloat",
         "label": "External bridge infill direction",
-        "tooltip": "Bridging angle override. If left to zero, the bridging angle will be calculated automatically. Otherwise the provided angle will be used for external bridges. Use 180° for zero angle.",
-        "unit": "°",
+        "tooltip": "Bridging angle override. If left to zero, the bridging angle will be calculated automatically. Otherwise the provided angle will be used for external bridges. Use 180\u00b0 for zero angle.",
+        "unit": "\u00b0",
         "min": 0,
         "mode": "advanced",
         "category": "Strength",
@@ -5129,7 +5279,7 @@
         "coType": "coFloat",
         "label": "Brim ear max angle",
         "tooltip": "Maximum angle to let a brim ear appear.\\nIf set to 0, no brim will be created.\\nIf set to ~180, brim will be created on everything but straight sections.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 180,
         "mode": "advanced",
@@ -5196,7 +5346,7 @@
         "coType": "coFloat",
         "label": "Normal printing",
         "tooltip": "The default acceleration of both normal printing and travel except initial layer.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -5511,7 +5661,7 @@
         "type": "enum",
         "coType": "coEnum",
         "label": "Fuzzy skin generator mode",
-        "tooltip": "Fuzzy skin generation mode. Works only with Arachne!\\nDisplacement: Сlassic mode when the pattern is formed by shifting the nozzle sideways from the original path.\\nExtrusion: The mode when the pattern formed by the amount of extruded plastic. This is the fast and straight algorithm without unnecessary nozzle shake that gives a smooth pattern. But it is more useful for forming loose walls in the entire they array.\\nCombined: Joint mode [Displacement] + [Extrusion]. The appearance of the walls is similar to [Displacement] Mode, but it leaves no pores between the perimeters.\\n\\nAttention! The [Extrusion] and [Combined] modes works only the fuzzy_skin_thickness parameter not more than the thickness of printed loop. At the same time, the width of the extrusion for a particular layer should also not be below a certain level. It is usually equal 15-25%% of a layer height. Therefore, the maximum fuzzy skin thickness with a perimeter width of 0.4 mm and a layer height of 0.2 mm will be 0.4-(0.2*0.25)=±0.35mm! If you enter a higher parameter than this, the error Flow::spacing() will displayed, and the model will not be sliced. You can choose this number until this error is repeated.",
+        "tooltip": "Fuzzy skin generation mode. Works only with Arachne!\\nDisplacement: \u0421lassic mode when the pattern is formed by shifting the nozzle sideways from the original path.\\nExtrusion: The mode when the pattern formed by the amount of extruded plastic. This is the fast and straight algorithm without unnecessary nozzle shake that gives a smooth pattern. But it is more useful for forming loose walls in the entire they array.\\nCombined: Joint mode [Displacement] + [Extrusion]. The appearance of the walls is similar to [Displacement] Mode, but it leaves no pores between the perimeters.\\n\\nAttention! The [Extrusion] and [Combined] modes works only the fuzzy_skin_thickness parameter not more than the thickness of printed loop. At the same time, the width of the extrusion for a particular layer should also not be below a certain level. It is usually equal 15-25%% of a layer height. Therefore, the maximum fuzzy skin thickness with a perimeter width of 0.4 mm and a layer height of 0.2 mm will be 0.4-(0.2*0.25)=\u00b10.35mm! If you enter a higher parameter than this, the error Flow::spacing() will displayed, and the model will not be sliced. You can choose this number until this error is repeated.",
         "mode": "simple",
         "category": "Others"
       },
@@ -5737,7 +5887,7 @@
         "coType": "coFloat",
         "label": "Sparse infill direction",
         "tooltip": "Angle for sparse infill pattern, which controls the start or main direction of line.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 360,
         "mode": "advanced",
@@ -5774,8 +5924,8 @@
         "type": "float",
         "coType": "coFloat",
         "label": "Infill overhang angle",
-        "tooltip": "The angle of the infill angled lines. 60° will result in a pure honeycomb.",
-        "unit": "°",
+        "tooltip": "The angle of the infill angled lines. 60\u00b0 will result in a pure honeycomb.",
+        "unit": "\u00b0",
         "min": 15,
         "max": 75,
         "mode": "advanced",
@@ -5812,7 +5962,7 @@
         "coType": "coFloat",
         "label": "First layer",
         "tooltip": "Acceleration of the first layer. Using a lower value can improve build plate adhesion.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -5906,7 +6056,7 @@
         "coType": "coFloat",
         "label": "Inner wall",
         "tooltip": "Acceleration of inner walls.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -6032,7 +6182,7 @@
         "coType": "coFloat",
         "label": "Interlocking direction",
         "tooltip": "Orientation of interlock beams.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 360,
         "mode": "advanced",
@@ -6044,8 +6194,8 @@
         "type": "float",
         "coType": "coFloat",
         "label": "Internal bridge infill direction",
-        "tooltip": "Internal bridging angle override. If left to zero, the bridging angle will be calculated automatically. Otherwise the provided angle will be used for internal bridges. Use 180° for zero angle.\\n\\nIt is recommended to leave it at 0 unless there is a specific model need not to.",
-        "unit": "°",
+        "tooltip": "Internal bridging angle override. If left to zero, the bridging angle will be calculated automatically. Otherwise the provided angle will be used for internal bridges. Use 180\u00b0 for zero angle.\\n\\nIt is recommended to leave it at 0 unless there is a specific model need not to.",
+        "unit": "\u00b0",
         "min": 0,
         "mode": "advanced",
         "category": "Strength",
@@ -6094,7 +6244,7 @@
         "coType": "coFloatOrPercent",
         "label": "Internal solid infill",
         "tooltip": "Acceleration of internal solid infill. If the value is expressed as a percentage (e.g. 100%), it will be calculated based on the default acceleration.",
-        "unit": "mm/s² or %",
+        "unit": "mm/s\u00b2 or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -6151,7 +6301,7 @@
         "coType": "coFloat",
         "label": "Ironing angle offset",
         "tooltip": "The angle of ironing lines offset from the top surface.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 359,
         "mode": "advanced",
@@ -6253,7 +6403,7 @@
         "coType": "coFloat",
         "label": "Lateral lattice angle 1",
         "tooltip": "The angle of the first set of Lateral lattice elements in the Z direction. Zero is vertical.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": -75,
         "max": 75,
         "mode": "advanced",
@@ -6266,7 +6416,7 @@
         "coType": "coFloat",
         "label": "Lateral lattice angle 2",
         "tooltip": "The angle of the second set of Lateral lattice elements in the Z direction. Zero is vertical.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": -75,
         "max": 75,
         "mode": "advanced",
@@ -6311,8 +6461,8 @@
         "type": "float",
         "coType": "coFloat",
         "label": "Make overhangs printable - Maximum angle",
-        "tooltip": "Maximum angle of overhangs to allow after making more steep overhangs printable.90° will not change the model at all and allow any overhang, while 0 will replace all overhangs with conical material.",
-        "unit": "°",
+        "tooltip": "Maximum angle of overhangs to allow after making more steep overhangs printable.90\u00b0 will not change the model at all and allow any overhang, while 0 will replace all overhangs with conical material.",
+        "unit": "\u00b0",
         "min": 0.0,
         "max": 90.0,
         "mode": "advanced",
@@ -6325,7 +6475,7 @@
         "coType": "coFloat",
         "label": "Make overhangs printable - Hole area",
         "tooltip": "Maximum area of a hole in the base of the model before it's filled by conical material. A value of 0 will fill all the holes in the model base.",
-        "unit": "mm²",
+        "unit": "mm\u00b2",
         "min": 0.0,
         "mode": "advanced",
         "category": "Quality",
@@ -6360,8 +6510,8 @@
         "type": "float",
         "coType": "coFloat",
         "label": "Extrusion rate smoothing",
-        "tooltip": "This parameter smooths out sudden extrusion rate changes that happen when the printer transitions from printing a high flow (high speed/larger width) extrusion to a lower flow (lower speed/smaller width) extrusion and vice versa.\\n\\nIt defines the maximum rate by which the extruded volumetric flow in mm³/s can change over time. Higher values mean higher extrusion rate changes are allowed, resulting in faster speed transitions.\\n\\nA value of 0 disables the feature.\\n\\nFor a high speed, high flow direct drive printer (like the Bambu lab or Voron) this value is usually not needed. However it can provide some marginal benefit in certain cases where feature speeds vary greatly. For example, when there are aggressive slowdowns due to overhangs. In these cases a high value of around 300-350 mm³/s² is recommended as this allows for just enough smoothing to assist pressure advance achieve a smoother flow transition.\\n\\nFor slower printers without pressure advance, the value should be set much lower. A value of 10-15 mm³/s² is a good starting point for direct drive extruders and 5-10 mm³/s² for Bowden style.\\n\\nThis feature is known as Pressure Equalizer in Prusa slicer.\\n\\nNote: this parameter disables arc fitting.",
-        "unit": "mm³/s²",
+        "tooltip": "This parameter smooths out sudden extrusion rate changes that happen when the printer transitions from printing a high flow (high speed/larger width) extrusion to a lower flow (lower speed/smaller width) extrusion and vice versa.\\n\\nIt defines the maximum rate by which the extruded volumetric flow in mm\u00b3/s can change over time. Higher values mean higher extrusion rate changes are allowed, resulting in faster speed transitions.\\n\\nA value of 0 disables the feature.\\n\\nFor a high speed, high flow direct drive printer (like the Bambu lab or Voron) this value is usually not needed. However it can provide some marginal benefit in certain cases where feature speeds vary greatly. For example, when there are aggressive slowdowns due to overhangs. In these cases a high value of around 300-350 mm\u00b3/s\u00b2 is recommended as this allows for just enough smoothing to assist pressure advance achieve a smoother flow transition.\\n\\nFor slower printers without pressure advance, the value should be set much lower. A value of 10-15 mm\u00b3/s\u00b2 is a good starting point for direct drive extruders and 5-10 mm\u00b3/s\u00b2 for Bowden style.\\n\\nThis feature is known as Pressure Equalizer in Prusa slicer.\\n\\nNote: this parameter disables arc fitting.",
+        "unit": "mm\u00b3/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "default": "0"
@@ -6444,7 +6594,7 @@
         "coType": "coFloat",
         "label": "Minimum sparse infill threshold",
         "tooltip": "Sparse infill areas smaller than this threshold value are replaced by internal solid infill.",
-        "unit": "mm²",
+        "unit": "mm\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Strength",
@@ -6515,7 +6665,7 @@
         "coType": "coFloat",
         "label": "Outer wall",
         "tooltip": "Acceleration of outer wall. Using a lower value can improve quality.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -6766,7 +6916,7 @@
         "coType": "coFloat",
         "label": "Prime volume",
         "tooltip": "The volume of material to prime extruder on tower.",
-        "unit": "mm³",
+        "unit": "mm\u00b3",
         "min": 1.0,
         "mode": "simple",
         "default": "45"
@@ -6892,8 +7042,8 @@
         "type": "int",
         "coType": "coInt",
         "label": "Conditional angle threshold",
-        "tooltip": "This option sets the threshold angle for applying a conditional scarf joint seam.\\nIf the maximum angle within the perimeter loop exceeds this value (indicating the absence of sharp corners), a scarf joint seam will be used. The default value is 155°.",
-        "unit": "°",
+        "tooltip": "This option sets the threshold angle for applying a conditional scarf joint seam.\\nIf the maximum angle within the perimeter loop exceeds this value (indicating the absence of sharp corners), a scarf joint seam will be used. The default value is 155\u00b0.",
+        "unit": "\u00b0",
         "min": 0,
         "max": 180,
         "mode": "advanced",
@@ -7172,7 +7322,7 @@
         "coType": "coFloat",
         "label": "Skirt start point",
         "tooltip": "Angle from the object center to skirt start point. Zero is the most right position, counter clockwise is positive angle.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": -180,
         "max": 180,
         "mode": "advanced",
@@ -7279,7 +7429,7 @@
         "coType": "coFloat",
         "label": "Solid infill direction",
         "tooltip": "Angle for solid infill pattern, which controls the start or main direction of line.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 360,
         "mode": "advanced",
@@ -7303,7 +7453,7 @@
         "coType": "coString",
         "label": "Solid infill rotation template",
         "tooltip": "This parameter adds a rotation of solid infill direction to each layer according to the specified template. The template is a comma-separated list of angles in degrees, e.g. '0,90'. The first angle is applied to the first layer, the second angle to the second layer, and so on. If there are more layers than angles, the angles will be repeated. Note that not all solid infill patterns support rotation.",
-        "unit": "°",
+        "unit": "\u00b0",
         "mode": "advanced",
         "category": "Strength"
       },
@@ -7313,7 +7463,7 @@
         "coType": "coFloatOrPercent",
         "label": "Sparse infill",
         "tooltip": "Acceleration of sparse infill. If the value is expressed as a percentage (e.g. 100%), it will be calculated based on the default acceleration.",
-        "unit": "mm/s² or %",
+        "unit": "mm/s\u00b2 or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -7380,8 +7530,8 @@
         "type": "string",
         "coType": "coString",
         "label": "Sparse infill rotation template",
-        "tooltip": "Rotate the sparse infill direction per layer using a template of angles. Enter comma-separated degrees (e.g., '0,30,60,90'). Angles are applied in order by layer and repeat when the list ends. Advanced syntax is supported: '+5' rotates +5° every layer; '+5#5' rotates +5° every 5 layers. See the Wiki for details. When a template is set, the standard infill direction setting is ignored. Note: some infill patterns (e.g., Gyroid) control rotation themselves; use with care.",
-        "unit": "°",
+        "tooltip": "Rotate the sparse infill direction per layer using a template of angles. Enter comma-separated degrees (e.g., '0,30,60,90'). Angles are applied in order by layer and repeat when the list ends. Advanced syntax is supported: '+5' rotates +5\u00b0 every layer; '+5#5' rotates +5\u00b0 every 5 layers. See the Wiki for details. When a template is set, the standard infill direction setting is ignored. Note: some infill patterns (e.g., Gyroid) control rotation themselves; use with care.",
+        "unit": "\u00b0",
         "mode": "advanced",
         "category": "Strength"
       },
@@ -7465,7 +7615,7 @@
         "coType": "coInt",
         "label": "Temperature variation",
         "tooltip": "Temperature difference to be applied when an extruder is not active. The value is not used when 'idle_temperature' in filament settings is set to non-zero value.",
-        "unit": "∆℃",
+        "unit": "\u2206\u2103",
         "mode": "advanced",
         "default": "-5"
       },
@@ -7484,7 +7634,7 @@
         "coType": "coFloat",
         "label": "Pattern angle",
         "tooltip": "Use this setting to rotate the support pattern on the horizontal plane.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 359,
         "mode": "advanced",
@@ -8015,7 +8165,7 @@
         "coType": "coInt",
         "label": "Threshold angle",
         "tooltip": "Support will be generated for overhangs whose slope angle is below the threshold.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 90,
         "mode": "simple",
@@ -8145,7 +8295,7 @@
         "coType": "coFloat",
         "label": "Top surface",
         "tooltip": "Acceleration of top surface infill. Using a lower value may improve top surface quality.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -8213,7 +8363,7 @@
         "coType": "coFloat",
         "label": "Travel",
         "tooltip": "Acceleration of travel moves.",
-        "unit": "mm/s²",
+        "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
@@ -8248,7 +8398,7 @@
         "coType": "coFloat",
         "label": "Preferred Branch Angle",
         "tooltip": "The preferred angle of the branches, when they do not have to avoid the model. Use a lower angle to make them more vertical and more stable. Use a higher angle for branches to merge faster.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 10,
         "max": 85,
         "mode": "advanced",
@@ -8270,7 +8420,7 @@
         "coType": "coFloat",
         "label": "Tree support branch angle",
         "tooltip": "This setting determines the maximum overhang angle that the branches of tree support are allowed to make. If the angle is increased, the branches can be printed more horizontally, allowing them to reach farther.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 60,
         "mode": "advanced",
@@ -8283,7 +8433,7 @@
         "coType": "coFloat",
         "label": "Tree support branch angle",
         "tooltip": "This setting determines the maximum overhang angle that the branches of tree support are allowed to make. If the angle is increased, the branches can be printed more horizontally, allowing them to reach farther.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 60,
         "mode": "advanced",
@@ -8309,7 +8459,7 @@
         "coType": "coFloat",
         "label": "Branch Diameter Angle",
         "tooltip": "The angle of the branches' diameter as they gradually become thicker towards the bottom. An angle of 0 will cause the branches to have uniform thickness over their length. A bit of an angle can increase stability of the organic support.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0,
         "max": 15,
         "mode": "advanced",
@@ -8478,7 +8628,7 @@
         "coType": "coFloat",
         "label": "Wall transitioning threshold angle",
         "tooltip": "When to create transitions between even and odd numbers of walls. A wedge shape with an angle greater than this setting will not have transitions and no walls will be printed in the center to fill the remaining space. Reducing this setting reduces the number and length of these center walls, but may leave gaps or overextrude.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 1.0,
         "max": 59.0,
         "mode": "advanced",
@@ -8557,7 +8707,7 @@
         "coType": "coFloat",
         "label": "Stabilization cone apex angle",
         "tooltip": "Angle at the apex of the cone that is used to stabilize the wipe tower. Larger angle means wider base.",
-        "unit": "°",
+        "unit": "\u00b0",
         "min": 0.0,
         "max": 90.0,
         "mode": "advanced",
@@ -8656,7 +8806,7 @@
         "coType": "coFloat",
         "label": "Wipe tower rotation angle",
         "tooltip": "Wipe tower rotation angle with respect to X axis.",
-        "unit": "°",
+        "unit": "\u00b0",
         "mode": "advanced",
         "default": "0"
       },
