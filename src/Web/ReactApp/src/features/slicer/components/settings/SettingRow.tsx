@@ -86,6 +86,14 @@ interface ColorInputSettingProps extends BaseSettingRowProps {
   onChange: (value: string) => void;
 }
 
+interface TextareaSettingProps extends BaseSettingRowProps {
+  type: 'textarea';
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+  placeholder?: string;
+}
+
 export type SettingRowProps =
   | SliderSettingProps
   | SelectSettingProps
@@ -93,7 +101,8 @@ export type SettingRowProps =
   | CheckboxSettingProps
   | NumberInputSettingProps
   | TextInputSettingProps
-  | ColorInputSettingProps;
+  | ColorInputSettingProps
+  | TextareaSettingProps;
 
 /**
  * SettingRow - OrcaSlicer-style setting control with icon, label, description, and control
@@ -128,6 +137,8 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         return <TextInputControl {...props} id={id} />;
       case 'color':
         return <ColorInputControl {...props} id={id} />;
+      case 'textarea':
+        return <TextareaControl {...props} id={id} />;
       default:
         return null;
     }
@@ -135,7 +146,24 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
 
   return (
     <div className={`py-0.5 ${disabled ? 'opacity-50' : ''}`}>
-      {/* Horizontal row: label+description left, control right */}
+      {/* Textarea: stacked layout (label on top, control below) */}
+      {props.type === 'textarea' ? (
+        <div>
+          {label && (
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-pf-accent-2 shrink-0">{icon}</span>
+              <label htmlFor={id} className="font-medium text-xs text-pf-text">{label}</label>
+              {tooltip && (
+                <span className="text-pf-text-muted cursor-help" title={tooltip}>
+                  <HelpIcon className="w-3.5 h-3.5" />
+                </span>
+              )}
+            </div>
+          )}
+          {renderControl()}
+        </div>
+      ) : (
+      /* Horizontal row: label+description left, control right */
       <div className="flex items-center gap-3">
         {/* Left side: icon, label, description — hidden when label is empty */}
         {label && (
@@ -193,6 +221,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           {renderControl()}
         </div>
       </div>
+      )}
     </div>
   );
 };
@@ -720,6 +749,30 @@ export const SettingSection: React.FC<SettingSectionProps> = ({ icon, title, chi
       {children}
     </div>
   </div>
+);
+
+// ── Textarea control ────────────────────────────────────────────────────
+
+const TextareaControl: React.FC<TextareaSettingProps & { id: string }> = ({
+  value,
+  onChange,
+  disabled,
+  rows = 8,
+  placeholder,
+  id,
+}) => (
+  <textarea
+    id={id}
+    title="G-code editor"
+    className="w-full px-3 py-2 bg-pf-panel border border-pf-border rounded-lg
+               text-sm text-pf-text-primary font-mono resize-y
+               focus:border-pf-accent-2 focus:outline-none focus:ring-1 focus:ring-pf-accent-2/30"
+    rows={rows}
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    disabled={disabled}
+    placeholder={placeholder}
+  />
 );
 
 export default SettingRow;
