@@ -272,3 +272,29 @@ Kane adding tests:
 - Filter by non-existent tag (empty results)
 - Verify filter doesn't affect pagination
 
+## bed_exclude_area coPoints Display Fix
+
+**Author:** Ripley (Frontend Dev)
+**Date:** 2026-07-18
+**Status:** COMMITTED
+**Impact:** Low (single helper function, all tests pass)
+
+### Context
+
+The toString() helper in MetadataProfileRenderer.tsx is the central string coercion function for displaying slicer settings values. It handles the conversion from raw profile data (strings, numbers, booleans, arrays) to display strings for text inputs.
+
+### Decision
+
+Handle arrays explicitly in toString():
+- Empty arrays [] fall back to meta.default (same as null/undefined)
+- Non-empty arrays use raw.join(', ') for readable comma-separated display
+
+### Rationale
+
+String([]) in JavaScript returns "" (empty string), which bypasses the existing null/undefined fallback. This caused coPoints fields like bed_exclude_area to render blank when the profile value was an empty array (the common case for most machine profiles).
+
+### Trade-offs
+
+- This changes toString behavior for ALL array-valued settings, not just bed_exclude_area. The new behavior (join with ', ') is strictly better than String() (which joins with bare ',' and no spaces).
+- Empty arrays now show the metadata default instead of blank. This is consistent with how null/undefined are handled.
+
