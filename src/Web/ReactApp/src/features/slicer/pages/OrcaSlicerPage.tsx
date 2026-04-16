@@ -15,7 +15,7 @@ import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
-import { SlicerSettingsPanel, DEFAULT_ORCA_PROCESS_SETTINGS, type OrcaProcessSettings } from '@/features/slicer/components/settings';
+import { SlicerSettingsPanel, type OrcaProcessSettings } from '@/features/slicer/components/settings';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import type { MaterialType, MaterialPreset } from '@/types/slicer';
@@ -51,7 +51,7 @@ export const OrcaSlicerPage: React.FC = () => {
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
-  const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>(DEFAULT_ORCA_PROCESS_SETTINGS);
+  const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
   const [loadedModels, setLoadedModels] = useState<LoadedModel[]>([]);
   const [selectedLoadedModelId, setSelectedLoadedModelId] = useState<string | null>(null);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
