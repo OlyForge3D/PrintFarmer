@@ -362,3 +362,26 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 4. Check tab order matches OrcaSlicer
 5. Run full test suite
 
+
+
+## 2026-07-18: bed_exclude_area Display Regression Fix
+
+**Role:** Frontend / Settings Renderer
+**Status:** FIXED - Committed and pushed
+
+**Root cause:** Commit 24f62322 changed coPoints fields (like bed_exclude_area) from X/Y point inputs to text inputs via resolveControlType. The toString() helper did not handle arrays: String([]) returns empty string instead of falling back to the metadata default. Most machine profiles store bed_exclude_area as [] (empty array), so the text input showed blank.
+
+**Fix:** Added array handling to toString() in MetadataProfileRenderer.tsx:
+- Empty arrays fall back to meta.default (same as null/undefined behavior)
+- Non-empty arrays use raw.join for readable display (e.g. 0x0, 24x0, 24x180)
+
+**Files changed:**
+- src/Web/ReactApp/src/features/slicer/components/settings/MetadataProfileRenderer.tsx
+
+**Verification:** Build clean, 1710/1710 tests passing, 0 lint errors.
+
+## Learnings
+
+- Array coercion trap: String([]) equals empty string in JS. Always handle empty arrays explicitly when coercing to string for display.
+- coPoints vs coPoint: coPoints is polygon/multi-point (array of XxY strings), coPoint is single X,Y pair rendered as dual number inputs.
+- MetadataProfileRenderer.tsx is the single renderer for all slicer profile fields. Changes to helpers like toString, parsePoint, toNumber, toBool affect ALL profile types.
