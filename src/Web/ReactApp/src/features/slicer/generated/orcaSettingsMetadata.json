@@ -2555,7 +2555,7 @@
         "unit": "s",
         "mode": "advanced",
         "default": "0",
-        "label": "fan_speedup_time"
+        "label": "Fan speed-up time"
       },
       "file_start_gcode": {
         "key": "file_start_gcode",
@@ -2629,7 +2629,7 @@
         "mode": "simple",
         "category": "Machine limits",
         "default": "1500., 1250",
-        "label": "machine_max_acceleration_extruding"
+        "label": "Maximum acceleration for extruding"
       },
       "machine_max_acceleration_retracting": {
         "key": "machine_max_acceleration_retracting",
@@ -2641,7 +2641,7 @@
         "mode": "simple",
         "category": "Machine limits",
         "default": "1500., 1250",
-        "label": "machine_max_acceleration_retracting"
+        "label": "Maximum acceleration for retracting"
       },
       "machine_max_acceleration_travel": {
         "key": "machine_max_acceleration_travel",
@@ -2653,7 +2653,7 @@
         "mode": "advanced",
         "category": "Machine limits",
         "default": "0., 0",
-        "label": "machine_max_acceleration_travel"
+        "label": "Maximum acceleration for travel"
       },
       "machine_max_junction_deviation": {
         "key": "machine_max_junction_deviation",
@@ -2666,7 +2666,7 @@
         "mode": "advanced",
         "category": "Machine limits",
         "default": "0.01",
-        "label": "machine_max_junction_deviation"
+        "label": "Maximum junction deviation"
       },
       "machine_min_extruding_rate": {
         "key": "machine_min_extruding_rate",
@@ -2678,7 +2678,7 @@
         "mode": "developer",
         "category": "Machine limits",
         "default": "0., 0",
-        "label": "machine_min_extruding_rate"
+        "label": "Minimum speed for extruding"
       },
       "machine_min_travel_rate": {
         "key": "machine_min_travel_rate",
@@ -2690,7 +2690,7 @@
         "mode": "developer",
         "category": "Machine limits",
         "default": "0., 0",
-        "label": "machine_min_travel_rate"
+        "label": "Minimum travel speed"
       },
       "machine_pause_gcode": {
         "key": "machine_pause_gcode",
@@ -6579,7 +6579,7 @@
         "mode": "advanced",
         "category": "Speed",
         "default": "0, false",
-        "label": "overhang_1_4_speed"
+        "label": "10%"
       },
       "overhang_2_4_speed": {
         "key": "overhang_2_4_speed",
@@ -6590,7 +6590,7 @@
         "mode": "advanced",
         "category": "Speed",
         "default": "0, false",
-        "label": "overhang_2_4_speed"
+        "label": "25%"
       },
       "overhang_3_4_speed": {
         "key": "overhang_3_4_speed",
@@ -6601,7 +6601,7 @@
         "mode": "advanced",
         "category": "Speed",
         "default": "0, false",
-        "label": "overhang_3_4_speed"
+        "label": "50%"
       },
       "overhang_4_4_speed": {
         "key": "overhang_4_4_speed",
@@ -6612,7 +6612,7 @@
         "mode": "advanced",
         "category": "Speed",
         "default": "0, false",
-        "label": "overhang_4_4_speed"
+        "label": "75%"
       },
       "overhang_flow_ratio": {
         "key": "overhang_flow_ratio",

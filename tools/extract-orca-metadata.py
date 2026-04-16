@@ -165,10 +165,17 @@ def parse_print_config(filepath: str) -> dict:
         # Join all lines in this block
         block_text = '\n'.join(lines[start_line:end_line])
 
-        # Extract label
+        # Extract label (try L("..."), then bare "...", then full_label as fallback)
         m = re.search(r'def->label\s*=\s*L\(\s*"((?:[^"\\]|\\.)*)"\s*\)', block_text)
+        if not m:
+            m = re.search(r'def->label\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', block_text)
         if m:
             entry['label'] = m.group(1).replace('\\"', '"')
+        else:
+            # Fall back to full_label if no label was found
+            m_full = re.search(r'def->full_label\s*=\s*L\(\s*"((?:[^"\\]|\\.)*)"\s*\)', block_text)
+            if m_full:
+                entry['label'] = m_full.group(1).replace('\\"', '"')
 
         # Extract tooltip (may span multiple lines with string concatenation)
         m = re.search(r'def->tooltip\s*=\s*L\(\s*"((?:[^"\\]|\\.)*(?:"\s*"(?:[^"\\]|\\.)*)*)"\s*\)', block_text, re.DOTALL)
