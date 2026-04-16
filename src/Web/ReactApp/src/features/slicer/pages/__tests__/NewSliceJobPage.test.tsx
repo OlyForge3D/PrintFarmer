@@ -251,7 +251,6 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
 // Mock SlicerSettingsPanel
 vi.mock('@/features/slicer/components/settings', () => ({
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
-  DEFAULT_ORCA_PROCESS_SETTINGS: {},
 }));
 
 // Mock useSTLFile hook

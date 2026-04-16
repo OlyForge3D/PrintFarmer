@@ -18,7 +18,6 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import {
   SlicerSettingsPanel,
-  DEFAULT_ORCA_PROCESS_SETTINGS,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
@@ -44,20 +43,19 @@ import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
  * Maps profile data to settings structure, using defaults for missing values
  */
 function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): OrcaProcessSettings {
-  if (!profile) return DEFAULT_ORCA_PROCESS_SETTINGS;
+  if (!profile) return {} as OrcaProcessSettings;
 
   // Parse settings from profile if available
   const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
 
   return {
-    ...DEFAULT_ORCA_PROCESS_SETTINGS,
-    layer_height: profile.layerHeight ?? DEFAULT_ORCA_PROCESS_SETTINGS.layer_height,
-    sparse_infill_density: profile.infillPercentage ?? DEFAULT_ORCA_PROCESS_SETTINGS.sparse_infill_density,
-    outer_wall_speed: profile.printSpeed ?? DEFAULT_ORCA_PROCESS_SETTINGS.outer_wall_speed,
-    enable_support: profile.supports ?? DEFAULT_ORCA_PROCESS_SETTINGS.enable_support,
+    layer_height: profile.layerHeight,
+    sparse_infill_density: profile.infillPercentage,
+    outer_wall_speed: profile.printSpeed,
+    enable_support: profile.supports,
     // Spread any additional parsed settings from profile.settings
     ...profileSettings,
-  };
+  } as OrcaProcessSettings;
 }
 
 export const NewSliceJobPage: React.FC = () => {
@@ -111,7 +109,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, []);
 
   // === OrcaSlicer-style Settings Panel ===
-  const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>(DEFAULT_ORCA_PROCESS_SETTINGS);
+  const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
   
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -126,7 +124,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // === Process Profile Management handlers ===
   const handleResetProcessProfile = useCallback(() => {
-    setSlicerSettings(DEFAULT_ORCA_PROCESS_SETTINGS);
+    setSlicerSettings({} as OrcaProcessSettings);
     setAdvancedProcessSettings({});
   }, []);
 
