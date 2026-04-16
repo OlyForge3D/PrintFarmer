@@ -407,10 +407,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                   ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'}`}
             >
-              <span className="inline-flex items-center gap-1">
-                <OrcaIcon icon={tab.icon} />
-                {tab.name}
-              </span>
+              {tab.name}
             </Button>
           ))}
         </div>
