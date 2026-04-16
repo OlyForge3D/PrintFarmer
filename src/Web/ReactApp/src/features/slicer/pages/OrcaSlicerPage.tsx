@@ -52,6 +52,7 @@ export const OrcaSlicerPage: React.FC = () => {
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
+  const originalProcessSettings = useMemo<Record<string, unknown>>(() => ({}), []);
   const [loadedModels, setLoadedModels] = useState<LoadedModel[]>([]);
   const [selectedLoadedModelId, setSelectedLoadedModelId] = useState<string | null>(null);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -434,6 +435,7 @@ export const OrcaSlicerPage: React.FC = () => {
                 settings={slicerSettings}
                 onChange={handleSlicerSettingsChange}
                 initialViewMode="simple"
+                originalSettings={originalProcessSettings}
               />
             </div>
 

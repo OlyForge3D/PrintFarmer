@@ -110,6 +110,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
+  const [originalProcessSettings, setOriginalProcessSettings] = useState<Record<string, unknown>>({});
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
   
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -853,6 +854,7 @@ export const NewSliceJobPage: React.FC = () => {
     queueMicrotask(() => {
       const typedSettings = convertOrcaProcessProfileToSettings(selectedProcessProfile ?? undefined);
       setSlicerSettings(typedSettings);
+      setOriginalProcessSettings(typedSettings as unknown as Record<string, unknown>);
     });
   }, [selectedProcessProfile]);
 
@@ -1373,6 +1375,7 @@ export const NewSliceJobPage: React.FC = () => {
               initialViewMode="simple"
               advancedSettings={advancedProcessSettings}
               onAdvancedSettingsChange={setAdvancedProcessSettings}
+              originalSettings={originalProcessSettings}
             />
           </div>
 
