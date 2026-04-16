@@ -352,6 +352,25 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
             current_section = None
             continue
 
+        # Dynamic tab page: add_options_page(wxString::Format("Extruder %d", ...), "icon")
+        # or other non-L() patterns for dynamically named pages (e.g. per-extruder)
+        m = re.search(r'add_options_page\(\s*(?:wxString::Format\(\s*"([^"]+)"'
+                       r'|from_u8\(\s*"([^"]+)"'
+                       r'|"([^"]+)")'
+                       r'.*?,\s*"([^"]*)"', stripped)
+        if m:
+            raw_name = m.group(1) or m.group(2) or m.group(3) or 'Unknown'
+            # Normalize dynamic format strings: "Extruder %d" -> "Extruder"
+            tab_name = re.sub(r'\s*%[ds].*', '', raw_name).strip()
+            current_tab = {
+                'name': tab_name,
+                'icon': m.group(4),
+                'sections': [],
+            }
+            tabs.append(current_tab)
+            current_section = None
+            continue
+
         # Section: page->new_optgroup(L("name"), L"icon_id") or page->new_optgroup(L("name"), "icon_id")
         m = re.search(r'new_optgroup\(\s*L\(\s*"([^"]+)"\s*\)\s*(?:,\s*(?:L"([^"]*)"|\s*"([^"]*)"))?', stripped)
         if m and current_tab:
@@ -429,7 +448,10 @@ def parse_machine_tabs(filepath: str) -> list:
     kinematics = parse_tab_layout(filepath, 'TabPrinter::build_kinematics_page')
     if kinematics:
         tabs.extend(kinematics)
-    # Multimaterial + Extruder pages — built via build_unregular_pages
+    # Multimaterial + Extruder pages — built via build_unregular_pages.
+    # Note: OrcaSlicer creates the Extruder page with a dynamic name
+    # (wxString::Format("Extruder %d", i+1)) rather than L("..."),
+    # so parse_tab_layout's dynamic tab page matcher is needed here.
     unregular = parse_tab_layout(filepath, 'TabPrinter::build_unregular_pages')
     if unregular:
         tabs.extend(unregular)
