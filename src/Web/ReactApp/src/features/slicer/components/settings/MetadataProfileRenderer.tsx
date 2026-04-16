@@ -62,6 +62,8 @@ const TEXTAREA_KEYS = new Set([
   'machine_pause_gcode', 'template_custom_gcode',
   'change_filament_gcode', 'layer_change_gcode',
   'time_lapse_gcode', 'before_layer_change_gcode',
+  'file_start_gcode', 'printing_by_object_gcode',
+  'wrapping_detection_gcode', 'change_extrusion_role_gcode',
   'filament_start_gcode', 'filament_end_gcode',
   'adaptive_pressure_advance_model',
 ]);
@@ -254,17 +256,21 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                 />
               );
             }
-            case 'textarea':
+            case 'textarea': {
+              // Skip label when section has only one textarea (section header IS the label)
+              const showLabel = visibleFields.length > 1;
               return (
                 <div key={field.key} className="py-0.5">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
-                    {meta.tooltip && (
-                      <span className="text-pf-text-muted cursor-help" title={meta.tooltip}>
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                      </span>
-                    )}
-                  </div>
+                  {showLabel && (
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
+                      {meta.tooltip && (
+                        <span className="text-pf-text-muted cursor-help" title={meta.tooltip}>
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <Textarea
                     rows={8}
                     value={toString(values[field.key], meta)}
@@ -274,6 +280,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   />
                 </div>
               );
+            }
             case 'point': {
               const [px, py] = parsePoint(values[field.key], meta);
               return (
