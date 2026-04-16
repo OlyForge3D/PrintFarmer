@@ -670,33 +670,33 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
             case 'point': {
               const [px, py] = parsePoint(values[field.key], meta);
               return (
-                <div key={field.key} className="flex items-center gap-2 py-0.5">
-                  <div className="flex items-center gap-1.5 w-1/2 shrink-0">
+                <div key={field.key} className="flex items-center gap-1.5 py-0.5">
+                  <div className="flex items-center gap-1.5 w-2/5 shrink-0">
                     <span
-                      className={`text-xs ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
+                      className={`text-xs truncate ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
                       title={meta.tooltip}
                     >
                       {meta.label}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
                     <div className="flex-1 flex items-center bg-pf-panel border border-pf-border rounded overflow-hidden">
-                      <span className="px-2 text-xs text-pf-text-muted select-none">X</span>
+                      <span className="px-1.5 text-xs text-pf-text-muted select-none">X</span>
                       <input
                         type="number"
                         title={`${meta.label} X`}
-                        className="flex-1 px-1 py-1 text-sm text-right bg-transparent border-none outline-none"
+                        className="flex-1 px-1 py-1 text-xs text-right bg-transparent border-none outline-none"
                         value={px}
                         onChange={(e) => onUpdate(field.key, `${e.target.value},${py}`)}
                         disabled={disabled}
                       />
                     </div>
                     <div className="flex-1 flex items-center bg-pf-panel border border-pf-border rounded overflow-hidden">
-                      <span className="px-2 text-xs text-pf-text-muted select-none">Y</span>
+                      <span className="px-1.5 text-xs text-pf-text-muted select-none">Y</span>
                       <input
                         type="number"
                         title={`${meta.label} Y`}
-                        className="flex-1 px-1 py-1 text-sm text-right bg-transparent border-none outline-none"
+                        className="flex-1 px-1 py-1 text-xs text-right bg-transparent border-none outline-none"
                         value={py}
                         onChange={(e) => onUpdate(field.key, `${px},${e.target.value}`)}
                         disabled={disabled}
