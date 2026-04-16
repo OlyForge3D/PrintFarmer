@@ -58,17 +58,44 @@ def extract_l_string(text: str) -> str:
     return match.group(1).replace('\\"', '"') if match else ''
 
 
+def _clean_default_value(raw: str) -> Optional[str]:
+    """Normalize a raw C++ default value, returning None if unparseable."""
+    if not raw:
+        return None
+    # Drop C++ type qualifiers and casts: "(int)" prefix, "ConfigOption*::nil_value(" etc.
+    if 'ConfigOption' in raw and 'nil_value' in raw:
+        return None  # nullable — no meaningful default
+    if raw.startswith('(int'):
+        return None  # C++ cast expression, not a real default
+    # C++ enum references: "ntUndefine", "RetractLiftEnforceType ::rletAllSurfaces", "ZHopType::zhtSlope"
+    enum_m = re.search(r'(\w+)\s*::\s*(\w+)', raw)
+    if enum_m:
+        raw = enum_m.group(2)  # keep only the enumerator name
+    # L("text") — localized string wrapper
+    l_m = re.search(r'L\(\s*"([^"]*)"', raw)
+    if l_m:
+        raw = l_m.group(1)
+    # C++ MACRO constants used as defaults (INITIAL_LAYER_HEIGHT, etc.) — not real values
+    if re.match(r'^[A-Z][A-Z_]+$', raw):
+        return None
+    # Strip C++ braces from struct/array initializers: "{ ntUndefine }" → "ntUndefine"
+    raw = re.sub(r'^\{\s*', '', raw)
+    raw = re.sub(r'\s*\}$', '', raw)
+    raw = raw.strip()
+    return raw if raw else None
+
+
 def extract_default_value(line: str) -> Optional[str]:
     """Extract default value from set_default_value line."""
     # ConfigOptionFloat{0.5}
     m = re.search(r'ConfigOption\w+\s*\{\s*([^}]+)\s*\}', line)
     if m:
         val = m.group(1).strip().strip('"')
-        return val
+        return _clean_default_value(val)
     # ConfigOptionBool(false)
     m = re.search(r'ConfigOption\w+\s*\(\s*([^)]+)\s*\)', line)
     if m:
-        return m.group(1).strip()
+        return _clean_default_value(m.group(1).strip())
     return None
 
 
@@ -188,7 +215,9 @@ def parse_print_config(filepath: str) -> dict:
             vec_match = re.match(r'Vec2d\(\s*(.+)', raw_default)
             if vec_match:
                 raw_default = vec_match.group(1).rstrip(')')
-            entry['default'] = raw_default
+            cleaned = _clean_default_value(raw_default)
+            if cleaned is not None:
+                entry['default'] = cleaned
 
         # Extract gui_type
         if 'f_enum_open' in block_text:
