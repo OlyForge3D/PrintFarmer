@@ -1,0 +1,472 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e5]:
+      - status [ref=e6]
+      - banner [ref=e7]:
+        - generic [ref=e8]:
+          - generic [ref=e10]:
+            - img "PrintFarmer Logo" [ref=e11]
+            - heading "PrintFarmer" [level=1] [ref=e12]
+          - generic [ref=e13]:
+            - generic [ref=e16]: Disconnected
+            - button "Notifications (35 unread)" [ref=e17] [cursor=pointer]:
+              - generic [ref=e18]:
+                - img "Notifications" [ref=e19]
+                - generic [ref=e21]: "35"
+            - button "User verified" [ref=e23] [cursor=pointer]:
+              - img "User verified" [ref=e25]
+      - generic [ref=e27]:
+        - complementary [ref=e28]:
+          - generic [ref=e29]:
+            - navigation [ref=e30]:
+              - generic [ref=e32]: Operations
+              - link "Home Dashboard" [ref=e34] [cursor=pointer]:
+                - /url: /dashboard
+                - img "Home" [ref=e35]
+                - generic [ref=e37]: Dashboard
+              - link "Printer Printers" [ref=e39] [cursor=pointer]:
+                - /url: /printers
+                - img "Printer" [ref=e40]
+                - generic [ref=e42]: Printers
+              - link "Files Files" [ref=e44] [cursor=pointer]:
+                - /url: /files
+                - img "Files" [ref=e45]
+                - generic [ref=e47]: Files
+              - link "Projects Projects" [ref=e49] [cursor=pointer]:
+                - /url: /projects
+                - img "Projects" [ref=e50]
+                - generic [ref=e52]: Projects
+              - link "Slice" [ref=e54] [cursor=pointer]:
+                - /url: /slicer
+                - img [ref=e55]
+                - generic [ref=e58]: Slice
+              - link "Layers Slice Jobs" [ref=e60] [cursor=pointer]:
+                - /url: /slice-jobs
+                - img "Layers" [ref=e61]
+                - generic [ref=e63]: Slice Jobs
+              - link "History Print Queue" [ref=e65] [cursor=pointer]:
+                - /url: /printQueue
+                - img "History" [ref=e66]
+                - generic [ref=e68]: Print Queue
+              - link "Play Auto-Dispatch" [ref=e70] [cursor=pointer]:
+                - /url: /auto-dispatch
+                - img "Play" [ref=e71]
+                - generic [ref=e73]: Auto-Dispatch
+              - generic [ref=e75]: Hardware
+              - link "Filament Inventory" [ref=e77] [cursor=pointer]:
+                - /url: /spools
+                - img [ref=e78]
+                - generic [ref=e81]: Filament Inventory
+              - link "Camera Cameras" [ref=e83] [cursor=pointer]:
+                - /url: /cameras
+                - img "Camera" [ref=e84]
+                - generic [ref=e86]: Cameras
+              - link "NFC NFC Devices" [ref=e88] [cursor=pointer]:
+                - /url: /nfc-devices
+                - img "NFC" [ref=e89]
+                - generic [ref=e91]: NFC Devices
+              - generic [ref=e93]: Management
+              - link "Tools Maintenance" [ref=e95] [cursor=pointer]:
+                - /url: /maintenance
+                - img "Tools" [ref=e96]
+                - generic [ref=e98]: Maintenance
+              - link "Chart Statistics" [ref=e100] [cursor=pointer]:
+                - /url: /statistics
+                - img "Chart" [ref=e101]
+                - generic [ref=e103]: Statistics
+              - link "Trending up Cost Analytics" [ref=e105] [cursor=pointer]:
+                - /url: /statistics/costs
+                - img "Trending up" [ref=e106]
+                - generic [ref=e108]: Cost Analytics
+              - link "Trending up Analytics" [ref=e110] [cursor=pointer]:
+                - /url: /analytics
+                - img "Trending up" [ref=e111]
+                - generic [ref=e113]: Analytics
+              - link "Date Scheduling" [ref=e115] [cursor=pointer]:
+                - /url: /scheduling
+                - img "Date" [ref=e116]
+                - generic [ref=e118]: Scheduling
+              - link "Key API Keys" [ref=e120] [cursor=pointer]:
+                - /url: /profile/api-keys
+                - img "Key" [ref=e121]
+                - generic [ref=e123]: API Keys
+              - generic [ref=e125]: Admin
+              - link "Printer Printer Groups" [ref=e127] [cursor=pointer]:
+                - /url: /printer-groups
+                - img "Printer" [ref=e128]
+                - generic [ref=e130]: Printer Groups
+              - link "Location Locations" [ref=e132] [cursor=pointer]:
+                - /url: /locations
+                - img "Location" [ref=e133]
+                - generic [ref=e135]: Locations
+              - link "Layers Catalog" [ref=e137] [cursor=pointer]:
+                - /url: /catalog
+                - img "Layers" [ref=e138]
+                - generic [ref=e140]: Catalog
+              - link "Users User Accounts" [ref=e142] [cursor=pointer]:
+                - /url: /users
+                - img "Users" [ref=e143]
+                - generic [ref=e145]: User Accounts
+              - link "Tag Tags" [ref=e147] [cursor=pointer]:
+                - /url: /admin/tags
+                - img "Tag" [ref=e148]
+                - generic [ref=e150]: Tags
+              - link "External link Webhooks" [ref=e152] [cursor=pointer]:
+                - /url: /admin/webhooks
+                - img "External link" [ref=e153]
+                - generic [ref=e155]: Webhooks
+              - link "Tools Workers" [ref=e157] [cursor=pointer]:
+                - /url: /admin/workers
+                - img "Tools" [ref=e158]
+                - generic [ref=e160]: Workers
+              - link "Trending up System" [ref=e162] [cursor=pointer]:
+                - /url: /admin/system
+                - img "Trending up" [ref=e163]
+                - generic [ref=e165]: System
+              - link "Database Data Management" [ref=e167] [cursor=pointer]:
+                - /url: /admin/data
+                - img "Database" [ref=e168]
+                - generic [ref=e170]: Data Management
+              - link "Settings Settings" [ref=e172] [cursor=pointer]:
+                - /url: /settings
+                - img "Settings" [ref=e173]
+                - generic [ref=e175]: Settings
+            - button "Collapse navigation" [ref=e177] [cursor=pointer]:
+              - img "Menu" [ref=e179]
+        - main [ref=e181]:
+          - generic [ref=e184]:
+            - generic [ref=e185]:
+              - generic [ref=e186]:
+                - generic [ref=e187]: Slicer Engine
+                - button "OrcaSlicer 2.3.2" [pressed] [ref=e189] [cursor=pointer]:
+                  - generic [ref=e193]: OrcaSlicer 2.3.2
+              - generic [ref=e194]:
+                - generic [ref=e195]: Printer
+                - button "arco1 arco1 Offline Phrozen Arco Change" [ref=e196] [cursor=pointer]:
+                  - generic [ref=e198]:
+                    - img "arco1" [ref=e200]
+                    - generic [ref=e201]:
+                      - generic [ref=e202]:
+                        - generic [ref=e203]: arco1
+                        - generic "Offline" [ref=e204]
+                      - generic [ref=e206]: Phrozen Arco
+                    - generic [ref=e207]: Change
+              - generic [ref=e208]:
+                - generic [ref=e209]:
+                  - generic [ref=e210]: Machine Profile
+                  - button "Edit" [ref=e211] [cursor=pointer]:
+                    - img "Edit" [ref=e213]
+                - paragraph [ref=e215]: Profiles for Phrozen Phrozen Arco • 0.4mm nozzle
+                - generic [ref=e216]:
+                  - combobox [ref=e217] [cursor=pointer]:
+                    - option "-- Select Machine Profile --"
+                    - option "── System Presets ──" [disabled]
+                    - option "Phrozen Arco 0.4 nozzle (0.4mm)" [selected]
+                  - img
+              - generic [ref=e218]:
+                - generic [ref=e219]:
+                  - generic [ref=e220]: Filament Profile
+                  - button "Edit" [ref=e630] [cursor=pointer]:
+                    - img "Edit" [ref=e632]
+                - button "Generic PLA @System" [ref=e634] [cursor=pointer]:
+                  - generic [ref=e222]: Generic PLA @System
+                  - img [ref=e223]
+                - generic [ref=e635]: 220°C nozzle, 55°C bed
+              - generic [ref=e225]:
+                - generic [ref=e226]:
+                  - generic [ref=e227]: Process Profile
+                  - button "Process profile options menu" [ref=e229] [cursor=pointer]:
+                    - img "More options" [ref=e231]
+                - button [ref=e233]
+                - generic [ref=e234]:
+                  - generic [ref=e235]:
+                    - combobox [ref=e236] [cursor=pointer]:
+                      - option "-- Select Process Profile --" [selected]
+                      - option "0.20mm Standard @Phrozen Arco 0.4 nozzle (0.2mm)"
+                    - img
+                  - button "Reset settings to defaults" [ref=e237] [cursor=pointer]:
+                    - img "Refresh" [ref=e239]
+                  - button "Save as custom profile" [disabled] [ref=e241]:
+                    - img "Save" [ref=e243]
+              - generic [ref=e246]:
+                - generic [ref=e247]:
+                  - generic [ref=e248]:
+                    - button "Quality" [ref=e249]
+                    - button "Strength" [ref=e250]
+                    - button "Speed" [ref=e251]
+                    - button "Support" [ref=e252]
+                    - button "Multimaterial" [ref=e253]
+                    - button "Others" [ref=e254]
+                  - button "Switch to Advanced mode" [ref=e255]
+                - generic [ref=e261]:
+                  - generic [ref=e262]:
+                    - heading "Layer height" [level=4] [ref=e265]
+                    - generic [ref=e267]:
+                      - generic [ref=e269]:
+                        - generic [ref=e271]: Layer height
+                        - generic "Slicing height for each layer. Smaller layer height means more accurate and more printing time." [ref=e272]:
+                          - generic [ref=e273]:
+                            - spinbutton "Layer height" [ref=e275]: "0"
+                            - generic [ref=e276]: mm
+                      - generic [ref=e278]:
+                        - generic [ref=e280]: First layer height
+                        - generic "Height of the first layer. Making the first layer height thicker can improve build plate adhesion." [ref=e281]:
+                          - generic [ref=e282]:
+                            - spinbutton "First layer height" [ref=e284]: "0.2"
+                            - generic [ref=e285]: mm
+                  - generic [ref=e286]:
+                    - heading "Seam" [level=4] [ref=e289]
+                    - generic [ref=e293]:
+                      - generic [ref=e295]: Seam position
+                      - generic "The start position to print each part of outer wall." [ref=e296]:
+                        - generic [ref=e297]:
+                          - combobox "Seam position" [ref=e298] [cursor=pointer]:
+                            - option "Nearest" [selected]
+                            - option "Aligned"
+                            - option "Aligned back"
+                            - option "Back"
+                            - option "Random"
+                          - generic:
+                            - img
+                  - generic [ref=e299]:
+                    - heading "Precision" [level=4] [ref=e302]
+                    - generic [ref=e306]:
+                      - generic [ref=e308]: Precise wall
+                      - 'generic "Improve shell precision by adjusting outer wall spacing. This also improves layer consistency. NOTE: This option will be ignored for outer-inner or inner-outer-inner wall sequences." [ref=e309]':
+                        - generic [ref=e311] [cursor=pointer]:
+                          - checkbox "Precise wall" [checked] [ref=e312]
+                          - img [ref=e314]
+                  - generic [ref=e316]:
+                    - heading "Wall generator" [level=4] [ref=e319]
+                    - generic [ref=e323]:
+                      - generic [ref=e325]: Minimum wall width
+                      - generic "Width of the wall that will replace thin features (according to the Minimum feature size) of the model. If the Minimum wall width is thinner than the thickness of the feature, the wall will become as thick as the feature itself. It's expressed as a percentage over nozzle diameter." [ref=e326]:
+                        - generic [ref=e327]:
+                          - spinbutton "Minimum wall width" [ref=e329]: "85"
+                          - generic [ref=e330]: "%"
+                  - generic [ref=e331]:
+                    - heading "Walls and surfaces" [level=4] [ref=e334]
+                    - generic [ref=e336]:
+                      - generic [ref=e338]:
+                        - generic [ref=e340]: Only one wall on top surfaces
+                        - generic "Use only one wall on flat top surfaces, to give more space to the top infill pattern." [ref=e341]:
+                          - checkbox "Only one wall on top surfaces" [ref=e344] [cursor=pointer]
+                      - generic [ref=e347]:
+                        - generic [ref=e349]: Only one wall on first layer
+                        - generic "Use only one wall on first layer, to give more space to the bottom infill pattern." [ref=e350]:
+                          - checkbox "Only one wall on first layer" [ref=e353] [cursor=pointer]
+            - generic [ref=e357]:
+              - generic [ref=e358]:
+                - button "Hide Settings" [ref=e359]:
+                  - img [ref=e361]
+                - button "Add model" [ref=e362]:
+                  - img "Add model" [ref=e364]
+                - button "Arrange" [disabled] [ref=e365]:
+                  - img "Arrange" [ref=e367]
+                - button "Orient" [disabled] [ref=e368]:
+                  - img "Orient" [ref=e370]
+                - button "Lay flat" [disabled] [ref=e371]:
+                  - img "Lay flat" [ref=e373]
+                - generic [ref=e374]:
+                  - button "Split" [disabled] [ref=e375]:
+                    - img "Split" [ref=e377]
+                  - button "Cut" [disabled] [ref=e378]:
+                    - img "Cut" [ref=e380]
+                  - button "Measure" [disabled] [ref=e381]:
+                    - img "Measure" [ref=e383]
+                  - button "Support paint" [disabled] [ref=e384]:
+                    - img "Support paint" [ref=e386]
+                  - button "Seam paint" [disabled] [ref=e387]:
+                    - img "Seam paint" [ref=e389]
+                - button "Undo" [disabled] [ref=e390]:
+                  - img "Undo" [ref=e392]
+                - button "Redo" [disabled] [ref=e393]:
+                  - img "Redo" [ref=e395]
+                - button "Assembly" [disabled] [ref=e397]:
+                  - img "Assembly" [ref=e399]
+                - button "SETTINGS & PROFILES" [ref=e400] [cursor=pointer]:
+                  - img [ref=e402]
+                  - generic [ref=e403]: SETTINGS & PROFILES
+                - button "Keyboard Shortcuts" [ref=e404]:
+                  - img [ref=e406]
+                - generic [ref=e417]: Beta
+              - generic [ref=e418]:
+                - generic:
+                  - generic [ref=e423]:
+                    - button "Move" [disabled] [ref=e424]:
+                      - img "Move" [ref=e426]
+                    - button "Rotate" [disabled] [ref=e427]:
+                      - img "Rotate" [ref=e429]
+                    - button "Scale" [disabled] [ref=e430]:
+                      - img "Scale" [ref=e432]
+                  - generic [ref=e433]:
+                    - button "Layers" [ref=e434]:
+                      - img "Layers" [ref=e436]
+                    - button "Toggle Grid (G)" [ref=e437]:
+                      - img [ref=e439]
+              - generic [ref=e441]:
+                - generic [ref=e442]:
+                  - generic [ref=e443]: 0 objects
+                  - generic [ref=e444]: 300 x 300 x 300 mm
+                - button "Slice" [disabled] [ref=e446]:
+                  - generic [ref=e447]: Slice
+    - region "Notifications alt+T"
+  - 'dialog "Edit Filament Profile: Generic PLA @System" [ref=e636]':
+    - generic [ref=e637]:
+      - generic [ref=e638]:
+        - 'heading "Edit Filament Profile: Generic PLA @System" [level=2] [ref=e640]'
+        - button "Close modal" [ref=e641] [cursor=pointer]:
+          - img "Close" [ref=e643]
+      - generic [ref=e647]:
+        - generic [ref=e648]:
+          - generic [ref=e649]:
+            - button "Filament" [ref=e650]
+            - button "Cooling" [ref=e651]
+            - button "Advanced" [ref=e652]
+            - button "Multimaterial" [ref=e653]
+            - button "Dependencies" [ref=e654]
+            - button "Notes" [ref=e655]
+            - button "Setting Overrides" [ref=e656]
+          - button "Switch to Advanced mode" [ref=e657]
+        - generic [ref=e663]:
+          - generic [ref=e664]:
+            - heading "Basic information" [level=4] [ref=e667]
+            - generic [ref=e669]:
+              - generic [ref=e671]:
+                - generic [ref=e673]: Type
+                - generic "The material type of filament." [ref=e674]:
+                  - generic [ref=e675]:
+                    - combobox "Type" [ref=e676] [cursor=pointer]:
+                      - option "PLA" [selected]
+                      - option "PLA-CF"
+                      - option "PLA-AERO"
+                      - option "ABS"
+                      - option "ASA"
+                      - option "PETG"
+                      - option "PETG-CF"
+                      - option "PET-CF"
+                      - option "TPU"
+                      - option "PA (Nylon)"
+                      - option "PA-CF"
+                      - option "PA6-CF"
+                      - option "PC"
+                      - option "HIPS"
+                      - option "PVA"
+                      - option "PP"
+                      - option "PHA"
+                      - option "BVOH"
+                    - generic:
+                      - img
+              - generic [ref=e678]:
+                - generic [ref=e680]: Diameter
+                - generic "Filament diameter is used to calculate extrusion in G-code, so it is important and should be accurate." [ref=e681]:
+                  - generic [ref=e682]:
+                    - spinbutton "Diameter" [ref=e684]: "1.75"
+                    - generic [ref=e685]: mm
+              - generic [ref=e687]:
+                - generic [ref=e689]: Softening temperature
+                - generic "The material softens at this temperature, so when the bed temperature is equal to or greater than this, it's highly recommended to open the front door and/or remove the upper glass to avoid clogging." [ref=e690]:
+                  - spinbutton "Softening temperature" [ref=e693]: "100"
+              - generic [ref=e695]:
+                - generic [ref=e697]: Idle temperature
+                - generic "Nozzle temperature when the tool is currently not used in multi-tool setups. This is only used when 'Ooze prevention' is active in Print Settings. Set to 0 to disable." [ref=e698]:
+                  - spinbutton "Idle temperature" [ref=e701]: "0"
+              - generic [ref=e703]:
+                - generic [ref=e705]: Min
+                - spinbutton "Min" [ref=e709]: "190"
+              - generic [ref=e711]:
+                - generic [ref=e713]: Max
+                - spinbutton "Max" [ref=e717]: "240"
+          - generic [ref=e718]:
+            - heading "Flow ratio and Pressure Advance" [level=4] [ref=e721]
+            - generic [ref=e723]:
+              - generic [ref=e725]:
+                - generic [ref=e727]: Pellet flow coefficient
+                - generic "Pellet flow coefficient is empirically derived and allows for volume calculation for pellet printers.\\n\\nInternally it is converted to filament_diameter. All other volume calculations remain the same.\\n\\nfilament_diameter = sqrt( (4 * pellet_flow_coefficient) / PI )" [ref=e728]:
+                  - spinbutton "Pellet flow coefficient" [ref=e731]: "0.4157"
+              - generic [ref=e733]:
+                - generic [ref=e735]: Enable pressure advance
+                - generic "Enable pressure advance, auto calibration result will be overwritten once enabled." [ref=e736]:
+                  - checkbox "Enable pressure advance" [ref=e739] [cursor=pointer]
+          - generic [ref=e741]:
+            - heading "Print chamber temperature" [level=4] [ref=e744]
+            - generic [ref=e746]:
+              - generic [ref=e748]:
+                - generic [ref=e750]: Chamber temperature
+                - generic [ref=e751]:
+                  - spinbutton "Chamber temperature" [ref=e754]: "0"
+              - generic [ref=e756]:
+                - generic [ref=e758]: Activate temperature control
+                - generic "Enable this option for automated chamber temperature control. This option activates the emitting of an M191 command before the \"machine_start_gcode\"\\n which sets the chamber temperature and waits until it is reached. In addition, it emits an M141 command at the end of the print to turn off the chamber heater, if present.\\n\\nThis option relies on the firmware supporting the M191 and M141 commands either via macros or natively and is usually used when an active chamber heater is installed." [ref=e759]:
+                  - checkbox "Activate temperature control" [ref=e762] [cursor=pointer]
+          - generic [ref=e764]:
+            - heading "Print temperature" [level=4] [ref=e767]
+            - generic [ref=e769]:
+              - generic [ref=e771]:
+                - generic [ref=e773]: First layer
+                - generic "Nozzle temperature for printing the first layer when using this filament." [ref=e774]:
+                  - spinbutton "First layer" [ref=e777]: "200"
+              - generic [ref=e779]:
+                - generic [ref=e781]: Other layers
+                - generic "Nozzle temperature for layers after the initial one." [ref=e782]:
+                  - spinbutton "Other layers" [ref=e785]: "210"
+                - button "Reset Other layers to original value" [active] [ref=e896] [cursor=pointer]:
+                  - img [ref=e898]
+          - generic [ref=e786]:
+            - heading "Bed temperature" [level=4] [ref=e789]
+            - generic [ref=e791]:
+              - generic [ref=e793]:
+                - generic [ref=e795]: First layer
+                - generic "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Cool Plate SuperTack." [ref=e796]:
+                  - spinbutton "First layer" [ref=e799]: "35"
+              - generic [ref=e801]:
+                - generic [ref=e803]: Other layers
+                - generic "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Cool Plate SuperTack." [ref=e804]:
+                  - spinbutton "Other layers" [ref=e807]: "35"
+              - generic [ref=e809]:
+                - generic [ref=e811]: First layer
+                - generic "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Cool Plate." [ref=e812]:
+                  - spinbutton "First layer" [ref=e815]: "35"
+              - generic [ref=e817]:
+                - generic [ref=e819]: Other layers
+                - generic "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Cool Plate." [ref=e820]:
+                  - spinbutton "Other layers" [ref=e823]: "35"
+              - generic [ref=e825]:
+                - generic [ref=e827]: First layer
+                - generic "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Textured Cool Plate." [ref=e828]:
+                  - spinbutton "First layer" [ref=e831]: "40"
+              - generic [ref=e833]:
+                - generic [ref=e835]: Other layers
+                - generic "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Textured Cool Plate." [ref=e836]:
+                  - spinbutton "Other layers" [ref=e839]: "40"
+              - generic [ref=e841]:
+                - generic [ref=e843]: First layer
+                - generic "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Engineering Plate." [ref=e844]:
+                  - spinbutton "First layer" [ref=e847]: "45"
+              - generic [ref=e849]:
+                - generic [ref=e851]: Other layers
+                - generic "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Engineering Plate." [ref=e852]:
+                  - spinbutton "Other layers" [ref=e855]: "45"
+              - generic [ref=e857]:
+                - generic [ref=e859]: First layer
+                - generic "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the High Temp Plate." [ref=e860]:
+                  - spinbutton "First layer" [ref=e863]: "45"
+              - generic [ref=e865]:
+                - generic [ref=e867]: Other layers
+                - generic "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the High Temp Plate." [ref=e868]:
+                  - spinbutton "Other layers" [ref=e871]: "45"
+              - generic [ref=e873]:
+                - generic [ref=e875]: First layer
+                - generic "Bed temperature of the first layer. A value of 0 means the filament does not support printing on the Textured PEI Plate." [ref=e876]:
+                  - spinbutton "First layer" [ref=e879]: "45"
+              - generic [ref=e881]:
+                - generic [ref=e883]: Other layers
+                - generic "Bed temperature for layers except the initial one. A value of 0 means the filament does not support printing on the Textured PEI Plate." [ref=e884]:
+                  - spinbutton "Other layers" [ref=e887]: "45"
+      - generic [ref=e889]:
+        - generic [ref=e901]: Settings modified
+        - generic [ref=e890]:
+          - button "Cancel" [ref=e891] [cursor=pointer]:
+            - generic [ref=e892]: Cancel
+          - button "Save as Custom Profile" [ref=e893] [cursor=pointer]:
+            - generic [ref=e894]: Save as Custom Profile

@@ -1389,7 +1389,6 @@ export const NewSliceJobPage: React.FC = () => {
             <SlicerSettingsPanel
               settings={slicerSettings}
               onChange={handleSlicerSettingsChange}
-              initialViewMode="simple"
               advancedSettings={advancedProcessSettings}
               onAdvancedSettingsChange={setAdvancedProcessSettings}
               originalSettings={originalProcessSettings}
@@ -1518,7 +1517,6 @@ export const NewSliceJobPage: React.FC = () => {
         isOpen={profileEditorOpen}
         onClose={() => setProfileEditorOpen(false)}
         profileType={profileEditorType}
-        initialViewMode={profileEditorType === 'machine' ? 'advanced' : 'simple'}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
           (selectedFilamentProfile ?? null)
