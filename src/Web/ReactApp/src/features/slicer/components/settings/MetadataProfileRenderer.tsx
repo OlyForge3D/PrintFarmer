@@ -797,15 +797,34 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
     setViewMode((m) => (m === 'simple' ? 'advanced' : 'simple'));
   }, []);
 
-  const tabs = profileMeta.tabs;
-  const activeTab = tabs[activeTabIdx] ?? tabs[0];
+  // Filter tabs to only show those with visible fields in the current view mode
+  const visibleTabs = useMemo(() => {
+    return profileMeta.tabs.filter((tab) => {
+      // A tab is visible if any section has any visible field
+      return tab.sections.some((section) =>
+        section.fields.some((field) => {
+          const meta = profileMeta.settings[field.key];
+          if (!meta) return false;
+          // Always hide developer-only fields
+          if (meta.mode === 'developer') return false;
+          // In simple mode, hide advanced fields
+          if (viewMode === 'simple' && meta.mode === 'advanced') return false;
+          return true;
+        })
+      );
+    });
+  }, [profileMeta.tabs, profileMeta.settings, viewMode]);
+
+  // Clamp activeTabIdx when visibleTabs changes (e.g., switching from Advanced to Simple)
+  const clampedActiveTabIdx = Math.min(activeTabIdx, Math.max(0, visibleTabs.length - 1));
+  const activeTab = visibleTabs[clampedActiveTabIdx] ?? visibleTabs[0];
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border flex flex-col ${className}`}>
       {/* Tab bar + Advanced toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
         <div className="flex gap-1 overflow-x-auto">
-          {tabs.map((tab, idx) => (
+          {visibleTabs.map((tab, idx) => (
             <Button
               key={tab.name}
               variant="unstyled"
@@ -814,7 +833,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
               onClick={() => setActiveTabIdx(idx)}
               disabled={disabled}
               className={`px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap
-                ${idx === activeTabIdx
+                ${idx === clampedActiveTabIdx
                   ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'}`}
             >
