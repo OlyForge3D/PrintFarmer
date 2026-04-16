@@ -179,14 +179,30 @@ def parse_print_config(filepath: str) -> dict:
             entry['tooltip'] = tooltip.strip()
 
         # Extract sidetext (unit)
-        m = re.search(r'def->sidetext\s*=\s*L\(\s*"((?:[^"\\]|\\.)*)"\s*\)', block_text)
-        if m:
-            entry['unit'] = m.group(1)
-        else:
-            # Try non-L() sidetext
-            m = re.search(r'def->sidetext\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', block_text)
+        # OrcaSlicer uses several patterns:
+        #   L("mm/s")         — translatable ASCII unit
+        #   L(u8"mm/s²")     — translatable UTF-8 unit
+        #   L(u8"\u2103" /* °C */) — translatable UTF-8 with inline C++ comment
+        #   u8"°"             — non-translatable UTF-8 unit
+        #   "mm"              — plain ASCII unit
+        sidetext_patterns = [
+            # L(u8"..." /* comment */) or L(u8"...")
+            r'def->sidetext\s*=\s*L\(\s*u8"((?:[^"\\]|\\.)*)"\s*(?:/\*[^*]*\*/\s*)?\)',
+            # L("...")
+            r'def->sidetext\s*=\s*L\(\s*"((?:[^"\\]|\\.)*)"\s*\)',
+            # u8"...";
+            r'def->sidetext\s*=\s*u8"((?:[^"\\]|\\.)*)"\s*;',
+            # "...";
+            r'def->sidetext\s*=\s*"((?:[^"\\]|\\.)*)"\s*;',
+        ]
+        for pat in sidetext_patterns:
+            m = re.search(pat, block_text)
             if m:
-                entry['unit'] = m.group(1)
+                unit = m.group(1)
+                # Decode C++ unicode escapes (e.g., \u2103 → ℃)
+                unit = unit.encode('utf-8').decode('unicode_escape') if '\\u' in unit else unit
+                entry['unit'] = unit
+                break
 
         # Extract min
         m = re.search(r'def->min\s*=\s*(-?[\d.]+)', block_text)
