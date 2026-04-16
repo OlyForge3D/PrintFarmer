@@ -264,11 +264,6 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                   {showLabel && (
                     <div className="flex items-center gap-1.5 mb-1">
                       <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
-                      {meta.tooltip && (
-                        <span className="text-pf-text-muted cursor-help" title={meta.tooltip}>
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        </span>
-                      )}
                     </div>
                   )}
                   <Textarea
@@ -287,11 +282,6 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                 <div key={field.key} className="flex items-center gap-3 py-0.5">
                   <div className="flex items-center gap-1.5 w-2/5 shrink-0">
                     <span className="text-xs text-pf-text-secondary" title={meta.tooltip}>{meta.label}</span>
-                    {meta.tooltip && (
-                      <span className="text-pf-text-muted cursor-help" title={meta.tooltip}>
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                      </span>
-                    )}
                   </div>
                   <div className="flex items-center gap-2 flex-1">
                     <span className="text-xs text-pf-text-muted">X</span>
