@@ -506,6 +506,9 @@ function parsePoint(raw: unknown, meta: SettingMetadata): [number, number] {
 
 function toString(raw: unknown, meta: SettingMetadata): string {
   if (raw === undefined || raw === null) return meta.default ?? '';
+  if (Array.isArray(raw)) {
+    return raw.length > 0 ? raw.join(', ') : (meta.default ?? '');
+  }
   return String(raw);
 }
 
