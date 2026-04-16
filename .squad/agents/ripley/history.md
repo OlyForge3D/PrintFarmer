@@ -199,3 +199,23 @@ Confirmed 7 inline select boxes populated with correct options in live browser:
 - **Auth token localStorage key is `auth-token`** (with hyphen), not `authToken`.
 - **Clone Profiles modal** auto-appears on slicer page when printer has no process profiles for its manufacturer. Escape key dismisses it.
 - **`/api/slicer/profiles/upload` endpoint** accepts `profileType` field ("machine"/"filament"/"process") and correctly classifies uploaded profiles in the extended listing — this is the reliable way to seed test profiles.
+
+### Tab Visibility Filtering in MetadataProfileEditor (2026-01-20)
+
+**Bug:** Tabs in slicer settings UI were always displayed regardless of whether they contained any editable settings in the current view mode. For example, the **Speed** tab appeared in Simple mode but had zero controls (all speed settings are marked `mode: "advanced"`).
+
+**Root cause:** The tab bar rendered ALL tabs from `profileMeta.tabs` without filtering by view mode. While `MetadataSection` already filtered individual fields and returned `null` when empty, the tab buttons were still rendered.
+
+**Fix implemented:**
+- Added `visibleTabs` computed via `useMemo` that filters tabs based on whether ANY section contains ANY visible field
+- Field visibility logic: field exists in settings, mode is NOT 'developer', and in Simple mode, mode is NOT 'advanced'
+- Tab bar now uses `visibleTabs` instead of raw `tabs`
+- Added `clampedActiveTabIdx` to handle cases where the active tab disappears when switching from Advanced to Simple mode
+
+**Pattern learned:**
+- When rendering UI elements (tabs, sections) that depend on filtered child data, always filter at BOTH levels
+- The parent container (tab bar) must apply the same visibility logic as the children (sections/fields)
+- Use `useMemo` for expensive filtering operations with clear dependencies (`profileMeta.tabs`, `profileMeta.settings`, `viewMode`)
+- Handle edge cases like active index pointing to a now-hidden tab by clamping to valid range
+
+**File:** `src/Web/ReactApp/src/features/slicer/components/settings/MetadataProfileRenderer.tsx` (lines 783-867)
