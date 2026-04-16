@@ -219,3 +219,36 @@ Confirmed 7 inline select boxes populated with correct options in live browser:
 - Handle edge cases like active index pointing to a now-hidden tab by clamping to valid range
 
 **File:** `src/Web/ReactApp/src/features/slicer/components/settings/MetadataProfileRenderer.tsx` (lines 783-867)
+
+## 2026-04-16: Machine Profile Tab Restructure & Global View Mode
+
+**Role:** Frontend / Slicer UI  
+**Status:** ✅ LANDED — Machine profile tabs reorganized, view mode now global
+
+**Two fixes landed:**
+
+1. **Machine Profile Extruder Tab**
+   - Created dedicated "Extruder" tab for machine profiles
+   - Moved 6 sections from Multimaterial → Extruder: nozzle, retraction, z-hop, layer height limits, position, toolchange retraction
+   - Fixed tab order: Basic Information → Machine G-Code → Multimaterial → Extruder → Motion Ability → Notes
+   - Promoted nozzle_diameter and retraction_speed to Simple mode so Extruder tab appears in Simple mode
+   - Multimaterial tab now contains only MMU-specific settings (wipe tower, single-extruder MM setup)
+
+2. **Global Persisted View Mode**
+   - Created useSlicerViewMode hook for global Simple/Advanced state
+   - Persists to localStorage (printfarmer-slicer-viewmode)
+   - Syncs across all mounted editors via CustomEvent + storage events
+   - Removed initialViewMode prop from all consumers (MetadataProfileEditor, SlicerSettingsPanel, ProfileEditorModal, page files)
+   - Toggling Advanced in one editor now affects ALL editors immediately
+
+**Commits:**
+- 16b541b7 — fix(slicer): create Extruder tab in machine profile, fix tab order
+- eb3406f3 — feat(slicer): global persisted Simple/Advanced view mode
+
+**Validation:** ✅ TypeScript 0 errors, ESLint 0 errors, 1710/1710 tests passing
+
+## Learnings
+
+- Metadata JSON restructuring is powerful but requires careful section extraction to maintain logical grouping
+- Global persisted state with cross-component sync needs both CustomEvent (same-tab) and storage event (cross-tab)
+- Always promote critical fields to Simple mode when creating new tabs — otherwise empty-tab filter hides the tab entirely
