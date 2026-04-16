@@ -13,8 +13,8 @@ import metadata from '../../generated/orcaSettingsMetadata.json';
 
 export interface SettingMetadata {
   key: string;
-  type: string;            // bool | float | int | percent | string
-  coType: string;           // coFloat | coFloats | coBool | coInt | coString | …
+  type: string;            // bool | float | int | percent | string | enum
+  coType: string;           // coFloat | coFloats | coBool | coInt | coString | coEnum | …
   label: string;
   tooltip?: string;
   unit?: string;
@@ -23,8 +23,48 @@ export interface SettingMetadata {
   mode?: 'simple' | 'advanced';
   default?: string;
   gui_type?: 'color' | 'enum_open';
+  enum_values?: string[];
   category?: string;
 }
+
+/** Known enum options for settings that use select dropdowns */
+const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
+  printer_structure: [
+    { value: 'undefine', label: 'Undefine' },
+    { value: 'corexy', label: 'CoreXY' },
+    { value: 'i3', label: 'I3' },
+    { value: 'hbot', label: 'Hbot' },
+    { value: 'delta', label: 'Delta' },
+  ],
+  gcode_flavor: [
+    { value: 'marlin', label: 'Marlin (legacy)' },
+    { value: 'klipper', label: 'Klipper' },
+    { value: 'reprapfirmware', label: 'RepRapFirmware' },
+    { value: 'marlin2', label: 'Marlin 2' },
+  ],
+  nozzle_type: [
+    { value: 'undefine', label: 'Undefine' },
+    { value: 'hardened_steel', label: 'Hardened Steel' },
+    { value: 'stainless_steel', label: 'Stainless Steel' },
+    { value: 'brass', label: 'Brass' },
+  ],
+  bed_type: [
+    { value: 'Cool Plate', label: 'Cool Plate' },
+    { value: 'Engineering Plate', label: 'Engineering Plate' },
+    { value: 'High Temp Plate', label: 'High Temp Plate' },
+    { value: 'Textured PEI Plate', label: 'Textured PEI Plate' },
+  ],
+};
+
+/** Keys that should render as multi-line textareas */
+const TEXTAREA_KEYS = new Set([
+  'machine_start_gcode', 'machine_end_gcode',
+  'machine_pause_gcode', 'template_custom_gcode',
+  'change_filament_gcode', 'layer_change_gcode',
+  'time_lapse_gcode', 'before_layer_change_gcode',
+  'filament_start_gcode', 'filament_end_gcode',
+  'adaptive_pressure_advance_model',
+]);
 
 export interface FieldRef {
   key: string;
@@ -65,8 +105,10 @@ const OrcaIcon: React.FC<{ icon: string }> = ({ icon }) => (
 );
 
 /** Map metadata type + gui_type to the SettingRow control type */
-function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' {
+function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' | 'select' | 'textarea' {
   if (meta.gui_type === 'color') return 'color';
+  if (TEXTAREA_KEYS.has(meta.key)) return 'textarea';
+  if (KNOWN_ENUMS[meta.key] || meta.type === 'enum' || meta.gui_type === 'enum_open') return 'select';
   switch (meta.type) {
     case 'bool':
       return 'checkbox';
@@ -177,6 +219,35 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                 <SettingRow
                   key={field.key}
                   type="color"
+                  label={meta.label}
+                  tooltip={meta.tooltip}
+                  value={toString(values[field.key], meta)}
+                  onChange={(v) => onUpdate(field.key, v)}
+                  disabled={disabled}
+                />
+              );
+            case 'select': {
+              const options = KNOWN_ENUMS[field.key]
+                ?? meta.enum_values?.map((v: string) => ({ value: v, label: v }))
+                ?? [];
+              return (
+                <SettingRow
+                  key={field.key}
+                  type="select"
+                  label={meta.label}
+                  tooltip={meta.tooltip}
+                  value={toString(values[field.key], meta)}
+                  options={options}
+                  onChange={(v) => onUpdate(field.key, v)}
+                  disabled={disabled}
+                />
+              );
+            }
+            case 'textarea':
+              return (
+                <SettingRow
+                  key={field.key}
+                  type="textarea"
                   label={meta.label}
                   tooltip={meta.tooltip}
                   value={toString(values[field.key], meta)}
