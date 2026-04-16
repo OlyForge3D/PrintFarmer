@@ -1904,138 +1904,6 @@
         ]
       },
       {
-        "name": "Notes",
-        "icon": "custom-gcode_note",
-        "sections": [
-          {
-            "name": "Notes",
-            "icon": "note",
-            "fields": [
-              {
-                "key": "printer_notes",
-                "compound": true
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "name": "Motion ability",
-        "icon": "custom-gcode_motion",
-        "sections": [
-          {
-            "name": "Advanced",
-            "icon": "param_advanced",
-            "fields": [
-              {
-                "key": "emit_machine_limits_to_gcode",
-                "compound": false
-              }
-            ]
-          },
-          {
-            "name": "Resonance Avoidance",
-            "icon": "param_resonance_avoidance",
-            "fields": [
-              {
-                "key": "resonance_avoidance",
-                "compound": false
-              },
-              {
-                "key": "min_resonance_avoidance_speed",
-                "compound": true
-              },
-              {
-                "key": "max_resonance_avoidance_speed",
-                "compound": true
-              }
-            ]
-          },
-          {
-            "name": "Speed limitation",
-            "icon": "param_speed",
-            "fields": [
-              {
-                "key": "machine_max_speed_x",
-                "compound": false
-              },
-              {
-                "key": "machine_max_speed_y",
-                "compound": false
-              },
-              {
-                "key": "machine_max_speed_z",
-                "compound": false
-              },
-              {
-                "key": "machine_max_speed_e",
-                "compound": false
-              }
-            ]
-          },
-          {
-            "name": "Acceleration limitation",
-            "icon": "param_acceleration",
-            "fields": [
-              {
-                "key": "machine_max_acceleration_x",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_y",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_z",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_e",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_extruding",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_retracting",
-                "compound": false
-              },
-              {
-                "key": "machine_max_acceleration_travel",
-                "compound": false
-              }
-            ]
-          },
-          {
-            "name": "Jerk limitation",
-            "icon": "param_jerk",
-            "fields": [
-              {
-                "key": "machine_max_junction_deviation",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_x",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_y",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_z",
-                "compound": false
-              },
-              {
-                "key": "machine_max_jerk_e",
-                "compound": false
-              }
-            ]
-          }
-        ]
-      },
-      {
         "name": "Multimaterial",
         "icon": "custom-gcode_multi_material",
         "sections": [
@@ -2118,7 +1986,13 @@
                 "compound": false
               }
             ]
-          },
+          }
+        ]
+      },
+      {
+        "name": "Extruder",
+        "icon": "param_nozzle",
+        "sections": [
           {
             "name": "Basic information",
             "icon": "param_information",
@@ -2256,6 +2130,138 @@
               {
                 "key": "retraction_distances_when_cut",
                 "compound": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Motion ability",
+        "icon": "custom-gcode_motion",
+        "sections": [
+          {
+            "name": "Advanced",
+            "icon": "param_advanced",
+            "fields": [
+              {
+                "key": "emit_machine_limits_to_gcode",
+                "compound": false
+              }
+            ]
+          },
+          {
+            "name": "Resonance Avoidance",
+            "icon": "param_resonance_avoidance",
+            "fields": [
+              {
+                "key": "resonance_avoidance",
+                "compound": false
+              },
+              {
+                "key": "min_resonance_avoidance_speed",
+                "compound": true
+              },
+              {
+                "key": "max_resonance_avoidance_speed",
+                "compound": true
+              }
+            ]
+          },
+          {
+            "name": "Speed limitation",
+            "icon": "param_speed",
+            "fields": [
+              {
+                "key": "machine_max_speed_x",
+                "compound": false
+              },
+              {
+                "key": "machine_max_speed_y",
+                "compound": false
+              },
+              {
+                "key": "machine_max_speed_z",
+                "compound": false
+              },
+              {
+                "key": "machine_max_speed_e",
+                "compound": false
+              }
+            ]
+          },
+          {
+            "name": "Acceleration limitation",
+            "icon": "param_acceleration",
+            "fields": [
+              {
+                "key": "machine_max_acceleration_x",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_y",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_z",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_e",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_extruding",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_retracting",
+                "compound": false
+              },
+              {
+                "key": "machine_max_acceleration_travel",
+                "compound": false
+              }
+            ]
+          },
+          {
+            "name": "Jerk limitation",
+            "icon": "param_jerk",
+            "fields": [
+              {
+                "key": "machine_max_junction_deviation",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_x",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_y",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_z",
+                "compound": false
+              },
+              {
+                "key": "machine_max_jerk_e",
+                "compound": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Notes",
+        "icon": "custom-gcode_note",
+        "sections": [
+          {
+            "name": "Notes",
+            "icon": "note",
+            "fields": [
+              {
+                "key": "printer_notes",
+                "compound": true
               }
             ]
           }
@@ -2774,7 +2780,7 @@
         "tooltip": "The diameter of nozzle.",
         "unit": "mm",
         "max": 100,
-        "mode": "advanced",
+        "mode": "simple",
         "default": "0.4"
       },
       "nozzle_hrc": {
@@ -3018,7 +3024,7 @@
         "label": "Retraction Speed",
         "tooltip": "Speed for retracting filament from the nozzle.",
         "unit": "mm/s",
-        "mode": "advanced",
+        "mode": "simple",
         "default": "30."
       },
       "scan_first_layer": {
