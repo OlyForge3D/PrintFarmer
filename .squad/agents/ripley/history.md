@@ -154,3 +154,48 @@ When modal success requires data refresh:
 - **Slice button:** Enabled after model load (ready for job submission)
 
 **No issues found.** Everything works as expected.
+
+## 2026-04-16: Select Box Audit — 28 Empty Dropdowns Fixed
+
+**Role:** Frontend / Slicer Profile Editor
+**Status:** ✅ COMPLETE (committed in prior session, verified this session)
+
+**Context:** Jeff requested visual verification of 3 UI fixes from commit 71f0c11f plus a comprehensive audit of all select boxes across slicer profile editors (process, filament, machine).
+
+**Audit findings:**
+- **44 total select fields** across all three profile types (process/filament/machine)
+- **28 select fields had NO option values** — rendering as empty dropdowns users couldn't interact with
+- **Root cause:** KNOWN_ENUMS map in MetadataProfileRenderer.tsx only covered 16 of 44 enum fields
+- **Additional bugs found:**
+  - `ironing_type` had wrong values (`no_ironing` → should be `no ironing` with space)
+  - `print_sequence` had wrong values (`by_layer` → should be `by layer` with space)
+  - `enum_open` with numeric types (`infill_anchor`, `prime_tower_brim_width`) incorrectly rendered as selects
+
+**Fix approach:**
+- Fetched authoritative enum values from OrcaSlicer's `PrintConfig.cpp` source on GitHub
+- Cross-referenced with real profile JSON files in `sample_profiles/orcaslicer/`
+- Added all 28 missing enums to KNOWN_ENUMS map
+- Created shared `INFILL_PATTERNS` and `SURFACE_PATTERNS` arrays to DRY up repeated options
+- Fixed `resolveControlType` to exclude numeric `enum_open` types from select rendering
+
+**Browser verification (Playwright):**
+Confirmed 7 inline select boxes populated with correct options in live browser:
+- Seam position: Nearest, Aligned, Aligned back, Back ✅
+- Top/Bottom surface pattern: Monotonic, Monotonic Lines, Concentric ✅
+- Sparse infill pattern: Rectilinear, Aligned Rectilinear, Monotonic... ✅
+- Internal solid infill pattern: Monotonic, Monotonic Lines, Concentric ✅
+- Apply gap fill: Everywhere, Top and bottom surfaces, Nowhere ✅
+- Ensure vertical shell thickness: None, Critical only, Moderate ✅
+
+**Quality gates:**
+✅ React build: 0 errors (7.78s)
+✅ React tests: 1710/1710 pass (12 skipped)
+✅ ESLint: 0 errors (4 pre-existing warnings)
+✅ .NET build: 0 errors (3 pre-existing warnings)
+
+## Learnings
+
+- **OrcaSlicer enum value format is inconsistent:** Some use spaces (`"by layer"`), some underscores (`"hardened_steel"`), some title case (`"Cool Plate"`), some numeric strings (`"0"`, `"1"`). Always check PrintConfig.cpp source.
+- **Auth token localStorage key is `auth-token`** (with hyphen), not `authToken`.
+- **Clone Profiles modal** auto-appears on slicer page when printer has no process profiles for its manufacturer. Escape key dismisses it.
+- **`/api/slicer/profiles/upload` endpoint** accepts `profileType` field ("machine"/"filament"/"process") and correctly classifies uploaded profiles in the extended listing — this is the reliable way to seed test profiles.
