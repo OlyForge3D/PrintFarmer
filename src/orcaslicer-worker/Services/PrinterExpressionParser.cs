@@ -356,11 +356,15 @@ public static class PrinterExpressionParser
                 }
 
                 // Try settings
-                if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out string? nozzle))
+                if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out object? nozzle))
                 {
+                    if (nozzle is IList<string> nozzleList && index.Value < nozzleList.Count)
+                    {
+                        return nozzleList[index.Value];
+                    }
                     if (index == 0 && nozzle != null)
                     {
-                        return nozzle;
+                        return nozzle.ToString();
                     }
                 }
 
@@ -376,7 +380,7 @@ public static class PrinterExpressionParser
 
         private static string? ExtractPrinterNotes(MachineProfileDto machine)
         {
-            return machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out string? notes) ? notes : null;
+            return machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes) ? notes?.ToString() : null;
         }
 
         private static string? ExtractNozzleDiameterFromName(string? machineName)

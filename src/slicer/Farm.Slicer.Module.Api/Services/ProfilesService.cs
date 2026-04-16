@@ -2564,8 +2564,8 @@ public class ProfilesService(
                 Quality = profile.Quality.ToString(),
                 Description = profile.Description,
                 Settings = string.IsNullOrEmpty(profile.AdvancedSettings)
-                    ? new Dictionary<string, string>()
-                    : JsonSerializer.Deserialize<Dictionary<string, string>>(profile.AdvancedSettings) ?? new Dictionary<string, string>()
+                    ? new Dictionary<string, object>()
+                    : JsonSerializer.Deserialize<Dictionary<string, object>>(profile.AdvancedSettings) ?? new Dictionary<string, object>()
             }
         };
     }

@@ -83,5 +83,5 @@ public class FilamentProfileDto
     public string? EndGcode { get; set; }
 
     // ── Full settings bag (forward compatibility) ─────────────────────────
-    public Dictionary<string, string> Settings { get; set; } = new();
+    public Dictionary<string, object> Settings { get; set; } = new();
 }

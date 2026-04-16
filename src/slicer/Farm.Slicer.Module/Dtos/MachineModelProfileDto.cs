@@ -20,5 +20,5 @@ public class MachineModelProfileDto
     [JsonPropertyName("inherits")]
     public string? Inherits { get; set; }
 
-    public Dictionary<string, string> Settings { get; set; } = new();
+    public Dictionary<string, object> Settings { get; set; } = new();
 }
