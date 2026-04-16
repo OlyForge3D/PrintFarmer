@@ -44,6 +44,7 @@ export interface OrcaFilamentSettings {
   filament_density?: number;
   filament_shrink?: number;
   filament_shrinkage_compensation_z?: number;
+  filament_cost?: number;
   temperature_vitrification?: number;
   idle_temperature?: number;
   nozzle_temperature_range_low?: number;

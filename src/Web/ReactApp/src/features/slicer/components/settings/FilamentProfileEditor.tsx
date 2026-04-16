@@ -260,13 +260,10 @@ const FilamentTab: React.FC<TabProps & {
 
   return (
     <div className="space-y-1">
-      {/* Basic Information */}
+      {/* Basic Information — matches OrcaSlicer field order exactly */}
       <div>
         <SectionHeader title="Basic Information" />
         <div className="">
-          {show('name') && (
-            <SettingRow type="text" icon={<FilamentIcon />} label="Profile Name" value={settings.name ?? ''} onChange={v => update('name', v)} disabled={disabled} />
-          )}
           {show('filament_type') && (
             <SettingRow type="select" icon={<FilamentIcon />} label="Type" value={settings.filament_type ?? 'PLA'}
               options={ORCA_FILAMENT_TYPES.map(t => ({ value: t, label: t }))}
@@ -274,6 +271,15 @@ const FilamentTab: React.FC<TabProps & {
           )}
           {show('filament_vendor') && (
             <SettingRow type="text" icon={<FilamentIcon />} label="Vendor" value={settings.filament_vendor ?? ''} onChange={v => update('filament_vendor', v)} disabled={disabled} />
+          )}
+          {show('filament_soluble') && (
+            <SettingRow type="checkbox" icon={<FilamentIcon />} label="Soluble Material" checked={settings.filament_soluble ?? false} onChange={v => update('filament_soluble', v)} disabled={disabled} />
+          )}
+          {show('filament_is_support') && (
+            <SettingRow type="checkbox" icon={<FilamentIcon />} label="Support Material" checked={settings.filament_is_support ?? false} onChange={v => update('filament_is_support', v)} disabled={disabled} />
+          )}
+          {show('filament_change_length') && (
+            <SettingRow type="number" icon={<RetractionIcon />} label="Filament Ramming Length" value={settings.filament_change_length ?? 10} onChange={v => update('filament_change_length', v)} min={0} max={100} step={1} unit="mm" disabled={disabled} />
           )}
           {show('default_filament_colour') && (
             <SettingRow type="color" icon={<FilamentIcon />} label="Default Color" value={settings.default_filament_colour ?? '#3B82F6'} onChange={v => update('default_filament_colour', v)} disabled={disabled} />
@@ -284,8 +290,14 @@ const FilamentTab: React.FC<TabProps & {
           {show('filament_density') && (
             <SettingRow type="number" icon={<FilamentIcon />} label="Density" value={settings.filament_density ?? 1.24} onChange={v => update('filament_density', v)} min={0.5} max={3.0} step={0.01} unit="g/cm³" disabled={disabled} />
           )}
-          {show('filament_adhesiveness_category') && (
-            <SettingRow type="number" icon={<FilamentIcon />} label="Adhesiveness Category" value={settings.filament_adhesiveness_category ?? 0} onChange={v => update('filament_adhesiveness_category', v)} min={0} max={5} step={1} disabled={disabled} />
+          {show('filament_shrink') && (
+            <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (XY)" value={settings.filament_shrink ?? 100} onChange={v => update('filament_shrink', v)} min={90} max={110} step={0.1} unit="%" disabled={disabled} />
+          )}
+          {show('filament_shrinkage_compensation_z') && (
+            <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (Z)" value={settings.filament_shrinkage_compensation_z ?? 100} onChange={v => update('filament_shrinkage_compensation_z', v)} min={90} max={110} step={0.1} unit="%" disabled={disabled} />
+          )}
+          {show('filament_cost') && (
+            <SettingRow type="number" icon={<FilamentIcon />} label="Price" value={settings.filament_cost ?? 0} onChange={v => update('filament_cost', v)} min={0} max={9999} step={0.01} unit="money/kg" disabled={disabled} />
           )}
           {show('temperature_vitrification') && (
             <SettingRow type="number" icon={<TemperatureIcon />} label="Softening Temperature" value={settings.temperature_vitrification ?? 0} onChange={v => update('temperature_vitrification', v)} min={0} max={300} step={5} unit="°C" disabled={disabled} />
@@ -294,37 +306,13 @@ const FilamentTab: React.FC<TabProps & {
             <SettingRow type="number" icon={<TemperatureIcon />} label="Idle Temperature" value={settings.idle_temperature ?? 0} onChange={v => update('idle_temperature', v)} min={0} max={300} step={5} unit="°C" disabled={disabled} />
           )}
           {show('nozzle_temperature_range_low') && (
-            <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp Min" value={settings.nozzle_temperature_range_low ?? 180} onChange={v => update('nozzle_temperature_range_low', v)} min={100} max={400} step={5} unit="°C" disabled={disabled} />
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Recommended Nozzle Temp Min" value={settings.nozzle_temperature_range_low ?? 180} onChange={v => update('nozzle_temperature_range_low', v)} min={100} max={400} step={5} unit="°C" disabled={disabled} />
           )}
           {show('nozzle_temperature_range_high') && (
-            <SettingRow type="number" icon={<TemperatureIcon />} label="Nozzle Temp Max" value={settings.nozzle_temperature_range_high ?? 230} onChange={v => update('nozzle_temperature_range_high', v)} min={100} max={400} step={5} unit="°C" disabled={disabled} />
-          )}
-          {show('required_nozzle_HRC') && (
-            <SettingRow type="number" icon={<FilamentIcon />} label="Required Nozzle HRC" value={settings.required_nozzle_HRC ?? 0} onChange={v => update('required_nozzle_HRC', v)} min={0} max={100} step={1} disabled={disabled} />
-          )}
-          {show('filament_soluble') && (
-            <SettingRow type="checkbox" icon={<FilamentIcon />} label="Soluble Material" checked={settings.filament_soluble ?? false} onChange={v => update('filament_soluble', v)} disabled={disabled} />
-          )}
-          {show('filament_is_support') && (
-            <SettingRow type="checkbox" icon={<FilamentIcon />} label="Support Material" checked={settings.filament_is_support ?? false} onChange={v => update('filament_is_support', v)} disabled={disabled} />
+            <SettingRow type="number" icon={<TemperatureIcon />} label="Recommended Nozzle Temp Max" value={settings.nozzle_temperature_range_high ?? 230} onChange={v => update('nozzle_temperature_range_high', v)} min={100} max={400} step={5} unit="°C" disabled={disabled} />
           )}
         </div>
       </div>
-
-      {/* Shrinkage */}
-      {(show('filament_shrink') || show('filament_shrinkage_compensation_z')) && (
-        <div>
-          <SectionHeader title="Shrinkage Compensation" />
-          <div className="">
-            {show('filament_shrink') && (
-              <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (XY)" value={settings.filament_shrink ?? 0} onChange={v => update('filament_shrink', v)} min={0} max={10} step={0.1} unit="%" disabled={disabled} />
-            )}
-            {show('filament_shrinkage_compensation_z') && (
-              <SettingRow type="number" icon={<PrecisionIcon />} label="Shrinkage (Z)" value={settings.filament_shrinkage_compensation_z ?? 0} onChange={v => update('filament_shrinkage_compensation_z', v)} min={0} max={10} step={0.1} unit="%" disabled={disabled} />
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Temperature */}
       <div>
