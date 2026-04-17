@@ -72,7 +72,7 @@ public abstract class HttpJobPollerService(
     /// </summary>
     private static Guid DeriveGuid(Guid baseId, string discriminator)
     {
-        byte[] input = [..baseId.ToByteArray(), ..System.Text.Encoding.UTF8.GetBytes(discriminator)];
+        byte[] input = [.. baseId.ToByteArray(), .. System.Text.Encoding.UTF8.GetBytes(discriminator)];
         byte[] hash = System.Security.Cryptography.SHA256.HashData(input);
 
         // Use first 16 bytes of SHA256 as a v4-like GUID

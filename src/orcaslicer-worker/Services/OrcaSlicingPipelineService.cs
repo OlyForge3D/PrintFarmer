@@ -702,6 +702,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     {
                         writer.WriteStringValue(item);
                     }
+
                     writer.WriteEndArray();
                     continue;
                 }

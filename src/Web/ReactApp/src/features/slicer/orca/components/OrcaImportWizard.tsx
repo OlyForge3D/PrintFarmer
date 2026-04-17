@@ -16,8 +16,10 @@
 import React, { useState } from 'react';
 import { UploadIcon, CheckCircleIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { orcaProfilesService } from '../services/orcaProfilesService';
 import type { OrcaBundlePreview } from '../types/orcaProfiles';
+import { isZipFile, extractOrcaBundle } from '../utils/orcaBundleExtractor';
 
 type WizardStep = 'upload' | 'preview' | 'review' | 'import' | 'complete';
 
@@ -28,6 +30,7 @@ export const OrcaImportWizard: React.FC = () => {
     const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
     const [selectedFilaments, setSelectedFilaments] = useState<Set<string>>(new Set());
     const [selectedProcesses, setSelectedProcesses] = useState<Set<string>>(new Set());
+    const [isExtracting, setIsExtracting] = useState<boolean>(false);
 
     const previewMutation = useMutation({
         mutationFn: (json: string) => orcaProfilesService.previewBundle(json),
@@ -56,13 +59,50 @@ export const OrcaImportWizard: React.FC = () => {
         },
     });
 
-    const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        if (file) {
+        if (!file) return;
+
+        const isZip = file.name.endsWith('.orca_printer') || file.name.endsWith('.orca_filament');
+
+        if (isZip) {
+            // Handle ZIP bundle files
+            setIsExtracting(true);
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const arrayBuffer = e.target?.result as ArrayBuffer;
+                    
+                    // Verify it's actually a ZIP file
+                    if (!isZipFile(arrayBuffer)) {
+                        toast.error('Invalid bundle file format');
+                        setIsExtracting(false);
+                        return;
+                    }
+
+                    // Extract and merge presets
+                    const json = await extractOrcaBundle(arrayBuffer);
+                    setBundleJson(json);
+                    setIsExtracting(false);
+                } catch (error) {
+                    toast.error(`Failed to extract bundle: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    setIsExtracting(false);
+                }
+            };
+            reader.onerror = () => {
+                toast.error('Failed to read bundle file');
+                setIsExtracting(false);
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            // Handle JSON files as before
             const reader = new FileReader();
             reader.onload = (e) => {
                 const content = e.target?.result as string;
                 setBundleJson(content);
+            };
+            reader.onerror = () => {
+                toast.error('Failed to read JSON file');
             };
             reader.readAsText(file);
         }
@@ -129,14 +169,14 @@ export const OrcaImportWizard: React.FC = () => {
                 <FileJsonIcon className="w-16 h-16 mx-auto mb-4 text-pf-accent-2" />
                 <h2 className="text-2xl font-bold mb-2 text-pf-text-primary">Upload OrcaSlicer Bundle</h2>
                 <p className="text-pf-text-secondary">
-                    Select a config bundle JSON file exported from OrcaSlicer to import presets.
+                    Select a config bundle file from OrcaSlicer (.json, .orca_printer, .orca_filament).
                 </p>
             </div>
 
             <div className="border-2 border-dashed border-pf-border-medium rounded-lg p-8 text-center hover:border-pf-accent-2 transition-colors bg-pf-bg-2">
                 <input
                     type="file"
-                    accept=".json"
+                    accept=".json,.orca_printer,.orca_filament"
                     onChange={handleFileUpload}
                     className="hidden"
                     id="bundle-upload"
@@ -144,10 +184,10 @@ export const OrcaImportWizard: React.FC = () => {
                 <label htmlFor="bundle-upload" className="cursor-pointer">
                     <UploadIcon className="w-12 h-12 mx-auto mb-4 text-pf-text-muted" />
                     <p className="text-lg font-medium mb-2 text-pf-text-primary">
-                        {bundleJson ? 'File loaded' : 'Click to select bundle file'}
+                        {isExtracting ? 'Extracting bundle...' : bundleJson ? 'File loaded' : 'Click to select bundle file'}
                     </p>
                     <p className="text-sm text-pf-text-secondary">
-                        Supports OrcaSlicer config bundle JSON format
+                        Supports OrcaSlicer JSON, .orca_printer, and .orca_filament formats
                     </p>
                 </label>
             </div>
@@ -156,10 +196,15 @@ export const OrcaImportWizard: React.FC = () => {
                 <div className="mt-6">
                     <button
                         onClick={handlePreview}
-                        disabled={previewMutation.isPending}
+                        disabled={previewMutation.isPending || isExtracting}
                         className="w-full bg-pf-accent-2 text-pf-text-primary px-6 py-3 rounded-lg font-semibold hover:opacity-90 disabled:bg-pf-border disabled:cursor-not-allowed transition-colors"
                     >
-                        {previewMutation.isPending ? (
+                        {isExtracting ? (
+                            <span className="flex items-center justify-center">
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current mr-2" />
+                                Extracting bundle...
+                            </span>
+                        ) : previewMutation.isPending ? (
                             <span className="flex items-center justify-center">
                                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current mr-2" />
                                 Parsing bundle...

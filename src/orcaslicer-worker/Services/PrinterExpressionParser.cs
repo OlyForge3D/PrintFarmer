@@ -362,6 +362,7 @@ public static class PrinterExpressionParser
                     {
                         return nozzleList[index.Value];
                     }
+
                     if (index == 0 && nozzle != null)
                     {
                         return nozzle.ToString();

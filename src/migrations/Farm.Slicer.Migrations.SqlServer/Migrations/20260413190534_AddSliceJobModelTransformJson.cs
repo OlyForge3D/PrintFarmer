@@ -2,29 +2,28 @@
 
 #nullable disable
 
-namespace Farm.Slicer.Migrations.SqlServer.Migrations
+namespace Farm.Slicer.Migrations.SqlServer.Migrations;
+
+/// <inheritdoc />
+public partial class AddSliceJobModelTransformJson : Migration
 {
     /// <inheritdoc />
-    public partial class AddSliceJobModelTransformJson : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<string>(
-                name: "ModelTransformJson",
-                schema: "slicer",
-                table: "SliceJobs",
-                type: "nvarchar(max)",
-                nullable: true);
-        }
+        migrationBuilder.AddColumn<string>(
+            name: "ModelTransformJson",
+            schema: "slicer",
+            table: "SliceJobs",
+            type: "nvarchar(max)",
+            nullable: true);
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "ModelTransformJson",
-                schema: "slicer",
-                table: "SliceJobs");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "ModelTransformJson",
+            schema: "slicer",
+            table: "SliceJobs");
     }
 }

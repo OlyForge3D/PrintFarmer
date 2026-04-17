@@ -390,6 +390,161 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Import selected profiles from an OrcaSlicer config bundle.
+    /// </summary>
+    /// <param name="request">Bundle JSON and selection criteria.</param>
+    /// <param name="orcaParsingService">OrcaSlicer bundle parsing service.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("import/orca")]
+    [Authorize(Policy = "farm_admin")]
+    [ProducesResponseType(typeof(ImportOrcaBundleResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ImportOrcaBundleResultDto>> ImportOrcaBundleAsync(
+        [FromBody] ImportOrcaBundleDto? request,
+        [FromServices] IOrcaBundleParsingService orcaParsingService,
+        CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.BundleJson))
+        {
+            return BadRequest("BundleJson is required");
+        }
+
+        try
+        {
+            if (!orcaParsingService.IsValidOrcaBundle(request.BundleJson))
+            {
+                return BadRequest("Invalid OrcaSlicer bundle format. Expected JSON object with printer/filament/process sections.");
+            }
+
+            OrcaBundlePreviewDto preview = orcaParsingService.ParseBundle(request.BundleJson);
+
+            ImportOrcaBundleResultDto result = new()
+            {
+                Success = true,
+                PrintersImported = 0,
+                FilamentsImported = 0,
+                ProcessesImported = 0
+            };
+
+            // Import selected printer presets
+            if (request.ImportPrinters)
+            {
+                IEnumerable<OrcaPrinterPresetDto> printersToImport = request.SelectedPrinters != null && request.SelectedPrinters.Count > 0
+                    ? preview.Printers.Where(p => request.SelectedPrinters.Contains(p.Name))
+                    : preview.Printers;
+
+                foreach (OrcaPrinterPresetDto printer in printersToImport)
+                {
+                    try
+                    {
+                        string rawJson = System.Text.Json.JsonSerializer.Serialize(printer.RawParameters);
+                        ImportProcessProfileDto importDto = new()
+                        {
+                            Name = printer.Name,
+                            Description = $"Imported OrcaSlicer printer preset: {printer.PrinterModel}",
+                            RawJson = rawJson,
+                            SlicerType = "OrcaSlicer",
+                            AllowSystemOverride = request.AllowSystemOverride,
+                            SetDefault = request.SetDefaults
+                        };
+
+                        await _profilesService.ImportProfileAsync(importDto, ct);
+                        result.PrintersImported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to import printer preset: {PrinterName}", printer.Name);
+                        result.Warnings.Add($"Failed to import printer '{printer.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            // Import selected filament presets
+            if (request.ImportFilaments)
+            {
+                IEnumerable<OrcaFilamentPresetDto> filamentsToImport = request.SelectedFilaments != null && request.SelectedFilaments.Count > 0
+                    ? preview.Filaments.Where(f => request.SelectedFilaments.Contains(f.Name))
+                    : preview.Filaments;
+
+                foreach (OrcaFilamentPresetDto filament in filamentsToImport)
+                {
+                    try
+                    {
+                        string rawJson = System.Text.Json.JsonSerializer.Serialize(filament.RawParameters);
+                        ImportProcessProfileDto importDto = new()
+                        {
+                            Name = filament.Name,
+                            Description = $"Imported OrcaSlicer filament preset: {filament.FilamentType}",
+                            RawJson = rawJson,
+                            SlicerType = "OrcaSlicer",
+                            AllowSystemOverride = request.AllowSystemOverride,
+                            SetDefault = request.SetDefaults
+                        };
+
+                        await _profilesService.ImportProfileAsync(importDto, ct);
+                        result.FilamentsImported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to import filament preset: {FilamentName}", filament.Name);
+                        result.Warnings.Add($"Failed to import filament '{filament.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            // Import selected process presets
+            if (request.ImportProcesses)
+            {
+                IEnumerable<OrcaProcessPresetDto> processesToImport = request.SelectedProcesses != null && request.SelectedProcesses.Count > 0
+                    ? preview.Processes.Where(p => request.SelectedProcesses.Contains(p.Name))
+                    : preview.Processes;
+
+                foreach (OrcaProcessPresetDto process in processesToImport)
+                {
+                    try
+                    {
+                        string rawJson = System.Text.Json.JsonSerializer.Serialize(process.RawParameters);
+                        ImportProcessProfileDto importDto = new()
+                        {
+                            Name = process.Name,
+                            Description = $"Imported OrcaSlicer process preset: {process.Quality ?? process.LayerHeight.ToString("F2") + "mm"}",
+                            RawJson = rawJson,
+                            SlicerType = "OrcaSlicer",
+                            AllowSystemOverride = request.AllowSystemOverride,
+                            SetDefault = request.SetDefaults
+                        };
+
+                        await _profilesService.ImportProfileAsync(importDto, ct);
+                        result.ProcessesImported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to import process preset: {ProcessName}", process.Name);
+                        result.Warnings.Add($"Failed to import process '{process.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            _logger.LogInformation(
+                "OrcaSlicer bundle imported: {PrintersImported} printers, {FilamentsImported} filaments, {ProcessesImported} processes",
+                result.PrintersImported, result.FilamentsImported, result.ProcessesImported);
+
+            result.Success = result.Errors.Count == 0;
+            return Ok(result);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogWarning(ex, "Invalid OrcaSlicer bundle format");
+            return BadRequest(new { error = "Invalid bundle format", detail = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to import OrcaSlicer bundle");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to import bundle");
+        }
+    }
+
+    /// <summary>
     /// Export PrintFarmer profiles to OrcaSlicer config bundle JSON format.
     /// </summary>
     /// <param name="request">Export configuration (optional filters).</param>
