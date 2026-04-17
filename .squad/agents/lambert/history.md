@@ -687,3 +687,53 @@ Backend data layer work for orphaned 3D model record cleanup and cross-context t
 - `.squad/decisions/decisions.md` — Tag Filtering Implementation Gaps (deferred work item)
 - `.squad/orchestration-log/2026-04-05T16-17-29Z-lambert.md` — Orchestration manifest
 
+## 2026-04-05: OrcaSlicer Import Endpoint Implementation
+
+**Role:** Backend Dev  
+**Status:** ✅ Complete
+
+### Task
+Implemented the missing `POST /api/slicer/profiles/import/orca` endpoint to persist selected profiles from OrcaSlicer config bundles.
+
+### Context
+The frontend's `OrcaImportWizard` had a 4-step flow (upload → preview → review → import). The preview endpoint existed and worked, but the import endpoint was missing, causing 404 errors on final import.
+
+### Implementation
+1. **Updated DTOs** — Extended `ImportOrcaBundleDto` in `OrcaProfileModels.cs` with:
+   - `SelectedPrinters?: List<string>` — Names of printer presets to import
+   - `SelectedFilaments?: List<string>` — Names of filament presets to import
+   - `SelectedProcesses?: List<string>` — Names of process presets to import
+
+2. **Added Import Endpoint** in `ProfilesController.cs`:
+   - Route: `[HttpPost("import/orca")]`
+   - Authorization: `farm_admin` policy
+   - Parses bundle JSON using `IOrcaBundleParsingService.ParseBundle`
+   - Filters presets based on `SelectedPrinters`, `SelectedFilaments`, `SelectedProcesses` lists
+   - Iterates through selected presets and calls `IProfilesService.ImportProfileAsync` for each
+   - Returns `ImportOrcaBundleResultDto` with counts, warnings, and errors
+
+3. **Error Handling**:
+   - Returns 400 if `BundleJson` is null/empty or invalid format
+   - Catches individual profile import failures and adds to warnings (continues processing)
+   - Returns 500 for unexpected errors with logging
+
+### Files Changed
+- `src/slicer/Farm.Slicer.Module/Models/OrcaProfileModels.cs` — Added selection list properties to DTO
+- `src/slicer/Farm.Slicer.Module.Api/Controllers/Slicing/ProfilesController.cs` — Added import endpoint
+
+### Validation
+- Build: ✅ 0 errors, 3 warnings (pre-existing StyleCop issues in OrcaSlicer worker)
+- Tests: ✅ 2313 tests passed (463 slicer tests + 1850 API tests)
+- Format: ✅ Applied dotnet format
+
+### Key Architecture Decisions
+- Import reuses existing `ImportProfileAsync` from `IProfilesService` — consistent deduplication via content hash
+- Profiles are created as custom (non-system) profiles unless `AllowSystemOverride=true`
+- Each preset type (printer/filament/process) is serialized from `RawParameters` dictionary for persistence
+- Failures for individual presets don't abort entire import — warnings collected for user feedback
+
+### Integration Points
+- `IOrcaBundleParsingService` — Validates and parses bundle structure
+- `IProfilesService.ImportProfileAsync` — Persists individual profiles with deduplication
+- Frontend `OrcaImportWizard` — Now has complete upload → preview → import flow
+

@@ -421,3 +421,52 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 **Decision Created:** PFarm1-5duw — Support `.orca_printer` and `.orca_filament` bundle import
 
 **Handoff:** Implementation planning ready; coordinate with Brett's format specification for ZIP extraction logic.
+
+
+## 2026-04-17: OrcaSlicer ZIP Bundle Import — Complete
+
+**Role:** Frontend implementation
+**Session:** 2026-04-17T15:34:00Z  
+**Status:** ✅ SHIPPED — All quality gates passed
+
+**Implementation:**
+- Added `fflate` library (8KB gzipped) for ZIP extraction
+- Created `orcaBundleExtractor.ts` utility with `isZipFile()` and `extractOrcaBundle()` functions
+- Updated `OrcaImportWizard.tsx` to handle `.orca_printer` and `.orca_filament` files
+- ZIP extraction happens client-side — backend APIs unchanged
+
+**Technical Approach:**
+- Detect ZIP via magic bytes (PK\x03\x04) check
+- Extract all JSON files from ZIP using `fflate.unzipSync()`
+- Parse each JSON file and classify by discriminator field:
+  - `printer_settings_id` → printer preset
+  - `filament_settings_id` → filament preset
+  - `print_settings_id` → process preset
+- Merge into single bundle JSON: `{ printer: [], filament: [], process: [] }`
+- Pass to existing preview API — no backend changes needed
+
+**User Flow Changes:**
+- File input now accepts `.json,.orca_printer,.orca_filament`
+- "Extracting bundle..." loading state shows during ZIP processing
+- Toast errors for extraction failures
+- Upload step description updated to mention all 3 formats
+
+**Quality Gates:**
+- ✅ Build: 0 errors (10.98s)
+- ✅ Lint: 0 errors, 4 warnings (all pre-existing)
+- ✅ Tests: 1710/1710 passing (11.26s)
+
+**Files Changed:**
+- `src/Web/ReactApp/package.json` — added fflate dependency
+- `src/Web/ReactApp/src/features/slicer/orca/utils/orcaBundleExtractor.ts` — new utility
+- `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx` — updated file handling
+
+**Learnings:**
+- OrcaSlicer bundle files are standard ZIP archives — no custom format
+- Preset type detection is reliable via discriminator fields in JSON
+- Client-side extraction keeps backend simple and stateless
+- `extractOrcaBundle()` returns same JSON format as direct upload — perfect API compatibility
+- `isZipFile()` byte check prevents false positives from renamed files
+- Error handling: ZIP extraction failures show user-friendly toast, malformed presets within ZIP are skipped with console.warn but don't break entire import
+- `fflate.unzipSync()` is synchronous but fast enough for typical bundle sizes (11 files = instant)
+- Backend never sees ZIP — frontend normalizes to the same `bundleJson` string format

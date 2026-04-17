@@ -550,3 +550,27 @@ Designed focused regression coverage for 3D model upload completion lifecycle. U
 
 **Files:**
 - `src/tests/Farm.Slicer.Module.Tests/Integration/Model3DUploadQueryRoundTripTests.cs` (NEW)
+
+## 2025-04-17: OrcaSlicer ZIP Bundle Extractor Tests
+
+### Task
+Written comprehensive test suite for new ZIP bundle extraction utility. Utility detects ZIP files via magic bytes and extracts .orca_printer / .orca_filament bundles, merging JSON presets into combined format for the preview API.
+
+### Test Coverage Created
+- isZipFile function: 6 tests covering magic bytes detection, JSON detection, empty buffers, short buffers
+- extractOrcaBundle function: 13 tests covering valid ZIP extraction, preset categorization, UTF-8 encoding, error handling
+- Integration tests: 3 tests for file type detection and preview API format validation
+
+### Status
+- Test file created: 22 tests total
+- Current results: 14 passing, 8 failing
+- Root cause: Tests expect populated arrays but getting empty arrays in Vitest context
+- Standalone testing confirms implementation logic works correctly outside Vitest
+- Dependencies: fflate 0.8.2 installed and working
+- Next steps: Ripley to debug array population issue in Vitest context
+
+### Quality
+- Comprehensive edge case coverage
+- Clear test names using BDD style
+- Proper setup/teardown with beforeEach
+- Both positive and negative test cases included
