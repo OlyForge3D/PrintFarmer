@@ -549,6 +549,19 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
 
   if (visibleFields.length === 0) return null;
 
+  // Detect paired temperature fields: *_temp_initial_layer + *_temp
+  // Build a set of "other layers" keys that are part of a pair (to skip in main loop)
+  const pairedOtherKeys = new Set<string>();
+  const pairMap = new Map<string, string>(); // initial_layer_key → other_layers_key
+  for (let i = 0; i < visibleFields.length - 1; i++) {
+    const k = visibleFields[i].key;
+    const next = visibleFields[i + 1].key;
+    if (k.endsWith('_temp_initial_layer') && next === k.replace('_initial_layer', '')) {
+      pairMap.set(k, next);
+      pairedOtherKeys.add(next);
+    }
+  }
+
   return (
     <div>
       <SectionHeader
@@ -557,6 +570,9 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
       />
       <div>
         {visibleFields.map((field) => {
+          // Skip "other layers" keys that are rendered as part of a pair
+          if (pairedOtherKeys.has(field.key)) return null;
+
           const meta = allSettings[field.key];
           const controlType = resolveControlType(meta);
           // Change tracking: compare current value to original
@@ -568,6 +584,64 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
             originalValue: origVal,
             onReset: () => onUpdate(field.key, origVal),
           } : {};
+
+          // Paired temperature row: render both "First layer" and "Other layers" on the same line
+          const otherKey = pairMap.get(field.key);
+          if (otherKey) {
+            const otherMeta = allSettings[otherKey];
+            const otherOrigVal = originalValues?.[otherKey];
+            const otherCurVal = values[otherKey];
+            const otherIsModified = originalValues !== undefined && otherOrigVal !== undefined && JSON.stringify(otherCurVal) !== JSON.stringify(otherOrigVal);
+            const anyModified = isModified || otherIsModified;
+            // Derive plate name from key: "cool_plate_temp_initial_layer" → "Cool Plate"
+            const plateName = field.key
+              .replace('_temp_initial_layer', '')
+              .replace(/_/g, ' ')
+              .replace(/\b\w/g, (c) => c.toUpperCase())
+              .replace('Supertack', 'SuperTack')
+              .replace('Eng', 'Engineering')
+              .replace('Hot', 'Smooth PEI / High Temp');
+            return (
+              <div key={field.key} className="flex items-center gap-1.5 py-0.5">
+                <div className="w-2/5 shrink-0 truncate">
+                  <span
+                    className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text'}`}
+                    title={meta.tooltip}
+                  >
+                    {plateName}
+                  </span>
+                </div>
+                <div className="w-[30%] shrink-0 flex items-center gap-1">
+                  <span className="text-[10px] text-pf-text-muted whitespace-nowrap">First layer</span>
+                  <div className="flex items-center flex-1">
+                    <input
+                      type="number"
+                      title={`${plateName} first layer`}
+                      className={`w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden`}
+                      value={toNumber(values[field.key], meta)}
+                      onChange={(e) => onUpdate(field.key, Number(e.target.value))}
+                      disabled={disabled}
+                    />
+                    <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-r-lg w-8 shrink-0 self-stretch flex items-center">°C</span>
+                  </div>
+                </div>
+                <div className="w-[30%] shrink-0 flex items-center gap-1">
+                  <span className="text-[10px] text-pf-text-muted whitespace-nowrap">Other layers</span>
+                  <div className="flex items-center flex-1">
+                    <input
+                      type="number"
+                      title={`${plateName} other layers`}
+                      className={`w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden`}
+                      value={toNumber(values[otherKey], otherMeta)}
+                      onChange={(e) => onUpdate(otherKey, Number(e.target.value))}
+                      disabled={disabled}
+                    />
+                    <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-r-lg w-8 shrink-0 self-stretch flex items-center">°C</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
 
           switch (controlType) {
             case 'checkbox':
