@@ -840,9 +840,6 @@ public sealed class MoonrakerSubscriptionService(
             using JsonDocument doc = JsonDocument.Parse(message);
             JsonElement root = doc.RootElement;
 
-            // Reset parse error count on successful JSON parsing - this indicates WebSocket connection is healthy
-            _ = _parseErrorCounts.TryRemove(printer.Id, out _);
-
             // Check if this is a JSON-RPC response (has "id" field)
             if (root.TryGetProperty("id", out _))
             {
@@ -913,6 +910,9 @@ public sealed class MoonrakerSubscriptionService(
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
                 await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.BackendUrl, null, null, ct);
             }
+
+            // Reset parse error count on successful (non-error) JSON-RPC response
+            _ = _parseErrorCounts.TryRemove(printer.Id, out _);
         }
         catch (JsonException ex)
         {
