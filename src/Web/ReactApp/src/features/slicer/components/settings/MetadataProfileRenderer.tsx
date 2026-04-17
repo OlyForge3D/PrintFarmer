@@ -415,6 +415,8 @@ const TEXTAREA_KEYS = new Set([
   'wrapping_detection_gcode', 'change_extrusion_role_gcode',
   'filament_start_gcode', 'filament_end_gcode',
   'adaptive_pressure_advance_model',
+  'filament_notes', 'printer_notes',
+  'compatible_printers_condition', 'compatible_prints_condition',
 ]);
 
 export interface FieldRef {
