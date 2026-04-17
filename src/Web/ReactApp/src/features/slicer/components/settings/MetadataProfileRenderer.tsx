@@ -419,6 +419,14 @@ const TEXTAREA_KEYS = new Set([
   'compatible_printers_condition', 'compatible_prints_condition',
 ]);
 
+/** Keys hidden because they only appear conditionally in OrcaSlicer
+ *  (e.g. adaptive PA sub-fields only show when adaptive PA is enabled) */
+const CONDITIONAL_HIDDEN_KEYS = new Set([
+  'adaptive_pressure_advance_overhangs',
+  'adaptive_pressure_advance_bridges',
+  'adaptive_pressure_advance_model',
+]);
+
 export interface FieldRef {
   key: string;
   compound: boolean;
@@ -543,6 +551,8 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
       // Always hide developer-only fields (PrintFarmer has no developer mode)
       if (meta.mode === 'developer') return false;
       if (viewMode === 'simple' && meta.mode === 'advanced') return false;
+      // Hide fields that only appear conditionally in OrcaSlicer
+      if (CONDITIONAL_HIDDEN_KEYS.has(f.key)) return false;
       return true;
     });
   }, [section.fields, allSettings, viewMode]);
