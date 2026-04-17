@@ -4672,3 +4672,363 @@ Emulator broadcasts every ~2 s. Tests use 10-15 s timeouts for initial card rend
 
 **Rationale:** SignalR connection setup + first broadcast can take 3-5 s on slow machines. Being generous prevents flaky CI failures while remaining fast enough for local development feedback.
 
+# OrcaSlicer Bundle Format Specification — Research Findings
+
+**Author:** Brett (Researcher)
+**Date:** 2026-07-16
+**Status:** Research Complete — Ready for Implementation Planning
+
+---
+
+## Executive Summary
+
+Both `.orca_printer` and `.orca_filament` files are **standard ZIP archives** containing JSON preset files organized in subdirectories, plus a `bundle_structure.json` manifest. They use the `miniz` (mz_zip) library for compression. The format is simple and well-structured — PrintFarmer can implement import/export support with moderate effort.
+
+---
+
+## 1. `.orca_printer` — Printer Config Bundle
+
+### What It Is
+
+A complete printer configuration package that bundles a **printer preset** with all its associated **filament presets** and **process (print) presets**.
+
+### File Format
+
+- **Container:** ZIP archive (standard zip, created via `mz_zip_writer`)
+- **Extension:** `.orca_printer`
+- **MIME type:** `application/zip` (effectively)
+
+### Internal Structure
+
+```
+MyPrinter.orca_printer (ZIP)
+├── bundle_structure.json          ← manifest (metadata + file listing)
+├── printer/
+│   └── MyPrinter 0.4 nozzle.json ← printer preset JSON
+├── filament/
+│   ├── Generic PLA @MyPrinter.json    ← filament preset JSONs
+│   ├── Generic PETG @MyPrinter.json
+│   └── ...
+└── process/
+    ├── 0.20mm Standard @MyPrinter.json ← process/print preset JSONs
+    ├── 0.16mm Fine @MyPrinter.json
+    └── ...
+```
+
+### `bundle_structure.json` Schema
+
+```json
+{
+  "version": "02.01.00.59",           // OrcaSlicer version string (or "" if offline)
+  "bundle_id": "userid_PrinterName_timestamp",  // unique ID: {user_id}_{printer_name}_{timestamp} or "offline_..."
+  "bundle_type": "printer config bundle",       // literal string identifier
+  "printer_preset_name": "MyPrinter 0.4 nozzle", // name of the primary printer preset
+  "printer_config": [                  // array of printer preset zip paths
+    "printer/MyPrinter 0.4 nozzle.json"
+  ],
+  "filament_config": [                 // array of filament preset zip paths
+    "filament/Generic PLA @MyPrinter.json",
+    "filament/Generic PETG @MyPrinter.json"
+  ],
+  "process_config": [                  // array of process preset zip paths
+    "process/0.20mm Standard @MyPrinter.json",
+    "process/0.16mm Fine @MyPrinter.json"
+  ]
+}
+```
+
+### What Gets Bundled
+
+- **One printer preset** (the selected machine config)
+- **All user filament presets** compatible with that printer
+- **All user process presets** compatible with that printer
+- System (built-in) presets are **not** exported — only user/custom presets
+
+---
+
+## 2. `.orca_filament` — Filament Bundle
+
+### What It Is
+
+A collection of filament presets for a specific filament type (e.g., "Polymaker PLA Pro"), organized by printer vendor compatibility.
+
+### File Format
+
+- **Container:** ZIP archive (same as `.orca_printer`)
+- **Extension:** `.orca_filament`
+
+### Internal Structure
+
+```
+MyFilament.orca_filament (ZIP)
+├── bundle_structure.json              ← manifest
+├── Creality/
+│   ├── MyFilament @Ender3.json        ← filament preset tuned for Creality printers
+│   └── MyFilament @Ender5.json
+├── Prusa/
+│   └── MyFilament @MK4.json           ← filament preset tuned for Prusa printers
+└── Bambu Lab/
+    └── MyFilament @X1C.json           ← filament preset tuned for Bambu printers
+```
+
+**Key difference from `.orca_printer`:** Files are organized by **printer vendor name** (not by preset type), because the same filament material has different tuning for different printers.
+
+### `bundle_structure.json` Schema
+
+```json
+{
+  "version": "02.01.00.59",
+  "bundle_id": "userid_FilamentName_timestamp",
+  "bundle_type": "filament config bundle",       // literal string identifier
+  "filament_name": "Polymaker PLA Pro",           // human-readable filament name
+  "printer_vendor": [                             // array of vendor objects
+    {
+      "vendor": "Creality",
+      "filament_path": [                          // filament preset paths within this vendor
+        "Creality/MyFilament @Ender3.json",
+        "Creality/MyFilament @Ender5.json"
+      ]
+    },
+    {
+      "vendor": "Prusa",
+      "filament_path": [
+        "Prusa/MyFilament @MK4.json"
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## 3. Individual Preset JSON Format
+
+Each JSON file inside the bundle is a standard OrcaSlicer preset. Key fields:
+
+### Common Fields (all preset types)
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"machine"`, `"filament"`, or `"process"` |
+| `name` | string | Human-readable preset name |
+| `version` | string | Semver string (e.g., `"1.9.0.0"`) |
+| `inherits` | string | Parent preset name for inheritance (optional) |
+| `from` | string | `"system"` or `"User"` — origin |
+| `setting_id` | string | Unique setting identifier |
+| `instantiation` | string | `"true"` if this is a concrete (non-abstract) preset |
+
+### Printer-Specific Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `printer_settings_id` | string | Identifies this as a printer preset (used for type detection) |
+| `printer_model` | string | Printer model name |
+| `nozzle_diameter` | string[] | Nozzle diameter(s) |
+| `printable_area` | string[] | Build plate coordinates |
+| `printable_height` | string | Max Z height |
+| `default_print_profile` | string | Default process preset name |
+
+### Filament-Specific Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `filament_settings_id` | string | Identifies this as a filament preset |
+| `filament_id` | string | Unique filament identifier (e.g., `"BSFI002"`) |
+| `filament_density` | string[] | Material density |
+| `nozzle_temperature` | string[] | Print temperature |
+| `hot_plate_temp` | string[] | Bed temperature |
+| `filament_flow_ratio` | string[] | Flow rate multiplier |
+
+### Process-Specific Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `print_settings_id` | string | Identifies this as a process preset |
+| `layer_height` | string | Layer height value |
+| `compatible_printers` | string[] | List of compatible printer names |
+
+### Preset Type Detection
+
+OrcaSlicer determines preset type by checking for discriminator fields:
+- Has `printer_settings_id` → **printer** preset
+- Has `print_settings_id` → **process** preset
+- Has `filament_settings_id` → **filament** preset
+
+---
+
+## 4. Import Workflow (How OrcaSlicer Loads Bundles)
+
+Source: `PresetBundle::import_presets()` in `src/libslic3r/PresetBundle.cpp:958`
+
+1. **File type detection:** Check file extension (`.orca_printer`, `.orca_filament`, or `.zip`)
+2. **Create temp directory:** `{user_data}/user/default/temp/`
+3. **Open as ZIP:** Use `mz_zip_reader_init_cfile()` to open the archive
+4. **Extract all files:** Iterate ZIP entries, extract each to temp dir
+   - **Skip** `bundle_structure.json` (manifest is metadata-only, not imported)
+   - Strip any directory prefix from filenames (flattened extraction)
+5. **Import each JSON:** Call `import_json_presets()` for each extracted file
+   - Parse JSON, detect preset type from discriminator fields
+   - Resolve inheritance chain (`inherits` field)
+   - Check for duplicates, prompt user for overwrite confirmation
+   - Save to user preset directory
+6. **Cleanup:** Delete temp directory
+
+**Important:** The `bundle_structure.json` manifest is **skipped during import**. OrcaSlicer reads each JSON individually and auto-detects its type. The manifest is informational for the export structure only.
+
+---
+
+## 5. Export Workflow (How OrcaSlicer Creates Bundles)
+
+Source: `ExportConfigsDialog` in `src/slic3r/GUI/CreatePresetsDialog.cpp`
+
+### `.orca_printer` Export
+
+1. User selects a printer from their user presets
+2. System finds all filament presets associated with that printer
+3. System finds all process presets associated with that printer
+4. Creates ZIP with:
+   - `printer/{name}.json` — the printer preset file
+   - `filament/{name}.json` — each associated filament preset
+   - `process/{name}.json` — each associated process preset
+   - `bundle_structure.json` — the manifest
+
+### `.orca_filament` Export
+
+1. User selects a filament name (e.g., "My Custom PLA")
+2. System finds all vendor-specific variants of that filament
+3. Creates ZIP with:
+   - `{VendorName}/{preset_name}.json` — vendor-grouped filament presets
+   - `bundle_structure.json` — the manifest with vendor grouping
+
+---
+
+## 6. Other Export Formats in OrcaSlicer
+
+OrcaSlicer's Export dialog offers **5 export types** (no `.bbcfg` or `.orca_process`):
+
+| Format | Extension | Contents |
+|---|---|---|
+| **Printer config bundle** | `.orca_printer` | Printer + filaments + processes |
+| **Filament bundle** | `.orca_filament` | Filament variants grouped by vendor |
+| **Printer presets** | `.zip` | Individual printer preset JSONs only |
+| **Filament presets** | `.zip` | Individual filament preset JSONs only |
+| **Process presets** | `.zip` | Individual process preset JSONs only |
+
+The `.zip` variants are simpler — they contain only the selected preset JSONs with no manifest and no subdirectory structure, using `save_presets_to_zip()`.
+
+---
+
+## 7. Implementation Recommendations for PrintFarmer
+
+### Import Support
+
+1. **Detect bundle type** by file extension (`.orca_printer` / `.orca_filament` / `.zip`)
+2. **Unzip** to temp directory using any standard ZIP library (SharpZipLib, System.IO.Compression)
+3. **Parse `bundle_structure.json`** for metadata display (bundle type, version, contents listing)
+4. **Parse each JSON preset** individually — type detection via `printer_settings_id` / `filament_settings_id` / `print_settings_id`
+5. **Map to PrintFarmer's profile model** — OrcaSlicer presets use flat key-value JSON with inheritance
+
+### Export Support
+
+1. **Create ZIP** with subdirectory structure matching OrcaSlicer's convention
+2. **Generate `bundle_structure.json`** manifest with version, bundle_id, and file paths
+3. **Serialize profiles as JSON** matching OrcaSlicer's key naming (flat structure, string arrays for multi-value fields)
+
+### Key Design Considerations
+
+- OrcaSlicer JSON uses **string arrays** even for single values (e.g., `"nozzle_diameter": ["0.4"]`)
+- The **inheritance model** (`inherits` field) means some presets are incomplete without their parent — full resolution requires the inheritance chain
+- **Bundle IDs** include timestamps and user IDs — generate a PrintFarmer-specific format
+- Values are mostly **strings** even for numbers (e.g., `"printable_height": "900"`)
+# Slicer Import/Export Audit — Orca Bundle Formats
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2025-07-24  
+**Status:** Informational — gap analysis for `.orca_printer` / `.orca_filament` support
+
+## What We Have Today
+
+### Import (Frontend → Backend)
+
+| Capability | Status | Details |
+|---|---|---|
+| OrcaSlicer JSON config bundle import | ✅ Working | 4-step wizard: Upload → Preview → Review → Import |
+| File format accepted | `.json` only | `accept=".json"` on file input |
+| Preview before import | ✅ Working | `POST /api/slicer/profiles/import/orca/preview` |
+| Selective import (pick presets) | ✅ Working | User selects which printer/filament/process presets to import |
+| Actual import persistence | ⚠️ Partial | Frontend calls `POST /api/slicer/profiles/import/orca` but this endpoint doesn't exist in ProfilesController. Only the `/preview` route is implemented. |
+| Preset mapping to catalog | ⚠️ Missing backend | Frontend calls `/api/slicer/profiles/import/orca/map` but no controller route exists. `IOrcaPresetMappingService` interface exists but isn't wired to a controller action. |
+| Individual profile import | ✅ Working | `POST /api/slicer/profiles/import` for raw JSON single profiles |
+| Bulk import from worker | ✅ Working | `POST /api/slicer/profiles/bulk-import-from-worker/{printerId}` |
+
+### Export (Backend → Frontend Download)
+
+| Capability | Status | Details |
+|---|---|---|
+| Single profile export | ✅ Working | `GET /api/slicer/profiles/{id}/export` → downloads as `.json` |
+| Full Orca bundle export | ✅ Working | `POST /api/slicer/profiles/export/orca` → JSON bundle with all profiles |
+| Export UI | ✅ Working | Both per-profile and bundle export buttons on SlicerProfilesPage |
+
+### Backend Parsing
+
+| Capability | Status |
+|---|---|
+| `OrcaBundleParsingService` | ✅ Parses JSON objects with `printer`/`filament`/`process` (or aliases `machine`/`material`/`print`) sections |
+| `IOrcaBundleExportService` | ✅ Interface defined for export |
+| `IOrcaPresetMappingService` | ✅ Interface + model classes exist, no implementation wired to controller |
+
+## What's Missing for `.orca_printer` / `.orca_filament`
+
+### Key Difference
+Current system handles **JSON text files**. `.orca_printer` and `.orca_filament` are **ZIP archives** containing multiple JSON files and potentially thumbnails/images.
+
+### Frontend Gaps
+
+1. **File input accept filter** — Must add `.orca_printer,.orca_filament` to `accept=` attribute in `OrcaImportWizard.tsx` (line 139)
+2. **Binary file reading** — Current `FileReader.readAsText()` won't work for ZIP. Need `readAsArrayBuffer()` + a ZIP library (e.g., `jszip` or `fflate`)
+3. **ZIP extraction logic** — New service/utility to:
+   - Detect if uploaded file is ZIP or raw JSON
+   - Extract JSON files from ZIP archive
+   - Combine extracted presets into the existing `OrcaBundlePreview` format
+4. **TypeScript types** — `orcaProfiles.ts` needs no structural changes if we normalize ZIP contents to the same `OrcaBundlePreview` shape before hitting the API
+5. **UI messaging** — Update wizard text from "config bundle JSON" to include "or .orca_printer/.orca_filament bundle"
+
+### Backend Gaps
+
+1. **No actual import endpoint** — `POST /api/slicer/profiles/import/orca` (without `/preview`) doesn't exist. The frontend calls it, but it would 404.
+2. **No mapping endpoint** — `POST /api/slicer/profiles/import/orca/map` isn't routed. The `IOrcaPresetMappingService` interface exists but needs a controller action.
+3. **ZIP handling option** — Either:
+   - (A) Frontend extracts ZIP → sends JSON to existing endpoints (simpler, no backend changes for format)
+   - (B) Backend accepts multipart file upload → extracts ZIP server-side (more robust, handles large files better)
+
+### Recommended Approach
+
+**Frontend-side extraction** (Option A) is simpler and reuses all existing API contracts:
+1. Add `fflate` or `jszip` to React dependencies
+2. Create `orcaBundleExtractor.ts` utility that detects format and normalizes to JSON
+3. Update `OrcaImportWizard` to handle both formats transparently
+4. Fix the missing backend endpoints (import + map) as a separate task
+
+## Files That Need Work
+
+### Must Modify
+| File | Change |
+|---|---|
+| `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx` | Accept new file extensions, binary reading, ZIP extraction |
+| `src/Web/ReactApp/src/features/slicer/orca/services/orcaProfilesService.ts` | Possibly add format detection before calling preview |
+| `src/Web/ReactApp/package.json` | Add ZIP library dependency |
+| `src/slicer/Farm.Slicer.Module.Api/Controllers/Slicing/ProfilesController.cs` | Add missing `import/orca` and `import/orca/map` endpoints |
+
+### Must Create
+| File | Purpose |
+|---|---|
+| `src/Web/ReactApp/src/features/slicer/orca/utils/orcaBundleExtractor.ts` | ZIP detection + extraction + JSON normalization |
+| `src/Web/ReactApp/src/features/slicer/orca/types/orcaBundleFormats.ts` | Types for `.orca_printer`/`.orca_filament` internal structure (optional, could go in existing types file) |
+
+### Reusable As-Is
+| File | Why |
+|---|---|
+| `src/Web/ReactApp/src/features/slicer/components/import/*` | ImportConflictResolver, ImportMappingTable, ImportPreviewCard, ImportSummaryPanel all work with profile-type-agnostic data |
+| `src/Web/ReactApp/src/features/slicer/orca/types/orcaProfiles.ts` | All types remain valid — ZIP contents normalize to same shape |
+| `src/slicer/Farm.Slicer.Module/Services/OrcaBundleParsingService.cs` | Handles JSON parsing regardless of source — ZIP extraction feeds into this |
+| `src/slicer/Farm.Slicer.Module/Models/OrcaProfileModels.cs` | DTOs unchanged |

@@ -389,3 +389,35 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - `orcaProfilesService.ts` has 4 methods: previewBundle, importBundle, exportBundle, mapBundlePresets. The map endpoint (`/api/slicer/profiles/import/orca/map`) has no backend controller route — frontend calls it but backend doesn't implement it.
 - File upload in OrcaImportWizard only accepts `.json` (line 139). It reads the entire file as text via FileReader.readAsText. Binary/ZIP formats would need ArrayBuffer + decompression.
 - Import helper components exist at `features/slicer/components/import/` (ImportConflictResolver, ImportMappingTable, ImportPreviewCard, ImportSummaryPanel) — reusable for new bundle format wizards.
+
+
+## 2026-04-17: Slicer Import/Export Audit — Orca Bundle Formats
+
+**Role:** Frontend audit specialist
+**Session:** 2026-04-17T19:21:05Z  
+**Status:** ✅ Complete — Gap analysis documented, decision PFarm1-5duw created
+
+**Audit Focus:** Current PrintFarmer slicer import/export capabilities vs `.orca_printer` / `.orca_filament` bundle format requirements.
+
+**Findings Summary:**
+
+**Currently Working:**
+- OrcaSlicer JSON config bundle import (4-step wizard with preview)
+- Selective import (user picks which presets to import)
+- Single profile export as JSON
+- Full bundle export (JSON)
+- Preview endpoint (`POST /api/slicer/profiles/import/orca/preview`)
+
+**Missing for ZIP Bundle Support:**
+- Frontend: File input only accepts `.json` — need to add `.orca_printer,.orca_filament`
+- Frontend: `FileReader.readAsText()` won't work for ZIP — need `readAsArrayBuffer()` + library
+- Backend: Import persistence endpoint (`POST /api/slicer/profiles/import/orca`)
+- Backend: Mapping endpoint (`POST /api/slicer/profiles/import/orca/map`)
+
+**Recommended Approach:** Frontend-only ZIP extraction using library like `fflate` or `jszip`, normalizes to existing `OrcaBundlePreview` shape, reuses all existing APIs.
+
+**Deliverable:** Gap analysis with file-by-file implementation plan in `decisions.md`
+
+**Decision Created:** PFarm1-5duw — Support `.orca_printer` and `.orca_filament` bundle import
+
+**Handoff:** Implementation planning ready; coordinate with Brett's format specification for ZIP extraction logic.
