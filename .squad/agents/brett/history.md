@@ -115,3 +115,31 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 
 **Outcome:** `slicingEnabled=true` now reported correctly in microservices mode. Slicer UI visible in production deployment.
 
+## 2026-07-16: OrcaSlicer Bundle Format Research (.orca_printer / .orca_filament)
+
+**Role:** Research specialist  
+**Status:** ✅ Complete — Format specification delivered
+
+**Context:** Deep-dive into OrcaSlicer C++ source code (`/Users/jpapiez/s/Orca/orcaslicer/src/`) to reverse-engineer the `.orca_printer` and `.orca_filament` bundle formats for PrintFarmer import/export support.
+
+**Key Findings:**
+
+1. **Both formats are standard ZIP archives** — `.orca_printer` and `.orca_filament` are renamed ZIPs containing JSON preset files + a `bundle_structure.json` manifest
+2. **`.orca_printer`** bundles a printer preset + all associated filament presets + process presets, organized in `printer/`, `filament/`, `process/` subdirectories
+3. **`.orca_filament`** bundles filament variants grouped by printer vendor (e.g., `Creality/`, `Prusa/`), with a vendor-indexed manifest
+4. **Preset type detection** uses discriminator fields: `printer_settings_id` (printer), `print_settings_id` (process), `filament_settings_id` (filament)
+5. **`bundle_structure.json`** is metadata-only — OrcaSlicer skips it during import and auto-detects types from individual JSONs
+6. **Inheritance model:** Presets use `inherits` field referencing parent presets; some presets are incomplete without their parent
+7. **Values are strings even for numbers**, and multi-value fields use string arrays (e.g., `"nozzle_diameter": ["0.4"]`)
+
+**Key Source Files:**
+- `src/libslic3r/PresetBundle.cpp:958` — `import_presets()` (ZIP extraction + import logic)
+- `src/slic3r/GUI/CreatePresetsDialog.cpp:3907` — `archive_preset_bundle_to_file()` (.orca_printer export)
+- `src/slic3r/GUI/CreatePresetsDialog.cpp:4027` — `archive_filament_bundle_to_file()` (.orca_filament export)
+- `src/libslic3r/Preset.hpp:39-75` — JSON key constants
+- `src/libslic3r/PresetBundle.hpp:15` — `BUNDLE_STRUCTURE_JSON_NAME` = `"bundle_structure.json"`
+
+**No `.bbcfg` or `.orca_process` formats exist.** OrcaSlicer offers 5 export types: 2 bundles (.orca_printer, .orca_filament) and 3 plain zips (printer/filament/process presets).
+
+**Output:** Full format specification with schemas in `.squad/decisions/inbox/brett-orca-bundles.md`
+

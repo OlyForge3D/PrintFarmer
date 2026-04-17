@@ -385,3 +385,7 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - Array coercion trap: String([]) equals empty string in JS. Always handle empty arrays explicitly when coercing to string for display.
 - coPoints vs coPoint: coPoints is polygon/multi-point (array of XxY strings), coPoint is single X,Y pair rendered as dual number inputs.
 - MetadataProfileRenderer.tsx is the single renderer for all slicer profile fields. Changes to helpers like toString, parsePoint, toNumber, toBool affect ALL profile types.
+- OrcaSlicer bundle import/export is fully wired: frontend wizard at `features/slicer/orca/`, backend parsing at `Farm.Slicer.Module/Services/OrcaBundleParsingService.cs`. Currently only accepts `.json` config bundles. No `.orca_printer` or `.orca_filament` support yet — those are ZIP archives needing binary file handling.
+- `orcaProfilesService.ts` has 4 methods: previewBundle, importBundle, exportBundle, mapBundlePresets. The map endpoint (`/api/slicer/profiles/import/orca/map`) has no backend controller route — frontend calls it but backend doesn't implement it.
+- File upload in OrcaImportWizard only accepts `.json` (line 139). It reads the entire file as text via FileReader.readAsText. Binary/ZIP formats would need ArrayBuffer + decompression.
+- Import helper components exist at `features/slicer/components/import/` (ImportConflictResolver, ImportMappingTable, ImportPreviewCard, ImportSummaryPanel) — reusable for new bundle format wizards.
