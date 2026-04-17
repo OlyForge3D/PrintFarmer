@@ -195,7 +195,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         )}
         
         {/* Center: control */}
-        <div className="flex-1 min-w-0" title={tooltip}>
+        <div className="w-[30%] shrink-0" title={tooltip}>
           {renderControl()}
         </div>
 
