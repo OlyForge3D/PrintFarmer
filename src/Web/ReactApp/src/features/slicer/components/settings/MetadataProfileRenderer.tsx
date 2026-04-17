@@ -679,7 +679,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
                       {meta.label}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 w-[30%] shrink-0">
                     <div className="flex-1 flex items-center bg-pf-panel border border-pf-border rounded overflow-hidden">
                       <span className="px-1.5 text-xs text-pf-text-muted select-none">X</span>
                       <input
