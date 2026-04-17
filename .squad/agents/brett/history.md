@@ -143,3 +143,26 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 
 **Output:** Full format specification with schemas in `.squad/decisions/inbox/brett-orca-bundles.md`
 
+
+## 2026-04-17: OrcaSlicer Bundle Format Research Complete
+
+
+**Role:** Research specialist  
+**Session:** 2026-04-17T19:21:05Z  
+**Status:** ✅ Complete — Research documented, decision PFarm1-5duw created
+
+**Research Focus:** Full specification of `.orca_printer` and `.orca_filament` bundle formats to guide PrintFarmer import/export implementation.
+
+**Key Findings Summary:**
+- Both formats are ZIP archives with JSON presets + manifest
+- `.orca_printer` bundles printer + filaments + processes in subdirectories
+- `.orca_filament` bundles vendor-grouped filament variants
+- Import skips manifest, auto-detects preset types from discriminator fields
+- Values mostly strings; multi-value fields use string arrays
+- Inheritance chain support via `inherits` field
+
+**Deliverable:** Complete specification with schemas, export workflows, and implementation recommendations in `decisions.md`
+
+**Decision Created:** PFarm1-5duw — Support `.orca_printer` and `.orca_filament` bundle import
+
+**Handoff:** Ripley's gap analysis identifies missing frontend ZIP extraction and backend endpoint wiring; implementation planning ready.
