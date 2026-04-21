@@ -762,7 +762,9 @@ function STLModel({
   selected = false,
   outOfBounds = false,
   layFlatMode = false,
+  draggable = false,
   onClick,
+  onDragStart,
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
@@ -774,7 +776,9 @@ function STLModel({
   selected?: boolean;
   outOfBounds?: boolean;
   layFlatMode?: boolean;
+  draggable?: boolean;
   onClick?: () => void;
+  onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
   onSelectedMetrics?: (metrics: {
     baseSize: [number, number, number];
@@ -853,10 +857,24 @@ function STLModel({
         onPointerDown={(e) => {
           e.stopPropagation();
           onClick?.();
+          if (draggable && onDragStart) {
+            onDragStart(e.nativeEvent.clientX, e.nativeEvent.clientY);
+          }
         }}
         onClick={(e) => {
           e.stopPropagation();
           onClick?.();
+        }}
+        onPointerOver={(e) => {
+          if (draggable) {
+            e.stopPropagation();
+            document.body.style.cursor = 'grab';
+          }
+        }}
+        onPointerOut={() => {
+          if (draggable) {
+            document.body.style.cursor = '';
+          }
         }}
         castShadow
         receiveShadow
@@ -1006,6 +1024,185 @@ function ModelTransformControls({
 }
 
 /**
+ * Drag-to-move on the XY build plate.
+ * Raycasts pointer against an invisible Z=0 plane and updates model position.
+ */
+function useBuildPlateDrag({
+  bedConfig,
+  models,
+  orbitRef,
+  onModelTransform,
+  layFlatMode,
+  transformMode,
+}: {
+  bedConfig: BedConfig;
+  models: LoadedModel[];
+  orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
+  onModelTransform?: SlicerBedVisualizationProps['onModelTransform'];
+  layFlatMode: boolean;
+  transformMode?: 'translate' | 'rotate' | 'scale' | null;
+}) {
+  const { camera, gl, invalidate } = useThree();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const xyPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), []);
+  const DRAG_THRESHOLD_PX = 3;
+
+  const dragStateRef = useRef<{
+    modelId: string;
+    startPosition: [number, number, number];
+    offset: THREE.Vector3;
+    committed: boolean;
+    startClientX: number;
+    startClientY: number;
+  } | null>(null);
+
+  const justDraggedRef = useRef(false);
+
+  // Mutable refs to avoid stale closures in DOM event handlers
+  const modelsRef = useRef(models);
+  const transformCbRef = useRef(onModelTransform);
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
+  useEffect(() => {
+    transformCbRef.current = onModelTransform;
+  }, [onModelTransform]);
+
+  const getPlaneIntersection = useCallback(
+    (clientX: number, clientY: number): THREE.Vector3 | null => {
+      const rect = gl.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+      const target = new THREE.Vector3();
+      return raycaster.ray.intersectPlane(xyPlane, target) ? target : null;
+    },
+    [camera, gl.domElement, raycaster, xyPlane],
+  );
+
+  const startDrag = useCallback(
+    (modelId: string, clientX: number, clientY: number) => {
+      if (layFlatMode) return;
+      if (transformMode === 'rotate' || transformMode === 'scale') return;
+
+      const model = modelsRef.current.find((m) => m.id === modelId);
+      if (!model) return;
+
+      const hit = getPlaneIntersection(clientX, clientY);
+      if (!hit) return;
+
+      dragStateRef.current = {
+        modelId,
+        startPosition: [...model.position] as [number, number, number],
+        offset: new THREE.Vector3(
+          model.position[0] - hit.x,
+          model.position[1] - hit.y,
+          0,
+        ),
+        committed: false,
+        startClientX: clientX,
+        startClientY: clientY,
+      };
+    },
+    [getPlaneIntersection, layFlatMode, transformMode],
+  );
+
+  useEffect(() => {
+    const el = gl.domElement;
+    const orbit = orbitRef.current;
+
+    const onPointerMove = (e: PointerEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+
+      if (!drag.committed) {
+        const dx = e.clientX - drag.startClientX;
+        const dy = e.clientY - drag.startClientY;
+        if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
+        drag.committed = true;
+        if (orbit) orbit.enabled = false;
+        el.style.cursor = 'grabbing';
+      }
+
+      const hit = getPlaneIntersection(e.clientX, e.clientY);
+      if (!hit) return;
+
+      const halfW = bedConfig.width / 2;
+      const halfD = bedConfig.depth / 2;
+      const nx = Math.max(-halfW, Math.min(halfW, hit.x + drag.offset.x));
+      const ny = Math.max(-halfD, Math.min(halfD, hit.y + drag.offset.y));
+
+      const model = modelsRef.current.find((m) => m.id === drag.modelId);
+      if (!model) return;
+
+      transformCbRef.current?.(
+        drag.modelId,
+        [nx, ny, drag.startPosition[2]],
+        model.rotation,
+        model.scale,
+        { recordHistory: false, actionLabel: 'Drag Move' },
+      );
+      invalidate();
+    };
+
+    const onPointerUp = () => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+
+      if (drag.committed) {
+        if (orbit) orbit.enabled = true;
+        el.style.cursor = '';
+
+        const model = modelsRef.current.find((m) => m.id === drag.modelId);
+        if (model) {
+          transformCbRef.current?.(
+            drag.modelId,
+            model.position,
+            model.rotation,
+            model.scale,
+            {
+              recordHistory: true,
+              actionLabel: 'Move Model',
+              historyBefore: {
+                position: drag.startPosition,
+                rotation: model.rotation,
+                scale: model.scale,
+              },
+            },
+          );
+        }
+
+        justDraggedRef.current = true;
+        requestAnimationFrame(() => {
+          justDraggedRef.current = false;
+        });
+      }
+
+      dragStateRef.current = null;
+    };
+
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', onPointerUp);
+    el.addEventListener('pointerleave', onPointerUp);
+
+    return () => {
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointerleave', onPointerUp);
+      if (dragStateRef.current?.committed) {
+        if (orbit) orbit.enabled = true;
+        el.style.cursor = '';
+      }
+      dragStateRef.current = null;
+    };
+  }, [bedConfig.depth, bedConfig.width, getPlaneIntersection, gl.domElement, invalidate, orbitRef]);
+
+  return { startDrag, justDraggedRef };
+}
+
+/**
  * Main scene content
  */
 function BedScene({
@@ -1026,6 +1223,15 @@ function BedScene({
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Object3D>(null);
+
+  const { startDrag, justDraggedRef } = useBuildPlateDrag({
+    bedConfig,
+    models,
+    orbitRef,
+    onModelTransform,
+    layFlatMode,
+    transformMode,
+  });
 
   const dragStartTransformRef = useRef<{
     position: [number, number, number];
@@ -1093,9 +1299,10 @@ function BedScene({
 
   // Deselect when clicking the bed/background
   const handlePointerMissed = useCallback(() => {
+    if (justDraggedRef.current) return;
     onModelSelect?.(null);
     onSelectedModelMetricsChange?.(null);
-  }, [onModelSelect, onSelectedModelMetricsChange]);
+  }, [justDraggedRef, onModelSelect, onSelectedModelMetricsChange]);
 
   useEffect(() => {
     if (!selectedModelId) {
@@ -1294,7 +1501,9 @@ function BedScene({
                 selected={model.id === selectedModelId}
                 outOfBounds={outOfBoundsModelIds?.has(model.id)}
                 layFlatMode={model.id === selectedModelId && layFlatMode}
+                draggable={!layFlatMode && transformMode !== 'rotate' && transformMode !== 'scale'}
                 onClick={() => onModelSelect?.(model.id)}
+                onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                 onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
                 meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
                 onSelectedMetrics={model.id === selectedModelId
