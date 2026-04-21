@@ -2045,6 +2045,19 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Dispatch a job to a specific printer, bypassing the scorer's material compatibility check.
+   * Used when the operator explicitly overrides a material mismatch.
+   */
+  async dispatchJobToPrinter(jobId: string, printerId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+      `/job-queue/${jobId}/dispatch-to`,
+      { printerId },
+      { timeout: 0 }
+    );
+    return response.data;
+  }
+
   // ============ Dispatch history ============
 
   async getDispatchHistory(page: number = 1, pageSize: number = 20): Promise<DispatchHistoryPageDto> {
