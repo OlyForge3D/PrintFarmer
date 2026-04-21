@@ -3,7 +3,7 @@
  * Supports slider, select, radio, and checkbox control types
  * Includes change tracking with reset-to-original functionality
  */
-import React, { useId } from 'react';
+import React, { useId, useState, useRef, useEffect, useCallback } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
 
 /** Reset icon - circular arrow matching OrcaSlicer's style */
@@ -313,8 +313,20 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
   options,
   disabled,
 }) => {
-  const selectedOption = options.find(o => o.value === value);
-  
+  const hasIcons = options.some(o => o.icon);
+
+  if (hasIcons) {
+    return (
+      <IconSelectDropdown
+        id={id}
+        value={value}
+        onChange={onChange}
+        options={options}
+        disabled={disabled}
+      />
+    );
+  }
+
   return (
     <div className="relative">
       {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom OrcaSlicer-style dropdown with icon preview */}
@@ -334,19 +346,150 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
           </option>
         ))}
       </select>
-      
+
       {/* Custom dropdown arrow */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
         <svg className="w-4 h-4 text-pf-text-muted" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
         </svg>
       </div>
-      
-      {/* Selected option icon preview */}
-      {selectedOption?.icon && (
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-pf-accent-2">
-          {selectedOption.icon}
-        </div>
+    </div>
+  );
+};
+
+/**
+ * Custom dropdown that renders icons alongside labels in the option list.
+ * Used by SelectControl when any option has an icon.
+ */
+const IconSelectDropdown: React.FC<{
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string; icon?: React.ReactNode }>;
+  disabled?: boolean;
+}> = ({ id, value, onChange, options, disabled }) => {
+  const [open, setOpen] = useState(false);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const selectedOption = options.find(o => o.value === value);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Scroll highlighted option into view
+  useEffect(() => {
+    if (!open || highlightIdx < 0) return;
+    const list = listRef.current;
+    const item = list?.children[highlightIdx] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: 'nearest' });
+  }, [open, highlightIdx]);
+
+  const select = useCallback((val: string) => {
+    onChange(val);
+    setOpen(false);
+  }, [onChange]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        if (!open) { setOpen(true); setHighlightIdx(options.findIndex(o => o.value === value)); }
+        else setHighlightIdx(i => Math.min(i + 1, options.length - 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        if (open) setHighlightIdx(i => Math.max(i - 1, 0));
+        break;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        if (open && highlightIdx >= 0) select(options[highlightIdx].value);
+        else { setOpen(true); setHighlightIdx(options.findIndex(o => o.value === value)); }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setOpen(false);
+        break;
+      case 'Home':
+        if (open) { e.preventDefault(); setHighlightIdx(0); }
+        break;
+      case 'End':
+        if (open) { e.preventDefault(); setHighlightIdx(options.length - 1); }
+        break;
+    }
+  }, [open, highlightIdx, options, value, select]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom combobox trigger with ARIA role/expanded/haspopup attributes */}
+      <button
+        id={id}
+        type="button"
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls={`${id}-list`}
+        disabled={disabled}
+        onClick={() => { if (!disabled) { setOpen(o => !o); setHighlightIdx(options.findIndex(o => o.value === value)); } }}
+        onKeyDown={handleKeyDown}
+        className="w-full flex items-center gap-1.5 px-2 py-1 bg-pf-panel border border-pf-border rounded-lg
+                   text-pf-text text-xs cursor-pointer text-left
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {selectedOption?.icon && <span className="shrink-0">{selectedOption.icon}</span>}
+        <span className="truncate flex-1">{selectedOption?.label ?? value}</span>
+        <svg className="w-4 h-4 text-pf-text-muted shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>
+      </button>
+
+      {/* Dropdown list */}
+      {open && (
+        <ul
+          ref={listRef}
+          id={`${id}-list`}
+          role="listbox"
+          aria-activedescendant={highlightIdx >= 0 ? `${id}-opt-${highlightIdx}` : undefined}
+          className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-lg border border-pf-border
+                     bg-pf-bg-1 shadow-lg py-1"
+        >
+          {options.map((opt, idx) => {
+            const isSelected = opt.value === value;
+            const isHighlighted = idx === highlightIdx;
+            return (
+              <li
+                key={opt.value}
+                id={`${id}-opt-${idx}`}
+                role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => setHighlightIdx(idx)}
+                onMouseDown={(e) => { e.preventDefault(); select(opt.value); }}
+                className={`flex items-center gap-2 px-2 py-1 cursor-pointer text-xs
+                  ${isHighlighted ? 'bg-pf-accent-2/15 text-pf-text' : 'text-pf-text'}
+                  ${isSelected ? 'font-medium' : ''}`}
+              >
+                {opt.icon && <span className="shrink-0">{opt.icon}</span>}
+                <span className="truncate">{opt.label}</span>
+                {isSelected && (
+                  <svg className="w-3 h-3 ml-auto text-pf-accent-2 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

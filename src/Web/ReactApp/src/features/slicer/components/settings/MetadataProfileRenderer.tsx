@@ -8,6 +8,7 @@ import React, { useState, useMemo } from 'react';
 import { Button, Textarea } from '@/common/components/ui';
 import { SettingRow, SectionHeader, ResetIcon } from './SettingRow';
 import { useSlicerViewMode } from '../../hooks/useSlicerViewMode';
+import { getInfillIcon } from './InfillPatternIcons';
 import metadata from '../../generated/orcaSettingsMetadata.json';
 
 // ── Metadata type definitions ───────────────────────────────────────────
@@ -33,52 +34,52 @@ export interface SettingMetadata {
  * top/bottom_surface_pattern, and internal_solid_infill_pattern.
  * Values sourced from OrcaSlicer PrintConfig.cpp s_keys_map_InfillPattern.
  */
-const INFILL_PATTERNS: Array<{ value: string; label: string }> = [
-  { value: 'rectilinear', label: 'Rectilinear' },
-  { value: 'alignedrectilinear', label: 'Aligned Rectilinear' },
-  { value: 'monotonic', label: 'Monotonic' },
-  { value: 'monotonicline', label: 'Monotonic Lines' },
-  { value: 'concentric', label: 'Concentric' },
-  { value: 'grid', label: 'Grid' },
-  { value: 'triangles', label: 'Triangles' },
-  { value: 'tri-hexagon', label: 'Tri-Hexagon' },
-  { value: 'cubic', label: 'Cubic' },
-  { value: 'adaptivecubic', label: 'Adaptive Cubic' },
-  { value: 'quartercubic', label: 'Quarter Cubic' },
-  { value: 'supportcubic', label: 'Support Cubic' },
-  { value: 'lightning', label: 'Lightning' },
-  { value: 'line', label: 'Line' },
-  { value: 'honeycomb', label: 'Honeycomb' },
-  { value: '3dhoneycomb', label: '3D Honeycomb' },
-  { value: 'lateral-honeycomb', label: 'Lateral Honeycomb' },
-  { value: 'lateral-lattice', label: 'Lateral Lattice' },
-  { value: 'crosshatch', label: 'Cross Hatch' },
-  { value: 'zigzag', label: 'Zig-Zag' },
-  { value: 'crosszag', label: 'Cross-Zag' },
-  { value: 'lockedzag', label: 'Locked-Zag' },
-  { value: 'gyroid', label: 'Gyroid' },
-  { value: 'hilbertcurve', label: 'Hilbert Curve' },
-  { value: 'archimedeanchords', label: 'Archimedean Chords' },
-  { value: 'octagramspiral', label: 'Octagram Spiral' },
-  { value: 'tpmsd', label: 'TPMS-D' },
-  { value: 'tpmsfk', label: 'TPMS-FK' },
+const INFILL_PATTERNS: Array<{ value: string; label: string; icon?: React.ReactNode }> = [
+  { value: 'rectilinear', label: 'Rectilinear', icon: getInfillIcon('rectilinear') },
+  { value: 'alignedrectilinear', label: 'Aligned Rectilinear', icon: getInfillIcon('alignedrectilinear') },
+  { value: 'monotonic', label: 'Monotonic', icon: getInfillIcon('monotonic') },
+  { value: 'monotonicline', label: 'Monotonic Lines', icon: getInfillIcon('monotonicline') },
+  { value: 'concentric', label: 'Concentric', icon: getInfillIcon('concentric') },
+  { value: 'grid', label: 'Grid', icon: getInfillIcon('grid') },
+  { value: 'triangles', label: 'Triangles', icon: getInfillIcon('triangles') },
+  { value: 'tri-hexagon', label: 'Tri-Hexagon', icon: getInfillIcon('tri-hexagon') },
+  { value: 'cubic', label: 'Cubic', icon: getInfillIcon('cubic') },
+  { value: 'adaptivecubic', label: 'Adaptive Cubic', icon: getInfillIcon('adaptivecubic') },
+  { value: 'quartercubic', label: 'Quarter Cubic', icon: getInfillIcon('quartercubic') },
+  { value: 'supportcubic', label: 'Support Cubic', icon: getInfillIcon('supportcubic') },
+  { value: 'lightning', label: 'Lightning', icon: getInfillIcon('lightning') },
+  { value: 'line', label: 'Line', icon: getInfillIcon('line') },
+  { value: 'honeycomb', label: 'Honeycomb', icon: getInfillIcon('honeycomb') },
+  { value: '3dhoneycomb', label: '3D Honeycomb', icon: getInfillIcon('3dhoneycomb') },
+  { value: 'lateral-honeycomb', label: 'Lateral Honeycomb', icon: getInfillIcon('lateral-honeycomb') },
+  { value: 'lateral-lattice', label: 'Lateral Lattice', icon: getInfillIcon('lateral-lattice') },
+  { value: 'crosshatch', label: 'Cross Hatch', icon: getInfillIcon('crosshatch') },
+  { value: 'zigzag', label: 'Zig-Zag', icon: getInfillIcon('zigzag') },
+  { value: 'crosszag', label: 'Cross-Zag', icon: getInfillIcon('crosszag') },
+  { value: 'lockedzag', label: 'Locked-Zag', icon: getInfillIcon('lockedzag') },
+  { value: 'gyroid', label: 'Gyroid', icon: getInfillIcon('gyroid') },
+  { value: 'hilbertcurve', label: 'Hilbert Curve', icon: getInfillIcon('hilbertcurve') },
+  { value: 'archimedeanchords', label: 'Archimedean Chords', icon: getInfillIcon('archimedeanchords') },
+  { value: 'octagramspiral', label: 'Octagram Spiral', icon: getInfillIcon('octagramspiral') },
+  { value: 'tpmsd', label: 'TPMS-D', icon: getInfillIcon('tpmsd') },
+  { value: 'tpmsfk', label: 'TPMS-FK', icon: getInfillIcon('tpmsfk') },
 ];
 
 /** Surface-specific patterns (top/bottom/internal solid) */
-const SURFACE_PATTERNS: Array<{ value: string; label: string }> = [
-  { value: 'monotonic', label: 'Monotonic' },
-  { value: 'monotonicline', label: 'Monotonic Lines' },
-  { value: 'concentric', label: 'Concentric' },
-  { value: 'rectilinear', label: 'Rectilinear' },
-  { value: 'alignedrectilinear', label: 'Aligned Rectilinear' },
-  { value: 'hilbertcurve', label: 'Hilbert Curve' },
-  { value: 'archimedeanchords', label: 'Archimedean Chords' },
-  { value: 'octagramspiral', label: 'Octagram Spiral' },
-  { value: 'zigzag', label: 'Zig-Zag' },
+const SURFACE_PATTERNS: Array<{ value: string; label: string; icon?: React.ReactNode }> = [
+  { value: 'monotonic', label: 'Monotonic', icon: getInfillIcon('monotonic') },
+  { value: 'monotonicline', label: 'Monotonic Lines', icon: getInfillIcon('monotonicline') },
+  { value: 'concentric', label: 'Concentric', icon: getInfillIcon('concentric') },
+  { value: 'rectilinear', label: 'Rectilinear', icon: getInfillIcon('rectilinear') },
+  { value: 'alignedrectilinear', label: 'Aligned Rectilinear', icon: getInfillIcon('alignedrectilinear') },
+  { value: 'hilbertcurve', label: 'Hilbert Curve', icon: getInfillIcon('hilbertcurve') },
+  { value: 'archimedeanchords', label: 'Archimedean Chords', icon: getInfillIcon('archimedeanchords') },
+  { value: 'octagramspiral', label: 'Octagram Spiral', icon: getInfillIcon('octagramspiral') },
+  { value: 'zigzag', label: 'Zig-Zag', icon: getInfillIcon('zigzag') },
 ];
 
 /** Known enum options for settings that use select dropdowns */
-const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string }>> = {
+const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; icon?: React.ReactNode }>> = {
   // ── Machine settings ────────────────────────────────────────────────
   printer_structure: [
     { value: 'undefine', label: 'Undefined' },
