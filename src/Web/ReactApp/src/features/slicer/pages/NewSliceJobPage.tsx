@@ -1224,7 +1224,7 @@ export const NewSliceJobPage: React.FC = () => {
       requiredCapabilitiesJson: '[]',
       priority: 1,
       modelTransformJson: bedModels[0]
-        ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale })
+        ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale, position: bedModels[0].position })
         : undefined,
     };
 
