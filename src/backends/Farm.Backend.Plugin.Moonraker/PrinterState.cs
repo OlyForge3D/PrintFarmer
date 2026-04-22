@@ -28,6 +28,8 @@ internal sealed class PrinterState
 
     public double? Progress { get; set; }
 
+    public double? PrintDuration { get; set; }
+
     public string? JobName { get; set; }
 
     public string? HomedAxes { get; set; }

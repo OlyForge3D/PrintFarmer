@@ -250,7 +250,8 @@ public sealed class PrusaLinkPollingService(
                         BedTemp: status.BedTemp,
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
-                        SpoolInfo: spoolInfo);
+                        SpoolInfo: spoolInfo,
+                        PrintTimeLeftSeconds: status.TimeRemainingSeconds);
 
                     // Update cache before broadcasting to clients
                     _statusCacheWriter.UpdateStatus(update);

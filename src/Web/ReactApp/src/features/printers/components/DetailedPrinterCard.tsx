@@ -16,6 +16,7 @@ import { FilamentControlSection } from '@/features/printers/components/FilamentC
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
@@ -586,6 +587,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           showTemperatures={false}
         />
       </div>
+
+      {(isPrinting || isPaused) && printer.estimatedCompletionTimeUtc && (
+        <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} className="mb-3" />
+      )}
 
       {(isPrinting || isPaused) && (
         <FailureDetectionMonitoringSummary

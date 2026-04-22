@@ -17,6 +17,7 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
+import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
@@ -232,6 +233,10 @@ export function CompactPrinterCard({
               queueLabel={queueLabel}
             />
           </div>
+
+          {(isPrinting || isPaused) && printer.estimatedCompletionTimeUtc && (
+            <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} />
+          )}
 
           {(isPrinting || isPaused) && (
             <FailureDetectionMonitoringSummary

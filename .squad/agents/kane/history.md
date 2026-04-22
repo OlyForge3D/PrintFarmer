@@ -79,6 +79,28 @@ Wrote regression tests for two P1 bugs identified by code review gate in the mul
 
 **Key file:** `src/tests/Farm.Web.Api.Tests/Services/ToolheadUsageCompletionRegressionTests.cs`
 
+## 2026-07-18: Spool Label Generator — Feature Implementation
+
+**Role:** Full-stack developer (feature implementation)  
+**Status:** ✅ Complete — pushed to `feature/orcaslicer-full-ui-parity`
+
+Implemented the spool label generator feature (PFarm1-e5f3.2):
+- Created `SpoolLabelModal.tsx` with QR code generation via `qrcode` npm package
+- Two label formats: Small (62mm DYMO) and A4 (8-up 2×4 grid)
+- Print-optimized output via browser print dialog with `@page` CSS
+- Label includes QR code, material name, vendor, color swatch with hex, weight, spool ID
+- Added TagIcon "Print Label" action to both SpoolCard and SpoolTableView
+- Wired modal state in SpoolsTab following existing modal patterns
+- Used ref callback for QR canvas generation to avoid ESLint `set-state-in-effect` violation
+
+**Key files:**
+- `src/Web/ReactApp/src/features/filamentManagement/components/SpoolLabelModal.tsx` (new)
+- `src/Web/ReactApp/src/features/filamentManagement/components/SpoolCard.tsx` (modified)
+- `src/Web/ReactApp/src/features/filamentManagement/components/SpoolTableView.tsx` (modified)
+- `src/Web/ReactApp/src/features/filamentManagement/components/SpoolsTab.tsx` (modified)
+
+**Quality gates:** ✅ Build (0 errors), ✅ Lint (0 errors), ✅ Tests (1822/1822 pass)
+
 **Validation:** Build 0 errors/0 warnings, 5/5 tests PASS (9.6s).
 
 ## 2026-03-26: Failure Detection Incident History Test Coverage & QA Gate → APPROVED

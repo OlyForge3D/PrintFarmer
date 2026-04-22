@@ -78,7 +78,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 status?.Printer?.TargetBed,
                 status?.Printer?.AxisX,
                 status?.Printer?.AxisY,
-                status?.Printer?.AxisZ);
+                status?.Printer?.AxisZ,
+                job?.TimeRemaining);
         }
         catch (Exception ex)
         {
