@@ -161,14 +161,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
         // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
         // --ensure-on-bed: lift objects partially below Z=0
-        string transformFlags = BuildTransformFlags(job.ModelTransformJson);
+        TransformResult transform = BuildTransformFlags(job.ModelTransformJson);
+        string arrangeFlag = transform.HasCustomPosition ? "--arrange 0" : "--arrange 1";
 
         // Create a named pipe for real-time progress from OrcaSlicer
         string pipePath = Path.Combine(workDir, "progress.pipe");
         bool pipeCreated = TryCreateNamedPipe(pipePath);
         string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
 
-        string arguments = $"--slice 0 --arrange 1 --ensure-on-bed{transformFlags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transform.Flags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
@@ -586,16 +587,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static partial Regex MyRegex();
 
     /// <summary>
-    /// Parse model transform JSON from the UI and build OrcaSlicer CLI rotation/scale flags.
-    /// Input: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} — radians, Y-up (Three.js/R3F).
-    /// Output: OrcaSlicer flags in degrees, Z-up.
-    /// Axis mapping: R3F X → --rotate-x, R3F Y (up) → --rotate (Z), R3F Z → --rotate-y.
+    /// Parsed transform result: CLI flags and whether a custom position was specified.
+    /// When <see cref="HasCustomPosition"/> is true, callers should use --arrange 0
+    /// instead of --arrange 1 so OrcaSlicer respects the explicit placement.
     /// </summary>
-    internal static string BuildTransformFlags(string? modelTransformJson)
+    internal readonly record struct TransformResult(string Flags, bool HasCustomPosition);
+
+    /// <summary>
+    /// Parse model transform JSON from the UI and build OrcaSlicer CLI transform flags.
+    /// Input: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz],"position":[px,py,pz]}
+    ///   — radians for rotation, Y-up coordinate system (Three.js/R3F).
+    /// Output: OrcaSlicer flags in degrees, Z-up.
+    /// Axis mapping (rotation): R3F X → --rotate-x, R3F Y (up) → --rotate (Z), R3F Z → --rotate-y.
+    /// Axis mapping (position):  R3F X → OrcaSlicer X, R3F Z → OrcaSlicer Y (bed plane).
+    /// </summary>
+    internal static TransformResult BuildTransformFlags(string? modelTransformJson)
     {
         if (string.IsNullOrWhiteSpace(modelTransformJson))
         {
-            return string.Empty;
+            return new TransformResult(string.Empty, false);
         }
 
         try
@@ -603,6 +613,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             using JsonDocument doc = JsonDocument.Parse(modelTransformJson);
             JsonElement root = doc.RootElement;
             StringBuilder flags = new();
+            bool hasCustomPosition = false;
 
             if (root.TryGetProperty("rotation", out JsonElement rotEl) && rotEl.ValueKind == JsonValueKind.Array)
             {
@@ -661,11 +672,38 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
             }
 
-            return flags.ToString();
+            // Position: Three.js Y-up → OrcaSlicer Z-up bed plane.
+            // R3F position [px, py, pz] where XZ is the bed plane.
+            // OrcaSlicer --center x,y where XY is the bed plane.
+            // Mapping: orca X = r3f X, orca Y = r3f Z.
+            if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
+            {
+                double[] pos = new double[3];
+                int i = 0;
+                foreach (JsonElement el in posEl.EnumerateArray())
+                {
+                    if (i < 3)
+                    {
+                        pos[i++] = el.GetDouble();
+                    }
+                }
+
+                const double epsilon = 0.001;
+                double bedX = pos[0]; // R3F X → OrcaSlicer X
+                double bedY = pos[2]; // R3F Z → OrcaSlicer Y
+
+                if (Math.Abs(bedX) > epsilon || Math.Abs(bedY) > epsilon)
+                {
+                    hasCustomPosition = true;
+                    flags.Append(CultureInfo.InvariantCulture, $" --center {bedX:F2},{bedY:F2}");
+                }
+            }
+
+            return new TransformResult(flags.ToString(), hasCustomPosition);
         }
         catch (JsonException)
         {
-            return string.Empty;
+            return new TransformResult(string.Empty, false);
         }
     }
 
