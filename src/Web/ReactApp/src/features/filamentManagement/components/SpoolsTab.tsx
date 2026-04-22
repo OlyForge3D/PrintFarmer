@@ -29,6 +29,7 @@ import { SpoolTableView } from '@/features/filamentManagement/components/SpoolTa
 import { EditSpoolModal } from '@/features/filamentManagement/components/EditSpoolModal';
 import { AddSpoolModal } from '@/features/filamentManagement/components/AddSpoolModal';
 import { BulkEditSpoolsModal } from '@/features/filamentManagement/components/BulkEditSpoolsModal';
+import { SpoolLabelModal } from '@/features/filamentManagement/components/SpoolLabelModal';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { useDeleteSpool, useBulkDeleteSpools, useImportSpoolmanSpoolsCsv } from '@/common/hooks/useApi';
 import { formatSpoolWeight, getUsagePercentage, getRemainingPercentage } from '@/features/filamentManagement/utils/formatters';
@@ -106,6 +107,7 @@ export function SpoolsTab() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [cloningSpool, setCloningSpool] = useState<SpoolmanSpoolDto | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single'; spool: SpoolmanSpoolDto } | { type: 'bulk' } | null>(null);
+  const [labelSpool, setLabelSpool] = useState<SpoolmanSpoolDto | null>(null);
   const deleteSpoolMutation = useDeleteSpool();
   const bulkDeleteMutation = useBulkDeleteSpools();
 
@@ -891,6 +893,7 @@ export function SpoolsTab() {
                   onEdit={() => setEditingSpool(spool)}
                   onClone={() => setCloningSpool(spool)}
                   onDelete={() => setDeleteConfirm({ type: 'single', spool })}
+                  onPrintLabel={() => setLabelSpool(spool)}
                 />
               ))}
             </div>
@@ -909,6 +912,7 @@ export function SpoolsTab() {
               onEdit={(s) => setEditingSpool(s)}
               onClone={(s) => setCloningSpool(s)}
               onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
+              onPrintLabel={(s) => setLabelSpool(s)}
             />
           )}
           {displayedSpools.length === 0 && (totalCount > 0 || hasActiveSpoolFilters) && (
@@ -951,6 +955,13 @@ export function SpoolsTab() {
         onClose={() => setIsBulkEditOpen(false)}
         selectedIds={[...selectedIds]}
         onSuccess={reload}
+      />
+
+      {/* Print Label Modal */}
+      <SpoolLabelModal
+        isOpen={labelSpool !== null}
+        onClose={() => setLabelSpool(null)}
+        spool={labelSpool}
       />
 
       {/* Delete Confirmation Modal */}
