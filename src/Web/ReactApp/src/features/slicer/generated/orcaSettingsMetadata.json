@@ -2,10 +2,10 @@
   "_meta": {
     "source": "OrcaSlicer PrintConfig.cpp + Tab.cpp",
     "generator": "tools/extract-orca-metadata.py",
-    "totalSettings": 781,
-    "filamentSettings": 108,
+    "totalSettings": 798,
+    "filamentSettings": 110,
     "machineSettings": 125,
-    "processSettings": 344
+    "processSettings": 347
   },
   "filament": {
     "tabs": [
@@ -322,7 +322,15 @@
                 "compound": false
               },
               {
+                "key": "activate_air_filtration_during_print",
+                "compound": true
+              },
+              {
                 "key": "during_print_exhaust_fan_speed",
+                "compound": true
+              },
+              {
+                "key": "activate_air_filtration_on_completion",
                 "compound": true
               },
               {
@@ -541,6 +549,24 @@
         "tooltip": "Activate for better air filtration. G-code command: M106 P3 S(0-255)",
         "mode": "simple",
         "default": "false"
+      },
+      "activate_air_filtration_during_print": {
+        "key": "activate_air_filtration_during_print",
+        "type": "bool",
+        "coType": "coBools",
+        "label": "During print",
+        "tooltip": "Enable this to override the fan speed set in custom G-code during print.",
+        "mode": "simple",
+        "default": "true"
+      },
+      "activate_air_filtration_on_completion": {
+        "key": "activate_air_filtration_on_completion",
+        "type": "bool",
+        "coType": "coBools",
+        "label": "On completion",
+        "tooltip": "Enable this to override the fan speed set in custom G-code after print completion.",
+        "mode": "simple",
+        "default": "true"
       },
       "activate_chamber_temp_control": {
         "key": "activate_chamber_temp_control",
@@ -906,8 +932,9 @@
         "key": "filament_extruder_variant",
         "type": "string",
         "coType": "coStrings",
-        "default": "Direct Drive Standard",
-        "label": "filament_extruder_variant"
+        "label": "Filament's extruder variant",
+        "tooltip": "Filament's extruder variant.",
+        "default": "Direct Drive Standard"
       },
       "filament_flow_ratio": {
         "key": "filament_flow_ratio",
@@ -1039,8 +1066,9 @@
         "key": "filament_map_mode",
         "type": "enum",
         "coType": "coEnum",
-        "mode": "advanced",
-        "label": "filament_map_mode"
+        "label": "filament mapping mode",
+        "tooltip": "Filament mapping mode used as plate param.",
+        "mode": "advanced"
       },
       "filament_max_volumetric_speed": {
         "key": "filament_max_volumetric_speed",
@@ -1138,8 +1166,9 @@
         "key": "filament_self_index",
         "type": "int",
         "coType": "coInts",
-        "default": "1",
-        "label": "filament_self_index"
+        "label": "Filament self index",
+        "tooltip": "Filament self index.",
+        "default": "1"
       },
       "filament_settings_id": {
         "key": "filament_settings_id",
@@ -2625,78 +2654,222 @@
         "mode": "advanced",
         "default": "0.0"
       },
+      "machine_max_acceleration_e": {
+        "key": "machine_max_acceleration_e",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration E",
+        "tooltip": "Maximum acceleration of the E axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "5000., 5000"
+      },
       "machine_max_acceleration_extruding": {
         "key": "machine_max_acceleration_extruding",
         "type": "float",
         "coType": "coFloats",
+        "label": "Maximum acceleration for extruding",
         "tooltip": "Maximum acceleration for extruding (M204 P)",
         "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "simple",
         "category": "Machine limits",
-        "default": "1500., 1250",
-        "label": "Maximum acceleration for extruding"
+        "default": "1500., 1250"
       },
       "machine_max_acceleration_retracting": {
         "key": "machine_max_acceleration_retracting",
         "type": "float",
         "coType": "coFloats",
+        "label": "Maximum acceleration for retracting",
         "tooltip": "Maximum acceleration for retracting (M204 R)",
         "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "simple",
         "category": "Machine limits",
-        "default": "1500., 1250",
-        "label": "Maximum acceleration for retracting"
+        "default": "1500., 1250"
       },
       "machine_max_acceleration_travel": {
         "key": "machine_max_acceleration_travel",
         "type": "float",
         "coType": "coFloats",
+        "label": "Maximum acceleration for travel",
         "tooltip": "Maximum acceleration for travel (M204 T), it only applies to Marlin 2.",
         "unit": "mm/s\u00b2",
         "min": 0,
         "mode": "advanced",
         "category": "Machine limits",
-        "default": "0., 0",
-        "label": "Maximum acceleration for travel"
+        "default": "0., 0"
+      },
+      "machine_max_acceleration_x": {
+        "key": "machine_max_acceleration_x",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration X",
+        "tooltip": "Maximum acceleration of the X axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "1000., 1000"
+      },
+      "machine_max_acceleration_y": {
+        "key": "machine_max_acceleration_y",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration Y",
+        "tooltip": "Maximum acceleration of the Y axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "1000., 1000"
+      },
+      "machine_max_acceleration_z": {
+        "key": "machine_max_acceleration_z",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum acceleration Z",
+        "tooltip": "Maximum acceleration of the Z axis",
+        "unit": "mm/s\u00b2",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "500., 200"
+      },
+      "machine_max_jerk_e": {
+        "key": "machine_max_jerk_e",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk E",
+        "tooltip": "Maximum jerk of the E axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "2.5, 2.5"
+      },
+      "machine_max_jerk_x": {
+        "key": "machine_max_jerk_x",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk X",
+        "tooltip": "Maximum jerk of the X axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "10., 10"
+      },
+      "machine_max_jerk_y": {
+        "key": "machine_max_jerk_y",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk Y",
+        "tooltip": "Maximum jerk of the Y axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "10., 10"
+      },
+      "machine_max_jerk_z": {
+        "key": "machine_max_jerk_z",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum jerk Z",
+        "tooltip": "Maximum jerk of the Z axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "0.2, 0.4"
       },
       "machine_max_junction_deviation": {
         "key": "machine_max_junction_deviation",
         "type": "float",
         "coType": "coFloats",
+        "label": "Maximum Junction Deviation",
         "tooltip": "Maximum junction deviation (M205 J, only apply if JD > 0 for Marlin Firmware\\nIf your Marlin 2 printer uses Classic Jerk set this value to 0.)",
         "unit": "mm",
         "min": 0.0,
-        "max": 0.5,
+        "max": 0.3,
         "mode": "advanced",
         "category": "Machine limits",
-        "default": "0.01",
-        "label": "Maximum junction deviation"
+        "default": "0.01"
+      },
+      "machine_max_speed_e": {
+        "key": "machine_max_speed_e",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed E",
+        "tooltip": "Maximum speed of E axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "120., 120"
+      },
+      "machine_max_speed_x": {
+        "key": "machine_max_speed_x",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed X",
+        "tooltip": "Maximum speed of X axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "500., 200"
+      },
+      "machine_max_speed_y": {
+        "key": "machine_max_speed_y",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed Y",
+        "tooltip": "Maximum speed of Y axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "500., 200"
+      },
+      "machine_max_speed_z": {
+        "key": "machine_max_speed_z",
+        "type": "float",
+        "coType": "coFloats",
+        "label": "Maximum speed Z",
+        "tooltip": "Maximum speed of Z axis",
+        "unit": "mm/s",
+        "min": 0,
+        "mode": "simple",
+        "category": "Machine limits",
+        "default": "12., 12"
       },
       "machine_min_extruding_rate": {
         "key": "machine_min_extruding_rate",
         "type": "float",
         "coType": "coFloats",
+        "label": "Minimum speed for extruding",
         "tooltip": "Minimum speed for extruding (M205 S)",
         "unit": "mm/s",
         "min": 0,
         "mode": "developer",
         "category": "Machine limits",
-        "default": "0., 0",
-        "label": "Minimum speed for extruding"
+        "default": "0., 0"
       },
       "machine_min_travel_rate": {
         "key": "machine_min_travel_rate",
         "type": "float",
         "coType": "coFloats",
+        "label": "Minimum travel speed",
         "tooltip": "Minimum travel speed (M205 T)",
         "unit": "mm/s",
         "min": 0,
         "mode": "developer",
         "category": "Machine limits",
-        "default": "0., 0",
-        "label": "Minimum travel speed"
+        "default": "0., 0"
       },
       "machine_pause_gcode": {
         "key": "machine_pause_gcode",
@@ -2798,7 +2971,7 @@
         "tooltip": "The diameter of nozzle.",
         "unit": "mm",
         "max": 100,
-        "mode": "simple",
+        "mode": "advanced",
         "default": "0.4"
       },
       "nozzle_hrc": {
@@ -3044,7 +3217,7 @@
         "label": "Retraction Speed",
         "tooltip": "Speed for retracting filament from the nozzle.",
         "unit": "mm/s",
-        "mode": "simple",
+        "mode": "advanced",
         "default": "30"
       },
       "scan_first_layer": {
@@ -3397,150 +3570,6 @@
         "unit": "mm",
         "mode": "advanced",
         "default": "0"
-      },
-      "machine_max_speed_x": {
-        "key": "machine_max_speed_x",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum speed X",
-        "tooltip": "Maximum speed of X axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "500, 200"
-      },
-      "machine_max_acceleration_x": {
-        "key": "machine_max_acceleration_x",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum acceleration X",
-        "tooltip": "Maximum acceleration of the X axis",
-        "unit": "mm/s\u00b2",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "1000, 1000"
-      },
-      "machine_max_jerk_x": {
-        "key": "machine_max_jerk_x",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum jerk X",
-        "tooltip": "Maximum jerk of the X axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "10, 10"
-      },
-      "machine_max_speed_y": {
-        "key": "machine_max_speed_y",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum speed Y",
-        "tooltip": "Maximum speed of Y axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "500, 200"
-      },
-      "machine_max_acceleration_y": {
-        "key": "machine_max_acceleration_y",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum acceleration Y",
-        "tooltip": "Maximum acceleration of the Y axis",
-        "unit": "mm/s\u00b2",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "1000, 1000"
-      },
-      "machine_max_jerk_y": {
-        "key": "machine_max_jerk_y",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum jerk Y",
-        "tooltip": "Maximum jerk of the Y axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "10, 10"
-      },
-      "machine_max_speed_z": {
-        "key": "machine_max_speed_z",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum speed Z",
-        "tooltip": "Maximum speed of Z axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "12, 12"
-      },
-      "machine_max_acceleration_z": {
-        "key": "machine_max_acceleration_z",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum acceleration Z",
-        "tooltip": "Maximum acceleration of the Z axis",
-        "unit": "mm/s\u00b2",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "500, 200"
-      },
-      "machine_max_jerk_z": {
-        "key": "machine_max_jerk_z",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum jerk Z",
-        "tooltip": "Maximum jerk of the Z axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "0.2, 0.4"
-      },
-      "machine_max_speed_e": {
-        "key": "machine_max_speed_e",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum speed E",
-        "tooltip": "Maximum speed of E axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "120, 120"
-      },
-      "machine_max_acceleration_e": {
-        "key": "machine_max_acceleration_e",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum acceleration E",
-        "tooltip": "Maximum acceleration of the E axis",
-        "unit": "mm/s\u00b2",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "5000, 5000"
-      },
-      "machine_max_jerk_e": {
-        "key": "machine_max_jerk_e",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Maximum jerk E",
-        "tooltip": "Maximum jerk of the E axis",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "simple",
-        "category": "Machine limits",
-        "default": "2.5, 2.5"
       }
     }
   },
@@ -3879,15 +3908,15 @@
                 "compound": false
               },
               {
+                "key": "only_one_wall_first_layer",
+                "compound": false
+              },
+              {
                 "key": "only_one_wall_top",
                 "compound": false
               },
               {
                 "key": "min_width_top_surface",
-                "compound": false
-              },
-              {
-                "key": "only_one_wall_first_layer",
                 "compound": false
               },
               {
@@ -4357,6 +4386,10 @@
                 "compound": false
               },
               {
+                "key": "initial_layer_travel_acceleration",
+                "compound": false
+              },
+              {
                 "key": "top_surface_acceleration",
                 "compound": false
               },
@@ -4404,6 +4437,10 @@
               },
               {
                 "key": "initial_layer_jerk",
+                "compound": false
+              },
+              {
+                "key": "initial_layer_travel_jerk",
                 "compound": false
               },
               {
@@ -4933,6 +4970,10 @@
                 "compound": false
               },
               {
+                "key": "combine_brims",
+                "compound": false
+              },
+              {
                 "key": "brim_ears_max_angle",
                 "compound": false
               },
@@ -5331,6 +5372,16 @@
         "category": "Support",
         "default": "0"
       },
+      "combine_brims": {
+        "key": "combine_brims",
+        "type": "bool",
+        "coType": "coBool",
+        "label": "Combine brims",
+        "tooltip": "Combine multiple brims into one when they are close to each other. This can improve brim adhesion.",
+        "mode": "advanced",
+        "category": "Support",
+        "default": "false"
+      },
       "counterbore_hole_bridging": {
         "key": "counterbore_hole_bridging",
         "type": "enum",
@@ -5372,7 +5423,7 @@
         "tooltip": "Marlin Firmware Junction Deviation (replaces the traditional XY Jerk setting).",
         "unit": "mm",
         "min": 0.0,
-        "max": 0.5,
+        "max": 0.3,
         "mode": "advanced",
         "category": "Speed",
         "default": "0.f"
@@ -6037,6 +6088,28 @@
         "min": 1,
         "mode": "advanced",
         "default": "30"
+      },
+      "initial_layer_travel_acceleration": {
+        "key": "initial_layer_travel_acceleration",
+        "type": "float_or_percent",
+        "coType": "coFloatOrPercent",
+        "label": "First layer travel",
+        "tooltip": "Travel acceleration of first layer.\\nThe percentage value is relative to Travel Acceleration.",
+        "unit": "mm/s\u00b2 or %",
+        "min": 0,
+        "mode": "advanced",
+        "default": "100, true"
+      },
+      "initial_layer_travel_jerk": {
+        "key": "initial_layer_travel_jerk",
+        "type": "float_or_percent",
+        "coType": "coFloatOrPercent",
+        "label": "First layer travel",
+        "tooltip": "Travel jerk of first layer.\\nThe percentage value is relative to Travel Jerk.",
+        "unit": "mm/s or %",
+        "min": 0,
+        "mode": "advanced",
+        "default": "100, true"
       },
       "initial_layer_travel_speed": {
         "key": "initial_layer_travel_speed",
@@ -6724,45 +6797,45 @@
         "key": "overhang_1_4_speed",
         "type": "float_or_percent",
         "coType": "coFloatOrPercent",
+        "label": "10%",
         "unit": "mm/s or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
-        "default": "0, false",
-        "label": "10%"
+        "default": "0, false"
       },
       "overhang_2_4_speed": {
         "key": "overhang_2_4_speed",
         "type": "float_or_percent",
         "coType": "coFloatOrPercent",
+        "label": "25%",
         "unit": "mm/s or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
-        "default": "0, false",
-        "label": "25%"
+        "default": "0, false"
       },
       "overhang_3_4_speed": {
         "key": "overhang_3_4_speed",
         "type": "float_or_percent",
         "coType": "coFloatOrPercent",
+        "label": "50%",
         "unit": "mm/s or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
-        "default": "0, false",
-        "label": "50%"
+        "default": "0, false"
       },
       "overhang_4_4_speed": {
         "key": "overhang_4_4_speed",
         "type": "float_or_percent",
         "coType": "coFloatOrPercent",
+        "label": "75%",
         "unit": "mm/s or %",
         "min": 0,
         "mode": "advanced",
         "category": "Speed",
-        "default": "0, false",
-        "label": "75%"
+        "default": "0, false"
       },
       "overhang_flow_ratio": {
         "key": "overhang_flow_ratio",
@@ -8567,7 +8640,7 @@
         "type": "enum",
         "coType": "coEnum",
         "label": "Wall loop direction",
-        "tooltip": "The direction which the wall loops are extruded when looking down from the top.\\n\\nBy default all walls are extruded in counter-clockwise, unless Reverse on even is enabled. Set this to any option other than Auto will force the wall direction regardless of the Reverse on even.\\n\\nThis option will be disabled if spiral vase mode is enabled.",
+        "tooltip": "The direction which the contour wall loops are extruded when looking down from the top.\\nHoles are printed in the opposite direction to the contour to maintain alignment with layers whose contour polygons are incomplete and change direction, also partially forming the contour of a hole.\\n\\nThis option will be disabled if spiral vase mode is enabled.",
         "mode": "advanced",
         "category": "Quality"
       },
@@ -8842,121 +8915,5 @@
       }
     }
   },
-  "icons": {
-    "custom-gcode_advanced": "custom-gcode_advanced.svg",
-    "custom-gcode_cooling_fan": "custom-gcode_cooling_fan.svg",
-    "custom-gcode_extruder": "custom-gcode_extruder.svg",
-    "custom-gcode_filament": "custom-gcode_filament.svg",
-    "custom-gcode_gcode": "custom-gcode_gcode.svg",
-    "custom-gcode_measure": "custom-gcode_measure.svg",
-    "custom-gcode_motion": "custom-gcode_motion.svg",
-    "custom-gcode_multi_material": "custom-gcode_multi_material.svg",
-    "custom-gcode_note": "custom-gcode_note.svg",
-    "custom-gcode_object-info": "custom-gcode_object-info.svg",
-    "custom-gcode_other": "custom-gcode_other.svg",
-    "custom-gcode_quality": "custom-gcode_quality.svg",
-    "custom-gcode_setting_override": "custom-gcode_setting_override.svg",
-    "custom-gcode_single": "custom-gcode_single.svg",
-    "custom-gcode_slicing-state": "custom-gcode_slicing-state.svg",
-    "custom-gcode_slicing-state_global": "custom-gcode_slicing-state_global.svg",
-    "custom-gcode_speed": "custom-gcode_speed.svg",
-    "custom-gcode_stats": "custom-gcode_stats.svg",
-    "custom-gcode_strength": "custom-gcode_strength.svg",
-    "custom-gcode_support": "custom-gcode_support.svg",
-    "custom-gcode_temperature": "custom-gcode_temperature.svg",
-    "custom-gcode_time": "custom-gcode_time.svg",
-    "custom-gcode_vector-index": "custom-gcode_vector-index.svg",
-    "custom-gcode_vector": "custom-gcode_vector.svg",
-    "param_3dhoneycomb": "param_3dhoneycomb.svg",
-    "param_acceleration": "param_acceleration.svg",
-    "param_accessory": "param_accessory.svg",
-    "param_adaptive_mesh": "param_adaptive_mesh.svg",
-    "param_adaptivecubic": "param_adaptivecubic.svg",
-    "param_adhension": "param_adhension.svg",
-    "param_advanced": "param_advanced.svg",
-    "param_alignedrectilinear": "param_alignedrectilinear.svg",
-    "param_archimedeanchords": "param_archimedeanchords.svg",
-    "param_bed_temp": "param_bed_temp.svg",
-    "param_bridge": "param_bridge.svg",
-    "param_chamber_temp": "param_chamber_temp.svg",
-    "param_concentric": "param_concentric.svg",
-    "param_cooling": "param_cooling.svg",
-    "param_cooling_aux_fan": "param_cooling_aux_fan.svg",
-    "param_cooling_exhaust": "param_cooling_exhaust.svg",
-    "param_cooling_fan": "param_cooling_fan.svg",
-    "param_cooling_part_fan": "param_cooling_part_fan.svg",
-    "param_cooling_specific_layer": "param_cooling_specific_layer.svg",
-    "param_crosshatch": "param_crosshatch.svg",
-    "param_crosszag": "param_crosszag.svg",
-    "param_cubic": "param_cubic.svg",
-    "param_dependencies_presets": "param_dependencies_presets.svg",
-    "param_dependencies_printers": "param_dependencies_printers.svg",
-    "param_extruder_clearance": "param_extruder_clearance.svg",
-    "param_extruder_lift_enforcement": "param_extruder_lift_enforcement.svg",
-    "param_extruder_size": "param_extruder_size.svg",
-    "param_extruder_temp": "param_extruder_temp.svg",
-    "param_filament_for_features": "param_filament_for_features.svg",
-    "param_flow_ratio_and_pressure_advance": "param_flow_ratio_and_pressure_advance.svg",
-    "param_flush": "param_flush.svg",
-    "param_gcode": "param_gcode.svg",
-    "param_grid": "param_grid.svg",
-    "param_gyroid": "param_gyroid.svg",
-    "param_hilbertcurve": "param_hilbertcurve.svg",
-    "param_hollow": "param_hollow.svg",
-    "param_honeycomb": "param_honeycomb.svg",
-    "param_infill": "param_infill.svg",
-    "param_information": "param_information.svg",
-    "param_ironing": "param_ironing.svg",
-    "param_jerk": "param_jerk.svg",
-    "param_lateral-honeycomb": "param_lateral-honeycomb.svg",
-    "param_lateral-lattice": "param_lateral-lattice.svg",
-    "param_layer_height": "param_layer_height.svg",
-    "param_lightning": "param_lightning.svg",
-    "param_line": "param_line.svg",
-    "param_line_width": "param_line_width.svg",
-    "param_lockedzag": "param_lockedzag.svg",
-    "param_monotonic": "param_monotonic.svg",
-    "param_monotonicline": "param_monotonicline.svg",
-    "param_multi_material": "param_multi_material.svg",
-    "param_octagramspiral": "param_octagramspiral.svg",
-    "param_ooze_prevention": "param_ooze_prevention.svg",
-    "param_overhang": "param_overhang.svg",
-    "param_overhang_speed": "param_overhang_speed.svg",
-    "param_position": "param_position.svg",
-    "param_precision": "param_precision.svg",
-    "param_printable_space": "param_printable_space.svg",
-    "param_quartercubic": "param_quartercubic.svg",
-    "param_raft": "param_raft.svg",
-    "param_rectilinear-grid": "param_rectilinear-grid.svg",
-    "param_rectilinear": "param_rectilinear.svg",
-    "param_rectilinear_interlaced": "param_rectilinear_interlaced.svg",
-    "param_resonance_avoidance": "param_resonance_avoidance.svg",
-    "param_retraction": "param_retraction.svg",
-    "param_retraction_material_change": "param_retraction_material_change.svg",
-    "param_seam": "param_seam.svg",
-    "param_settings": "param_settings.svg",
-    "param_shell": "param_shell.svg",
-    "param_skirt": "param_skirt.svg",
-    "param_special": "param_special.svg",
-    "param_speed": "param_speed.svg",
-    "param_speed_first": "param_speed_first.svg",
-    "param_support": "param_support.svg",
-    "param_support_filament": "param_support_filament.svg",
-    "param_support_tree": "param_support_tree.svg",
-    "param_supportcubic": "param_supportcubic.svg",
-    "param_temperature": "param_temperature.svg",
-    "param_toolchange": "param_toolchange.svg",
-    "param_toolchange_multi_extruder": "param_toolchange_multi_extruder.svg",
-    "param_tower": "param_tower.svg",
-    "param_tpmsd": "param_tpmsd.svg",
-    "param_tpmsfk": "param_tpmsfk.svg",
-    "param_travel_speed": "param_travel_speed.svg",
-    "param_tri-hexagon": "param_tri-hexagon.svg",
-    "param_triangles": "param_triangles.svg",
-    "param_volumetric_speed": "param_volumetric_speed.svg",
-    "param_wall": "param_wall.svg",
-    "param_wall_generator": "param_wall_generator.svg",
-    "param_wall_surface": "param_wall_surface.svg",
-    "param_zigzag": "param_zigzag.svg"
-  }
+  "icons": {}
 }
