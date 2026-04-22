@@ -958,6 +958,23 @@ export const NewSliceJobPage: React.FC = () => {
     return customProcessProfiles.find((p) => p.id === customId) ?? null;
   }, [customProcessProfiles, selectedProcessPresetId]);
 
+  // Unified resolved process profile for the modal editor — works for both system and custom presets
+  const resolvedProcessProfile = useMemo((): OrcaProcessProfile | null => {
+    if (selectedProcessProfile) return selectedProcessProfile;
+    if (selectedCustomProcessProfile?.rawJson) {
+      try {
+        const parsed = JSON.parse(selectedCustomProcessProfile.rawJson) as Record<string, unknown>;
+        return {
+          name: selectedCustomProcessProfile.name,
+          settings: parsed,
+        } as OrcaProcessProfile;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [selectedProcessProfile, selectedCustomProcessProfile]);
+
   // Fetch models for picker
   const { data: models = [], isLoading: isLoadingModels } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
@@ -1955,9 +1972,12 @@ export const NewSliceJobPage: React.FC = () => {
       <ProcessProfileEditorModal
         isOpen={processEditorOpen}
         onClose={() => setProcessEditorOpen(false)}
-        originalProfile={selectedProcessProfile}
+        originalProfile={resolvedProcessProfile}
+        currentSettings={advancedProcessSettings}
         onApply={(newSettings) => {
           setSlicerSettings((prev) => ({ ...prev, ...newSettings } as OrcaProcessSettings));
+          // Keep advancedProcessSettings in sync so submit overrides don't revert modal edits
+          setAdvancedProcessSettings((prev) => ({ ...prev, ...newSettings }));
         }}
         onSaveSuccess={(_profileId, profileName) => {
           qc.invalidateQueries({ queryKey: ['customProfiles'] });

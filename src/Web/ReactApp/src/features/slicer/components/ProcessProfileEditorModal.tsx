@@ -21,6 +21,8 @@ interface ProcessProfileEditorModalProps {
   onClose: () => void;
   /** Original process profile to edit */
   originalProfile: OrcaProcessProfile | null;
+  /** Current live settings from the inline panel — used as initial state so inline tweaks aren't lost */
+  currentSettings?: Record<string, unknown>;
   /** Fires after a custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
   /** Fires when the user applies setting edits without saving a new profile */
@@ -42,6 +44,7 @@ export function ProcessProfileEditorModal({
   isOpen,
   onClose,
   originalProfile,
+  currentSettings: currentSettingsProp,
   onSaveSuccess,
   onApply,
 }: ProcessProfileEditorModalProps) {
@@ -63,11 +66,15 @@ export function ProcessProfileEditorModal({
       setShowSaveForm(false);
       setSaveError(null);
       setHasChanges(false);
-      const extracted = extractSettings(originalProfile);
-      setSettings(extracted);
-      setOriginalSettings(extracted);
+      const baseSettings = extractSettings(originalProfile);
+      // Prefer current live settings (from inline panel) so user tweaks aren't lost
+      const initial = currentSettingsProp
+        ? { ...baseSettings, ...currentSettingsProp }
+        : baseSettings;
+      setSettings(initial);
+      setOriginalSettings(baseSettings);
     }
-  }, [isOpen, originalProfile]);
+  }, [isOpen, originalProfile, currentSettingsProp]);
 
   const handleUpdate = useCallback((key: string, value: unknown) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
