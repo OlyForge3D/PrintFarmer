@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as THREE from 'three';
 import { sliceJobService, type SubmitSliceJobRequest, SlicerEngine } from '@/services/sliceJobService';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { workersService } from '@/services/workersService';
@@ -284,6 +285,25 @@ export const OrcaSlicerPage: React.FC = () => {
     []
   );
 
+  // C1: Handle model replacement (e.g., after cut operation)
+  const handleModelsReplace = useCallback((removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => {
+    setLoadedModels(prev => {
+      const filtered = prev.filter(m => m.id !== removedId);
+      const additions: LoadedModel[] = newModels.map((nm, i) => ({
+        id: `${removedId}-cut-${i}-${Date.now()}`,
+        url: nm.url,
+        fileName: nm.fileName,
+        fileType: 'stl' as const,
+        position: nm.position ?? [0, 0, 0] as [number, number, number],
+        rotation: nm.rotation ?? [0, 0, 0] as [number, number, number],
+        scale: nm.scale ?? [1, 1, 1] as [number, number, number],
+        geometry: nm.geometry,
+      }));
+      return [...filtered, ...additions];
+    });
+    setSelectedLoadedModelId(null);
+  }, []);
+
   const handleSettingsProfiles = useCallback(() => {
     setShowSettingsPanel(prev => !prev);
   }, []);
@@ -466,6 +486,7 @@ export const OrcaSlicerPage: React.FC = () => {
             canSlice={canSlice}
             slicesRemaining={30}
             slicesTotal={30}
+            onModelsReplace={handleModelsReplace}
           />
         </div>
       </div>

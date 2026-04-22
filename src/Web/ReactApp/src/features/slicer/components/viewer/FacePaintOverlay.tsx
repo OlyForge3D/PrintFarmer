@@ -76,6 +76,19 @@ export function FacePaintOverlay({
   const threeColor = useMemo(() => new THREE.Color(color), [color]);
   const brushIndicatorRef = useRef<THREE.Mesh>(null);
 
+  // C4: Use refs for paint state to avoid stale closures in pointer events
+  const paintedFacesRef = useRef(paintedFaces);
+  const onPaintUpdateRef = useRef(onPaintUpdate);
+  useEffect(() => { paintedFacesRef.current = paintedFaces; }, [paintedFaces]);
+  useEffect(() => { onPaintUpdateRef.current = onPaintUpdate; }, [onPaintUpdate]);
+
+  // W5: Ref-based accumulator for rapid drag painting — flushes on pointerup
+  const pendingPaintRef = useRef<Set<number> | null>(null);
+
+  // C5: Monotonic revision counter for change detection instead of Set.size
+  const revisionRef = useRef(0);
+  const lastRevisionRef = useRef(0);
+
   // Get the actual mesh child from the group
   const getTargetMesh = useCallback((): THREE.Mesh | null => {
     const obj = meshRef.current;
@@ -89,29 +102,28 @@ export function FacePaintOverlay({
     return target;
   }, [meshRef]);
 
-  // Build overlay geometry — use lazy initializer since component remounts on mode toggle
+  // Build overlay geometry — C3: convert to non-indexed to prevent vertex color bleeding
   const [overlayGeometry, setOverlayGeometry] = useState<THREE.BufferGeometry | null>(null);
-  const overlayGeometryInitRef = useRef(false);
 
-  // Initialize geometry once after mount (avoids setState-in-render)
   useEffect(() => {
-    if (overlayGeometryInitRef.current) return;
-    overlayGeometryInitRef.current = true;
     const geo = meshRef.current?.userData.geometry ?? null;
     if (!geo) return;
-    const clone = geo.clone();
-    const vertexCount = clone.getAttribute('position').count;
+    // C3: toNonIndexed() gives each face unique vertices so painting doesn't bleed
+    const nonIndexed = geo.index ? geo.toNonIndexed() : geo.clone();
+    const vertexCount = nonIndexed.getAttribute('position').count;
     const colorData = new Float32Array(vertexCount * 4);
-    clone.setAttribute('color', new THREE.BufferAttribute(colorData, 4));
-    setOverlayGeometry(clone);
+    nonIndexed.setAttribute('color', new THREE.BufferAttribute(colorData, 4));
+    setOverlayGeometry(nonIndexed);
+
+    // W3: Dispose cloned geometry on unmount
+    return () => {
+      nonIndexed.dispose();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync prop/state values into refs for use inside useFrame (avoids ref-during-render lint)
-  const paintedFacesRef = useRef(paintedFaces);
   const hoveredFaceRef = useRef(hoveredFace);
   const threeColorRef = useRef(threeColor);
-  useEffect(() => { paintedFacesRef.current = paintedFaces; }, [paintedFaces]);
   useEffect(() => { hoveredFaceRef.current = hoveredFace; }, [hoveredFace]);
   useEffect(() => { threeColorRef.current = threeColor; }, [threeColor]);
 
@@ -131,32 +143,42 @@ export function FacePaintOverlay({
     return { faceIndex: hits[0].faceIndex, point: hits[0].point.clone() };
   }, [camera, getTargetMesh, gl.domElement, raycaster]);
 
-  // Paint or erase a face
+  // C4+W5: Paint using ref-based accumulator — stable callback that never goes stale
   const applyPaint = useCallback((faceIndex: number, erase: boolean) => {
-    const next = new Set(paintedFaces);
+    // Start from pending accumulator or current painted faces
+    const base = pendingPaintRef.current ?? new Set(paintedFacesRef.current);
     if (erase) {
-      next.delete(faceIndex);
+      base.delete(faceIndex);
     } else {
-      next.add(faceIndex);
+      base.add(faceIndex);
     }
-    onPaintUpdate(next);
-  }, [onPaintUpdate, paintedFaces]);
+    pendingPaintRef.current = base;
+    // C5: Bump revision on every mutation
+    revisionRef.current += 1;
+    invalidate();
+  }, [invalidate]);
 
-  // Mouse event handlers
+  // W5: Flush accumulated paint to parent state
+  const flushPaint = useCallback(() => {
+    if (pendingPaintRef.current) {
+      onPaintUpdateRef.current(pendingPaintRef.current);
+      pendingPaintRef.current = null;
+    }
+  }, []);
+
+  // Mouse event handlers — C4: uses stable applyPaint (no paintedFaces dep)
   useEffect(() => {
     if (!active) return;
     const el = gl.domElement;
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button === 0) {
-        // Left click = paint
         isPaintingRef.current = true;
         isErasingRef.current = false;
         const hit = raycastFace(e.clientX, e.clientY);
         if (hit) applyPaint(hit.faceIndex, false);
         e.preventDefault();
       } else if (e.button === 2) {
-        // Right click = erase
         isErasingRef.current = true;
         isPaintingRef.current = false;
         const hit = raycastFace(e.clientX, e.clientY);
@@ -169,7 +191,6 @@ export function FacePaintOverlay({
       const hit = raycastFace(e.clientX, e.clientY);
       if (hit) {
         setHoveredFace(hit.faceIndex);
-        // Update brush indicator position
         if (brushIndicatorRef.current) {
           brushIndicatorRef.current.position.copy(hit.point);
           brushIndicatorRef.current.visible = true;
@@ -191,6 +212,8 @@ export function FacePaintOverlay({
     const onPointerUp = () => {
       isPaintingRef.current = false;
       isErasingRef.current = false;
+      // W5: Flush accumulated paint on pointer up
+      flushPaint();
     };
 
     const onContextMenu = (e: Event) => {
@@ -209,12 +232,11 @@ export function FacePaintOverlay({
       el.removeEventListener('pointerup', onPointerUp);
       el.removeEventListener('pointerleave', onPointerUp);
       el.removeEventListener('contextmenu', onContextMenu);
-      isPaintingRef.current = false;
-      isErasingRef.current = false;
+      // Don't reset painting state during cleanup — C4 fix
     };
-  }, [active, applyPaint, gl.domElement, invalidate, raycastFace]);
+  }, [active, applyPaint, flushPaint, gl.domElement, invalidate, raycastFace]);
 
-  // Cursor style — use direct DOM access to avoid hook immutability lint
+  // Cursor style
   useEffect(() => {
     if (active) {
       const canvas = document.querySelector('canvas');
@@ -226,7 +248,6 @@ export function FacePaintOverlay({
   }, [active]);
 
   // Sync overlay mesh transform with the model mesh each frame and update colors
-  const lastPaintedCountRef = useRef(0);
   const lastHoveredRef = useRef<number | null>(null);
   useFrame(() => {
     const obj = meshRef.current;
@@ -236,17 +257,19 @@ export function FacePaintOverlay({
     overlay.rotation.copy(obj.rotation);
     overlay.scale.copy(obj.scale);
 
-    // Update vertex colors when paint data or hover changes
     if (!overlayGeometry) return;
-    const faces = paintedFacesRef.current;
+
+    // C5: Use revision counter + hovered face for change detection
     const hovered = hoveredFaceRef.current;
-    const needsUpdate = faces.size !== lastPaintedCountRef.current || hovered !== lastHoveredRef.current;
+    const needsUpdate = revisionRef.current !== lastRevisionRef.current || hovered !== lastHoveredRef.current;
     if (!needsUpdate) return;
-    lastPaintedCountRef.current = faces.size;
+    lastRevisionRef.current = revisionRef.current;
     lastHoveredRef.current = hovered;
 
     const colorAttr = overlayGeometry.getAttribute('color') as THREE.BufferAttribute;
     if (!colorAttr) return;
+    // Use pending accumulator if mid-drag, otherwise use prop
+    const faces = pendingPaintRef.current ?? paintedFacesRef.current;
     const allFaces = new Set(faces);
     if (hovered !== null && active) allFaces.add(hovered);
     const newColors = buildFaceColors(overlayGeometry, allFaces, threeColorRef.current);
