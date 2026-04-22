@@ -453,7 +453,7 @@ export const CONDITIONAL_HIDDEN_KEYS = new Set([
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /** Map metadata type + gui_type to the SettingRow control type */
-export function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' | 'select' | 'textarea' | 'point' {
+export function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number' | 'text' | 'color' | 'select' | 'textarea' | 'point' | 'coFloats' {
   if (meta.gui_type === 'color') return 'color';
   if (TEXTAREA_KEYS.has(meta.key)) return 'textarea';
   if (KNOWN_ENUMS[meta.key] || meta.type === 'enum'
@@ -461,6 +461,8 @@ export function resolveControlType(meta: SettingMetadata): 'checkbox' | 'number'
   ) return 'select';
   // coPoints = polygon/multi-point → render as text; coPoint = single X,Y pair
   if (meta.type === 'point' && meta.coType !== 'coPoints') return 'point';
+  // coFloats = multi-extruder array (e.g. "500,200")
+  if (meta.coType === 'coFloats') return 'coFloats';
   switch (meta.type) {
     case 'bool':
       return 'checkbox';
@@ -498,6 +500,16 @@ export function parsePoint(raw: unknown, meta: SettingMetadata): [number, number
   const x = parseFloat(parts[0] ?? '0');
   const y = parseFloat(parts[1] ?? '0');
   return [isNaN(x) ? 0 : x, isNaN(y) ? 0 : y];
+}
+
+/** Parse a coFloats value "500,200" or "500., 200" into an array of numbers */
+export function parseCoFloats(raw: unknown, meta: SettingMetadata): number[] {
+  const str = raw != null ? String(raw) : (meta.default ?? '0');
+  const parts = str.split(',').map((s) => s.trim());
+  return parts.map((p) => {
+    const n = parseFloat(p);
+    return isNaN(n) ? 0 : n;
+  });
 }
 
 export function toString(raw: unknown, meta: SettingMetadata): string {
