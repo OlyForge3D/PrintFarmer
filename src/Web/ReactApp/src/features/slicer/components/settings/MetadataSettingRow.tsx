@@ -18,6 +18,7 @@ import {
   toNumber,
   toBool,
   parsePoint,
+  parseCoFloats,
   toString,
 } from '@/features/slicer/components/settings/metadataTypes';
 
@@ -313,6 +314,87 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
                 className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors hover:bg-pf-warning/10 rounded"
                 title="Reset to original"
                 aria-label={`Reset ${meta.label} to original value`}
+              >
+                <ResetIcon className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    case 'coFloats': {
+      const floats = parseCoFloats(values[field.key], meta);
+      const isSingle = floats.length <= 1;
+
+      if (isSingle) {
+        return (
+          <SettingRow
+            type="number"
+            label={meta.label}
+            tooltip={meta.tooltip}
+            value={floats[0] ?? 0}
+            min={meta.min}
+            max={meta.max}
+            step={0.01}
+            unit={meta.unit}
+            onChange={(v) => onUpdate(field.key, String(v))}
+            disabled={disabled}
+            {...resetProps}
+          />
+        );
+      }
+
+      return (
+        <div className="flex items-center gap-1.5 py-0.5">
+          <div className="w-2/5 shrink-0 truncate">
+            <span
+              className={`text-xs font-medium ${isModified ? 'text-pf-warning' : 'text-pf-text-secondary'}`}
+              title={meta.tooltip}
+            >
+              {meta.label}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            {floats.map((val, idx) => (
+              <div key={idx} className="flex items-center gap-0.5 flex-1 min-w-0">
+                <span className="text-[10px] text-pf-text-muted whitespace-nowrap">
+                  {`E${idx + 1}`}
+                </span>
+                <div className="flex items-center flex-1 min-w-0">
+                  <input
+                    type="number"
+                    title={`${meta.label} Extruder ${idx + 1}`}
+                    className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
+                    value={val}
+                    min={meta.min}
+                    max={meta.max}
+                    step={0.01}
+                    onChange={(e) => {
+                      const updated = [...floats];
+                      updated[idx] = Number(e.target.value);
+                      onUpdate(field.key, updated.join(','));
+                    }}
+                    disabled={disabled}
+                  />
+                  {meta.unit && (
+                    <span className="text-[10px] text-pf-text-muted px-1 bg-pf-border rounded-r-lg shrink-0 self-stretch flex items-center">
+                      {meta.unit}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="w-7 shrink-0 flex justify-center">
+            {isModified && (
+              <Button
+                variant="subtle"
+                type="button"
+                onClick={() => onUpdate(field.key, origVal)}
+                className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors hover:bg-pf-warning/10 rounded"
+                title="Reset to original"
+                aria-label={`Reset ${meta.label} to original values`}
               >
                 <ResetIcon className="w-4 h-4" />
               </Button>

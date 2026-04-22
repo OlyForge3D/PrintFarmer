@@ -356,14 +356,14 @@ describe('resolveControlType', () => {
     expect(resolveControlType(meta)).toBe('text');
   });
 
-  it('maps coFloats to number (array of floats)', () => {
+  it('maps coFloats to coFloats (multi-extruder array)', () => {
     const meta: SettingMetadata = {
       key: 'test_floats',
       type: 'float',
       coType: 'coFloats',
       label: 'Test',
     };
-    expect(resolveControlType(meta)).toBe('number');
+    expect(resolveControlType(meta)).toBe('coFloats');
   });
 
   it('maps coPoint to point control', () => {
@@ -455,7 +455,7 @@ describe('resolveControlType', () => {
 
   describe('all real metadata settings resolve to a valid control type', () => {
     const VALID_CONTROLS = new Set([
-      'checkbox', 'number', 'text', 'color', 'select', 'textarea', 'point',
+      'checkbox', 'number', 'text', 'color', 'select', 'textarea', 'point', 'coFloats',
     ]);
 
     it.each(PROFILE_TYPES)('%s', (profileType) => {
@@ -467,6 +467,7 @@ describe('resolveControlType', () => {
         if (meta.type === 'bool') expect(ct).toBe('checkbox');
         if (
           meta.type === 'float' &&
+          meta.coType !== 'coFloats' &&
           !TEXTAREA_KEYS.has(key) &&
           !KNOWN_ENUMS[key] &&
           meta.gui_type !== 'color'
