@@ -23,6 +23,7 @@ public record PrusaCompositeStatus(
     double? BedTarget = null,
     double? AxisX = null,
     double? AxisY = null,
-    double? AxisZ = null);
+    double? AxisZ = null,
+    int? TimeRemainingSeconds = null);
 
 #pragma warning restore CS1066

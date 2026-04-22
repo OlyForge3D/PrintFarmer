@@ -504,30 +504,51 @@ public class PrintersController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <param name="includeDisabled">Return disabled printers as well (admin-only).</param>
+    /// <param name="doneWithinMinutes">Only return printers estimated to finish within this many minutes.</param>
+    /// <param name="doneAfterMinutes">Only return printers estimated to finish after this many minutes.</param>
     /// <returns>A complete list of all printers with configuration and live status merged.</returns>
     /// <response code="200">Returns the list of complete printer data with live status.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<CompletePrinterDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
+    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(
+        CancellationToken ct,
+        [FromQuery] bool includeDisabled = false,
+        [FromQuery] int? doneWithinMinutes = null,
+        [FromQuery] int? doneAfterMinutes = null)
     {
         try
         {
             CompletePrinterDto[] dtos = await _printersService.GetAllCompleteDtosAsync(ct);
             bool isAdmin = User.IsInRole("farm_admin");
-            if (isAdmin)
+            IEnumerable<CompletePrinterDto> result = dtos;
+
+            if (!isAdmin)
             {
-                return Ok(dtos);
+                if (includeDisabled)
+                {
+                    return Forbid();
+                }
+
+                result = result.Where(p => p.IsEnabled);
             }
 
-            if (includeDisabled)
+            // Time-based availability filters
+            if (doneWithinMinutes.HasValue)
             {
-                return Forbid();
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(doneWithinMinutes.Value);
+                result = result.Where(p =>
+                    p.EstimatedCompletionTimeUtc.HasValue && p.EstimatedCompletionTimeUtc.Value <= cutoff);
             }
 
-            // Filter to only enabled printers for normal users
-            List<CompletePrinterDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
-            return Ok(enabledDtos);
+            if (doneAfterMinutes.HasValue)
+            {
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(doneAfterMinutes.Value);
+                result = result.Where(p =>
+                    p.EstimatedCompletionTimeUtc.HasValue && p.EstimatedCompletionTimeUtc.Value > cutoff);
+            }
+
+            return Ok(result.ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {

@@ -49,4 +49,5 @@ public record CompletePrinterDto(
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,
-    bool HasCatalogUpdate = false);
+    bool HasCatalogUpdate = false,
+    DateTime? EstimatedCompletionTimeUtc = null);

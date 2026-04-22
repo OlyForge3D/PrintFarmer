@@ -2070,7 +2070,7 @@ public sealed class MoonrakerSubscriptionService(
             }
         }
 
-        // Print stats (state, filename)
+        // Print stats (state, filename, print_duration)
         string? printStatsState = null;
         if (statusObj.TryGetProperty("print_stats", out JsonElement ps))
         {
@@ -2082,6 +2082,17 @@ public sealed class MoonrakerSubscriptionService(
             if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
             {
                 jobName = fn.GetString();
+            }
+
+            if (ps.TryGetProperty("print_duration", out JsonElement pd) && pd.ValueKind == JsonValueKind.Number)
+            {
+                try
+                {
+                    state.PrintDuration = pd.GetDouble();
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -2190,6 +2201,14 @@ public sealed class MoonrakerSubscriptionService(
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
             // Update cache before broadcasting to clients
+            // Calculate estimated time remaining from progress and elapsed print duration
+            double? printTimeLeftSeconds = null;
+            if (state.Progress is > 0 and < 100 && state.PrintDuration is > 0)
+            {
+                double progressFraction = state.Progress.Value / 100.0;
+                printTimeLeftSeconds = state.PrintDuration.Value * (1.0 - progressFraction) / progressFraction;
+            }
+
             PrinterStatusDto cacheUpdate = new PrinterStatusDto(
                 Id: printerId,
                 IsOnline: isOnline,
@@ -2207,7 +2226,8 @@ public sealed class MoonrakerSubscriptionService(
                 HotendTarget: state.HotendTarget,
                 BedTarget: state.BedTarget,
                 SpoolInfo: spoolInfo,
-                MmuStatus: mmuStatus);
+                MmuStatus: mmuStatus,
+                PrintTimeLeftSeconds: printTimeLeftSeconds);
             _statusCacheWriter.UpdateStatus(cacheUpdate);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);

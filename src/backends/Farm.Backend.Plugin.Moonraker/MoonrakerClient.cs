@@ -198,6 +198,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             double? progress = null;
             string? jobName = null;
             string? thumb = null;
+            double? printDuration = null;
 
             if (result.TryGetProperty("status", out JsonElement statusEl))
             {
@@ -216,10 +217,23 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
 
-                if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
-                    ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                if (statusEl.TryGetProperty("print_stats", out JsonElement ps))
                 {
-                    jobName = fn.GetString();
+                    if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                    {
+                        jobName = fn.GetString();
+                    }
+
+                    if (ps.TryGetProperty("print_duration", out JsonElement pd) && pd.ValueKind == JsonValueKind.Number)
+                    {
+                        try
+                        {
+                            printDuration = pd.GetDouble();
+                        }
+                        catch
+                        {
+                        }
+                    }
                 }
             }
 
@@ -269,7 +283,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                 }
             }
 
-            return new PrinterJob(state, progress, jobName, thumb);
+            return new PrinterJob(state, progress, jobName, thumb, printDuration);
         }
         catch
         {
@@ -541,7 +555,15 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             snap = snapshotUrl;
         }
 
-        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
+        // Calculate estimated time remaining from progress and elapsed print duration
+        double? printTimeLeftSeconds = null;
+        if (job?.Progress is > 0 and < 100 && job.PrintDurationSeconds is > 0)
+        {
+            double progressFraction = job.Progress.Value / 100.0;
+            printTimeLeftSeconds = job.PrintDurationSeconds.Value * (1.0 - progressFraction) / progressFraction;
+        }
+
+        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT, PrintTimeLeftSeconds: printTimeLeftSeconds);
     }
 
     public Task<PrinterDto> CreatePrinterDtoAsync(

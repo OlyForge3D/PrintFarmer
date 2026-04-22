@@ -213,6 +213,8 @@ export interface PrinterJobInfo {
   currentSpoolId?: number;
   /** Active spool/filament information */
   spoolInfo?: PrinterSpoolInfo;
+  /** Estimated UTC timestamp when the current print will complete */
+  estimatedCompletionTimeUtc?: string;
 }
 
 /**

@@ -37,6 +37,7 @@ import { HelpButton } from '@/common/components/HelpButton';
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
 type PrinterSortMode = 'state' | 'name' | 'backend';
+type AvailabilityFilter = 'all' | '1' | '2' | '4' | '8' | '12' | '24';
 
 /** State priority for sorting: lower number = higher in list */
 function getStateSortPriority(printer: Printer, pendingIds: Set<string>): number {
@@ -159,6 +160,7 @@ export function PrintersPage() {
   // Filter state
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
   const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
     const saved = localStorage.getItem('printerSortMode');
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
@@ -178,6 +180,9 @@ export function PrintersPage() {
     return map;
   }, [printers]);
 
+  // Cutoff timestamp for availability filter, set in the dropdown's onChange handler
+  const [availabilityCutoffMs, setAvailabilityCutoffMs] = useState(0);
+
   // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
     let filtered = optimisticPrinters || [];
@@ -195,6 +200,13 @@ export function PrintersPage() {
     // Backend filter
     if (backendFilter !== 'all') {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
+    }
+    // Availability filter — show printers done within N hours
+    if (availabilityFilter !== 'all') {
+      filtered = filtered.filter(p => {
+        if (!p.estimatedCompletionTimeUtc) return false;
+        return new Date(p.estimatedCompletionTimeUtc).getTime() <= availabilityCutoffMs;
+      });
     }
     // Sort based on selected mode
     filtered.sort((a, b) => {
@@ -217,7 +229,7 @@ export function PrintersPage() {
       return 0;
     });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter, sortMode, pendingPrinterIds]);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityFilter, availabilityCutoffMs, sortMode, pendingPrinterIds]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -411,6 +423,32 @@ export function PrintersPage() {
                     <option value="SDCP">SDCP</option>
                     <option value="OctoPrint">OctoPrint</option>
                     <option value="FlashForge">FlashForge</option>
+                  </Select>
+                </div>
+
+                {/* Availability Filter */}
+                <div className="flex items-center gap-2">
+                  <label htmlFor="availability-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Done in:</label>
+                  <Select
+                    id="availability-filter"
+                    value={availabilityFilter}
+                    onChange={e => {
+                      const val = e.target.value as AvailabilityFilter;
+                      setAvailabilityFilter(val);
+                      setAvailabilityCutoffMs(val !== 'all'
+                        ? Date.now() + parseInt(val, 10) * 60 * 60 * 1000
+                        : 0);
+                    }}
+                    aria-label="Filter by estimated completion time"
+                    className="min-w-0"
+                  >
+                    <option value="all">Any Time</option>
+                    <option value="1">≤ 1 hour</option>
+                    <option value="2">≤ 2 hours</option>
+                    <option value="4">≤ 4 hours</option>
+                    <option value="8">≤ 8 hours</option>
+                    <option value="12">≤ 12 hours</option>
+                    <option value="24">≤ 24 hours</option>
                   </Select>
                 </div>
 
