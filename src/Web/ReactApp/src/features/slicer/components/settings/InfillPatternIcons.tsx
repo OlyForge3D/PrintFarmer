@@ -4,7 +4,6 @@
  * Each icon is a static <img> reference to the real OrcaSlicer param_*.svg file.
  * These SVGs use the canonical two-layer design (gray #949494 + teal #009688).
  */
-/* eslint-disable react-refresh/only-export-components -- Icon factory pattern */
 import React from 'react';
 
 interface IconProps { className?: string }
