@@ -5032,3 +5032,228 @@ Current system handles **JSON text files**. `.orca_printer` and `.orca_filament`
 | `src/Web/ReactApp/src/features/slicer/orca/types/orcaProfiles.ts` | All types remain valid — ZIP contents normalize to same shape |
 | `src/slicer/Farm.Slicer.Module/Services/OrcaBundleParsingService.cs` | Handles JSON parsing regardless of source — ZIP extraction feeds into this |
 | `src/slicer/Farm.Slicer.Module/Models/OrcaProfileModels.cs` | DTOs unchanged |
+
+
+---
+
+## 7. Ripley: Global Slicer View Mode + Machine Tab Restructure (Implemented)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-04-16  
+**Status:** ✅ IMPLEMENTED (commits: 16b541b7, eb3406f3)  
+**Impact:** High (UX consistency across slicer editors + discoverability improvement)  
+
+### Summary
+
+Two interconnected improvements to slicer profile editors:
+1. **Machine Profile Tab Restructure** — Created dedicated Extruder tab, moved 6 sections from Multimaterial for better logical organization
+2. **Global Persisted View Mode** — Simple/Advanced toggle now syncs across all profile editors and persists in localStorage
+
+### Context
+
+- Machine profile settings poorly organized (extruder settings buried in Multimaterial tab)
+- View mode toggle was per-editor (no sync, not persisted across navigation)
+
+### Decision & Implementation
+
+**Tab Restructure:**
+- New tab order: Basic Information → Machine G-Code → Multimaterial → **Extruder** → Motion Ability → Notes
+- Moved to Extruder tab: nozzle properties, layer height limits, extruder position, retraction, z-hop, toolchange settings
+- Promoted `nozzle_diameter` and `retraction_speed` to Simple mode for better Simple-mode visibility
+
+**Global View Mode Hook (`useSlicerViewMode`):**
+- Replaces per-component local state with localStorage-backed hook
+- Syncs via CustomEvent + storage event listener for same-tab and cross-tab sync
+- Removed `initialViewMode` prop from MetadataProfileEditor, SlicerSettingsPanel, ProfileEditorModal
+
+### Quality Gates
+✅ Build: 0 errors  
+✅ Lint: 0 errors (4 pre-existing)  
+✅ Tests: 1710/1710 passing  
+✅ TypeScript strict mode: clean  
+
+### Trade-offs & Rationale
+- localStorage + events approach simpler than Context provider, no wrapper component needed
+- Metadata restructuring requires careful JSON manipulation but avoids API changes
+- Empty-tab filtering requires at least one Simple field per tab to avoid hiding tabs entirely
+
+### Lessons Learned
+1. When a prop is passed through multiple layers unchanged, it's a signal for global state
+2. Metadata-driven UI requires careful section extraction to maintain logical relationships
+3. For UI preferences: localStorage + CustomEvent + storage event listener = effective global state without Context
+
+---
+
+## 8. Ripley: Client-Side OrcaSlicer Bundle ZIP Extraction (Implemented)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-04-17  
+**Status:** ✅ IMPLEMENTED  
+**Impact:** Medium (enables import of .orca_printer and .orca_filament files)  
+
+### Summary
+
+Added support for importing OrcaSlicer bundle formats (`.orca_printer`, `.orca_filament`) without backend changes by extracting ZIPs on client side.
+
+### Context
+
+OrcaSlicer exports bundle files as standard ZIP archives containing individual JSON preset files. Existing import wizard only handled plain JSON. Need to support bundles with unified UX.
+
+### Options Considered
+1. Backend ZIP extraction + parsing
+2. **CHOSEN:** Client-side ZIP extraction
+
+### Decision & Implementation
+
+**Chose client-side extraction** because:
+- Backend APIs already handle JSON perfectly — no changes needed
+- ZIP extraction is pure normalization (transforms ZIP → existing JSON shape)
+- Frontend already has complete import wizard UX
+- `fflate` library is tiny (8KB gzipped)
+- Synchronous extraction is fast enough for typical bundle sizes
+
+**Created `orcaBundleExtractor.ts` utility:**
+- `isZipFile(data)`: Magic byte check (PK\x03\x04)
+- `extractOrcaBundle(data)`: Unzip, parse JSONs, classify by discriminator, merge to bundle format
+- Updated file input to accept `.json,.orca_printer,.orca_filament`
+- Added `isExtracting` loading state during ZIP processing
+
+### Quality Gates
+✅ Build: 0 errors  
+✅ Lint: 0 errors  
+✅ Tests: 1710/1710 passing  
+
+### Trade-offs
+- **Pro**: Zero backend changes, perfect API compatibility, stateless design, instant client-side processing
+- **Pro**: Error handling all client-side with immediate feedback
+- **Con**: Couples frontend to OrcaSlicer ZIP structure (structure is stable)
+- **Con**: Large bundles could briefly block UI (not a real-world concern for typical preset counts)
+
+---
+
+## 9. Ripley: Fix 28 Empty Select Boxes in Profile Editors (Implemented)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-04-16  
+**Status:** ✅ IMPLEMENTED  
+**Impact:** Small (UI correctness, no API changes)  
+
+### Summary
+
+Audit revealed 28 of 44 select fields in slicer profile editors rendered as empty dropdowns. Root cause: missing enum entries in `KNOWN_ENUMS` map in MetadataProfileRenderer.
+
+### Context
+
+Metadata-driven renderer uses priority chain: `KNOWN_ENUMS` → `meta.enum_values` → empty array. Most OrcaSlicer settings have no `enum_values` in metadata, so `KNOWN_ENUMS` is the only source.
+
+### Decision & Implementation
+
+**Add all missing enum entries to `KNOWN_ENUMS`** using authoritative values from OrcaSlicer's `PrintConfig.cpp`:
+- Created shared arrays (`INFILL_PATTERNS`, `SURFACE_PATTERNS`) to DRY up repeated option lists
+- Fixed `resolveControlType` to exclude numeric `enum_open` types from select rendering
+- Entries must match exactly (inconsistent formatting: spaces, underscores, title case, numeric strings)
+
+### Quality Gates
+✅ All 44 select fields now render with correct options  
+✅ No API changes required (pure frontend fix)  
+✅ No test changes needed  
+✅ Build + Lint: 0 errors  
+
+---
+
+## 10. Jeff: Global Simple/Advanced Toggle for Slicer Settings (User Directive)
+
+**Date:** 2026-04-16  
+**Request by:** Jeff Papiez (via Copilot)  
+**Status:** ✅ Implemented (via Decision #7)  
+
+### What
+The Simple/Advanced toggle in slicer settings must be a **global, persisted setting**. When user toggles to Advanced in one profile editor, ALL profile editors must reflect Advanced mode. Preference must persist across sessions (localStorage). This is **not per-editor** — it's app-wide.
+
+### Why
+User mental model: "Advanced" is a UI-wide preference, not editor-specific state. Consistency and reduced friction.
+
+### Implementation
+Covered in Decision #7 (Global Persisted View Mode hook with localStorage + CustomEvent synchronization).
+
+---
+
+## 11. Dallas: Per-Slicer Native UI Key Architecture (Proposed)
+
+**Author:** Dallas (Lead/Architect)  
+**Date:** 2025-07-11  
+**Status:** Proposed (pending team review)  
+**Impact:** High (foundational design for multi-backend slicer support)  
+
+### Summary
+Architectural proposal for managing native UI keys across multiple slicer backends (OrcaSlicer, Cura, Prusa). Each slicer backend has different setting name conventions and structures. Key decision: namespace keys by backend to avoid collisions and allow independent evolutions.
+
+### Status
+Awaiting implementation decisions from team.
+
+---
+
+## 12. Lambert: OrcaSlicer Bundle Import Endpoint Architecture (Implemented)
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-04-05  
+**Status:** ✅ IMPLEMENTED  
+**Impact:** Medium (backend support for ZIP bundle imports)  
+
+### Summary
+Backend endpoint architecture for importing OrcaSlicer bundle formats. Handles parsing and storage of multiple preset files extracted from bundle ZIPs.
+
+### Implementation
+- `POST /api/orca/import-bundle` endpoint receives extracted JSON presets
+- `OrcaBundleParsingService.cs` deserializes and validates presets
+- Returns validation results with conflict detection for duplicates/overwrites
+
+### Integration
+Works with Ripley's client-side ZIP extraction (Decision #8). Frontend extracts ZIP, uploads individual presets to this endpoint.
+
+---
+
+## 13. Brett: Infill Pattern Icon Audit — OrcaSlicer Parity Analysis (Findings)
+
+**Author:** Brett (Researcher)  
+**Date:** 2025-07-24  
+**Status:** Findings — Needs Action  
+**Impact:** Medium (UI fidelity/parity with OrcaSlicer)  
+
+### Executive Summary
+**Zero of 28 infill icons in our `InfillPatternIcons.tsx` accurately match OrcaSlicer's.**
+
+Only 4 icons in right spirit (gyroid, hilbert curve, archimedean chords, honeycomb). Remaining 24 completely wrong — depict naive geometric interpretation of pattern name rather than actual infill toolpath geometry. Also **missing 2 patterns** OrcaSlicer supports (`rectilinear-grid`, `rectilinear_interlaced`) and **have 1 pattern** (`stars`) that doesn't exist in OrcaSlicer.
+
+### Root Cause
+Our icons drawn as abstract geometric shapes based on **name** (e.g., "triangles" → triangle). OrcaSlicer's icons show **actual cross-section of infill toolpath as it appears in printed layer** — very different.
+
+Example: "rectilinear" doesn't print as horizontal lines — it prints as diagonal lines alternating between +45° and −45° on consecutive layers.
+
+### Key Findings
+- OrcaSlicer icons: 24×24 viewBox (ours: 16×16)
+- Two-layer design: gray (`#949494`, opacity 0.75) for alternate layer, teal (`#009688`) for primary
+- Rounded-rect border: 21×21 with `rx="2"` in gray
+- Source: `resources/images/param_*.svg` in SoftFever/OrcaSlicer GitHub
+
+### Recommendation
+**All 28 icons need replacement.** Correct approach:
+1. Port OrcaSlicer's actual SVGs or create new icons matching same *pattern geometry*
+2. Scale from 24×24 to 16×16 viewBox
+3. Preserve two-layer design (gray + teal)
+4. Add 2 missing patterns
+5. Decide on `stars` pattern (may be invalid in OrcaSlicer)
+
+### Licensing Note
+OrcaSlicer is AGPLv3. Icons could be used as-is if PrintFarmer's license compatible, or used as reference to create independently-drawn icons. **Decision needed from team lead.**
+
+### Implementation Effort
+- **Small**: Each SVG mechanically converted to React component
+- **Medium**: Coordinate scaling from 24×24 → 16×16
+- SVG data for all patterns collected in audit document
+
+### Patterns Status
+- **Completely wrong (24)**: rectilinear, aligned-rectilinear, monotonic, monotonic-line, grid, line, concentric, triangles, tri-hexagon, cubic, adaptive-cubic, quarter-cubic, support-cubic, 3d-honeycomb, lateral-honeycomb, lateral-lattice, cross-hatch, zigzag, crosszag, locked-zag, lightning, TPMS-D, TPMS-FK
+- **Partially correct (4)**: gyroid, hilbert-curve, archimedean-chords, honeycomb
+- **Missing from us (2)**: rectilinear-grid, rectilinear_interlaced
+- **We have, OrcaSlicer doesn't (1)**: stars
