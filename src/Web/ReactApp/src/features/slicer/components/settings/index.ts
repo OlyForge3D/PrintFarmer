@@ -5,3 +5,5 @@ export { SlicerSettingsPanel } from './SlicerSettingsPanel';
 export { SettingRow } from './SettingRow';
 export * from './SlicerSettingIcons';
 export * from './slicerSettingsTypes';
+export * from './filamentSettingsTypes';
+export * from './machineSettingsTypes';
