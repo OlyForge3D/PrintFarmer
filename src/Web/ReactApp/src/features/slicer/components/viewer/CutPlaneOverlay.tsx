@@ -37,14 +37,24 @@ function lerpVertex(a: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector
 }
 
 /**
- * Split a geometry along a horizontal plane at planeZ.
- * Returns two BufferGeometry objects: above and below.
- * Caps the cut surfaces with new triangles.
+ * Split a geometry along a horizontal plane at planeZ in model-local space.
+ * The modelMatrix transforms local coordinates to world; we transform the
+ * world-space planeZ back into local space so the cut respects rotation/scale.
+ * Returns two BufferGeometry objects: above and below (in local space).
  */
 function splitGeometryAtPlane(
   geometry: THREE.BufferGeometry,
   planeZ: number,
+  modelMatrix?: THREE.Matrix4,
 ): { above: THREE.BufferGeometry; below: THREE.BufferGeometry } {
+  // C2 fix: Transform world-space cutting plane into model-local space
+  let localPlaneZ = planeZ;
+  if (modelMatrix) {
+    const inv = modelMatrix.clone().invert();
+    const planePoint = new THREE.Vector3(0, 0, planeZ).applyMatrix4(inv);
+    localPlaneZ = planePoint.z;
+  }
+
   const posAttr = geometry.getAttribute('position');
   const index = geometry.getIndex();
   const triCount = index ? index.count / 3 : posAttr.count / 3;
@@ -74,9 +84,9 @@ function splitGeometryAtPlane(
     const v1 = getVertex(i1);
     const v2 = getVertex(i2);
 
-    const c0 = classifyPoint(v0.z, planeZ);
-    const c1 = classifyPoint(v1.z, planeZ);
-    const c2 = classifyPoint(v2.z, planeZ);
+    const c0 = classifyPoint(v0.z, localPlaneZ);
+    const c1 = classifyPoint(v1.z, localPlaneZ);
+    const c2 = classifyPoint(v2.z, localPlaneZ);
 
     // All above
     if (c0 >= 0 && c1 >= 0 && c2 >= 0) {
@@ -121,8 +131,8 @@ function splitGeometryAtPlane(
     const cA = classes[loneIdx];
 
     // Compute intersection points
-    const tAB = (planeZ - vA.z) / (vB.z - vA.z);
-    const tAC = (planeZ - vA.z) / (vC.z - vA.z);
+    const tAB = (localPlaneZ - vA.z) / (vB.z - vA.z);
+    const tAC = (localPlaneZ - vA.z) / (vC.z - vA.z);
     const pAB = lerpVertex(vA, vB, Math.max(0, Math.min(1, tAB)));
     const pAC = lerpVertex(vA, vC, Math.max(0, Math.min(1, tAC)));
 
@@ -152,7 +162,7 @@ function splitGeometryAtPlane(
       centroid.add(a).add(b);
     }
     centroid.divideScalar(capPoints.length);
-    centroid.z = planeZ;
+    centroid.z = localPlaneZ;
 
     // Fan triangulate from centroid for each edge
     for (const [a, b] of capEdges) {
@@ -288,11 +298,15 @@ export function CutPlaneOverlay({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [active, onCutCancel]);
 
-  // Confirm cut handler
+  // Confirm cut handler — C2: pass model world matrix for rotation-aware splitting
   const handleConfirm = useCallback(() => {
-    const geo: THREE.BufferGeometry | undefined = meshRef.current?.userData.geometry;
-    if (!geo) return;
-    const { above, below } = splitGeometryAtPlane(geo, actualPlaneZ);
+    const obj = meshRef.current;
+    const geo: THREE.BufferGeometry | undefined = obj?.userData.geometry;
+    if (!geo || !obj) return;
+
+    // R1: Include obj.position.z so the plane round-trips correctly through inverse matrixWorld
+    const worldPlaneZ = obj.position.z + (modelBounds.min + cutHeight * (modelBounds.max - modelBounds.min)) * obj.scale.z;
+    const { above, below } = splitGeometryAtPlane(geo, worldPlaneZ, obj.matrixWorld);
 
     // Only proceed if both halves have triangles
     const aboveCount = above.getAttribute('position')?.count ?? 0;
@@ -303,17 +317,19 @@ export function CutPlaneOverlay({
     }
 
     onCutComplete(above, below);
-  }, [meshRef, actualPlaneZ, onCutComplete, onCutCancel]);
+  }, [meshRef, modelBounds, cutHeight, onCutComplete, onCutCancel]);
 
-  // Sync plane position with model
+  // W1+W2: Sync plane position with model, accounting for scale
   useFrame(() => {
     const obj = meshRef.current;
     if (!obj || !planeRef.current) return;
+    // Position plane in world space, accounting for model scale
     planeRef.current.position.set(
       obj.position.x,
       obj.position.y,
-      obj.position.z + actualPlaneZ,
+      obj.position.z + actualPlaneZ * obj.scale.z,
     );
+    planeRef.current.rotation.copy(obj.rotation);
     planeRef.current.scale.copy(obj.scale);
   });
 
@@ -321,10 +337,9 @@ export function CutPlaneOverlay({
 
   return (
     <group>
-      {/* Cutting plane visualization */}
+      {/* Cutting plane visualization — W2: ring is a child so it inherits plane position each frame */}
       <mesh
         ref={planeRef}
-        rotation={[0, 0, 0]}
         renderOrder={2}
       >
         <planeGeometry args={[planeSize, planeSize]} />
@@ -336,22 +351,18 @@ export function CutPlaneOverlay({
           depthWrite={false}
           toneMapped={false}
         />
-      </mesh>
-
-      {/* Cut plane edge ring */}
-      <mesh
-        position={planeRef.current?.position ?? [0, 0, 0]}
-        renderOrder={3}
-      >
-        <ringGeometry args={[planeSize / 2 - 0.5, planeSize / 2, 64]} />
-        <meshBasicMaterial
-          color="#ff6b35"
-          transparent
-          opacity={0.8}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-          toneMapped={false}
-        />
+        {/* Cut plane edge ring — child of plane mesh for correct positioning */}
+        <mesh renderOrder={3}>
+          <ringGeometry args={[planeSize / 2 - 0.5, planeSize / 2, 64]} />
+          <meshBasicMaterial
+            color="#ff6b35"
+            transparent
+            opacity={0.8}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
       </mesh>
 
       {/* Height indicator + confirm/cancel UI */}
@@ -360,7 +371,7 @@ export function CutPlaneOverlay({
           position={[
             meshRef.current.position.x + planeSize / 2 + 5,
             meshRef.current.position.y,
-            meshRef.current.position.z + actualPlaneZ,
+            meshRef.current.position.z + actualPlaneZ * (meshRef.current.scale.z || 1),
           ]}
           center
           style={{ pointerEvents: 'auto' }}

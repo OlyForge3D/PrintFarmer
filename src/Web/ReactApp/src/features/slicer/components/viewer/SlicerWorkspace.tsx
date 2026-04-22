@@ -5,6 +5,7 @@
  */
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
+import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { toast } from 'sonner';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
@@ -53,7 +54,7 @@ export interface SlicerWorkspaceProps {
   /** Whether sidebar is currently open */
   sidebarOpen?: boolean;
   /** Callback when models need to be replaced (e.g., after cut) */
-  onModelsReplace?: (removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry }>) => void;
+  onModelsReplace?: (removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => void;
   /** Additional CSS class */
   className?: string;
 }
@@ -74,6 +75,15 @@ type TransformHistoryEntry = {
   action: string;
   deltas: TransformDelta[];
 };
+
+/** Serialize a BufferGeometry to a binary STL Blob URL via Three.js STLExporter. */
+function geometryToBlobUrl(geometry: THREE.BufferGeometry): string {
+  const exporter = new STLExporter();
+  const mesh = new THREE.Mesh(geometry);
+  const buffer = exporter.parse(mesh, { binary: true });
+  const blob = new Blob([buffer], { type: 'application/octet-stream' });
+  return URL.createObjectURL(blob);
+}
 
 export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   bedConfig,
@@ -501,9 +511,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (onModelsReplace) {
       const selectedModel = models.find(m => m.id === selectedModelId);
       const baseName = selectedModel?.fileName?.replace(/\.stl$/i, '') ?? 'model';
+      const aboveUrl = geometryToBlobUrl(geometryAbove);
+      const belowUrl = geometryToBlobUrl(geometryBelow);
       onModelsReplace(selectedModelId, [
-        { url: '', fileName: `${baseName}_top.stl`, geometry: geometryAbove },
-        { url: '', fileName: `${baseName}_bottom.stl`, geometry: geometryBelow },
+        { url: aboveUrl, fileName: `${baseName}_top.stl`, geometry: geometryAbove, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
+        { url: belowUrl, fileName: `${baseName}_bottom.stl`, geometry: geometryBelow, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
       ]);
     }
     toast.success('Model cut into two parts');

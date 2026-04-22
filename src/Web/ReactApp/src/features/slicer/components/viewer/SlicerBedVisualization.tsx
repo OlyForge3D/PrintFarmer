@@ -12,6 +12,9 @@ import { toast } from 'sonner';
 import { FacePaintOverlay } from './FacePaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 
+// W4: Module-level constant to avoid creating new Set on every render
+const EMPTY_FACE_SET = new Set<number>();
+
 export interface LoadedModel {
   id: string;
   url: string;
@@ -20,6 +23,8 @@ export interface LoadedModel {
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
+  /** Pre-built geometry (e.g., from a cut operation) — bypasses URL loading */
+  geometry?: THREE.BufferGeometry;
 }
 
 export interface BedConfig {
@@ -921,6 +926,139 @@ function STLModel({
 }
 
 /**
+ * STL Model component for pre-built geometries (e.g., from cut operations).
+ * Same visual output as STLModel but uses a provided BufferGeometry
+ * instead of loading from URL via useLoader.
+ */
+function PrebuiltSTLModel({
+  inputGeometry,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  selected = false,
+  outOfBounds = false,
+  layFlatMode = false,
+  draggable = false,
+  onClick,
+  onDragStart,
+  meshRef,
+  onSelectedMetrics,
+  onLayFlatFaceClick,
+}: {
+  inputGeometry: THREE.BufferGeometry;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+  selected?: boolean;
+  outOfBounds?: boolean;
+  layFlatMode?: boolean;
+  draggable?: boolean;
+  onClick?: () => void;
+  onDragStart?: (clientX: number, clientY: number) => void;
+  meshRef?: React.RefObject<THREE.Object3D | null>;
+  onSelectedMetrics?: (metrics: {
+    baseSize: [number, number, number];
+    currentSize: [number, number, number];
+    currentScale: [number, number, number];
+  }) => void;
+  onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+}) {
+  const internalRef = useRef<THREE.Group>(null);
+  const ref = meshRef || internalRef;
+
+  // Do NOT re-center cut fragment geometry — the vertices are already in the
+  // parent model's centered local space.  Re-centering would collapse both
+  // halves to origin, making them overlap.  Instead offset by -bb.min.z so
+  // each fragment's bottom sits at `position.z` (same contract as STLModel).
+  // NOTE: cut math is Z-scalar only; X/Y rotated models are unsupported
+  // (acceptable because 3D-print models always sit flat on the bed).
+  const { geometry, halfZ } = useMemo(() => {
+    const geo = inputGeometry.clone();
+    geo.computeBoundingBox();
+    const hz = geo.boundingBox ? -geo.boundingBox.min.z : 0;
+    geo.computeVertexNormals();
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    return { geometry: geo, halfZ: hz };
+  }, [inputGeometry]);
+
+  const baseSize = useMemo<[number, number, number]>(() => {
+    geometry.computeBoundingBox();
+    if (!geometry.boundingBox) return [0, 0, 0];
+    const size = new THREE.Vector3();
+    geometry.boundingBox.getSize(size);
+    return [size.x, size.y, size.z];
+  }, [geometry]);
+
+  useEffect(() => {
+    if (!selected || !onSelectedMetrics) return;
+    onSelectedMetrics({
+      baseSize,
+      currentSize: [
+        baseSize[0] * scale[0],
+        baseSize[1] * scale[1],
+        baseSize[2] * scale[2],
+      ],
+      currentScale: scale,
+    });
+  }, [baseSize, onSelectedMetrics, scale, selected]);
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.userData.halfZ = halfZ;
+      ref.current.userData.geometry = geometry;
+    }
+  }, [geometry, halfZ, ref]);
+
+  return (
+    <group
+      ref={ref as React.RefObject<THREE.Group | null>}
+      position={[position[0], position[1], position[2] + halfZ]}
+      rotation={rotation}
+      scale={scale}
+    >
+      <mesh
+        geometry={geometry}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onClick?.();
+          if (draggable && onDragStart) {
+            onDragStart(e.nativeEvent.clientX, e.nativeEvent.clientY);
+          }
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+        onPointerOver={(e) => {
+          if (draggable) {
+            e.stopPropagation();
+            document.body.style.cursor = 'grab';
+          }
+        }}
+        onPointerOut={() => {
+          if (draggable) {
+            document.body.style.cursor = '';
+          }
+        }}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial
+          color="#009688"
+          metalness={0.05}
+          roughness={0.7}
+        />
+        {selected && <SelectionBoundingBox geometry={geometry} outOfBounds={outOfBounds} />}
+      </mesh>
+      {selected && layFlatMode && onLayFlatFaceClick && (
+        <FaceSwatches geometry={geometry} onFaceClick={onLayFlatFaceClick} />
+      )}
+    </group>
+  );
+}
+
+/**
  * Camera controller with optimal positioning.
  * OrbitControls ref is exposed so TransformControls can disable orbiting during drag.
  */
@@ -1789,28 +1927,53 @@ function BedScene({
           return (
             <Suspense key={model.id} fallback={<LoadingIndicator />}>
               {model.fileType === 'stl' && (
-                <STLModel
-                  url={model.url}
-                  position={displayPos}
-                  rotation={model.rotation}
-                  scale={model.scale}
-                  selected={model.id === selectedModelId}
-                  outOfBounds={outOfBoundsModelIds?.has(model.id)}
-                  layFlatMode={model.id === selectedModelId && layFlatMode}
-                  draggable={!layFlatMode && !assemblyViewActive && transformMode !== 'rotate' && transformMode !== 'scale'}
-                  onClick={() => onModelSelect?.(model.id)}
-                  onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
-                  onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
-                  meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
-                  onSelectedMetrics={model.id === selectedModelId
-                    ? (metrics) => onSelectedModelMetricsChange?.({
-                      modelId: model.id,
-                      baseSize: metrics.baseSize,
-                      currentSize: metrics.currentSize,
-                      currentScale: metrics.currentScale,
-                    })
-                    : undefined}
-                />
+                model.geometry ? (
+                  <PrebuiltSTLModel
+                    inputGeometry={model.geometry}
+                    position={displayPos}
+                    rotation={model.rotation}
+                    scale={model.scale}
+                    selected={model.id === selectedModelId}
+                    outOfBounds={outOfBoundsModelIds?.has(model.id)}
+                    layFlatMode={model.id === selectedModelId && layFlatMode}
+                    draggable={!layFlatMode && !assemblyViewActive && transformMode !== 'rotate' && transformMode !== 'scale'}
+                    onClick={() => onModelSelect?.(model.id)}
+                    onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
+                    onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
+                    meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
+                    onSelectedMetrics={model.id === selectedModelId
+                      ? (metrics) => onSelectedModelMetricsChange?.({
+                        modelId: model.id,
+                        baseSize: metrics.baseSize,
+                        currentSize: metrics.currentSize,
+                        currentScale: metrics.currentScale,
+                      })
+                      : undefined}
+                  />
+                ) : (
+                  <STLModel
+                    url={model.url}
+                    position={displayPos}
+                    rotation={model.rotation}
+                    scale={model.scale}
+                    selected={model.id === selectedModelId}
+                    outOfBounds={outOfBoundsModelIds?.has(model.id)}
+                    layFlatMode={model.id === selectedModelId && layFlatMode}
+                    draggable={!layFlatMode && !assemblyViewActive && transformMode !== 'rotate' && transformMode !== 'scale'}
+                    onClick={() => onModelSelect?.(model.id)}
+                    onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
+                    onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
+                    meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
+                    onSelectedMetrics={model.id === selectedModelId
+                      ? (metrics) => onSelectedModelMetricsChange?.({
+                        modelId: model.id,
+                        baseSize: metrics.baseSize,
+                        currentSize: metrics.currentSize,
+                        currentScale: metrics.currentScale,
+                      })
+                      : undefined}
+                  />
+                )
               )}
             </Suspense>
           );
@@ -1830,11 +1993,12 @@ function BedScene({
         />
       )}
 
-      {/* Support paint overlay */}
+      {/* Support paint overlay — C6: key forces remount on model switch */}
       {supportPaintMode && selectedModelId && onSupportPaintUpdate && (
         <FacePaintOverlay
+          key={`support-${selectedModelId}`}
           meshRef={selectedMeshRef}
-          paintedFaces={supportPaintData?.get(selectedModelId) ?? new Set<number>()}
+          paintedFaces={supportPaintData?.get(selectedModelId) ?? EMPTY_FACE_SET}
           onPaintUpdate={onSupportPaintUpdate}
           color="#22d3ee"
           opacity={0.4}
@@ -1842,11 +2006,12 @@ function BedScene({
         />
       )}
 
-      {/* Seam paint overlay */}
+      {/* Seam paint overlay — C6: key forces remount on model switch */}
       {seamPaintMode && selectedModelId && onSeamPaintUpdate && (
         <FacePaintOverlay
+          key={`seam-${selectedModelId}`}
           meshRef={selectedMeshRef}
-          paintedFaces={seamPaintData?.get(selectedModelId) ?? new Set<number>()}
+          paintedFaces={seamPaintData?.get(selectedModelId) ?? EMPTY_FACE_SET}
           onPaintUpdate={onSeamPaintUpdate}
           color="#4ade80"
           opacity={0.4}

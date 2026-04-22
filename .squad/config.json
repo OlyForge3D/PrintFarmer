@@ -5,6 +5,8 @@
   "agentModelOverrides": {
     "scribe": "claude-haiku-4.5",
     "ripley": "claude-opus-4.6",
-    "bishop": "gpt-5.4"
+    "bishop": "gpt-5.4",
+    "hicks": "gpt-5.3-codex",
+    "vasquez": "claude-opus-4.6"
   }
 }

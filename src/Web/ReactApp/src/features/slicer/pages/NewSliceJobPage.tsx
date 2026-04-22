@@ -35,6 +35,7 @@ import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewMod
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
+import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
@@ -1170,6 +1171,25 @@ export const NewSliceJobPage: React.FC = () => {
     ));
   }, []);
 
+  // C1: Handle model replacement (e.g., after cut operation)
+  const handleWorkspaceModelsReplace = useCallback((removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => {
+    setBedModels(prev => {
+      const filtered = prev.filter(m => m.id !== removedId);
+      const additions: LoadedModel[] = newModels.map((nm, i) => ({
+        id: `${removedId}-cut-${i}-${Date.now()}`,
+        url: nm.url,
+        fileName: nm.fileName,
+        fileType: 'stl' as const,
+        position: nm.position ?? [0, 0, 0] as [number, number, number],
+        rotation: nm.rotation ?? [0, 0, 0] as [number, number, number],
+        scale: nm.scale ?? [1, 1, 1] as [number, number, number],
+        geometry: nm.geometry,
+      }));
+      return [...filtered, ...additions];
+    });
+    setSelectedBedModelId(null);
+  }, []);
+
   const handleWorkspaceSettingsProfiles = useCallback(() => {
     const settingsPanel = document.querySelector('[aria-label="Process profile options menu"]');
     if (settingsPanel instanceof HTMLElement) {
@@ -1737,6 +1757,7 @@ export const NewSliceJobPage: React.FC = () => {
                 canSlice={!submittedJobId && workspaceModels.length > 0 && !!selectedMachineProfileId && !!selectedFilamentProfileId && !!selectedProcessPresetId}
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
+                onModelsReplace={handleWorkspaceModelsReplace}
                 className="h-full"
               />
             ) : (
