@@ -5555,3 +5555,454 @@ OrcaSlicer is AGPLv3. Icons could be used as-is if PrintFarmer's license compati
 - **Partially correct (4)**: gyroid, hilbert-curve, archimedean-chords, honeycomb
 - **Missing from us (2)**: rectilinear-grid, rectilinear_interlaced
 - **We have, OrcaSlicer doesn't (1)**: stars
+
+
+---
+
+## User Directives — Code Review Gate (2026-04-22)
+
+### Mandatory Triple Review Gate
+
+### 2026-04-22T01:24Z: User directive — triple code review gate
+**By:** Jeff Papiez (via Copilot)
+**What:** ALL code must be reviewed by Bishop (GPT-5.4), Hicks (Gemini 3 Pro), AND Vasquez (Opus 4.6) before commit and push. All three reviewers must approve. This supersedes the previous directive requiring only Bishop.
+**Why:** User request — multi-model review gate for maximum code quality
+
+
+**Earlier version** (2026-04-22T01:22Z, superseded): Single-reviewer directive requiring only Bishop.
+
+---
+
+## Machine Settings Types — 105 Unique Keys (Dallas, 2026-07-18)
+
+**Bead:** PFarm1-pysq.3  
+**Status:** 📋 REFERENCE (used by Machine editor implementations)  
+**Author:** Dallas
+
+# Decision: Machine Settings Types
+
+**Author:** Dallas (frontend)
+**Date:** 2025-07-18
+**Task:** PFarm1-pysq.3
+
+## Key Decisions
+
+### 1. 105 unique keys (not 125)
+The metadata JSON has 106 field entries but `fan_speedup_time` is listed twice (same key, two sections in the Cooling Fan group). Deduplicated to **105 unique keys** in the interface. The `_meta.machineSettings: 125` count in the JSON appears to include additional internal-only keys not represented in the tab structure.
+
+### 2. Compound fields typed as `string`
+All fields marked `"compound": true` in metadata (G-code macros, bed_exclude_area, extruder_printable_area, fan_speedup_time/overhangs, resonance speeds, thumbnails, printer_notes) are typed as `string` since OrcaSlicer serialises them as semicolon-delimited strings internally.
+
+### 3. Simple vs Advanced split
+15 settings classified as `simple` — printable_height, bed_exclude_area, support_multi_bed_types, gcode_flavor, nozzle_type, nozzle_diameter, extruder_printable_area, min/max_layer_height, retraction_length, retraction_speed, machine_max_speed_x/y/z/e. Everything else is `advanced`.
+
+### 4. Default values source
+Defaults based on a generic Ender-3 class printer (220×220×250, Marlin, 0.4mm brass nozzle, i3 structure). Multi-material parameters use OrcaSlicer's own compiled defaults.
+
+### 5. Pattern alignment
+File structure mirrors `slicerSettingsTypes.ts` exactly — same section comment style, same export pattern, augmented with MODE_MAP / CATEGORY_MAP / DEFAULT objects that the process file didn't yet have.
+
+
+---
+
+## Process Metadata Extraction — Audit & Improvements (Lambert, 2026-07-25)
+
+**Status:** ✅ VERIFIED — Audit complete, fixes applied  
+# Process Metadata Extraction — Audit & Improvements
+
+**Bead:** PFarm1-d3by
+**Author:** Lambert (Backend)
+**Date:** 2025-07-25
+
+## Summary
+
+Audited `tools/extract-orca-metadata.py` against latest OrcaSlicer source (main branch).
+Found and fixed one extraction gap; regenerated metadata JSON with improved completeness.
+
+## Findings
+
+### Process Metadata (TabPrint::build) — Previously 344, now 347
+
+The process section was already well-covered with 6 tabs and 318 tab fields.
+Three new settings from the latest OrcaSlicer source were picked up:
+
+- `combine_brims` — new Quality/Others option
+- `initial_layer_travel_acceleration` — new Speed option
+- `initial_layer_travel_jerk` — new Speed option
+
+All 6 tabs remain correct: Quality, Strength, Speed, Support, Multimaterial, Others.
+
+### Machine Metadata (TabPrinter::build_fff) — 125 settings, 6 tabs ✅
+
+All 6 machine tabs were already correctly extracted:
+Basic information, Machine G-code, Multimaterial, Extruder, Motion ability, Notes.
+
+**Bug fixed:** 12 axis-expanded settings (`machine_max_speed_x/y/z/e`,
+`machine_max_acceleration_x/y/z/e`, `machine_max_jerk_x/y/z/e`) were present in
+the tab field layout but missing from the settings dictionary. These settings are
+defined in PrintConfig.cpp using a C++ for-loop with string concatenation:
+
+```cpp
+for (const AxisDefault &axis : axes) {
+    def = this->add("machine_max_speed_" + axis.name, coFloats);
+    def->full_label = (boost::format("Maximum speed %1%") % axis_upper).str();
+    ...
+}
+```
+
+The static regex parser (`def = this->add("literal_name", coType)`) couldn't match
+the concatenated key. Added `_expand_printconfig_axis_loops()` to pre-process
+PrintConfig.cpp, expanding the AxisDefault loop into 4 copies with literal strings.
+All 12 axis settings now have full metadata (label, tooltip, unit, type, mode, min).
+
+### Filament Metadata — Previously 108, now 110
+
+Two new settings from latest OrcaSlicer source:
+- `activate_air_filtration_during_print`
+- `activate_air_filtration_on_completion`
+
+## Changes Made
+
+### `tools/extract-orca-metadata.py`
+
+- Added `_expand_printconfig_axis_loops()` — detects the `for (const AxisDefault &axis : axes)`
+  loop in PrintConfig.cpp and expands it into literal definitions for x/y/z/e
+- Updated `parse_print_config()` to call the expansion before regex parsing
+- Added fallback patterns for `def->full_label` and `def->tooltip` to match plain strings
+  (not wrapped in `L()`) that result from the expansion
+
+### `orcaSettingsMetadata.json`
+
+Regenerated from latest OrcaSlicer source. Changes:
+- `_meta.totalSettings`: 781 → 798
+- `_meta.filamentSettings`: 108 → 110
+- `_meta.processSettings`: 344 → 347
+- `_meta.machineSettings`: 125 → 125 (same count but axis keys now have full metadata)
+- 5 new settings added across filament/process
+- 12 machine axis settings now have proper labels, tooltips, and units
+
+## Edge Cases Noted
+
+1. **Compound fields** — Some settings use `get_option()` / `Option{}` for multi-value
+   lines (e.g., x+y dimensions). These are correctly tagged `compound: true` in the JSON.
+
+2. **Conditional visibility** — OrcaSlicer's `toggle_options()` methods control field
+   visibility based on other settings (e.g., support options hidden when support disabled).
+   This is NOT captured in the metadata. Frontend must handle conditional visibility.
+
+3. **Dynamic extruder tabs** — The Extruder tab is created per-extruder with
+   `wxString::Format("Extruder %d", i+1)`. The script handles this by constructing
+   a single canonical Extruder tab from known section names.
+
+4. **Setting Overrides page** — The filament Setting Overrides tab has 0 fields in the
+   tab layout because it's populated dynamically at runtime. This is expected.
+
+## Validation
+
+- ✅ JSON validates (`json.load()` succeeds)
+- ✅ All tab field keys exist in their category's settings dict
+- ✅ All 12 axis-expanded machine settings have label, tooltip, unit, type, mode, min
+- ✅ Settings counts ≥ previous values (no regressions)
+- ✅ React lint unaffected (pre-existing error in metadataTypes.ts, not related)
+
+
+---
+
+## Backend Snake_case Migration Verification (Lambert, 2026-08-01)
+
+**Status:** ✅ VERIFIED — No backend issues  
+# PFarm1-pysq.5 — Backend Verification: snake_case Migration Impact
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-08-01  
+**Status:** ✅ VERIFIED — No backend issues
+
+---
+
+## 1. How Profile Settings Are Stored/Transmitted
+
+**Architecture: Opaque JSON blobs with promoted convenience fields.**
+
+The `ProcessProfile` domain entity stores settings in three TEXT columns:
+
+| Column | Content | Key Format |
+|---|---|---|
+| `RawJson` | Full raw slicer profile JSON as imported | snake_case (native OrcaSlicer) |
+| `SettingsJson` | Extracted key-value pairs for quick display | snake_case (native OrcaSlicer) |
+| `AdvancedSettings` | Additional slicer-specific settings | snake_case |
+
+Plus four promoted typed columns for server-side filtering/display: `LayerHeight`, `InfillPercentage`, `PrintSpeed`, `EnableSupports`. These are C# properties — completely independent of the JSON key format.
+
+The `ProcessProfileDto` has:
+- ~30 promoted C# properties (serialized as camelCase by ASP.NET's `JsonNamingPolicy.CamelCase`)
+- A `Dictionary<string, object> Settings` bag containing ALL profile keys in their **native snake_case format**
+
+The promoted properties are convenience accessors only. The `Settings` dictionary is the authoritative full-settings source, populated by `SerializeElementToDict()` which preserves original key names verbatim.
+
+## 2. Do snake_case Keys Work End-to-End?
+
+**YES — fully verified.**
+
+### Parsing (OrcaSlicer → Backend)
+`OrcaProfilesService.ParseProcessProfile()` reads snake_case keys directly:
+- `root.TryGetProperty("layer_height", ...)` → `profile.LayerHeight`
+- `root.TryGetProperty("sparse_infill_density", ...)` → `profile.InfillPercentage`
+- `SerializeElementToDict(root)` → `profile.Settings` (preserves all snake_case keys)
+
+### Storage (Backend → DB)
+`RawJson` and `SettingsJson` are stored as-is. Keys remain snake_case throughout.
+
+### Override Application (Frontend → Worker)
+`HttpJobPollerService.cs` line 513: *"Apply user overrides — all keys are native snake_case, pass through directly"*
+```csharp
+profile.ProcessProfile.Settings[prop.Name] = prop.Value.ValueKind switch { ... };
+```
+No translation layer — keys pass through verbatim from the frontend override JSON into the Settings dictionary.
+
+### Export (.3mf Bundle)
+`OrcaBundleExportService.ExportProcessPresetsAsync()` builds presets with snake_case keys:
+- `["layer_height"]`, `["print_speed"]`, `["infill_sparse_density"]`
+
+### SignalR
+Slicer SignalR hubs (`/hubs/slicer-registry`, `/hubs/slicers`) transmit high-level DTOs (progress, status). Profile settings are opaque `Settings` dictionary payloads — the hub's `CamelCase` naming policy only affects DTO property names, not dictionary keys inside the `Settings` bag.
+
+## 3. Issues Found
+
+**None.** The backend was already designed for snake_case keys from day one. OrcaSlicer natively uses snake_case, and the backend's parsing/storage/export pipeline preserves these keys throughout.
+
+## 4. Can CamelToNativeKeyMap Be Deleted?
+
+**Already deleted.** Commit `68042d59` ("refactor: delete CamelToNativeKeyMap and simplify override passthrough [closes PFarm1-pysq.4]") removed the map entirely. The git history shows the full lifecycle:
+
+1. `e9c2edef` — Initial camelCase→snake_case mapping added
+2. `a7b7982c` — Expanded to 187 entries
+3. `68042d59` — **Deleted entirely** after frontend migrated to native snake_case keys
+
+No remnants of `CamelToNativeKeyMap` exist in the current codebase (verified via grep).
+
+## 5. Test Results Summary
+
+```
+Passed!  - Failed: 0, Passed: 463, Skipped: 0, Total: 463, Duration: 1m 14s
+```
+
+All 463 slicer/profile/OrcaSlicer tests pass with 0 failures. Test filter: `FullyQualifiedName~Slicer|OrcaSlicer|Orca|Profile`.
+
+Coverage:
+- `Farm.Slicer.Module`: 32.5% line / 31.42% branch
+- `Farm.Slicer.Module.Api`: 27.63% line / 18.73% branch
+- `Farm.Slicers.OrcaSlicer.v2_3_1`: 79.16% line / 62.5% branch
+
+## Key Files Reviewed
+
+| File | Verification |
+|---|---|
+| `slicer/Farm.Slicer.Module/Dtos/ProcessProfileDto.cs` | Settings dict is opaque `Dictionary<string, object>` — passes through any key format |
+| `slicer/Farm.Slicer.Module/Domain/ProcessProfile.cs` | RawJson/SettingsJson stored as TEXT blobs — format-agnostic |
+| `worker-shared/HttpJobPollerService.cs` | Override keys passed through directly (line 513), no CamelToNativeKeyMap |
+| `orcaslicer-worker/Services/OrcaProfilesService.cs` | ParseProcessProfile reads snake_case keys directly from JSON |
+| `slicer/Farm.Slicer.Module.Api/Services/ProfilesService.cs` | Settings populated from AdvancedSettings JSON blob |
+| `slicer/Farm.Slicer.Module.Api/Services/OrcaBundleExportService.cs` | Export uses snake_case keys natively |
+
+## Conclusion
+
+The backend is **fully compatible** with the frontend's snake_case migration. No code changes needed. The opaque JSON blob architecture means settings keys flow through untouched from frontend → backend → OrcaSlicer worker → .3mf export.
+
+
+---
+
+## Lightweight Geometry Upload Endpoint (Lambert, 2026-08-01)
+
+**Status:** 📋 PLANNED (Cut Model tool feature dependency)  
+# Decision: Lightweight Geometry Upload Endpoint
+
+**Date:** 2026-08-01
+**Author:** Lambert
+**Status:** Implemented (not yet committed)
+
+## Context
+
+The Cut Model tool in the slicer workspace generates STL geometry in the browser via Three.js.
+These are `blob:` URLs that the slicer backend cannot fetch. We need a way to upload the
+generated STL binary to the server and get back a URL the slicer worker can HTTP-fetch.
+
+## Decision
+
+Added `POST /api/3d-models/upload-geometry` as a **lightweight** variant of the existing
+`POST /api/3d-models/upload`. It reuses the same controller, storage path, and download
+endpoint but skips:
+
+- Hash-based deduplication (cut geometry is unique each time)
+- Thumbnail generation (not meaningful for cut pieces)
+- Model analysis/dimensions (not needed for slicing)
+
+The endpoint creates a minimal `Model3D` DB row so the existing
+`GET /api/3d-models/file/{id}` download endpoint serves the file — no new download
+plumbing needed.
+
+## Implications for the Team
+
+- **Ripley (Frontend):** The response DTO is `GeometryUploadResultDto` with fields
+  `id`, `fileName`, `fileSize`, `fileUrl`. The `fileUrl` value (e.g., `/api/3d-models/file/{id}`)
+  can be passed directly as `ModelFileUrl` when submitting a slice job.
+- **No schema change:** Uses existing `Model3D` table, no migration needed.
+- **Cleanup:** Cut geometry files accumulate in the uploads directory. A future
+  housekeeping task should prune orphaned geometry (no associated slice job) older than N days.
+
+
+---
+
+## OrcaSlicer Section SVG Icons — Inventory & Theming (Newt, 2026-07-15)
+
+**Status:** ✅ COMPLETE (118 icons, all verified)  
+# Design Decision: OrcaSlicer Section SVG Icons
+
+**Author:** Newt (Designer)  
+**Bead:** PFarm1-98f1  
+**Date:** 2025-07-15
+
+## Summary
+
+All 118 OrcaSlicer section/tab SVG icons are present in `src/Web/ReactApp/public/icons/orca/` and verified against `orcaSettingsMetadata.json`. An `index.json` manifest was created for programmatic access. Hardcoded colors were converted to CSS custom properties with fallbacks.
+
+## Icon Inventory
+
+- **75** icons referenced directly in metadata tabs/sections
+- **115** icons listed in the metadata `icons` key
+- **118** total unique SVGs on disk (superset covers both)
+- **0** missing icons
+
+## Color Theming
+
+All 118 SVGs use a consistent two-tone color scheme from OrcaSlicer:
+
+| Role | Original Color | CSS Variable | Usage |
+|---|---|---|---|
+| Structural | `#949494` (gray) | `--orca-icon-secondary` | Borders, outlines, dial marks |
+| Accent | `#009688` (teal) | `--orca-icon-accent` | Highlighted elements, primary paths |
+
+Colors were converted from hardcoded hex values to `var(--orca-icon-secondary, #949494)` and `var(--orca-icon-accent, #009688)` in inline `style` attributes. Fallback values preserve the original OrcaSlicer appearance.
+
+**Theming behavior depends on how SVGs are loaded:**
+- `<img src="...">` — Isolated context; fallback values used (original colors, works on dark backgrounds)
+- Inline SVG / `dangerouslySetInnerHTML` — Parent CSS variables override; full theme control
+
+Both colors have sufficient contrast on dark backgrounds (#1a1a2e or similar), so the fallback path is dark-theme safe.
+
+## ViewBox Sizes
+
+SVGs have three viewBox sizes. All are square, so they scale uniformly:
+
+| viewBox | Count |
+|---|---|
+| `0 0 18 18` | 62 |
+| `0 0 24 24` | 31 |
+| `0 0 16 16` | 25 |
+
+**Decision: Not normalized.** Since all viewBoxes are square, the rendering container controls display size. Modifying coordinate spaces risks distorting the hand-crafted paths. The `index.json` includes viewBox metadata so consumers can handle sizing if needed.
+
+## Files Created/Modified
+
+- **Modified:** 118 SVG files (color → CSS variable conversion)
+- **Created:** `src/Web/ReactApp/public/icons/orca/index.json` (icon manifest)
+
+
+---
+
+## Filament Settings Types — Compound Fields as String (Ripley, 2026-07-31)
+
+**Status:** ✅ REFERENCE (used by Filament editor)  
+# Decision: Filament Settings Types — Compound Fields as `string`
+
+**Author:** Ripley (Frontend)
+**Date:** 2025-07-31
+**Bead:** PFarm1-pysq.2
+
+## Context
+
+OrcaSlicer filament settings include "compound" fields (per-extruder values stored as semicolon-delimited strings like `"200"` or `"200;210"`). The metadata JSON marks these with `"compound": true`.
+
+## Decision
+
+Compound fields are typed as `string` in `OrcaFilamentSettings`, not `number[]`. This matches OrcaSlicer's internal representation and avoids parse/serialize overhead at the type boundary. Non-compound numeric fields use `number`, booleans use `boolean`.
+
+## Consequences
+
+- Components rendering compound fields must handle string parsing when displaying individual extruder values
+- Simpler JSON round-trip: values pass through unchanged from OrcaSlicer profiles
+- Consistent with how the backend stores and returns these values
+
+
+---
+
+## Metadata Renderer Refactor — Monolith Extraction (Ripley, 2026-08-01)
+
+**Status:** ✅ REFERENCE (code organization decision)  
+# Decision: Extract reusable metadata renderer components
+
+**Author:** Ripley (Frontend Developer)
+**Date:** 2025-08-01
+**Bead:** PFarm1-ugub
+
+## Context
+
+`MetadataProfileRenderer.tsx` was a 976-line monolith containing types, constants, helper functions, and three internal components (`OrcaIcon`, `MetadataSection`, `MetadataTab`). None of these could be imported independently, making reuse impossible and the file difficult to navigate.
+
+## Decision
+
+Extract the monolith into five focused modules:
+
+| File | Responsibility |
+|---|---|
+| `metadataTypes.ts` | Shared types, constants (KNOWN_ENUMS, TEXTAREA_KEYS, etc.), helper functions |
+| `OrcaIcon.tsx` | Blue-tinted OrcaSlicer section icon component |
+| `MetadataSettingRow.tsx` | Single-field renderer (all control types + paired temperature rows) |
+| `MetadataSection.tsx` | Section group renderer with view-mode filtering and paired temp detection |
+| `MetadataTabRenderer.tsx` | Tab-level renderer mapping sections to MetadataSection |
+
+`MetadataProfileRenderer.tsx` becomes a ~100-line thin facade that re-exports everything, preserving all existing import paths.
+
+## Trade-offs
+
+- **More files** — 5 new files instead of 1, but each is <300 lines and single-purpose
+- **Paired hook workaround** — `useChangeTracking` for the optional paired temperature key is always called (with a fallback key when absent) to satisfy React's rules-of-hooks
+- **OrcaIcon separated** — moved to its own `.tsx` file to avoid `react-refresh/only-export-components` lint error on the pure `.ts` types file
+
+## Validation
+
+- ✅ ESLint: 0 errors (1 pre-existing warning in SettingRow.tsx)
+- ✅ Tests: 1734/1734 pass, 12 skipped, 0 failures
+- ✅ Backward compatibility: all existing consumers unchanged
+
+
+---
+
+## Frontend Slicer Fixes — Blob Leak, Profile Selection, Filtering (Ripley, 2026-07-31)
+
+**Status:** ✅ IMPLEMENTED  
+# Frontend Slicer Fixes — Blob Leak, Profile Selection, Filtering, Multi-Import
+
+**Author:** Ripley (Frontend)  
+**Date:** 2026-07-31  
+**Beads:** PFarm1-eidj, PFarm1-eh3a, PFarm1-yigr, PFarm1-issr
+
+## Summary
+
+Four slicer-area frontend bugs fixed in a single session:
+
+1. **Blob URL memory leak** — SlicerWorkspace now tracks and revokes blob URLs on unmount/replacement
+2. **Machine profile reset** — Auto-select effect now validates against both system and custom profiles
+3. **Profile filtering by printer** — Custom profiles filtered using OrcaSlicer rawJson metadata
+4. **Multi-file import** — All 3 profile file inputs now accept multiple files
+
+## Decision Points
+
+- **Blob tracking via useRef (not state):** Blob URLs are side-effect resources, not renderable state. A ref avoids unnecessary re-renders while keeping cleanup deterministic.
+- **Fuzzy name matching fallback:** When rawJson metadata lacks `printer_model`, we match against tokenized printer name words. Profiles without any match metadata are shown (not hidden) — safer to show extra than hide needed profiles.
+- **OrcaImportWizard NOT updated for multi-select:** The wizard is a multi-step flow (upload→preview→review→import) that processes one bundle. Multi-select there would require batch orchestration. The simpler file-input multi-select on NewSliceJobPage covers the common case.
+
+## Files Changed
+
+- `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx`
+- `src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx`
+
