@@ -235,7 +235,7 @@ export function CompactPrinterCard({
           </div>
 
           {(isPrinting || isPaused) && printer.estimatedCompletionTimeUtc && (
-            <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} />
+            <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} />
           )}
 
           {(isPrinting || isPaused) && (
