@@ -9,6 +9,8 @@ import { OrbitControls, Environment, Html, TransformControls } from '@react-thre
 import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { toast } from 'sonner';
+import { FacePaintOverlay } from './FacePaintOverlay';
+import { CutPlaneOverlay } from './CutPlaneOverlay';
 
 export interface LoadedModel {
   id: string;
@@ -80,6 +82,24 @@ export interface SlicerBedVisualizationProps {
   assemblyViewActive?: boolean;
   /** Increment to trigger connected-component split analysis on selected model */
   splitTrigger?: number;
+  /** Whether cut mode is active */
+  cutMode?: boolean;
+  /** Called when a cut is completed with two new geometries */
+  onCutComplete?: (geometryAbove: THREE.BufferGeometry, geometryBelow: THREE.BufferGeometry) => void;
+  /** Called when cut is cancelled */
+  onCutCancel?: () => void;
+  /** Whether support paint mode is active */
+  supportPaintMode?: boolean;
+  /** Painted support face indices per model */
+  supportPaintData?: Map<string, Set<number>>;
+  /** Called when support paint data changes */
+  onSupportPaintUpdate?: (faces: Set<number>) => void;
+  /** Whether seam paint mode is active */
+  seamPaintMode?: boolean;
+  /** Painted seam face indices per model */
+  seamPaintData?: Map<string, Set<number>>;
+  /** Called when seam paint data changes */
+  onSeamPaintUpdate?: (faces: Set<number>) => void;
 }
 
 /**
@@ -1370,6 +1390,15 @@ function BedScene({
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
+  cutMode = false,
+  onCutComplete,
+  onCutCancel,
+  supportPaintMode = false,
+  supportPaintData,
+  onSupportPaintUpdate,
+  seamPaintMode = false,
+  seamPaintData,
+  onSeamPaintUpdate,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
@@ -1791,6 +1820,40 @@ function BedScene({
       {/* Measure tool overlay */}
       {measureMode && <MeasureTool />}
 
+      {/* Cut plane overlay */}
+      {cutMode && selectedModelId && onCutComplete && onCutCancel && (
+        <CutPlaneOverlay
+          meshRef={selectedMeshRef}
+          active={cutMode}
+          onCutComplete={onCutComplete}
+          onCutCancel={onCutCancel}
+        />
+      )}
+
+      {/* Support paint overlay */}
+      {supportPaintMode && selectedModelId && onSupportPaintUpdate && (
+        <FacePaintOverlay
+          meshRef={selectedMeshRef}
+          paintedFaces={supportPaintData?.get(selectedModelId) ?? new Set<number>()}
+          onPaintUpdate={onSupportPaintUpdate}
+          color="#22d3ee"
+          opacity={0.4}
+          active={supportPaintMode}
+        />
+      )}
+
+      {/* Seam paint overlay */}
+      {seamPaintMode && selectedModelId && onSeamPaintUpdate && (
+        <FacePaintOverlay
+          meshRef={selectedMeshRef}
+          paintedFaces={seamPaintData?.get(selectedModelId) ?? new Set<number>()}
+          onPaintUpdate={onSeamPaintUpdate}
+          color="#4ade80"
+          opacity={0.4}
+          active={seamPaintMode}
+        />
+      )}
+
       {/* TransformControls for the selected model */}
       {selectedModelId && transformMode && (
         <ModelTransformControls
@@ -1831,6 +1894,15 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
+  cutMode = false,
+  onCutComplete,
+  onCutCancel,
+  supportPaintMode = false,
+  supportPaintData,
+  onSupportPaintUpdate,
+  seamPaintMode = false,
+  seamPaintData,
+  onSeamPaintUpdate,
 }) => {
   return (
     <div className={`w-full h-full ${className}`}>
@@ -1875,6 +1947,15 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             measureMode={measureMode}
             assemblyViewActive={assemblyViewActive}
             splitTrigger={splitTrigger}
+            cutMode={cutMode}
+            onCutComplete={onCutComplete}
+            onCutCancel={onCutCancel}
+            supportPaintMode={supportPaintMode}
+            supportPaintData={supportPaintData}
+            onSupportPaintUpdate={onSupportPaintUpdate}
+            seamPaintMode={seamPaintMode}
+            seamPaintData={seamPaintData}
+            onSeamPaintUpdate={onSeamPaintUpdate}
           />
         </Suspense>
       </Canvas>

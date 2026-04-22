@@ -94,6 +94,9 @@ export interface SlicerToolbarProps {
   hasSelection?: boolean;
   measureActive?: boolean;
   assemblyActive?: boolean;
+  cutActive?: boolean;
+  supportPaintActive?: boolean;
+  seamPaintActive?: boolean;
 }
 
 /** Hamburger icon for sidebar toggle */
@@ -128,6 +131,9 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   hasSelection = false,
   measureActive = false,
   assemblyActive = false,
+  cutActive = false,
+  supportPaintActive = false,
+  seamPaintActive = false,
 }) => {
   return (
     <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border shrink-0">
@@ -186,6 +192,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
           title="Cut Model (C)"
           onClick={onCut}
           disabled={!hasSelection}
+          active={cutActive}
         />
 
         <ToolbarDivider />
@@ -207,12 +214,14 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
           title="Support Painting"
           onClick={onSupportPaint}
           disabled={!hasSelection}
+          active={supportPaintActive}
         />
         <ToolbarButton
           icon={<SeamPaintIcon />}
           title="Seam Painting"
           onClick={onSeamPaint}
           disabled={!hasSelection}
+          active={seamPaintActive}
         />
       </div>
 

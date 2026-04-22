@@ -52,6 +52,8 @@ export interface SlicerWorkspaceProps {
   onToggleSidebar?: () => void;
   /** Whether sidebar is currently open */
   sidebarOpen?: boolean;
+  /** Callback when models need to be replaced (e.g., after cut) */
+  onModelsReplace?: (removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry }>) => void;
   /** Additional CSS class */
   className?: string;
 }
@@ -88,6 +90,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   slicesTotal,
   onToggleSidebar,
   sidebarOpen = true,
+  onModelsReplace,
   className = '',
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
@@ -98,6 +101,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [measureMode, setMeasureMode] = useState(false);
   const [assemblyViewActive, setAssemblyViewActive] = useState(false);
   const [splitTrigger, setSplitTrigger] = useState(0);
+  const [cutMode, setCutMode] = useState(false);
+  const [supportPaintMode, setSupportPaintMode] = useState(false);
+  const [seamPaintMode, setSeamPaintMode] = useState(false);
+  const [supportPaintData, setSupportPaintData] = useState<Map<string, Set<number>>>(new Map());
+  const [seamPaintData, setSeamPaintData] = useState<Map<string, Set<number>>>(new Map());
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
@@ -424,9 +432,28 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setSplitTrigger((prev) => prev + 1);
   }, [hasSelection]);
 
-  const handleCut = useCallback(() => {
-    toast.info('Cut tool coming soon — plane-based model cutting will be available in a future update');
+  /** Exit all interactive tool modes */
+  const exitAllToolModes = useCallback(() => {
+    setCutMode(false);
+    setSupportPaintMode(false);
+    setSeamPaintMode(false);
+    setMeasureMode(false);
+    setLayFlatMode(false);
   }, []);
+
+  const handleCut = useCallback(() => {
+    if (!hasSelection) {
+      toast.info('Select a model first to cut it');
+      return;
+    }
+    if (cutMode) {
+      setCutMode(false);
+      return;
+    }
+    exitAllToolModes();
+    setCutMode(true);
+    toast.info('Cut mode: drag the plane to set cut height, then confirm or cancel');
+  }, [hasSelection, cutMode, exitAllToolModes]);
 
   const handleMeasure = useCallback(() => {
     setMeasureMode((prev) => {
@@ -441,12 +468,69 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, []);
 
   const handleSupportPaint = useCallback(() => {
-    toast.info('Support painting coming soon — brush-based support placement will be available in a future update');
-  }, []);
+    if (!hasSelection) {
+      toast.info('Select a model first to paint supports');
+      return;
+    }
+    if (supportPaintMode) {
+      setSupportPaintMode(false);
+      return;
+    }
+    exitAllToolModes();
+    setSupportPaintMode(true);
+    toast.info('Support paint: left-click to paint, right-click to erase, Escape to exit');
+  }, [hasSelection, supportPaintMode, exitAllToolModes]);
 
   const handleSeamPaint = useCallback(() => {
-    toast.info('Seam painting coming soon — custom seam line control will be available in a future update');
+    if (!hasSelection) {
+      toast.info('Select a model first to paint seam');
+      return;
+    }
+    if (seamPaintMode) {
+      setSeamPaintMode(false);
+      return;
+    }
+    exitAllToolModes();
+    setSeamPaintMode(true);
+    toast.info('Seam paint: left-click to paint, right-click to erase, Escape to exit');
+  }, [hasSelection, seamPaintMode, exitAllToolModes]);
+
+  const handleCutComplete = useCallback((geometryAbove: THREE.BufferGeometry, geometryBelow: THREE.BufferGeometry) => {
+    if (!selectedModelId) return;
+    setCutMode(false);
+    if (onModelsReplace) {
+      const selectedModel = models.find(m => m.id === selectedModelId);
+      const baseName = selectedModel?.fileName?.replace(/\.stl$/i, '') ?? 'model';
+      onModelsReplace(selectedModelId, [
+        { url: '', fileName: `${baseName}_top.stl`, geometry: geometryAbove },
+        { url: '', fileName: `${baseName}_bottom.stl`, geometry: geometryBelow },
+      ]);
+    }
+    toast.success('Model cut into two parts');
+  }, [selectedModelId, models, onModelsReplace]);
+
+  const handleCutCancel = useCallback(() => {
+    setCutMode(false);
+    toast.info('Cut cancelled');
   }, []);
+
+  const handleSupportPaintUpdate = useCallback((faces: Set<number>) => {
+    if (!selectedModelId) return;
+    setSupportPaintData(prev => {
+      const next = new Map(prev);
+      next.set(selectedModelId, faces);
+      return next;
+    });
+  }, [selectedModelId]);
+
+  const handleSeamPaintUpdate = useCallback((faces: Set<number>) => {
+    if (!selectedModelId) return;
+    setSeamPaintData(prev => {
+      const next = new Map(prev);
+      next.set(selectedModelId, faces);
+      return next;
+    });
+  }, [selectedModelId]);
 
   const handleUndo = useCallback(() => {
     if (undoStack.length > 0) {
@@ -533,13 +617,22 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!hasSelection) return;
-
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName?.toLowerCase();
       if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target?.isContentEditable) {
         return;
       }
+
+      if (event.key === 'Escape') {
+        if (cutMode || supportPaintMode || seamPaintMode || measureMode || layFlatMode) {
+          event.preventDefault();
+          exitAllToolModes();
+          toast.info('Tool mode exited');
+          return;
+        }
+      }
+
+      if (!hasSelection) return;
 
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
@@ -558,7 +651,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection]);
+  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, measureMode, layFlatMode, exitAllToolModes]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
@@ -642,6 +735,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         hasSelection={hasSelection}
         measureActive={measureMode}
         assemblyActive={assemblyViewActive}
+        cutActive={cutMode}
+        supportPaintActive={supportPaintMode}
+        seamPaintActive={seamPaintMode}
       />
 
       {/* Main content area with 3D bed and left tools */}
@@ -662,6 +758,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           measureMode={measureMode}
           assemblyViewActive={assemblyViewActive}
           splitTrigger={splitTrigger}
+          cutMode={cutMode}
+          onCutComplete={handleCutComplete}
+          onCutCancel={handleCutCancel}
+          supportPaintMode={supportPaintMode}
+          supportPaintData={supportPaintData}
+          onSupportPaintUpdate={handleSupportPaintUpdate}
+          seamPaintMode={seamPaintMode}
+          seamPaintData={seamPaintData}
+          onSeamPaintUpdate={handleSeamPaintUpdate}
           showGrid={true}
           showAxes={true}
           showGridLines={showGridLines}
