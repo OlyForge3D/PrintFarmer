@@ -180,8 +180,16 @@ export function PrintersPage() {
     return map;
   }, [printers]);
 
-  // Cutoff timestamp for availability filter, set in the dropdown's onChange handler
-  const [availabilityCutoffMs, setAvailabilityCutoffMs] = useState(0);
+  // Hours value for availability filter — cutoff is derived dynamically so it never goes stale
+  const [availabilityHours, setAvailabilityHours] = useState<number | null>(null);
+
+  // Ticking now value for availability filter — updates every 30s so filter stays fresh
+  const [filterNow, setFilterNow] = useState(Date.now);
+  useEffect(() => {
+    if (availabilityHours === null) return;
+    const id = setInterval(() => setFilterNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [availabilityHours]);
 
   // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
@@ -201,11 +209,12 @@ export function PrintersPage() {
     if (backendFilter !== 'all') {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
-    // Availability filter — show printers done within N hours
-    if (availabilityFilter !== 'all') {
+    // Availability filter — show printers available within N hours (idle printers are always available)
+    if (availabilityHours !== null) {
+      const cutoffMs = filterNow + availabilityHours * 60 * 60 * 1000;
       filtered = filtered.filter(p => {
-        if (!p.estimatedCompletionTimeUtc) return false;
-        return new Date(p.estimatedCompletionTimeUtc).getTime() <= availabilityCutoffMs;
+        if (!p.estimatedCompletionTimeUtc) return true; // idle = already available
+        return new Date(p.estimatedCompletionTimeUtc).getTime() <= cutoffMs;
       });
     }
     // Sort based on selected mode
@@ -229,7 +238,7 @@ export function PrintersPage() {
       return 0;
     });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter, availabilityFilter, availabilityCutoffMs, sortMode, pendingPrinterIds]);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -435,9 +444,7 @@ export function PrintersPage() {
                     onChange={e => {
                       const val = e.target.value as AvailabilityFilter;
                       setAvailabilityFilter(val);
-                      setAvailabilityCutoffMs(val !== 'all'
-                        ? Date.now() + parseInt(val, 10) * 60 * 60 * 1000
-                        : 0);
+                      setAvailabilityHours(val !== 'all' ? parseInt(val, 10) : null);
                     }}
                     aria-label="Filter by estimated completion time"
                     className="min-w-0"

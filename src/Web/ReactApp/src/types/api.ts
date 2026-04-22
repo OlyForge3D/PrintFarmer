@@ -215,6 +215,8 @@ export interface PrinterJobInfo {
   spoolInfo?: PrinterSpoolInfo;
   /** Estimated UTC timestamp when the current print will complete */
   estimatedCompletionTimeUtc?: string;
+  /** Seconds remaining for the current print (from backend status) */
+  printTimeLeftSeconds?: number;
 }
 
 /**

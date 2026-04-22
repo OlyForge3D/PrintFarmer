@@ -62,6 +62,10 @@ export function usePrinterDisplay(printer: Printer): PrinterDisplay {
       bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
       // MMU status (only available from SignalR)
       mmuStatus: signalRStatus?.mmuStatus,
+      // Pass through printTimeLeftSeconds from SignalR for ETA derivation
+      printTimeLeftSeconds: signalRStatus?.printTimeLeftSeconds ?? printer.printTimeLeftSeconds,
+      // Prefer API-computed ETA (more accurate); SignalR provides printTimeLeftSeconds for live updates
+      estimatedCompletionTimeUtc: signalRStatus?.estimatedCompletionTimeUtc ?? printer.estimatedCompletionTimeUtc,
       // Expose for debugging/inspection
       isRealtimeStatus,
       signalRStatus,
@@ -107,6 +111,8 @@ export function usePrinterDisplays(printers: Printer[]): PrinterDisplay[] {
         bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
         spoolInfo: signalRStatus?.spoolInfo !== undefined ? signalRStatus.spoolInfo : printer.spoolInfo,
         mmuStatus: signalRStatus?.mmuStatus,
+        printTimeLeftSeconds: signalRStatus?.printTimeLeftSeconds ?? printer.printTimeLeftSeconds,
+        estimatedCompletionTimeUtc: signalRStatus?.estimatedCompletionTimeUtc ?? printer.estimatedCompletionTimeUtc,
         isRealtimeStatus,
         signalRStatus,
       } as PrinterDisplay;

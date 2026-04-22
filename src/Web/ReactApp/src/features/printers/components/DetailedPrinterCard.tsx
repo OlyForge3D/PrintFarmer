@@ -589,7 +589,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {(isPrinting || isPaused) && printer.estimatedCompletionTimeUtc && (
-        <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} className="mb-3" />
+        <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} className="mb-3" />
       )}
 
       {(isPrinting || isPaused) && (

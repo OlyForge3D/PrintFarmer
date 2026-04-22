@@ -538,7 +538,7 @@ public class PrintersController(
             {
                 DateTime cutoff = DateTime.UtcNow.AddMinutes(doneWithinMinutes.Value);
                 result = result.Where(p =>
-                    p.EstimatedCompletionTimeUtc.HasValue && p.EstimatedCompletionTimeUtc.Value <= cutoff);
+                    !p.EstimatedCompletionTimeUtc.HasValue || p.EstimatedCompletionTimeUtc.Value <= cutoff);
             }
 
             if (doneAfterMinutes.HasValue)
