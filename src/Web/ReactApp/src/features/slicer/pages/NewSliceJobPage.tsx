@@ -16,6 +16,7 @@ import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
+import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -440,6 +441,7 @@ export const NewSliceJobPage: React.FC = () => {
   // Profile Editor Modal State
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileEditorType, setProfileEditorType] = useState<ProfileType>('machine');
+  const [processEditorOpen, setProcessEditorOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Post-submission progress tracking
@@ -1677,6 +1679,17 @@ export const NewSliceJobPage: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={() => { setProfileMenuOpen(false); setProcessEditorOpen(true); }}
+                      disabled={!selectedProcessPresetId}
+                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                    >
+                      Edit in modal
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
                       onClick={handleCopyProcess}
                       disabled={!selectedProcessPresetId}
                       iconLeft={<CopyIcon className="w-3.5 h-3.5" />}
@@ -1950,10 +1963,23 @@ export const NewSliceJobPage: React.FC = () => {
           (selectedFilamentProfile ?? null)
         }
         onSaveSuccess={(_profileId, profileName) => {
-          // Invalidate custom profiles cache
           qc.invalidateQueries({ queryKey: ['customProfiles'] });
-          // Show success message
           setMessage(`Custom profile "${profileName}" saved successfully`);
+        }}
+      />
+
+      {/* Process Profile Editor Modal */}
+      <ProcessProfileEditorModal
+        isOpen={processEditorOpen}
+        onClose={() => setProcessEditorOpen(false)}
+        originalProfile={selectedProcessProfile}
+        onApply={(newSettings) => {
+          setSlicerSettings((prev) => ({ ...prev, ...newSettings } as OrcaProcessSettings));
+        }}
+        onSaveSuccess={(_profileId, profileName) => {
+          qc.invalidateQueries({ queryKey: ['customProfiles'] });
+          qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
+          setMessage(`Custom process profile "${profileName}" saved successfully`);
         }}
       />
     </div>
