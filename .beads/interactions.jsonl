@@ -155,3 +155,4 @@
 {"id":"int-6373b3db","kind":"field_change","created_at":"2026-04-22T19:57:32.817173Z","actor":"Jeff Papiez","issue_id":"PFarm1-oeyx.2","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-1354c6c7","kind":"field_change","created_at":"2026-04-22T19:57:33.313227Z","actor":"Jeff Papiez","issue_id":"PFarm1-e5f3.2","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-cbc0d8a7","kind":"field_change","created_at":"2026-04-22T20:03:19.322959Z","actor":"Jeff Papiez","issue_id":"PFarm1-suv8","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-544d6746","kind":"field_change","created_at":"2026-04-22T20:06:32.730721Z","actor":"Jeff Papiez","issue_id":"PFarm1-e5f3.2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
