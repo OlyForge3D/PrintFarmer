@@ -59,6 +59,7 @@ export function ScanSpoolModal({ isOpen, onClose, onSpoolFound }: ScanSpoolModal
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const hasDecodedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const cleanup = useCallback(async () => {
     if (timeoutRef.current) {
@@ -113,11 +114,13 @@ export function ScanSpoolModal({ isOpen, onClose, onSpoolFound }: ScanSpoolModal
 
   const startScanning = useCallback(async (cameraId?: string) => {
     await cleanup();
+    if (!mountedRef.current) return;
     hasDecodedRef.current = false;
     setScanState({ status: 'initializing' });
 
     try {
       const devices = await Html5Qrcode.getCameras();
+      if (!mountedRef.current) return;
       if (devices.length === 0) {
         setScanState({ status: 'no-camera' });
         return;
@@ -169,10 +172,12 @@ export function ScanSpoolModal({ isOpen, onClose, onSpoolFound }: ScanSpoolModal
   // Start/stop scanner when modal opens/closes
   useEffect(() => {
     if (isOpen) {
+      mountedRef.current = true;
       // Small delay lets the DOM element render before Html5Qrcode binds
       const timer = setTimeout(() => startScanning(), 150);
       return () => clearTimeout(timer);
     }
+    mountedRef.current = false;
     cleanup();
     setScanState({ status: 'initializing' });
     return undefined;
@@ -180,7 +185,7 @@ export function ScanSpoolModal({ isOpen, onClose, onSpoolFound }: ScanSpoolModal
   }, [isOpen]);
 
   // Cleanup on unmount
-  useEffect(() => () => { cleanup(); }, [cleanup]);
+  useEffect(() => () => { mountedRef.current = false; cleanup(); }, [cleanup]);
 
   const switchCamera = useCallback(() => {
     if (cameras.length < 2) return;

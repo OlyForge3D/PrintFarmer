@@ -621,46 +621,48 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 int i = 0;
                 foreach (JsonElement el in rotEl.EnumerateArray())
                 {
-                    if (i < 3)
+                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
                     {
-                        rot[i++] = el.GetDouble();
+                        double v = el.GetDouble();
+                        rot[i++] = double.IsFinite(v) ? v : 0;
                     }
                 }
 
                 const double radToDeg = 180.0 / Math.PI;
                 const double epsilon = 0.001;
 
-                // R3F X-rotation → OrcaSlicer X-rotation
+                // Workspace is Z-up with XY bed plane (camera.up = [0,0,1]).
+                // rotation[0]=X, rotation[1]=Y, rotation[2]=Z — same axes as OrcaSlicer.
                 double rotXDeg = rot[0] * radToDeg;
                 if (Math.Abs(rotXDeg) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
                 }
 
-                // R3F Y-rotation (up in Y-up) → OrcaSlicer Z-rotation
-                double rotZDeg = rot[1] * radToDeg;
-                if (Math.Abs(rotZDeg) > epsilon)
-                {
-                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
-                }
-
-                // R3F Z-rotation → OrcaSlicer Y-rotation
-                double rotYDeg = rot[2] * radToDeg;
+                double rotYDeg = rot[1] * radToDeg;
                 if (Math.Abs(rotYDeg) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate-y {rotYDeg:F2}");
+                }
+
+                // Z-rotation (around up axis) = OrcaSlicer --rotate (yaw)
+                double rotZDeg = rot[2] * radToDeg;
+                if (Math.Abs(rotZDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
                 }
             }
 
             if (root.TryGetProperty("scale", out JsonElement scaleEl) && scaleEl.ValueKind == JsonValueKind.Array)
             {
-                double[] scale = new double[3];
+                double[] scale = new double[3] { 1, 1, 1 };
                 int i = 0;
                 foreach (JsonElement el in scaleEl.EnumerateArray())
                 {
-                    if (i < 3)
+                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
                     {
-                        scale[i++] = el.GetDouble();
+                        double v = el.GetDouble();
+                        scale[i++] = double.IsFinite(v) ? v : 1;
                     }
                 }
 
@@ -672,25 +674,24 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
             }
 
-            // Position: Three.js Y-up → OrcaSlicer Z-up bed plane.
-            // R3F position [px, py, pz] where XZ is the bed plane.
-            // OrcaSlicer --center x,y where XY is the bed plane.
-            // Mapping: orca X = r3f X, orca Y = r3f Z.
+            // Workspace is Z-up with XY bed plane — same as OrcaSlicer.
+            // position[0]=X (bed), position[1]=Y (bed), position[2]=Z (height, ignored for --center).
             if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
             {
                 double[] pos = new double[3];
                 int i = 0;
                 foreach (JsonElement el in posEl.EnumerateArray())
                 {
-                    if (i < 3)
+                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
                     {
-                        pos[i++] = el.GetDouble();
+                        double v = el.GetDouble();
+                        pos[i++] = double.IsFinite(v) ? v : 0;
                     }
                 }
 
                 const double epsilon = 0.001;
-                double bedX = pos[0]; // R3F X → OrcaSlicer X
-                double bedY = pos[2]; // R3F Z → OrcaSlicer Y
+                double bedX = pos[0]; // X bed axis → OrcaSlicer X
+                double bedY = pos[1]; // Y bed axis → OrcaSlicer Y
 
                 if (Math.Abs(bedX) > epsilon || Math.Abs(bedY) > epsilon)
                 {

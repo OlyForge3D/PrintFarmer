@@ -203,6 +203,7 @@ describe('View mode filtering', () => {
       const advSettings = Object.values(pm.settings).filter(
         (s) => s.mode === 'advanced',
       );
+      expect(advSettings.length).toBeGreaterThan(0);
       for (const s of advSettings) {
         expect(isFieldVisible(s, 'advanced')).toBe(true);
       }
@@ -215,6 +216,7 @@ describe('View mode filtering', () => {
       const simpleSettings = Object.values(pm.settings).filter(
         (s) => s.mode === 'simple',
       );
+      expect(simpleSettings.length).toBeGreaterThan(0);
       for (const s of simpleSettings) {
         expect(isFieldVisible(s, 'simple')).toBe(true);
         expect(isFieldVisible(s, 'advanced')).toBe(true);
@@ -223,16 +225,20 @@ describe('View mode filtering', () => {
   });
 
   it('settings without a mode are visible in both modes', () => {
+    let totalNoMode = 0;
     for (const pt of PROFILE_TYPES) {
       const pm = getProfileMeta(pt);
       const noModeSettings = Object.values(pm.settings).filter(
         (s) => !s.mode,
       );
+      totalNoMode += noModeSettings.length;
       for (const s of noModeSettings) {
         expect(isFieldVisible(s, 'simple')).toBe(true);
         expect(isFieldVisible(s, 'advanced')).toBe(true);
       }
     }
+    // At least some settings across all profile types lack a mode
+    expect(totalNoMode).toBeGreaterThan(0);
   });
 
   describe('Other Settings tab logic', () => {
