@@ -132,10 +132,92 @@ def strip_block_comments(source: str) -> str:
     return ''.join(result)
 
 
+def _expand_printconfig_axis_loops(content: str) -> str:
+    """Expand the AxisDefault for-loop in PrintConfig.cpp so each axis gets a static def block.
+
+    OrcaSlicer defines machine_max_speed_x/y/z/e (and acceleration/jerk variants) inside:
+        for (const AxisDefault &axis : axes) {
+            def = this->add("machine_max_speed_" + axis.name, coFloats);
+            def->full_label = (boost::format("Maximum speed %1%") % axis_upper).str();
+            ...
+        }
+    The static regex-based parser cannot match the concatenated key, so we expand the loop
+    into four copies with literal strings substituted for each axis value.
+    """
+    axes = [('x', 'X'), ('y', 'Y'), ('z', 'Z'), ('e', 'E')]
+    # OrcaSlicer AxisDefault struct values from PrintConfig.cpp (vectors for multi-extruder):
+    #   {"x", {500.,200.}, {1000.,1000.}, {10.,10.}}
+    #   {"y", {500.,200.}, {1000.,1000.}, {10.,10.}}
+    #   {"z", {12.,12.},   {500.,200.},   {0.2,0.4}}
+    #   {"e", {120.,120.}, {5000.,5000.}, {2.5,2.5}}
+    axis_defaults = {
+        'x': {'max_feedrate': '500., 200.', 'max_acceleration': '1000., 1000.', 'max_jerk': '10., 10.'},
+        'y': {'max_feedrate': '500., 200.', 'max_acceleration': '1000., 1000.', 'max_jerk': '10., 10.'},
+        'z': {'max_feedrate': '12., 12.', 'max_acceleration': '500., 200.', 'max_jerk': '0.2, 0.4'},
+        'e': {'max_feedrate': '120., 120.', 'max_acceleration': '5000., 5000.', 'max_jerk': '2.5, 2.5'},
+    }
+    lines = content.split('\n')
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        # Detect: for (const AxisDefault &axis : axes)
+        if re.search(r'for\s*\(\s*const\s+AxisDefault\s*&\s*\w+\s*:\s*axes\s*\)', lines[i]):
+            # Find the loop body between braces
+            j = i
+            while j < len(lines) and '{' not in lines[j]:
+                j += 1
+            if j >= len(lines):
+                result.append(lines[i])
+                i += 1
+                continue
+            j += 1  # skip opening brace line
+            body_lines: list[str] = []
+            depth = 1
+            while j < len(lines) and depth > 0:
+                for ch in lines[j]:
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                if depth > 0:
+                    body_lines.append(lines[j])
+                j += 1
+            # Expand: for each axis, substitute axis.name and axis_upper
+            for lower, upper in axes:
+                for body_line in body_lines:
+                    expanded = body_line
+                    # "prefix_" + axis.name → "prefix_x"
+                    expanded = re.sub(
+                        r'"([^"]*?)"\s*\+\s*axis\.name',
+                        lambda mm: f'"{mm.group(1)}{lower}"',
+                        expanded,
+                    )
+                    # (boost::format("...%1%") % axis_upper).str() → "literal string"
+                    fmt_m = re.search(
+                        r'\(\s*boost::format\(\s*"([^"]+)"\s*\)\s*%\s*axis_upper\s*\)\.str\(\)',
+                        expanded,
+                    )
+                    if fmt_m:
+                        formatted = fmt_m.group(1).replace('%1%', upper)
+                        expanded = expanded[:fmt_m.start()] + f'"{formatted}"' + expanded[fmt_m.end():]
+                    # axis.max_feedrate / axis.max_acceleration / axis.max_jerk → numeric value
+                    for field, val in axis_defaults[lower].items():
+                        expanded = re.sub(rf'axis\.{field}', val, expanded)
+                    result.append(expanded)
+            i = j
+            continue
+        result.append(lines[i])
+        i += 1
+    return '\n'.join(result)
+
+
 def parse_print_config(filepath: str) -> dict:
     """Parse PrintConfig.cpp and extract all setting definitions."""
     with open(filepath, 'r', encoding='utf-8') as f:
         content = strip_block_comments(f.read())
+
+    # Expand the AxisDefault for-loop so axis-specific keys become static definitions
+    content = _expand_printconfig_axis_loops(content)
 
     settings = {}
 
@@ -174,11 +256,17 @@ def parse_print_config(filepath: str) -> dict:
         else:
             # Fall back to full_label if no label was found
             m_full = re.search(r'def->full_label\s*=\s*L\(\s*"((?:[^"\\]|\\.)*)"\s*\)', block_text)
+            if not m_full:
+                # After axis-loop expansion, full_label is a plain string (not wrapped in L())
+                m_full = re.search(r'def->full_label\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', block_text)
             if m_full:
                 entry['label'] = m_full.group(1).replace('\\"', '"')
 
         # Extract tooltip (may span multiple lines with string concatenation)
         m = re.search(r'def->tooltip\s*=\s*L\(\s*"((?:[^"\\]|\\.)*(?:"\s*"(?:[^"\\]|\\.)*)*)"\s*\)', block_text, re.DOTALL)
+        if not m:
+            # After axis-loop expansion, tooltip is a plain string from boost::format
+            m = re.search(r'def->tooltip\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', block_text)
         if m:
             tooltip = m.group(1).replace('\\"', '"').replace('"\n"', '').replace('"  "', '').replace('\n', ' ')
             # Clean up C++ string concatenation artifacts
@@ -261,6 +349,14 @@ def parse_print_config(filepath: str) -> dict:
             entry['label'] = name  # Use key as fallback
 
         settings[name] = entry
+
+    # Labels defined in Tab.cpp rather than PrintConfig.cpp
+    LABEL_OVERRIDES = {
+        'fan_speedup_time': 'Fan speed-up time',
+    }
+    for key, label in LABEL_OVERRIDES.items():
+        if key in settings:
+            settings[key]['label'] = label
 
     return settings
 
