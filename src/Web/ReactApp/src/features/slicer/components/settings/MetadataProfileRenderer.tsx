@@ -62,19 +62,40 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   const [viewMode, toggleViewMode] = useSlicerViewMode();
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 
-  // Filter tabs to only show those with visible fields in the current view mode
+  // Filter tabs to only show those with visible fields in the current view mode,
+  // and append a synthetic "Other Settings" tab for orphaned settings in advanced mode.
   const visibleTabs = useMemo(() => {
-    return profileMeta.tabs.filter((tab) => {
-      return tab.sections.some((section) =>
-        section.fields.some((field) => {
-          const meta = profileMeta.settings[field.key];
-          if (!meta) return false;
-          if (meta.mode === 'developer') return false;
-          if (viewMode === 'simple' && meta.mode === 'advanced') return false;
-          return true;
-        })
-      );
-    });
+    const isFieldVisible = (key: string): boolean => {
+      const m = profileMeta.settings[key];
+      if (!m) return false;
+      if (m.mode === 'developer') return false;
+      if (viewMode === 'simple' && m.mode === 'advanced') return false;
+      return true;
+    };
+
+    const filtered = profileMeta.tabs.filter((tab) =>
+      tab.sections.some((section) => section.fields.some((f) => isFieldVisible(f.key)))
+    );
+
+    // Collect keys that appear in any tab
+    const tabbedKeys = new Set(
+      profileMeta.tabs.flatMap((t) => t.sections.flatMap((s) => s.fields.map((f) => f.key)))
+    );
+
+    // Find orphaned settings that are visible in the current view mode
+    const orphanedFields = Object.keys(profileMeta.settings)
+      .filter((k) => !tabbedKeys.has(k) && isFieldVisible(k))
+      .map((k) => ({ key: k, compound: false }));
+
+    if (orphanedFields.length > 0) {
+      filtered.push({
+        name: 'Other Settings',
+        icon: 'cog',
+        sections: [{ name: 'Other Settings', icon: 'cog', fields: orphanedFields }],
+      });
+    }
+
+    return filtered;
   }, [profileMeta.tabs, profileMeta.settings, viewMode]);
 
   // Clamp activeTabIdx when visibleTabs changes
