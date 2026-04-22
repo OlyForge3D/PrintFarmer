@@ -107,6 +107,7 @@ import {
   mdiClipboardListOutline,
   mdiShield,
   mdiCloudDownload,
+  mdiBarcodeScan,
 } from '@mdi/js';
 
 interface IconProps {
@@ -3052,6 +3053,31 @@ export function CloudDownloadIcon({ className = 'w-4 h-4', ariaLabel = 'Cloud do
       role="img"
     >
       <path fill="currentColor" d={mdiCloudDownload} />
+    </svg>
+  );
+}
+
+/**
+ * Barcode scan icon
+ *
+ * Material Design icon component for barcode/QR scanning actions.
+ *
+ * @preview ![barcode-scan](https://unpkg.com/@mdi/svg@7.4.47/svg/barcode-scan.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/barcode-scan.svg
+ * @example
+ * ```tsx
+ * <BarcodeScanIcon className="w-5 h-5" ariaLabel="Scan barcode" />
+ * ```
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function BarcodeScanIcon({ className = 'w-4 h-4', ariaLabel = 'Scan barcode' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiBarcodeScan} />
     </svg>
   );
 }
