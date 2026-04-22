@@ -166,3 +166,30 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 **Decision Created:** PFarm1-5duw — Support `.orca_printer` and `.orca_filament` bundle import
 
 **Handoff:** Ripley's gap analysis identifies missing frontend ZIP extraction and backend endpoint wiring; implementation planning ready.
+
+## 2025-07-24: Infill Pattern Icon Audit — OrcaSlicer Comparison
+
+**Role:** Research specialist
+**Status:** Complete — Detailed audit in `.squad/decisions/inbox/brett-infill-icon-audit.md`
+
+**Context:** Jeff reported our infill pattern icons don't match OrcaSlicer's actual icons. Performed systematic comparison by downloading all 30 infill `param_*.svg` files from OrcaSlicer's GitHub (`SoftFever/OrcaSlicer/resources/images/`) and comparing against our 28 icons in `InfillPatternIcons.tsx`.
+
+**Key Findings:**
+- 0 out of 28 icons are accurate matches to OrcaSlicer's SVGs
+- 4 are partially correct in concept (gyroid, hilbert curve, archimedean chords, honeycomb)
+- 24 are completely wrong — drawn from imagination rather than actual toolpath geometry
+- Root cause: Our icons depict naive geometric interpretations of pattern names (e.g., "triangles" as a triangle). OrcaSlicer icons show the actual toolpath cross-section (e.g., "rectilinear" as diagonal cross-hatch because toolpath alternates plus/minus 45 degrees per layer)
+- Missing 2 patterns: rectilinear-grid, rectilinear_interlaced exist in OrcaSlicer but not in our codebase
+- 1 phantom pattern: stars exists in our code but has no corresponding icon in OrcaSlicer
+- OrcaSlicer icons are 24x24 with two-layer design (gray for alternate layer, teal for current layer)
+
+**Recommendation:** All 28 icons need replacement using OrcaSlicer's actual SVG path data as source. AGPL licensing implications noted.
+
+## Learnings
+
+- OrcaSlicer infill icons are NOT abstract geometric shapes — they show the actual toolpath cross-section of each infill pattern as it would appear in a single printed layer
+- Rectilinear family patterns use plus/minus 45 degree diagonal lines (not horizontal/vertical) because that is the actual print direction
+- OrcaSlicer uses a consistent two-layer visual language: gray (#949494) at 75% opacity for the alternate layer, teal (#009688) for the active layer
+- All infill icons in OrcaSlicer are 24x24 SVGs in resources/images/param_*.svg
+- Lateral variants (lateral-honeycomb, lateral-lattice) have a unique 3D perspective corner-fold border treatment
+- There is no param_stars.svg in OrcaSlicer — the stars infill pattern may not be valid or goes by another name
