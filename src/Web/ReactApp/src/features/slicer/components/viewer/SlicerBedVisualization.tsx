@@ -8,6 +8,7 @@ import { Canvas, useThree, useLoader, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
+import { toast } from 'sonner';
 
 export interface LoadedModel {
   id: string;
@@ -73,6 +74,12 @@ export interface SlicerBedVisualizationProps {
   onLayFlatComplete?: () => void;
   /** Increment to trigger auto-orient on the selected model */
   autoOrientTrigger?: number;
+  /** When true, measure tool is active for point-to-point distance */
+  measureMode?: boolean;
+  /** When true, models are offset radially for exploded assembly inspection */
+  assemblyViewActive?: boolean;
+  /** Increment to trigger connected-component split analysis on selected model */
+  splitTrigger?: number;
 }
 
 /**
@@ -209,7 +216,7 @@ function SvgTexturedPrintBed({
     return () => {
       img.onload = null;
     };
-  }, [textureUrl]);
+  }, [textureUrl, width, depth]);
 
   // Dispose old texture when replaced or unmounted
   useEffect(() => {
@@ -1203,6 +1210,147 @@ function useBuildPlateDrag({
 }
 
 /**
+ * Interactive point-to-point distance measurement tool.
+ * Click two points on model surfaces → shows distance line + label.
+ */
+function MeasureTool() {
+  const { camera, gl, scene, invalidate } = useThree();
+  const [pointA, setPointA] = useState<THREE.Vector3 | null>(null);
+  const [pointB, setPointB] = useState<THREE.Vector3 | null>(null);
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+
+  // Reset state when component unmounts (measure mode toggled off)
+  useEffect(() => {
+    return () => {
+      setPointA(null);
+      setPointB(null);
+    };
+  }, []);
+
+  // Escape key clears measurement
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPointA(null);
+        setPointB(null);
+        invalidate();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [invalidate]);
+
+  // Click handler on the canvas
+  useEffect(() => {
+    const el = gl.domElement;
+
+    const onClick = (e: MouseEvent) => {
+      const rect = el.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+
+      // Raycast against all mesh children in the scene
+      const meshes: THREE.Object3D[] = [];
+      scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) meshes.push(obj);
+      });
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length === 0) return;
+
+      const hitPoint = hits[0].point.clone();
+
+      setPointA((prevA) => {
+        if (prevA === null) {
+          // First click → set point A
+          setPointB(null);
+          invalidate();
+          return hitPoint;
+        }
+        // Second click → set point B (point A already set)
+        setPointB(hitPoint);
+        invalidate();
+        return prevA;
+      });
+    };
+
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [camera, gl.domElement, invalidate, raycaster, scene]);
+
+  // Allow resetting by clicking again after both points are set
+  useEffect(() => {
+    if (pointA && pointB) {
+      const el = gl.domElement;
+      const onReset = () => {
+        setPointA(null);
+        setPointB(null);
+        invalidate();
+      };
+      // Use a timeout to avoid the same click that set pointB from clearing
+      const timer = setTimeout(() => {
+        el.addEventListener('click', onReset, { once: true });
+      }, 200);
+      return () => {
+        clearTimeout(timer);
+        el.removeEventListener('click', onReset);
+      };
+    }
+  }, [pointA, pointB, gl.domElement, invalidate]);
+
+  const distance = pointA && pointB ? pointA.distanceTo(pointB) : null;
+  const midpoint = pointA && pointB
+    ? new THREE.Vector3().addVectors(pointA, pointB).multiplyScalar(0.5)
+    : null;
+
+  return (
+    <group>
+      {/* Point A marker */}
+      {pointA && (
+        <mesh position={pointA}>
+          <sphereGeometry args={[1.2, 16, 16]} />
+          <meshBasicMaterial color="#ef4444" depthTest={false} toneMapped={false} />
+        </mesh>
+      )}
+      {/* Point B marker */}
+      {pointB && (
+        <mesh position={pointB}>
+          <sphereGeometry args={[1.2, 16, 16]} />
+          <meshBasicMaterial color="#3b82f6" depthTest={false} toneMapped={false} />
+        </mesh>
+      )}
+      {/* Line between A and B */}
+      {pointA && pointB && (
+        <line>
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              args={[new Float32Array([
+                pointA.x, pointA.y, pointA.z,
+                pointB.x, pointB.y, pointB.z,
+              ]), 3]}
+              count={2}
+              itemSize={3}
+            />
+          </bufferGeometry>
+          <lineBasicMaterial color="#ffffff" depthTest={false} linewidth={2} />
+        </line>
+      )}
+      {/* Distance label */}
+      {midpoint && distance !== null && (
+        <Html position={midpoint} center style={{ pointerEvents: 'none' }}>
+          <div className="bg-pf-bg-2/95 backdrop-blur-sm px-2.5 py-1 rounded-md border border-pf-accent shadow-lg text-sm font-mono text-pf-text-primary whitespace-nowrap">
+            {distance.toFixed(2)} mm
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+/**
  * Main scene content
  */
 function BedScene({
@@ -1219,6 +1367,9 @@ function BedScene({
   layFlatMode = false,
   onLayFlatComplete,
   autoOrientTrigger = 0,
+  measureMode = false,
+  assemblyViewActive = false,
+  splitTrigger = 0,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
@@ -1457,6 +1608,120 @@ function BedScene({
     );
   }, [autoOrientTrigger, onModelTransform, selectedModelId]);
 
+  // Assembly view: compute radial offsets from centroid
+  const assemblyPositions = useMemo(() => {
+    if (!assemblyViewActive || models.length < 2) return null;
+    const cx = models.reduce((s, m) => s + m.position[0], 0) / models.length;
+    const cy = models.reduce((s, m) => s + m.position[1], 0) / models.length;
+    const MIN_DISPLACEMENT = 30;
+    const SCALE_FACTOR = 1.5;
+    const map = new Map<string, [number, number, number]>();
+    for (const model of models) {
+      const dx = model.position[0] - cx;
+      const dy = model.position[1] - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      let ox: number, oy: number;
+      if (dist < 0.01) {
+        // Model at centroid — push outward along arbitrary direction based on index
+        const idx = models.indexOf(model);
+        const angle = (idx / models.length) * Math.PI * 2;
+        ox = Math.cos(angle) * MIN_DISPLACEMENT;
+        oy = Math.sin(angle) * MIN_DISPLACEMENT;
+      } else {
+        const displacement = Math.max(dist * (SCALE_FACTOR - 1), MIN_DISPLACEMENT);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        ox = nx * displacement;
+        oy = ny * displacement;
+      }
+      map.set(model.id, [
+        model.position[0] + ox,
+        model.position[1] + oy,
+        model.position[2],
+      ]);
+    }
+    return map;
+  }, [assemblyViewActive, models]);
+
+  // Split: connected component analysis via union-find
+  const lastSplitRef = useRef(0);
+  useEffect(() => {
+    if (splitTrigger === 0 || splitTrigger === lastSplitRef.current) return;
+    lastSplitRef.current = splitTrigger;
+
+    if (!selectedModelId || !selectedMeshRef.current) return;
+    const geo: THREE.BufferGeometry | undefined = selectedMeshRef.current.userData.geometry;
+    if (!geo) {
+      toast.info('No geometry available for split analysis');
+      return;
+    }
+
+    const posAttr = geo.getAttribute('position');
+    const index = geo.getIndex();
+    const vertexCount = posAttr.count;
+    const triCount = index ? index.count / 3 : vertexCount / 3;
+
+    // Union-find
+    const parent = new Int32Array(vertexCount);
+    const rank = new Int32Array(vertexCount);
+    for (let i = 0; i < vertexCount; i++) parent[i] = i;
+
+    function find(x: number): number {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+      }
+      return x;
+    }
+
+    function union(a: number, b: number) {
+      const ra = find(a), rb = find(b);
+      if (ra === rb) return;
+      if (rank[ra] < rank[rb]) parent[ra] = rb;
+      else if (rank[ra] > rank[rb]) parent[rb] = ra;
+      else { parent[rb] = ra; rank[ra]++; }
+    }
+
+    // Build spatial hash to merge vertices at same position
+    const PRECISION = 1e4;
+    const vertexMap = new Map<string, number>();
+    const canonicalIndex = new Int32Array(vertexCount);
+    for (let i = 0; i < vertexCount; i++) {
+      const x = Math.round(posAttr.getX(i) * PRECISION);
+      const y = Math.round(posAttr.getY(i) * PRECISION);
+      const z = Math.round(posAttr.getZ(i) * PRECISION);
+      const key = `${x},${y},${z}`;
+      const existing = vertexMap.get(key);
+      if (existing !== undefined) {
+        canonicalIndex[i] = existing;
+        union(i, existing);
+      } else {
+        vertexMap.set(key, i);
+        canonicalIndex[i] = i;
+      }
+    }
+
+    // Union triangle vertices
+    for (let t = 0; t < triCount; t++) {
+      const i0 = index ? index.getX(t * 3) : t * 3;
+      const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+      union(canonicalIndex[i0], canonicalIndex[i1]);
+      union(canonicalIndex[i1], canonicalIndex[i2]);
+    }
+
+    // Count components
+    const roots = new Set<number>();
+    for (let i = 0; i < vertexCount; i++) roots.add(find(i));
+    const componentCount = roots.size;
+
+    if (componentCount <= 1) {
+      toast.info('Model is a single solid — nothing to split');
+    } else {
+      toast.info(`Model has ${componentCount} separate parts. Split support coming soon.`);
+    }
+  }, [splitTrigger, selectedModelId]);
+
   return (
     <>
       {/* Lighting — matched to OrcaSlicer dark theme shader values */}
@@ -1490,35 +1755,41 @@ function BedScene({
 
       {/* Loaded models */}
       <group onPointerMissed={handlePointerMissed}>
-        {models.map((model) => (
-          <Suspense key={model.id} fallback={<LoadingIndicator />}>
-            {model.fileType === 'stl' && (
-              <STLModel
-                url={model.url}
-                position={model.position}
-                rotation={model.rotation}
-                scale={model.scale}
-                selected={model.id === selectedModelId}
-                outOfBounds={outOfBoundsModelIds?.has(model.id)}
-                layFlatMode={model.id === selectedModelId && layFlatMode}
-                draggable={!layFlatMode && transformMode !== 'rotate' && transformMode !== 'scale'}
-                onClick={() => onModelSelect?.(model.id)}
-                onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
-                onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
-                meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
-                onSelectedMetrics={model.id === selectedModelId
-                  ? (metrics) => onSelectedModelMetricsChange?.({
-                    modelId: model.id,
-                    baseSize: metrics.baseSize,
-                    currentSize: metrics.currentSize,
-                    currentScale: metrics.currentScale,
-                  })
-                  : undefined}
-              />
-            )}
-          </Suspense>
-        ))}
+        {models.map((model) => {
+          const displayPos = assemblyPositions?.get(model.id) ?? model.position;
+          return (
+            <Suspense key={model.id} fallback={<LoadingIndicator />}>
+              {model.fileType === 'stl' && (
+                <STLModel
+                  url={model.url}
+                  position={displayPos}
+                  rotation={model.rotation}
+                  scale={model.scale}
+                  selected={model.id === selectedModelId}
+                  outOfBounds={outOfBoundsModelIds?.has(model.id)}
+                  layFlatMode={model.id === selectedModelId && layFlatMode}
+                  draggable={!layFlatMode && !assemblyViewActive && transformMode !== 'rotate' && transformMode !== 'scale'}
+                  onClick={() => onModelSelect?.(model.id)}
+                  onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
+                  onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
+                  meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
+                  onSelectedMetrics={model.id === selectedModelId
+                    ? (metrics) => onSelectedModelMetricsChange?.({
+                      modelId: model.id,
+                      baseSize: metrics.baseSize,
+                      currentSize: metrics.currentSize,
+                      currentScale: metrics.currentScale,
+                    })
+                    : undefined}
+                />
+              )}
+            </Suspense>
+          );
+        })}
       </group>
+
+      {/* Measure tool overlay */}
+      {measureMode && <MeasureTool />}
 
       {/* TransformControls for the selected model */}
       {selectedModelId && transformMode && (
@@ -1557,6 +1828,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   layFlatMode = false,
   onLayFlatComplete,
   autoOrientTrigger = 0,
+  measureMode = false,
+  assemblyViewActive = false,
+  splitTrigger = 0,
 }) => {
   return (
     <div className={`w-full h-full ${className}`}>
@@ -1598,6 +1872,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             layFlatMode={layFlatMode}
             onLayFlatComplete={onLayFlatComplete}
             autoOrientTrigger={autoOrientTrigger}
+            measureMode={measureMode}
+            assemblyViewActive={assemblyViewActive}
+            splitTrigger={splitTrigger}
           />
         </Suspense>
       </Canvas>

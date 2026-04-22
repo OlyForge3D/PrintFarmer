@@ -5,6 +5,7 @@
  */
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
+import { toast } from 'sonner';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
@@ -94,6 +95,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [showGridLines, setShowGridLines] = useState(true);
   const [layFlatMode, setLayFlatMode] = useState(false);
   const [autoOrientTrigger, setAutoOrientTrigger] = useState(0);
+  const [measureMode, setMeasureMode] = useState(false);
+  const [assemblyViewActive, setAssemblyViewActive] = useState(false);
+  const [splitTrigger, setSplitTrigger] = useState(0);
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
@@ -413,34 +417,36 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [getSelectedModel, onModelTransform]);
 
   const handleSplit = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Split model'); }
-    // Placeholder history marker until split operation state is implemented.
-    pushHistoryEntry({ action: 'Split Model', deltas: [] });
-  }, [pushHistoryEntry]);
+    if (!hasSelection) {
+      toast.info('Select a model first to split it');
+      return;
+    }
+    setSplitTrigger((prev) => prev + 1);
+  }, [hasSelection]);
 
   const handleCut = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Cut model'); }
-    // Placeholder history marker until cut operation state is implemented.
-    pushHistoryEntry({ action: 'Cut Model', deltas: [] });
-  }, [pushHistoryEntry]);
+    toast.info('Cut tool coming soon — plane-based model cutting will be available in a future update');
+  }, []);
 
   const handleMeasure = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Measure tool'); }
-    // Placeholder history marker until measure state is implemented.
-    pushHistoryEntry({ action: 'Measure Tool', deltas: [] });
-  }, [pushHistoryEntry]);
+    setMeasureMode((prev) => {
+      const next = !prev;
+      if (next) {
+        toast.info('Measure mode: click two points on a model surface to measure distance');
+      } else {
+        toast.info('Measure mode off');
+      }
+      return next;
+    });
+  }, []);
 
   const handleSupportPaint = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Support paint mode'); }
-    // Placeholder history marker until support painting state is implemented.
-    pushHistoryEntry({ action: 'Support Painting', deltas: [] });
-  }, [pushHistoryEntry]);
+    toast.info('Support painting coming soon — brush-based support placement will be available in a future update');
+  }, []);
 
   const handleSeamPaint = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Seam paint mode'); }
-    // Placeholder history marker until seam painting state is implemented.
-    pushHistoryEntry({ action: 'Seam Painting', deltas: [] });
-  }, [pushHistoryEntry]);
+    toast.info('Seam painting coming soon — custom seam line control will be available in a future update');
+  }, []);
 
   const handleUndo = useCallback(() => {
     if (undoStack.length > 0) {
@@ -465,10 +471,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [applyHistoryEntry, redoStack]);
 
   const handleAssemblyView = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Assembly view'); }
-    // Placeholder history marker until assembly view state is implemented.
-    pushHistoryEntry({ action: 'Assembly View', deltas: [] });
-  }, [pushHistoryEntry]);
+    setAssemblyViewActive((prev) => {
+      const next = !prev;
+      if (next) {
+        toast.info('Assembly view: models offset for inspection');
+      } else {
+        toast.info('Assembly view off — positions restored');
+      }
+      return next;
+    });
+  }, []);
 
   const handleKeyboardShortcuts = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Show keyboard shortcuts'); }
@@ -628,6 +640,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         canRedo={redoStack.length > 0}
         hasModels={hasModels}
         hasSelection={hasSelection}
+        measureActive={measureMode}
+        assemblyActive={assemblyViewActive}
       />
 
       {/* Main content area with 3D bed and left tools */}
@@ -645,6 +659,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           layFlatMode={layFlatMode}
           onLayFlatComplete={() => setLayFlatMode(false)}
           autoOrientTrigger={autoOrientTrigger}
+          measureMode={measureMode}
+          assemblyViewActive={assemblyViewActive}
+          splitTrigger={splitTrigger}
           showGrid={true}
           showAxes={true}
           showGridLines={showGridLines}
