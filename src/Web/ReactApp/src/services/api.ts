@@ -116,6 +116,7 @@ import {
   TimelineEventDto,
   TimezoneInfo,
 } from "@/types/api";
+import type { GeometryUploadResultDto } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
@@ -2578,6 +2579,21 @@ export class ApiClient {
   async getModels3D(): Promise<Record<string, unknown>[]> {
     const response = await this.client.get('/3d-models');
     return response.data || [];
+  }
+
+  /**
+   * Upload raw STL geometry (e.g. cut model pieces) to the server.
+   * Returns a server-side URL that slicer workers can HTTP-fetch.
+   */
+  async uploadGeometry(stlBlob: Blob, fileName: string): Promise<GeometryUploadResultDto> {
+    const formData = new FormData();
+    formData.append('geometryFile', new File([stlBlob], fileName, { type: 'application/octet-stream' }));
+    const response = await this.client.post<GeometryUploadResultDto>(
+      '/3d-models/upload-geometry',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return response.data;
   }
 
   // ============ User Management API methods ============

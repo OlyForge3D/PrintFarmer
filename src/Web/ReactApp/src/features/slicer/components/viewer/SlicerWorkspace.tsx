@@ -12,6 +12,7 @@ import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
 import { SlicerBedVisualization, type LoadedModel, type BedConfig } from './SlicerBedVisualization';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
+import { apiClient } from '@/services/api';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
 
 export interface SlicerWorkspaceProps {
@@ -77,12 +78,22 @@ type TransformHistoryEntry = {
 };
 
 /** Serialize a BufferGeometry to a binary STL Blob URL via Three.js STLExporter. */
-function geometryToBlobUrl(geometry: THREE.BufferGeometry): string {
+function geometryToBlobUrl(geometry: THREE.BufferGeometry, blobUrlsRef?: React.MutableRefObject<Set<string>>): string {
   const exporter = new STLExporter();
   const mesh = new THREE.Mesh(geometry);
   const buffer = exporter.parse(mesh, { binary: true });
   const blob = new Blob([buffer], { type: 'application/octet-stream' });
-  return URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  blobUrlsRef?.current.add(url);
+  return url;
+}
+
+/** Serialize a BufferGeometry to a binary STL Blob for upload. */
+function geometryToStlBlob(geometry: THREE.BufferGeometry): Blob {
+  const exporter = new STLExporter();
+  const mesh = new THREE.Mesh(geometry);
+  const buffer = exporter.parse(mesh, { binary: true });
+  return new Blob([buffer], { type: 'application/octet-stream' });
 }
 
 export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
@@ -119,6 +130,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
+  const blobUrlsRef = useRef<Set<string>>(new Set());
+
+  // Revoke all tracked blob URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    const urls = blobUrlsRef.current;
+    return () => {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
+      urls.clear();
+    };
+  }, []);
+
   const [uniformScale, setUniformScale] = useState(true);
   const [scalePercentInput, setScalePercentInput] = useState<[number, number, number]>([100, 100, 100]);
   const [scaleMmInput, setScaleMmInput] = useState<[number, number, number]>([0, 0, 0]);
@@ -508,17 +532,53 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const handleCutComplete = useCallback((geometryAbove: THREE.BufferGeometry, geometryBelow: THREE.BufferGeometry) => {
     if (!selectedModelId) return;
     setCutMode(false);
-    if (onModelsReplace) {
-      const selectedModel = models.find(m => m.id === selectedModelId);
-      const baseName = selectedModel?.fileName?.replace(/\.stl$/i, '') ?? 'model';
-      const aboveUrl = geometryToBlobUrl(geometryAbove);
-      const belowUrl = geometryToBlobUrl(geometryBelow);
-      onModelsReplace(selectedModelId, [
-        { url: aboveUrl, fileName: `${baseName}_top.stl`, geometry: geometryAbove, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
-        { url: belowUrl, fileName: `${baseName}_bottom.stl`, geometry: geometryBelow, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
-      ]);
+    if (!onModelsReplace) {
+      toast.success('Model cut into two parts');
+      return;
     }
-    toast.success('Model cut into two parts');
+
+    const selectedModel = models.find(m => m.id === selectedModelId);
+    const baseName = selectedModel?.fileName?.replace(/\.stl$/i, '') ?? 'model';
+    const oldModel = models.find(m => m.id === selectedModelId);
+
+    const aboveFileName = `${baseName}_top.stl`;
+    const belowFileName = `${baseName}_bottom.stl`;
+
+    // Upload STL geometry to server, falling back to local blob URLs on failure
+    const uploadAndReplace = async () => {
+      const aboveBlob = geometryToStlBlob(geometryAbove);
+      const belowBlob = geometryToStlBlob(geometryBelow);
+      const results = await Promise.allSettled([
+        apiClient.uploadGeometry(aboveBlob, aboveFileName),
+        apiClient.uploadGeometry(belowBlob, belowFileName),
+      ]);
+
+      const aboveResult = results[0].status === 'fulfilled' ? results[0].value : null;
+      const belowResult = results[1].status === 'fulfilled' ? results[1].value : null;
+
+      const aboveUrl = aboveResult?.fileUrl ?? geometryToBlobUrl(geometryAbove, blobUrlsRef);
+      const belowUrl = belowResult?.fileUrl ?? geometryToBlobUrl(geometryBelow, blobUrlsRef);
+
+      if (!aboveResult || !belowResult) {
+        const failCount = [aboveResult, belowResult].filter(r => !r).length;
+        toast.error(`Failed to upload ${failCount} cut piece(s) — using local preview`);
+      }
+
+      // Revoke old blob URL only after successful replacement
+      if (oldModel?.url && blobUrlsRef.current.has(oldModel.url)) {
+        URL.revokeObjectURL(oldModel.url);
+        blobUrlsRef.current.delete(oldModel.url);
+      }
+
+      onModelsReplace(selectedModelId, [
+        { url: aboveUrl, fileName: aboveFileName, geometry: geometryAbove, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
+        { url: belowUrl, fileName: belowFileName, geometry: geometryBelow, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
+      ]);
+      toast.success('Model cut into two parts');
+    };
+    uploadAndReplace().catch(() => {
+      toast.error('Failed to process cut model');
+    });
   }, [selectedModelId, models, onModelsReplace]);
 
   const handleCutCancel = useCallback(() => {

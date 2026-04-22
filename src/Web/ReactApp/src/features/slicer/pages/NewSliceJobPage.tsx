@@ -180,54 +180,65 @@ export const NewSliceJobPage: React.FC = () => {
   }, []);
 
   const handleProfileFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const fileArray = Array.from(e.target.files ?? []);
+    if (fileArray.length === 0) return;
 
     // Reset the input so re-importing the same file triggers onChange
     e.target.value = '';
 
-    const isBundle = file.name.endsWith('.orca_printer') || file.name.endsWith('.orca_filament');
+    let importedCount = 0;
+    let failedCount = 0;
 
-    try {
-      if (isBundle) {
-        const buffer = await file.arrayBuffer();
-        if (!isZipFile(buffer)) {
-          toast.error('File does not appear to be a valid OrcaSlicer bundle');
-          return;
-        }
-        const bundleJson = await extractOrcaBundle(buffer);
-        const bundle = JSON.parse(bundleJson) as { process?: Array<{ name?: string }> };
-        const processProfiles = bundle.process ?? [];
+    for (const file of fileArray) {
+      const isBundle = file.name.endsWith('.orca_printer') || file.name.endsWith('.orca_filament');
 
-        if (processProfiles.length === 0) {
-          toast.info('No process profiles found in bundle');
-          return;
-        }
+      try {
+        if (isBundle) {
+          const buffer = await file.arrayBuffer();
+          if (!isZipFile(buffer)) {
+            toast.error(`${file.name}: not a valid OrcaSlicer bundle`);
+            failedCount++;
+            continue;
+          }
+          const bundleJson = await extractOrcaBundle(buffer);
+          const bundle = JSON.parse(bundleJson) as { process?: Array<{ name?: string }> };
+          const processProfiles = bundle.process ?? [];
 
-        for (const profile of processProfiles) {
+          if (processProfiles.length === 0) {
+            toast.info(`${file.name}: no process profiles found`);
+            continue;
+          }
+
+          for (const profile of processProfiles) {
+            await slicerProfilesService.uploadProfile({
+              rawJson: JSON.stringify(profile),
+              profileType: 'process',
+              name: profile.name || 'Unnamed profile',
+            });
+          }
+
+          importedCount += processProfiles.length;
+        } else {
+          const text = await file.text();
+          const parsed = JSON.parse(text) as Record<string, unknown>;
           await slicerProfilesService.uploadProfile({
-            rawJson: JSON.stringify(profile),
+            rawJson: text,
             profileType: 'process',
-            name: profile.name || 'Unnamed profile',
+            name: (parsed.name as string) || file.name.replace('.json', ''),
           });
+          importedCount++;
         }
-
-        toast.success(`Imported ${processProfiles.length} process profile(s) from bundle`);
-      } else {
-        const text = await file.text();
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        await slicerProfilesService.uploadProfile({
-          rawJson: text,
-          profileType: 'process',
-          name: (parsed.name as string) || file.name.replace('.json', ''),
-        });
-        toast.success('Profile imported successfully');
+      } catch {
+        toast.error(`Failed to import ${file.name}`);
+        failedCount++;
       }
-
-      qc.invalidateQueries({ queryKey: ['customProfiles'] });
-    } catch {
-      toast.error('Failed to import profile — make sure it is valid OrcaSlicer process JSON or bundle');
     }
+
+    if (importedCount > 0) {
+      toast.success(`Imported ${importedCount} process profile(s)${failedCount > 0 ? ` (${failedCount} failed)` : ''}`);
+    }
+
+    qc.invalidateQueries({ queryKey: ['customProfiles'] });
   }, [qc]);
 
   // === Machine Profile Import handlers ===
@@ -237,53 +248,64 @@ export const NewSliceJobPage: React.FC = () => {
   }, []);
 
   const handleMachineFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const fileArray = Array.from(e.target.files ?? []);
+    if (fileArray.length === 0) return;
     e.target.value = '';
 
-    const isBundle = file.name.endsWith('.orca_printer');
+    let importedCount = 0;
+    let failedCount = 0;
 
-    try {
-      if (isBundle) {
-        const buffer = await file.arrayBuffer();
-        if (!isZipFile(buffer)) {
-          toast.error('File does not appear to be a valid OrcaSlicer bundle');
-          return;
-        }
-        const bundleJson = await extractOrcaBundle(buffer);
-        const bundle = JSON.parse(bundleJson) as { printer?: Array<{ name?: string }> };
-        const machineProfiles = bundle.printer ?? [];
+    for (const file of fileArray) {
+      const isBundle = file.name.endsWith('.orca_printer');
 
-        if (machineProfiles.length === 0) {
-          toast.info('No machine profiles found in bundle');
-          return;
-        }
+      try {
+        if (isBundle) {
+          const buffer = await file.arrayBuffer();
+          if (!isZipFile(buffer)) {
+            toast.error(`${file.name}: not a valid OrcaSlicer bundle`);
+            failedCount++;
+            continue;
+          }
+          const bundleJson = await extractOrcaBundle(buffer);
+          const bundle = JSON.parse(bundleJson) as { printer?: Array<{ name?: string }> };
+          const machineProfiles = bundle.printer ?? [];
 
-        for (const profile of machineProfiles) {
+          if (machineProfiles.length === 0) {
+            toast.info(`${file.name}: no machine profiles found`);
+            continue;
+          }
+
+          for (const profile of machineProfiles) {
+            await slicerProfilesService.uploadProfile({
+              rawJson: JSON.stringify(profile),
+              profileType: 'machine',
+              name: profile.name || 'Unnamed profile',
+            });
+          }
+
+          importedCount += machineProfiles.length;
+        } else {
+          const text = await file.text();
+          const parsed = JSON.parse(text) as Record<string, unknown>;
           await slicerProfilesService.uploadProfile({
-            rawJson: JSON.stringify(profile),
+            rawJson: text,
             profileType: 'machine',
-            name: profile.name || 'Unnamed profile',
+            name: (parsed.name as string) || file.name.replace('.json', ''),
           });
+          importedCount++;
         }
-
-        toast.success(`Imported ${machineProfiles.length} machine profile(s) from bundle`);
-      } else {
-        const text = await file.text();
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        await slicerProfilesService.uploadProfile({
-          rawJson: text,
-          profileType: 'machine',
-          name: (parsed.name as string) || file.name.replace('.json', ''),
-        });
-        toast.success('Machine profile imported successfully');
+      } catch {
+        toast.error(`Failed to import ${file.name}`);
+        failedCount++;
       }
-
-      qc.invalidateQueries({ queryKey: ['customProfiles'] });
-      qc.invalidateQueries({ queryKey: ['machineProfilesForPrinter'] });
-    } catch {
-      toast.error('Failed to import machine profile');
     }
+
+    if (importedCount > 0) {
+      toast.success(`Imported ${importedCount} machine profile(s)${failedCount > 0 ? ` (${failedCount} failed)` : ''}`);
+    }
+
+    qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    qc.invalidateQueries({ queryKey: ['machineProfilesForPrinter'] });
   }, [qc]);
 
   // === Filament Profile Import handlers ===
@@ -293,53 +315,64 @@ export const NewSliceJobPage: React.FC = () => {
   }, []);
 
   const handleFilamentFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const fileArray = Array.from(e.target.files ?? []);
+    if (fileArray.length === 0) return;
     e.target.value = '';
 
-    const isBundle = file.name.endsWith('.orca_filament');
+    let importedCount = 0;
+    let failedCount = 0;
 
-    try {
-      if (isBundle) {
-        const buffer = await file.arrayBuffer();
-        if (!isZipFile(buffer)) {
-          toast.error('File does not appear to be a valid OrcaSlicer bundle');
-          return;
-        }
-        const bundleJson = await extractOrcaBundle(buffer);
-        const bundle = JSON.parse(bundleJson) as { filament?: Array<{ name?: string }> };
-        const filamentProfiles = bundle.filament ?? [];
+    for (const file of fileArray) {
+      const isBundle = file.name.endsWith('.orca_filament');
 
-        if (filamentProfiles.length === 0) {
-          toast.info('No filament profiles found in bundle');
-          return;
-        }
+      try {
+        if (isBundle) {
+          const buffer = await file.arrayBuffer();
+          if (!isZipFile(buffer)) {
+            toast.error(`${file.name}: not a valid OrcaSlicer bundle`);
+            failedCount++;
+            continue;
+          }
+          const bundleJson = await extractOrcaBundle(buffer);
+          const bundle = JSON.parse(bundleJson) as { filament?: Array<{ name?: string }> };
+          const filamentProfiles = bundle.filament ?? [];
 
-        for (const profile of filamentProfiles) {
+          if (filamentProfiles.length === 0) {
+            toast.info(`${file.name}: no filament profiles found`);
+            continue;
+          }
+
+          for (const profile of filamentProfiles) {
+            await slicerProfilesService.uploadProfile({
+              rawJson: JSON.stringify(profile),
+              profileType: 'filament',
+              name: profile.name || 'Unnamed profile',
+            });
+          }
+
+          importedCount += filamentProfiles.length;
+        } else {
+          const text = await file.text();
+          const parsed = JSON.parse(text) as Record<string, unknown>;
           await slicerProfilesService.uploadProfile({
-            rawJson: JSON.stringify(profile),
+            rawJson: text,
             profileType: 'filament',
-            name: profile.name || 'Unnamed profile',
+            name: (parsed.name as string) || file.name.replace('.json', ''),
           });
+          importedCount++;
         }
-
-        toast.success(`Imported ${filamentProfiles.length} filament profile(s) from bundle`);
-      } else {
-        const text = await file.text();
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        await slicerProfilesService.uploadProfile({
-          rawJson: text,
-          profileType: 'filament',
-          name: (parsed.name as string) || file.name.replace('.json', ''),
-        });
-        toast.success('Filament profile imported successfully');
+      } catch {
+        toast.error(`Failed to import ${file.name}`);
+        failedCount++;
       }
-
-      qc.invalidateQueries({ queryKey: ['customProfiles'] });
-      qc.invalidateQueries({ queryKey: ['filamentProfilesAll'] });
-    } catch {
-      toast.error('Failed to import filament profile');
     }
+
+    if (importedCount > 0) {
+      toast.success(`Imported ${importedCount} filament profile(s)${failedCount > 0 ? ` (${failedCount} failed)` : ''}`);
+    }
+
+    qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    qc.invalidateQueries({ queryKey: ['filamentProfilesAll'] });
   }, [qc]);
 
   // Close profile menu when clicking outside
@@ -593,11 +626,40 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 30_000
   });
 
-  // Get the selected machine profile object
+  // === CUSTOM PROFILES (Hybrid Architecture) ===
+  // Fetch user's custom profiles to merge with system profiles
+  // NOTE: Declared before selectedMachineProfile so custom machine profiles can be resolved
+  const { data: customProfilesData } = useQuery({
+    queryKey: ['customProfiles'],
+    queryFn: () => slicerProfilesService.listCustomProfiles(),
+    staleTime: 30_000
+  });
+
+  // Get the selected machine profile object (system or custom/imported)
   const selectedMachineProfile = useMemo(() => {
-    if (!selectedMachineProfileId || !machineProfilesData?.length) return null;
-    return machineProfilesData.find(p => p.name === selectedMachineProfileId) || null;
-  }, [selectedMachineProfileId, machineProfilesData]);
+    if (!selectedMachineProfileId) return null;
+    if (machineProfilesData?.length) {
+      const system = machineProfilesData.find(p => p.name === selectedMachineProfileId);
+      if (system) return system;
+    }
+    // Check custom/imported machine profiles
+    const customMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
+    const custom = customMachine.find(p => p.name === selectedMachineProfileId);
+    if (custom) {
+      // Keep original profile name for compatibility queries; store printer_model separately for display
+      let printerModel: string | undefined;
+      if (custom.rawJson) {
+        try {
+          const parsed = JSON.parse(custom.rawJson) as Record<string, unknown>;
+          if (typeof parsed.printer_model === 'string' && parsed.printer_model) {
+            printerModel = parsed.printer_model;
+          }
+        } catch { /* ignore parse errors */ }
+      }
+      return { ...custom, printerModel } as OrcaMachineProfile;
+    }
+    return null;
+  }, [selectedMachineProfileId, machineProfilesData, customProfilesData]);
 
   // Machine names for filament/process queries (just the selected machine)
   const selectedMachineNames = useMemo(() => {
@@ -621,26 +683,75 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 30_000
   });
 
-  // === CUSTOM PROFILES (Hybrid Architecture) ===
-  // Fetch user's custom profiles to merge with system profiles
-  const { data: customProfilesData } = useQuery({
-    queryKey: ['customProfiles'],
-    queryFn: () => slicerProfilesService.listCustomProfiles(),
-    staleTime: 30_000
-  });
-
   // Filter custom profiles by type for each selector
+  // Machine profiles filtered by selected printer (name or rawJson metadata matching)
   const customMachineProfiles = useMemo(() => {
-    return customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
-  }, [customProfilesData]);
+    const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
+    if (!selectedPrinterForSlicing?.manufacturerName && !selectedPrinterForSlicing?.modelName) {
+      return allCustomMachine;
+    }
+    const mfr = selectedPrinterForSlicing.manufacturerName?.toLowerCase() ?? '';
+    const model = selectedPrinterForSlicing.modelName?.toLowerCase() ?? '';
+    return allCustomMachine.filter(p => {
+      // Try to extract printer_model from rawJson
+      if (p.rawJson) {
+        try {
+          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
+          const printerModel = (parsed.printer_model as string)?.toLowerCase();
+          if (printerModel) {
+            // Match if printer_model contains model name words or vice versa
+            const modelWords = model.split(/[\s\-_]+/).filter(w => w.length > 2);
+            if (modelWords.some(w => printerModel.includes(w))) return true;
+            if (printerModel.split(/[\s\-_]+/).some(w => model.includes(w))) return true;
+            return false;
+          }
+        } catch { /* fall through to name matching */ }
+      }
+      // Fall back to fuzzy name matching against manufacturer + model
+      const nameLower = p.name.toLowerCase();
+      const modelWords = model.split(/[\s\-_]+/).filter(w => w.length > 2);
+      const mfrWords = mfr.split(/[\s\-_]+/).filter(w => w.length > 2);
+      const matchesModel = modelWords.length > 0 && modelWords.some(w => nameLower.includes(w));
+      const matchesMfr = mfrWords.length > 0 && mfrWords.some(w => nameLower.includes(w));
+      // Show if name matches model, or if no matching info show it anyway
+      return matchesModel || (matchesMfr && modelWords.length === 0);
+    });
+  }, [customProfilesData, selectedPrinterForSlicing]);
 
+  // Filament profiles filtered by selected machine profile compatibility
   const customFilamentProfiles = useMemo(() => {
-    return customProfilesData?.profiles?.filter(p => p.profileType === 'filament') ?? [];
-  }, [customProfilesData]);
+    const allCustomFilament = customProfilesData?.profiles?.filter(p => p.profileType === 'filament') ?? [];
+    if (!selectedMachineProfileId) return allCustomFilament;
+    return allCustomFilament.filter(p => {
+      if (p.rawJson) {
+        try {
+          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
+          const compatible = parsed.compatible_printers as string[] | undefined;
+          if (compatible && compatible.length > 0) {
+            return compatible.some(c => c === selectedMachineProfileId);
+          }
+        } catch { /* show profile if can't parse */ }
+      }
+      return true;
+    });
+  }, [customProfilesData, selectedMachineProfileId]);
 
   const customProcessProfiles = useMemo(() => {
-    return customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
-  }, [customProfilesData]);
+    const allCustomProcess = customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
+    if (!selectedMachineProfileId) return allCustomProcess;
+    return allCustomProcess.filter(p => {
+      if (p.rawJson) {
+        try {
+          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
+          const compatible = parsed.compatible_printers as string[] | undefined;
+          if (compatible && compatible.length > 0) {
+            return compatible.some(c => c === selectedMachineProfileId);
+          }
+        } catch { /* show profile if can't parse */ }
+      }
+      return true;
+    });
+  }, [customProfilesData, selectedMachineProfileId]);
 
   // Combined loading state for profile queries
   // Combined loading state for profile queries
@@ -701,8 +812,11 @@ export const NewSliceJobPage: React.FC = () => {
       setSelectedManufacturer(mfgName || '');
       setSelectedPrinterModel(modelName || '');
 
-      // Keep current selection if valid for this printer model
-      const hasCurrent = !!selectedMachineProfileId && machineProfilesData.some((p) => p.name === selectedMachineProfileId);
+      // Keep current selection if valid — check both system and custom profiles
+      const hasCurrent = !!selectedMachineProfileId && (
+        machineProfilesData.some((p) => p.name === selectedMachineProfileId) ||
+        customMachineProfiles.some((p) => p.name === selectedMachineProfileId)
+      );
       if (hasCurrent) {
         return;
       }
@@ -731,7 +845,7 @@ export const NewSliceJobPage: React.FC = () => {
         setSelectedMachineProfileId(machineProfilesData[0].name);
       }
     });
-  }, [selectedPrinterForSlicing, machineProfilesData, selectedMachineProfileId]);
+  }, [selectedPrinterForSlicing, machineProfilesData, selectedMachineProfileId, customMachineProfiles]);
 
   // When machine profile changes, keep compatible selections and clear invalid ones.
   // This lets us restore last-used filament/process values on re-entry.
@@ -1188,6 +1302,22 @@ export const NewSliceJobPage: React.FC = () => {
       return [...filtered, ...additions];
     });
     setSelectedBedModelId(null);
+
+    // Update submission source to use the first cut model with a non-blob server URL
+    const serverModel = newModels.find(m => m.url && !m.url.startsWith('blob:'));
+    if (serverModel) {
+      // Normalize relative URLs to absolute, matching the pattern in the model selection useEffect
+      const url = serverModel.url.startsWith('/') ? `${getApiBaseUrl()}${serverModel.url.replace(/^\/api/, '')}` : serverModel.url;
+      setModelFileUrl(url);
+      setModelFileName(serverModel.fileName || 'cut-piece.stl');
+      setSelectedModelId('');
+    } else {
+      // All uploads failed (blob URLs only) — clear submission source so stale model can't be sliced
+      setModelFileUrl('');
+      setModelFileName('');
+      setSelectedModelId('');
+      toast.warning('Cut pieces could not be uploaded to server. Please retry or re-select a model to slice.');
+    }
   }, []);
 
   const handleWorkspaceSettingsProfiles = useCallback(() => {
@@ -1353,6 +1483,7 @@ export const NewSliceJobPage: React.FC = () => {
               ref={importMachineFileRef}
               type="file"
               accept=".json,.orca_printer"
+              multiple
               className="sr-only"
               onChange={handleMachineFileImport}
               aria-hidden="true"
@@ -1474,6 +1605,7 @@ export const NewSliceJobPage: React.FC = () => {
               ref={importFilamentFileRef}
               type="file"
               accept=".json,.orca_filament"
+              multiple
               className="sr-only"
               onChange={handleFilamentFileImport}
               aria-hidden="true"
@@ -1582,6 +1714,7 @@ export const NewSliceJobPage: React.FC = () => {
               ref={importFileRef}
               type="file"
               accept=".json,.orca_printer,.orca_filament"
+              multiple
               className="sr-only"
               onChange={handleProfileFileImport}
               aria-hidden="true"
@@ -1754,7 +1887,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onSettingsProfiles={handleWorkspaceSettingsProfiles}
                 onSlice={submitSliceJob}
                 slicing={submitMutation.isPending}
-                canSlice={!submittedJobId && workspaceModels.length > 0 && !!selectedMachineProfileId && !!selectedFilamentProfileId && !!selectedProcessPresetId}
+                canSlice={!submittedJobId && workspaceModels.length > 0 && (!!selectedModelId || !!modelFileUrl.trim()) && !!selectedMachineProfileId && !!selectedFilamentProfileId && !!selectedProcessPresetId}
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
                 onModelsReplace={handleWorkspaceModelsReplace}

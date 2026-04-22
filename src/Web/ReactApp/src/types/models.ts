@@ -56,3 +56,14 @@ export interface Model3DSearchResponse {
   pageSize: number;
   totalPages: number;
 }
+
+/**
+ * Response from POST /api/3d-models/upload-geometry
+ * Used when uploading STL geometry blobs (e.g. cut model pieces).
+ */
+export interface GeometryUploadResultDto {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileUrl: string;
+}
