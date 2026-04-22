@@ -92,6 +92,8 @@ export interface SlicerToolbarProps {
   canRedo?: boolean;
   hasModels?: boolean;
   hasSelection?: boolean;
+  measureActive?: boolean;
+  assemblyActive?: boolean;
 }
 
 /** Hamburger icon for sidebar toggle */
@@ -124,6 +126,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   canRedo = false,
   hasModels = false,
   hasSelection = false,
+  measureActive = false,
+  assemblyActive = false,
 }) => {
   return (
     <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border shrink-0">
@@ -192,6 +196,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
           title="Measure (M)"
           onClick={onMeasure}
           disabled={!hasSelection}
+          active={measureActive}
         />
 
         <ToolbarDivider />
@@ -236,6 +241,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
           title="Assembly View"
           onClick={onAssemblyView}
           disabled={!hasModels}
+          active={assemblyActive}
         />
       </div>
 
