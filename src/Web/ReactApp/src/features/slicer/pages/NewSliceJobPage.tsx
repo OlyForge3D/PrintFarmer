@@ -23,6 +23,7 @@ import {
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
+import { isZipFile, extractOrcaBundle } from '@/features/slicer/orca/utils/orcaBundleExtractor';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
@@ -120,6 +121,14 @@ export const NewSliceJobPage: React.FC = () => {
   const importFileRef = React.useRef<HTMLInputElement>(null);
   const [saveProfileState, setSaveProfileState] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
 
+  const [machineMenuOpen, setMachineMenuOpen] = useState(false);
+  const machineMenuRef = React.useRef<HTMLDivElement>(null);
+  const importMachineFileRef = React.useRef<HTMLInputElement>(null);
+
+  const [filamentMenuOpen, setFilamentMenuOpen] = useState(false);
+  const filamentMenuRef = React.useRef<HTMLDivElement>(null);
+  const importFilamentFileRef = React.useRef<HTMLInputElement>(null);
+
   // Callback for settings panel changes
   const handleSlicerSettingsChange = useCallback((newSettings: OrcaProcessSettings) => {
     setSlicerSettings((prev) => ({ ...prev, ...newSettings }));
@@ -172,18 +181,163 @@ export const NewSliceJobPage: React.FC = () => {
   const handleProfileFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Reset the input so re-importing the same file triggers onChange
+    e.target.value = '';
+
+    const isBundle = file.name.endsWith('.orca_printer') || file.name.endsWith('.orca_filament');
+
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
-      await slicerProfilesService.uploadProfile({
-        rawJson: text,
-        profileType: 'process',
-        name: (parsed.name as string) || file.name.replace('.json', ''),
-      });
-      toast.success('Profile imported successfully');
+      if (isBundle) {
+        const buffer = await file.arrayBuffer();
+        if (!isZipFile(buffer)) {
+          toast.error('File does not appear to be a valid OrcaSlicer bundle');
+          return;
+        }
+        const bundleJson = await extractOrcaBundle(buffer);
+        const bundle = JSON.parse(bundleJson) as { process?: Array<{ name?: string }> };
+        const processProfiles = bundle.process ?? [];
+
+        if (processProfiles.length === 0) {
+          toast.info('No process profiles found in bundle');
+          return;
+        }
+
+        for (const profile of processProfiles) {
+          await slicerProfilesService.uploadProfile({
+            rawJson: JSON.stringify(profile),
+            profileType: 'process',
+            name: profile.name || 'Unnamed profile',
+          });
+        }
+
+        toast.success(`Imported ${processProfiles.length} process profile(s) from bundle`);
+      } else {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        await slicerProfilesService.uploadProfile({
+          rawJson: text,
+          profileType: 'process',
+          name: (parsed.name as string) || file.name.replace('.json', ''),
+        });
+        toast.success('Profile imported successfully');
+      }
+
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     } catch {
-      toast.error('Failed to import profile — make sure it is valid OrcaSlicer process JSON');
+      toast.error('Failed to import profile — make sure it is valid OrcaSlicer process JSON or bundle');
+    }
+  }, [qc]);
+
+  // === Machine Profile Import handlers ===
+  const handleImportMachine = useCallback(() => {
+    setMachineMenuOpen(false);
+    importMachineFileRef.current?.click();
+  }, []);
+
+  const handleMachineFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const isBundle = file.name.endsWith('.orca_printer');
+
+    try {
+      if (isBundle) {
+        const buffer = await file.arrayBuffer();
+        if (!isZipFile(buffer)) {
+          toast.error('File does not appear to be a valid OrcaSlicer bundle');
+          return;
+        }
+        const bundleJson = await extractOrcaBundle(buffer);
+        const bundle = JSON.parse(bundleJson) as { printer?: Array<{ name?: string }> };
+        const machineProfiles = bundle.printer ?? [];
+
+        if (machineProfiles.length === 0) {
+          toast.info('No machine profiles found in bundle');
+          return;
+        }
+
+        for (const profile of machineProfiles) {
+          await slicerProfilesService.uploadProfile({
+            rawJson: JSON.stringify(profile),
+            profileType: 'machine',
+            name: profile.name || 'Unnamed profile',
+          });
+        }
+
+        toast.success(`Imported ${machineProfiles.length} machine profile(s) from bundle`);
+      } else {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        await slicerProfilesService.uploadProfile({
+          rawJson: text,
+          profileType: 'machine',
+          name: (parsed.name as string) || file.name.replace('.json', ''),
+        });
+        toast.success('Machine profile imported successfully');
+      }
+
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+      qc.invalidateQueries({ queryKey: ['machineProfilesForPrinter'] });
+    } catch {
+      toast.error('Failed to import machine profile');
+    }
+  }, [qc]);
+
+  // === Filament Profile Import handlers ===
+  const handleImportFilament = useCallback(() => {
+    setFilamentMenuOpen(false);
+    importFilamentFileRef.current?.click();
+  }, []);
+
+  const handleFilamentFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const isBundle = file.name.endsWith('.orca_filament');
+
+    try {
+      if (isBundle) {
+        const buffer = await file.arrayBuffer();
+        if (!isZipFile(buffer)) {
+          toast.error('File does not appear to be a valid OrcaSlicer bundle');
+          return;
+        }
+        const bundleJson = await extractOrcaBundle(buffer);
+        const bundle = JSON.parse(bundleJson) as { filament?: Array<{ name?: string }> };
+        const filamentProfiles = bundle.filament ?? [];
+
+        if (filamentProfiles.length === 0) {
+          toast.info('No filament profiles found in bundle');
+          return;
+        }
+
+        for (const profile of filamentProfiles) {
+          await slicerProfilesService.uploadProfile({
+            rawJson: JSON.stringify(profile),
+            profileType: 'filament',
+            name: profile.name || 'Unnamed profile',
+          });
+        }
+
+        toast.success(`Imported ${filamentProfiles.length} filament profile(s) from bundle`);
+      } else {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        await slicerProfilesService.uploadProfile({
+          rawJson: text,
+          profileType: 'filament',
+          name: (parsed.name as string) || file.name.replace('.json', ''),
+        });
+        toast.success('Filament profile imported successfully');
+      }
+
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+      qc.invalidateQueries({ queryKey: ['filamentProfilesAll'] });
+    } catch {
+      toast.error('Failed to import filament profile');
     }
   }, [qc]);
 
@@ -198,6 +352,28 @@ export const NewSliceJobPage: React.FC = () => {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (!machineMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (machineMenuRef.current && !machineMenuRef.current.contains(e.target as Node)) {
+        setMachineMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [machineMenuOpen]);
+
+  useEffect(() => {
+    if (!filamentMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (filamentMenuRef.current && !filamentMenuRef.current.contains(e.target as Node)) {
+        setFilamentMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [filamentMenuOpen]);
 
   // === Model Selection ===
   const [modelFileUrl, setModelFileUrl] = useState('');
@@ -1097,22 +1273,71 @@ export const NewSliceJobPage: React.FC = () => {
                 Machine Profile
                 {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
               </label>
-              {selectedMachineProfileId && (
+              <div className="relative" ref={machineMenuRef}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    setProfileEditorType('machine');
-                    setProfileEditorOpen(true);
-                  }}
                   className="p-1 h-auto"
-                  title="Edit machine profile settings"
+                  onClick={() => setMachineMenuOpen(v => !v)}
+                  title="Machine profile options"
+                  aria-label="Machine profile options menu"
+                  aria-expanded={machineMenuOpen}
+                  aria-haspopup="menu"
                 >
-                  <EditIcon className="w-4 h-4" />
+                  <MoreVerticalIcon className="w-4 h-4" />
                 </Button>
-              )}
+                {machineMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={() => {
+                        setMachineMenuOpen(false);
+                        setProfileEditorType('machine');
+                        setProfileEditorOpen(true);
+                      }}
+                      disabled={!selectedMachineProfileId}
+                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                    >
+                      Edit settings
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={handleImportMachine}
+                      iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                    >
+                      Import profile
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                    >
+                      Manage profiles
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
+            {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
+            <input
+              ref={importMachineFileRef}
+              type="file"
+              accept=".json,.orca_printer"
+              className="sr-only"
+              onChange={handleMachineFileImport}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
             
             {/* Show printer info when selected */}
             {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
@@ -1169,22 +1394,71 @@ export const NewSliceJobPage: React.FC = () => {
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-sm font-semibold text-pf-text-primary">Filament Profile</label>
-              {selectedFilamentProfileId && (
+              <div className="relative" ref={filamentMenuRef}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    setProfileEditorType('filament');
-                    setProfileEditorOpen(true);
-                  }}
                   className="p-1 h-auto"
-                  title="Edit filament profile settings"
+                  onClick={() => setFilamentMenuOpen(v => !v)}
+                  title="Filament profile options"
+                  aria-label="Filament profile options menu"
+                  aria-expanded={filamentMenuOpen}
+                  aria-haspopup="menu"
                 >
-                  <EditIcon className="w-4 h-4" />
+                  <MoreVerticalIcon className="w-4 h-4" />
                 </Button>
-              )}
+                {filamentMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={() => {
+                        setFilamentMenuOpen(false);
+                        setProfileEditorType('filament');
+                        setProfileEditorOpen(true);
+                      }}
+                      disabled={!selectedFilamentProfileId}
+                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                    >
+                      Edit settings
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={handleImportFilament}
+                      iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                    >
+                      Import profile
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={() => { setFilamentMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                    >
+                      Manage profiles
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
+            {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
+            <input
+              ref={importFilamentFileRef}
+              type="file"
+              accept=".json,.orca_filament"
+              className="sr-only"
+              onChange={handleFilamentFileImport}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
             
             {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
               <>
@@ -1287,7 +1561,7 @@ export const NewSliceJobPage: React.FC = () => {
             <input
               ref={importFileRef}
               type="file"
-              accept=".json"
+              accept=".json,.orca_printer,.orca_filament"
               className="sr-only"
               onChange={handleProfileFileImport}
               aria-hidden="true"

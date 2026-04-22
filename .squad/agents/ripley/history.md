@@ -470,3 +470,10 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - Error handling: ZIP extraction failures show user-friendly toast, malformed presets within ZIP are skipped with console.warn but don't break entire import
 - `fflate.unzipSync()` is synchronous but fast enough for typical bundle sizes (11 files = instant)
 - Backend never sees ZIP — frontend normalizes to the same `bundleJson` string format
+
+### Session: Fix profile import for ZIP bundles on NewSliceJobPage
+- `NewSliceJobPage.tsx` line ~1273 file input `accept` must include `.orca_printer,.orca_filament` alongside `.json`
+- `handleProfileFileImport` must branch on file extension: ZIP bundles go through `extractOrcaBundle()`, plain JSON keeps existing `text()→JSON.parse()` path
+- Extracted bundles contain `{ process: [...] }` — each entry is uploaded individually via `slicerProfilesService.uploadProfile()`
+- Always reset `e.target.value = ''` after reading file so re-importing the same file triggers `onChange`
+- Reuse `isZipFile()` + `extractOrcaBundle()` from `@/features/slicer/orca/utils/orcaBundleExtractor` — never re-implement ZIP handling
