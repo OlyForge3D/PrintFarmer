@@ -82,9 +82,16 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       profileMeta.tabs.flatMap((t) => t.sections.flatMap((s) => s.fields.map((f) => f.key)))
     );
 
-    // Find orphaned settings that are visible in the current view mode
+    // Find orphaned settings with an explicit user-visible mode.
+    // Settings without a mode are internal/programmatic and should not appear.
     const orphanedFields = Object.keys(profileMeta.settings)
-      .filter((k) => !tabbedKeys.has(k) && isFieldVisible(k))
+      .filter((k) => {
+        if (tabbedKeys.has(k)) return false;
+        const m = profileMeta.settings[k];
+        if (!m || !m.mode || m.mode === 'developer') return false;
+        if (viewMode === 'simple' && m.mode === 'advanced') return false;
+        return true;
+      })
       .map((k) => ({ key: k, compound: false }));
 
     if (orphanedFields.length > 0) {
