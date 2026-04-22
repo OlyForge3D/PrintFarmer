@@ -563,3 +563,40 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - useSlicerToolState hook pattern for modal-like tool activation (singleton per workspace)
 - Slider + dropdown combo pattern for numeric + categorical parameters
 - 3D face selection pattern (click detection + visual feedback)
+
+## 2026-07-31: 4 Frontend Beads — Blob Leak, Profile Reset, Filtering, Multi-Select
+
+**Role:** Frontend / Slicer UX  
+**Status:** ✅ COMPLETE — All 4 beads fixed, build+lint+tests clean
+
+### Bead PFarm1-eidj: Blob URL Memory Leak Fix
+- `geometryToBlobUrl()` now tracks created URLs via `useRef<Set<string>>`
+- Old blob URLs revoked when models replaced by cut operations
+- All tracked URLs cleaned up on component unmount via `useEffect` return
+- **File:** `SlicerWorkspace.tsx`
+
+### Bead PFarm1-eh3a: Machine Profile Reset Fix
+- Auto-select effect now checks both system (`machineProfilesData`) AND custom (`customMachineProfiles`) for current selection validity
+- Previously: selecting a custom/imported profile triggered the effect to reset to first system profile because custom profiles weren't in `machineProfilesData`
+- **File:** `NewSliceJobPage.tsx` — useEffect at machine profile auto-select
+
+### Bead PFarm1-yigr: Filter Imported Profiles by Printer
+- Custom machine profiles filtered by selected printer using rawJson `printer_model` field + fuzzy name matching
+- Custom filament/process profiles filtered by `compatible_printers` in rawJson when available
+- Profiles without matching metadata shown as fallback (safe default)
+- **File:** `NewSliceJobPage.tsx` — `customMachineProfiles`, `customFilamentProfiles`, `customProcessProfiles` useMemo blocks
+
+### Bead PFarm1-issr: Multi-Select File Import
+- All 3 hidden file inputs (`machine`, `filament`, `process`) now have `multiple` attribute
+- Import handlers iterate over `FileList` instead of accessing `files[0]`
+- Per-file error handling with aggregate success/fail toast
+- **File:** `NewSliceJobPage.tsx` — `handleMachineFileImport`, `handleFilamentFileImport`, `handleProfileFileImport`
+
+**Validation:** ✅ Build 0 errors (7.99s), ESLint 0 errors, 1734/1734 tests pass
+
+## Learnings
+
+- **Blob URL lifecycle:** `URL.createObjectURL()` allocates memory that persists until explicitly revoked or page unloads. In SPAs, components can unmount without page unload, so always track and revoke.
+- **Custom vs system profile split:** Custom profiles from `listCustomProfiles()` are NOT in the system profile queries (`machineProfilesForModel`). Any selection validation must check both data sources.
+- **OrcaSlicer rawJson metadata:** Custom profiles store the original OrcaSlicer JSON in `rawJson`. Key fields: `printer_model` for machine profiles, `compatible_printers` array for filament/process profiles.
+- **Multi-file import pattern:** Use `Array.from(files)` to iterate FileList, accumulate counts, and show aggregate results. Per-file `try/catch` prevents one bad file from blocking the rest.

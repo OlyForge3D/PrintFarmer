@@ -343,6 +343,42 @@ public class Model3DFilesController(
     }
 
     /// <summary>
+    /// Uploads raw geometry data (e.g., STL from the Cut Model tool) with minimal processing.
+    /// Skips thumbnail generation, model analysis, and deduplication.
+    /// Returns a server-accessible URL that the slicer worker can fetch.
+    /// </summary>
+    /// <param name="geometryFile">The STL geometry file to upload.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("upload-geometry")]
+    [ProducesResponseType(typeof(GeometryUploadResultDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [RequestSizeLimit(200_000_000)] // 200 MB
+    public async Task<IActionResult> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct)
+    {
+        if (geometryFile is null || geometryFile.Length == 0)
+        {
+            return BadRequest("No file uploaded or file is empty.");
+        }
+
+        try
+        {
+            GeometryUploadResultDto result = await _modelService.UploadGeometryAsync(geometryFile, ct);
+            _logger.LogInformation("Geometry upload complete: {ModelId}", result.Id);
+            return Created($"/api/3d-models/file/{result.Id}", result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Geometry upload validation failed: {Message}", ex.Message);
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload geometry");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload geometry");
+        }
+    }
+
+    /// <summary>
     /// Queries 3D models with filtering, sorting, and pagination.
     /// </summary>
     /// <param name="request">Search and filter parameters.</param>

@@ -23,6 +23,7 @@ import type { MaterialType, MaterialPreset } from '@/types/slicer';
 import type { ModelListItem } from '@/types/models';
 import { Button, Alert, Select } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { toast } from 'sonner';
 
 const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
   'PLA': { name: 'PLA', nozzleTemp: 210, bedTemp: 60 },
@@ -299,6 +300,13 @@ export const OrcaSlicerPage: React.FC = () => {
         scale: nm.scale ?? [1, 1, 1] as [number, number, number],
         geometry: nm.geometry,
       }));
+
+      // If all replacement models have blob URLs (upload failures), warn the user
+      const serverModel = newModels.find(m => m.url && !m.url.startsWith('blob:'));
+      if (!serverModel && newModels.length > 0) {
+        toast.warning('Cut pieces could not be uploaded to server. Please retry or re-add a model to slice.');
+      }
+
       return [...filtered, ...additions];
     });
     setSelectedLoadedModelId(null);
@@ -318,7 +326,14 @@ export const OrcaSlicerPage: React.FC = () => {
       return;
     }
 
-    const model = loadedModels[0]; // For now, slice first model
+    // Find first model with a valid server URL (not a blob URL from a failed upload)
+    const model = loadedModels.find(m => m.url && !m.url.startsWith('blob:')) ?? loadedModels[0];
+    if (model.url.startsWith('blob:')) {
+      setError('No uploadable model available — all models have local-only blob URLs. Please re-add a model.');
+      toast.warning('Cannot slice: model files were not uploaded to server.');
+      return;
+    }
+
     const slicerEngine = selectedSlicerId === 1 ? SlicerEngine.PrusaSlicer : SlicerEngine.OrcaSlicer;
     const capabilities = [selectedSlicerId === 1 ? 'prusaslicer' : 'orcaslicer'];
     
@@ -337,7 +352,8 @@ export const OrcaSlicerPage: React.FC = () => {
     submitMutation.mutate(request);
   }, [loadedModels, user, selectedSlicerId, selectedPrinterId, slicerSettings, selectedProcessPresetId, priority, submitMutation]);
 
-  const canSlice = loadedModels.length > 0 && !!selectedWorkerId;
+  const hasSubmittableModel = loadedModels.some(m => m.url && !m.url.startsWith('blob:'));
+  const canSlice = loadedModels.length > 0 && hasSubmittableModel && !!selectedWorkerId;
 
   return (
     <div className="h-screen flex flex-col bg-pf-bg-0">

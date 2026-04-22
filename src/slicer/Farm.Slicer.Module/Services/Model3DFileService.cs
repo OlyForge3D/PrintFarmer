@@ -833,4 +833,125 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     }
 
     #endregion
+
+    /// <inheritdoc />
+    public async Task<GeometryUploadResultDto> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct)
+    {
+        if (geometryFile is null || geometryFile.Length == 0)
+        {
+            throw new ArgumentException("Geometry file is required", nameof(geometryFile));
+        }
+
+        const long maxFileSize = 200_000_000; // 200 MB
+        if (geometryFile.Length > maxFileSize)
+        {
+            throw new ArgumentException($"File exceeds maximum allowed size of {maxFileSize / 1_000_000} MB", nameof(geometryFile));
+        }
+
+        Guid modelId = Guid.NewGuid();
+        string fileName = $"{modelId}.stl";
+        string finalFilePath = Path.Combine(_modelsPath, fileName);
+
+        if (!_fileManagementService.IsSafePath(finalFilePath, _modelsPath))
+        {
+            throw new InvalidOperationException("Unsafe file path generated");
+        }
+
+        _logger.LogInformation("Geometry upload started: {ModelId} ({FileSize} bytes)", modelId, geometryFile.Length);
+
+        // Write file to a temp path, then move to final location
+        string tempFilePath = Path.Combine(_modelsPath, $"{modelId}.tmp.stl");
+        try
+        {
+            using (Stream dest = _fileSystem.OpenWrite(tempFilePath))
+            {
+                await geometryFile.CopyToAsync(dest, ct);
+            }
+
+            if (_fileSystem.FileExists(finalFilePath))
+            {
+                _fileSystem.DeleteFile(finalFilePath);
+            }
+
+            _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
+
+            if (!_fileSystem.FileExists(finalFilePath))
+            {
+                throw new InvalidOperationException("File move succeeded but verification failed");
+            }
+        }
+        catch
+        {
+            // Cleanup on failure
+            foreach (string path in new[] { tempFilePath, finalFilePath })
+            {
+                try
+                {
+                    if (_fileManagementService.IsSafePath(path, _modelsPath) && _fileSystem.FileExists(path))
+                    {
+                        _fileSystem.DeleteFile(path);
+                    }
+                }
+                catch
+                {
+                    // ignore cleanup errors
+                }
+            }
+
+            throw;
+        }
+
+        // Create minimal DB entry so the existing download endpoint can serve the file
+        FolderNode rootFolder = await _folderManagementService.GetOrCreateFolderAsync("/", "models", ct);
+
+        Model3D model = new()
+        {
+            Id = modelId,
+            Name = geometryFile.FileName ?? $"cut-geometry-{modelId:N}.stl",
+            FileName = fileName,
+            FolderId = rootFolder.Id,
+            FilePath = "/",
+            FileSizeBytes = geometryFile.Length,
+            FileHash = modelId.ToString("N"), // Use model ID as hash — no dedup for generated geometry
+            FileFormat = ModelFileFormat.STL,
+            UploadedAt = DateTime.UtcNow,
+            IsValid = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await _model3dFiles.AddAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // DB write failed — clean up the orphaned file on disk
+            try
+            {
+                if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
+                {
+                    _fileSystem.DeleteFile(finalFilePath);
+                }
+            }
+            catch
+            {
+                // ignore cleanup errors
+            }
+
+            throw;
+        }
+
+        string fileUrl = _fileOperations.BuildModel3DFileUrl(modelId, ModelFileFormat.STL);
+        _logger.LogInformation("Geometry upload complete: {ModelId}, URL: {FileUrl}", modelId, fileUrl);
+
+        return new GeometryUploadResultDto
+        {
+            Id = modelId,
+            FileName = fileName,
+            FileSize = geometryFile.Length,
+            FileUrl = fileUrl
+        };
+    }
 }
