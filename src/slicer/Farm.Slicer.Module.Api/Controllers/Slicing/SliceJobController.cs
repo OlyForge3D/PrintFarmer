@@ -76,11 +76,14 @@ public class SliceJobController(
             ModelFileUrl = modelFileUrl,
             ModelFileName = request.ModelFileName,
             SlicerEngine = request.SlicerEngine,
-            SlicerProfileJson = request.SlicerProfileJson,
+            SlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames),
             SlicerProfileId = request.SlicerProfileId,
             RequiredCapabilitiesJson = request.RequiredCapabilitiesJson,
             Priority = request.Priority,
             ModelTransformJson = request.ModelTransformJson,
+            ExtruderFilamentProfileNamesJson = request.ExtruderFilamentProfileNames is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.ExtruderFilamentProfileNames)
+                : null,
             Status = SliceJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -484,6 +487,40 @@ public class SliceJobController(
         SlicerProfileJson = job.SlicerProfileJson,
         ModelTransformJson = job.ModelTransformJson,
     };
+
+    /// <summary>
+    /// Ensures the <c>extruderFilamentProfileNames</c> array is present inside SlicerProfileJson
+    /// so workers can resolve per-extruder filament profiles from a single JSON blob.
+    /// </summary>
+    private static string? EmbedExtruderFilamentNames(string? slicerProfileJson, List<string>? names)
+    {
+        if (names is not { Count: > 0 })
+        {
+            return slicerProfileJson;
+        }
+
+        if (string.IsNullOrWhiteSpace(slicerProfileJson))
+        {
+            return JsonSerializer.Serialize(new { extruderFilamentProfileNames = names });
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(slicerProfileJson);
+            if (doc.RootElement.TryGetProperty("extruderFilamentProfileNames", out _))
+            {
+                return slicerProfileJson;
+            }
+
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(slicerProfileJson) ?? [];
+            dict["extruderFilamentProfileNames"] = JsonSerializer.SerializeToElement(names);
+            return JsonSerializer.Serialize(dict);
+        }
+        catch (JsonException)
+        {
+            return slicerProfileJson;
+        }
+    }
 }
 
 /// <summary>Request body for reporting a failed slice job.</summary>

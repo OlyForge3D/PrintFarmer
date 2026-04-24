@@ -494,6 +494,47 @@ public abstract class HttpJobPollerService(
                 }
             }
 
+            // Resolve per-extruder filament profiles for multi-toolhead printers
+            if (root.TryGetProperty("extruderFilamentProfileNames", out JsonElement extruderNamesElem)
+                && extruderNamesElem.ValueKind == JsonValueKind.Array
+                && extruderNamesElem.GetArrayLength() > 0)
+            {
+                IList<FilamentProfileDto> filaments = await profilesService.ListAvailableFilamentProfilesAsync(ct);
+                var extruderProfiles = new List<FilamentProfileDto>();
+                int index = 0;
+                foreach (JsonElement nameElem in extruderNamesElem.EnumerateArray())
+                {
+                    string? name = nameElem.GetString();
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        index++;
+                        continue;
+                    }
+
+                    FilamentProfileDto? resolved = filaments.FirstOrDefault(f =>
+                        string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+                    if (resolved == null)
+                    {
+                        _logger.LogWarning("Extruder {Index} filament profile '{Name}' not found", index, name);
+                    }
+                    else
+                    {
+                        extruderProfiles.Add(resolved);
+                        _logger.LogInformation("Resolved extruder {Index} filament profile: {Name}", index, resolved.Name);
+                    }
+
+                    index++;
+                }
+
+                if (extruderProfiles.Count > 0)
+                {
+                    profile.ExtruderFilamentProfiles = extruderProfiles;
+
+                    // Use first extruder as the primary filament profile for backward compat
+                    profile.FilamentProfile ??= extruderProfiles[0];
+                }
+            }
+
             // Resolve process profile by name
             if (!string.IsNullOrEmpty(processProfileName))
             {

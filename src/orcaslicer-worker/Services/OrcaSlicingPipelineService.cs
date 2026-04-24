@@ -118,7 +118,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         string machineJsonPath = Path.Combine(workDir, "machine.json");
         string processJsonPath = Path.Combine(workDir, "process.json");
-        string filamentJsonPath = Path.Combine(workDir, "filament.json");
 
         // Write the profiles directly as JSON - they should already contain complete settings from the database
         // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
@@ -126,18 +125,39 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // so we reconstruct proper JSON by writing the raw values directly.
         string machineJson = SettingsDictToNativeJson(profile.MachineProfile?.Settings);
         string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
-        string filamentJson = SettingsDictToNativeJson(profile.FilamentProfile?.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
-        await File.WriteAllTextAsync(filamentJsonPath, filamentJson, cancellationToken);
 
-        return new Dictionary<string, string>
+        var result = new Dictionary<string, string>
         {
             { "machine", machineJsonPath },
-            { "process", processJsonPath },
-            { "filament", filamentJsonPath }
+            { "process", processJsonPath }
         };
+
+        // Multi-extruder: write one filament JSON per extruder, semicolon-separated for --load-filaments
+        if (profile.ExtruderFilamentProfiles is { Count: > 1 })
+        {
+            var filamentPaths = new List<string>();
+            for (int i = 0; i < profile.ExtruderFilamentProfiles.Count; i++)
+            {
+                string path = Path.Combine(workDir, $"filament_{i}.json");
+                string json = SettingsDictToNativeJson(profile.ExtruderFilamentProfiles[i].Settings);
+                await File.WriteAllTextAsync(path, json, cancellationToken);
+                filamentPaths.Add(path);
+            }
+
+            result["filament"] = string.Join(";", filamentPaths);
+        }
+        else
+        {
+            string filamentJsonPath = Path.Combine(workDir, "filament.json");
+            string filamentJson = SettingsDictToNativeJson(profile.FilamentProfile?.Settings);
+            await File.WriteAllTextAsync(filamentJsonPath, filamentJson, cancellationToken);
+            result["filament"] = filamentJsonPath;
+        }
+
+        return result;
     }
 
     private async Task<string> RunOrcaSlicerAsync(string stlPath, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
@@ -295,7 +315,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string printerModel = job.Profile?.MachineProfile?.PrinterModel
                            ?? job.Profile?.MachineProfile?.Name
                            ?? "Unknown";
-        string material = job.Profile?.FilamentProfile?.Material ?? "PLA";
+        string material = job.Profile?.ExtruderFilamentProfiles is { Count: > 1 }
+            ? string.Join("+", job.Profile.ExtruderFilamentProfiles.Select(f => f.Material ?? "PLA"))
+            : job.Profile?.FilamentProfile?.Material ?? "PLA";
         string printTime = FormatPrintTime(metadata.PrintTimeSeconds);
 
         string newName = SanitizeFileName($"{modelName}_{printerModel}_{material}_{printTime}.gcode");
