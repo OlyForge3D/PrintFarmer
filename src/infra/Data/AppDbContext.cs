@@ -35,6 +35,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
+    // Tags
+    public DbSet<Tag> Tags => Set<Tag>();
+
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
 

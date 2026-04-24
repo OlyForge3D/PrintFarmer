@@ -96,5 +96,8 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         // Index for efficient lookup by external job ID and source printer (for history seeding)
         builder.HasIndex(pj => pj.SourcePrinterId)
             .HasDatabaseName("IX_PrintJobs_SourcePrinterId");
+
+        // Tags - many-to-many via skip-navigation (auto-creates join table)
+        builder.HasMany(pj => pj.Tags).WithMany();
     }
 }

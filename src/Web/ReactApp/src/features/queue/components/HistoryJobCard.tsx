@@ -1,5 +1,24 @@
 import { Button } from "@/common/components/ui/Button";
-import { HistoryJob } from "./QueueHistoryTab";
+import { Badge } from "@/common/components/ui/Badge";
+import type { HistoryJob } from "@/types/queue";
+
+function getCategoryBadgeVariant(category?: string | null): "default" | "primary" | "success" | "warning" | "error" | "info" {
+  switch (category) {
+    case "material": return "primary";
+    case "color": return "info";
+    case "nozzle": return "warning";
+    default: return "default";
+  }
+}
+
+function getCategoryIcon(category: string): string {
+  switch (category) {
+    case "material": return "🧵";
+    case "color": return "🎨";
+    case "nozzle": return "⊘";
+    default: return "🏷";
+  }
+}
 
 interface HistoryJobCardProps {
   job: HistoryJob;
@@ -105,6 +124,24 @@ export default function HistoryJobCard({
           </div>
         </div>
       </div>
+
+      {/* Tags */}
+      {job.tags && job.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {job.tags.map((tag) => (
+            <Badge
+              key={tag.id}
+              variant={getCategoryBadgeVariant(tag.category)}
+              size="sm"
+            >
+              {tag.category && (
+                <span className="opacity-60 mr-0.5">{getCategoryIcon(tag.category)}</span>
+              )}
+              {tag.name}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {/* Progress Bar */}
       <div className="mb-4">
