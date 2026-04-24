@@ -135,8 +135,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         for (int i = 0; i < modelUrls.Count; i++)
         {
             string url = modelUrls[i];
-            Uri uri = new(url, UriKind.RelativeOrAbsolute);
-            string fileName = Path.GetFileName(uri.LocalPath);
+
+            // Safely extract filename — Uri.LocalPath throws on relative URIs
+            string fileName;
+            if (Uri.TryCreate(url, UriKind.Absolute, out Uri? parsedUri))
+            {
+                fileName = Path.GetFileName(parsedUri.LocalPath);
+            }
+            else
+            {
+                fileName = string.Empty;
+            }
+
             if (string.IsNullOrEmpty(fileName))
             {
                 fileName = $"model_{i}{(url.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase) ? ".3mf" : ".stl")}";
@@ -151,7 +161,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 destPath = Path.Combine(workDir, $"{baseName}_{i}{ext}");
             }
 
-            HttpResponseMessage response = await _httpClient.GetAsync(uri, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             _ = response.EnsureSuccessStatusCode();
             await using FileStream fileStream = File.Create(destPath);
             await response.Content.CopyToAsync(fileStream, cancellationToken);

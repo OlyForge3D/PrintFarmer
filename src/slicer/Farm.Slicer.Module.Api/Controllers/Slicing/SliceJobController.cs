@@ -68,15 +68,36 @@ public class SliceJobController(
             modelFileUrl = $"{scheme}://{host}{modelFileUrl}";
         }
 
-        // Resolve multi-model URLs to absolute
+        // Resolve and validate multi-model URLs
         List<string>? resolvedModelUrls = null;
         if (request.ModelFileUrls is { Count: > 0 })
         {
+            const int maxModelFiles = 20;
+            if (request.ModelFileUrls.Count > maxModelFiles)
+            {
+                return BadRequest($"Too many model files. Maximum is {maxModelFiles}.");
+            }
+
             string scheme = HttpContext.Request.Scheme;
             string host = HttpContext.Request.Host.ToString();
-            resolvedModelUrls = request.ModelFileUrls
-                .Select(u => !string.IsNullOrEmpty(u) && u.StartsWith('/') ? $"{scheme}://{host}{u}" : u)
-                .ToList();
+            resolvedModelUrls = [];
+            foreach (string url in request.ModelFileUrls)
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    return BadRequest("Model file URLs must not contain empty entries.");
+                }
+
+                string resolved = url.StartsWith('/') ? $"{scheme}://{host}{url}" : url;
+
+                if (!Uri.TryCreate(resolved, UriKind.Absolute, out Uri? parsedUri)
+                    || (parsedUri.Scheme != "http" && parsedUri.Scheme != "https"))
+                {
+                    return BadRequest($"Invalid model file URL: must be an absolute HTTP(S) URL. Got: '{url}'");
+                }
+
+                resolvedModelUrls.Add(resolved);
+            }
         }
 
         var job = new SliceJob
