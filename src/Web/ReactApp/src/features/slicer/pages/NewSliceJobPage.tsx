@@ -1264,6 +1264,12 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrls: bedModels.length > 1
         ? bedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
         : undefined,
+      // Per-model transforms: send each model's transform alongside its URL
+      modelFileTransforms: bedModels.length > 1
+        ? bedModels
+            .filter(m => m.url && !m.url.startsWith('blob:'))
+            .map(m => JSON.stringify({ rotation: m.rotation, scale: m.scale, position: m.position }))
+        : undefined,
     };
 
     submitMutation.mutate(request);

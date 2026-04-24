@@ -351,6 +351,12 @@ export const OrcaSlicerPage: React.FC = () => {
       modelFileUrls: loadedModels.length > 1
         ? loadedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
         : undefined,
+      // Per-model transforms: send each model's transform alongside its URL
+      modelFileTransforms: loadedModels.length > 1
+        ? loadedModels
+            .filter(m => m.url && !m.url.startsWith('blob:'))
+            .map(m => JSON.stringify({ rotation: m.rotation, scale: m.scale, position: m.position }))
+        : undefined,
     };
     
     submitMutation.mutate(request);

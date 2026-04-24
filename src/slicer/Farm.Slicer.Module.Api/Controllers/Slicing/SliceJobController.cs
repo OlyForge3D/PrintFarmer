@@ -68,6 +68,14 @@ public class SliceJobController(
             modelFileUrl = $"{scheme}://{host}{modelFileUrl}";
         }
 
+        // Validate per-model transforms length matches model URLs
+        if (request.ModelFileTransforms is { Count: > 0 }
+            && request.ModelFileUrls is { Count: > 0 }
+            && request.ModelFileTransforms.Count != request.ModelFileUrls.Count)
+        {
+            return BadRequest($"ModelFileTransforms length ({request.ModelFileTransforms.Count}) must match ModelFileUrls length ({request.ModelFileUrls.Count}).");
+        }
+
         // Resolve and validate multi-model URLs
         List<string>? resolvedModelUrls = null;
         if (request.ModelFileUrls is { Count: > 0 })
@@ -118,6 +126,9 @@ public class SliceJobController(
                 : null,
             ModelFileUrlsJson = resolvedModelUrls is { Count: > 0 }
                 ? JsonSerializer.Serialize(resolvedModelUrls)
+                : null,
+            ModelFileTransformsJson = request.ModelFileTransforms is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.ModelFileTransforms)
                 : null,
             Status = SliceJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
@@ -517,6 +528,19 @@ public class SliceJobController(
             }
         }
 
+        List<string?>? modelTransforms = null;
+        if (!string.IsNullOrEmpty(job.ModelFileTransformsJson))
+        {
+            try
+            {
+                modelTransforms = JsonSerializer.Deserialize<List<string?>>(job.ModelFileTransformsJson);
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed JSON
+            }
+        }
+
         return new()
         {
             Id = job.Id,
@@ -537,6 +561,7 @@ public class SliceJobController(
             SlicerProfileJson = job.SlicerProfileJson,
             ModelTransformJson = job.ModelTransformJson,
             ModelFileUrls = modelUrls,
+            ModelFileTransforms = modelTransforms,
         };
     }
 

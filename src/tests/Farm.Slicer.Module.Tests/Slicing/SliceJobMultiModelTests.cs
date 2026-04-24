@@ -203,4 +203,108 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
 
         _output.WriteLine($"Claimed job {claimed.Id} has {claimed.ModelFileUrls!.Count} model URLs");
     }
+
+    [Fact(DisplayName = "Submit with ModelFileTransforms stores and returns per-model transforms")]
+    public async Task SubmitMultiModel_WithTransforms_StoresAndReturnsTransforms()
+    {
+        List<string> modelUrls =
+        [
+            "http://example.com/part_a.stl",
+            "http://example.com/part_b.stl",
+        ];
+
+        List<string?> transforms =
+        [
+            """{"rotation":[0,0,0],"scale":[1,1,1],"position":[10,20,0]}""",
+            """{"rotation":[1.5707963,0,0],"scale":[2,2,2],"position":[-15,30,0]}""",
+        ];
+
+        var submit = new SubmitSliceJobRequest
+        {
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = modelUrls[0],
+            ModelFileName = "part_a.stl",
+            SlicerEngine = 0,
+            SlicerProfileJson = "{}",
+            ModelFileUrls = modelUrls,
+            ModelFileTransforms = transforms,
+        };
+
+        HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
+        submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        submitted.Should().NotBeNull();
+
+        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
+        statusResp.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        status.Should().NotBeNull();
+        status!.ModelFileTransforms.Should().NotBeNull();
+        status.ModelFileTransforms.Should().HaveCount(2);
+        status.ModelFileTransforms![0].Should().Contain("\"position\":[10,20,0]");
+        status.ModelFileTransforms[1].Should().Contain("\"rotation\":[1.5707963,0,0]");
+
+        _output.WriteLine($"Multi-model job {status.Id} stored {status.ModelFileTransforms.Count} per-model transforms");
+    }
+
+    [Fact(DisplayName = "Submit without ModelFileTransforms returns null (backward compat)")]
+    public async Task SubmitMultiModel_WithoutTransforms_ReturnsNull()
+    {
+        List<string> modelUrls =
+        [
+            "http://example.com/part_a.stl",
+            "http://example.com/part_b.stl",
+        ];
+
+        var submit = new SubmitSliceJobRequest
+        {
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = modelUrls[0],
+            ModelFileName = "part_a.stl",
+            SlicerEngine = 0,
+            SlicerProfileJson = "{}",
+            ModelFileUrls = modelUrls,
+        };
+
+        HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
+        submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+
+        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
+        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        status!.ModelFileTransforms.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "Submit rejects mismatched ModelFileTransforms and ModelFileUrls lengths")]
+    public async Task SubmitMultiModel_MismatchedTransformsLength_ReturnsBadRequest()
+    {
+        List<string> modelUrls =
+        [
+            "http://example.com/part_a.stl",
+            "http://example.com/part_b.stl",
+        ];
+
+        // Only one transform for two URLs
+        List<string?> transforms =
+        [
+            """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,0]}""",
+        ];
+
+        var submit = new SubmitSliceJobRequest
+        {
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = modelUrls[0],
+            ModelFileName = "part_a.stl",
+            SlicerEngine = 0,
+            SlicerProfileJson = "{}",
+            ModelFileUrls = modelUrls,
+            ModelFileTransforms = transforms,
+        };
+
+        HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
+        submitResp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
 }

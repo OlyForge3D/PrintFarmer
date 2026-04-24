@@ -187,6 +187,14 @@ public class SliceJob
     /// Null or empty for single-model jobs (falls back to <see cref="ModelFileUrl"/>).
     /// </summary>
     public string? ModelFileUrlsJson { get; set; }
+
+    /// <summary>
+    /// JSON array of per-model transform strings for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrlsJson"/>.
+    /// Format per entry: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz],"position":[px,py,pz]}.
+    /// Null for single-model jobs (falls back to <see cref="ModelTransformJson"/>).
+    /// </summary>
+    public string? ModelFileTransformsJson { get; set; }
 }
 
 /// <summary>

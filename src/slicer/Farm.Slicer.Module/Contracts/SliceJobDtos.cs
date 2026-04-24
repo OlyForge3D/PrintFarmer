@@ -47,6 +47,13 @@ public class SubmitSliceJobRequest
     /// Falls back to <see cref="ModelFileUrl"/> for single-model jobs.
     /// </summary>
     public List<string>? ModelFileUrls { get; set; }
+
+    /// <summary>
+    /// Per-model transforms for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
+    /// Format per entry: JSON string with rotation/scale/position arrays.
+    /// </summary>
+    public List<string?>? ModelFileTransforms { get; set; }
 }
 
 /// <summary>
@@ -112,6 +119,12 @@ public class SliceJobStatusResponse
     /// Empty or null for single-model jobs (use <see cref="ModelFileUrl"/>).
     /// </summary>
     public List<string>? ModelFileUrls { get; set; }
+
+    /// <summary>
+    /// Per-model transforms for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
+    /// </summary>
+    public List<string?>? ModelFileTransforms { get; set; }
 }
 
 /// <summary>

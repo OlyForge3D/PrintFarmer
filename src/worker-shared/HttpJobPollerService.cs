@@ -171,6 +171,7 @@ public abstract class HttpJobPollerService(
                     StartedAt = DateTime.UtcNow,
                     ModelTransformJson = jobStatus.ModelTransformJson,
                     ModelFileUrls = jobStatus.ModelFileUrls,
+                    ModelFileTransforms = jobStatus.ModelFileTransforms,
                 };
 
                 // Resolve profile names from SlicerProfileJson into full SlicerProfileDto

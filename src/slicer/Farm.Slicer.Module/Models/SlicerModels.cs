@@ -185,6 +185,13 @@ public class DistributedSlicingJob : SlicingJobDto
     /// </summary>
     public List<string>? ModelFileUrls { get; set; }
 
+    /// <summary>
+    /// Per-model transforms for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
+    /// Format per entry: JSON string with rotation/scale/position arrays.
+    /// </summary>
+    public List<string?>? ModelFileTransforms { get; set; }
+
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
 
