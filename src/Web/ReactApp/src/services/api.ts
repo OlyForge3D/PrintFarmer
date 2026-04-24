@@ -127,7 +127,7 @@ import {
   BalanceTransactionDto,
   BalanceAdjustRequest,
 } from "@/types/api";
-import type { GeometryUploadResultDto } from "@/types/models";
+import type { GeometryUploadResultDto, ThreeMfMetadata } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
@@ -3236,6 +3236,14 @@ export class ApiClient {
     if (!modelId) return {};
     const response = await this.client.get(`/3d-models/${modelId}`);
     return response.data as Record<string, unknown>;
+  }
+
+  /**
+   * Get extracted 3MF metadata for a model
+   */
+  async getModel3DMetadata(modelId: string): Promise<ThreeMfMetadata | null> {
+    const response = await this.client.get(`/3d-models/${modelId}/metadata`);
+    return response.data as ThreeMfMetadata | null;
   }
 
   /**

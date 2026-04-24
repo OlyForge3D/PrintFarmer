@@ -53,6 +53,12 @@ public class Model3DDto
     /// <summary>Gets or sets validation error details.</summary>
     public string? ValidationErrors { get; set; }
 
+    /// <summary>Gets or sets metadata extracted from 3MF file.</summary>
+    public ThreeMfMetadataDto? ExtractedMetadata { get; set; }
+
+    /// <summary>Gets or sets auto-generated tags from file metadata.</summary>
+    public string[]? AutoTags { get; set; }
+
     /// <summary>Gets or sets the associated tags.</summary>
     public TagDto[]? Tags { get; set; }
 }
