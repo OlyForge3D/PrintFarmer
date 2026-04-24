@@ -818,6 +818,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             .Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
             .ToArray();
 
+        ThreeMfMetadataDto? metadata = DeserializeMetadata(model.ExtractedMetadataJson);
+
         return new Model3DDto
         {
             Id = model.Id,
@@ -829,8 +831,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
             ThumbnailUrl = thumbnailUrl,
             Tags = tags,
-            ExtractedMetadata = DeserializeMetadata(model.ExtractedMetadataJson),
-            AutoTags = DeserializeMetadata(model.ExtractedMetadataJson)?.AutoTags?.ToArray()
+            ExtractedMetadata = metadata,
+            AutoTags = metadata?.AutoTags?.ToArray()
         };
     }
 

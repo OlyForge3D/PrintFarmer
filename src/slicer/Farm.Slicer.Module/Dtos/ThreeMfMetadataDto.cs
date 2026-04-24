@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Dtos;
+﻿namespace Farm.Slicer.Module.Dtos;
 
 /// <summary>
 /// Metadata extracted from a 3MF file's XML content.
