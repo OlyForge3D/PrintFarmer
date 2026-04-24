@@ -70,11 +70,18 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
                 .FirstOrDefaultAsync(f => EF.Functions.Like(f.Name, requiredMaterial) && f.IsActive, ct);
         }
 
+        // Pre-load cluster mate names for the required material (used for fallback matching)
+        HashSet<string> clusterMateNames = [];
+        if (!string.IsNullOrWhiteSpace(requiredMaterial))
+        {
+            clusterMateNames = await GetClusterMateNamesAsync(requiredMaterial, ct);
+        }
+
         List<DispatchScore> results = [];
 
         foreach (Printer printer in printers)
         {
-            DispatchScore score = ScorePrinter(job, printer, requiredFilament, queueDepths);
+            DispatchScore score = ScorePrinter(job, printer, requiredFilament, queueDepths, clusterMateNames);
             results.Add(score);
         }
 
@@ -100,7 +107,8 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         PrintJob job,
         Printer printer,
         FilamentType? requiredFilament,
-        Dictionary<Guid, int> queueDepths)
+        Dictionary<Guid, int> queueDepths,
+        HashSet<string> clusterMateNames)
     {
         Dictionary<string, FactorScore> breakdown = [];
         List<string> eliminationReasons = [];
@@ -120,7 +128,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
 
         // Factor 1: Material Match
         string? requiredMaterial = job.RequiredMaterialType ?? job.GcodeFile?.RequiredMaterial;
-        FactorScore materialScore = ScoreMaterialMatch(printer, requiredMaterial);
+        FactorScore materialScore = ScoreMaterialMatch(printer, requiredMaterial, clusterMateNames);
         breakdown["MaterialMatch"] = materialScore;
         if (materialScore is { IsHardRequirement: true, Score: 0 })
         {
@@ -258,18 +266,26 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         return new FactorScore("Availability", 100, 0, 0, true);
     }
 
-    private static FactorScore ScoreMaterialMatch(Printer printer, string? requiredMaterial)
+    private static FactorScore ScoreMaterialMatch(Printer printer, string? requiredMaterial, HashSet<string> clusterMateNames)
     {
         if (string.IsNullOrWhiteSpace(requiredMaterial))
         {
             return new FactorScore("MaterialMatch", 70, WeightMaterialMatch, 70 * WeightMaterialMatch, false);
         }
 
-        // Check if printer's currently loaded material matches
+        // Check if printer's currently loaded material matches exactly
         if (!string.IsNullOrWhiteSpace(printer.CurrentMaterial)
             && string.Equals(printer.CurrentMaterial, requiredMaterial, StringComparison.OrdinalIgnoreCase))
         {
             return new FactorScore("MaterialMatch", 100, WeightMaterialMatch, 100 * WeightMaterialMatch, true);
+        }
+
+        // Check if printer's loaded material is a cluster mate (equivalent material)
+        if (!string.IsNullOrWhiteSpace(printer.CurrentMaterial)
+            && clusterMateNames.Count > 0
+            && clusterMateNames.Contains(printer.CurrentMaterial))
+        {
+            return new FactorScore("MaterialMatch", 85, WeightMaterialMatch, 85 * WeightMaterialMatch, true);
         }
 
         // Check toolhead supported materials
@@ -283,6 +299,18 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             return new FactorScore("MaterialMatch", 50, WeightMaterialMatch, 50 * WeightMaterialMatch, true);
         }
 
+        // Check toolhead supported materials via cluster equivalence
+        if (clusterMateNames.Count > 0)
+        {
+            bool anyToolheadSupportsCluster = printer.Toolheads.Any(t =>
+                t.SupportedMaterials?.Any(m => clusterMateNames.Contains(m)) == true);
+
+            if (anyToolheadSupportsCluster)
+            {
+                return new FactorScore("MaterialMatch", 45, WeightMaterialMatch, 45 * WeightMaterialMatch, true);
+            }
+        }
+
         // Check printer model's supported filament types
         bool modelSupports = printer.Model?.SupportedFilamentTypes.Any(f =>
             string.Equals(f.Name, requiredMaterial, StringComparison.OrdinalIgnoreCase)) == true;
@@ -290,6 +318,18 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         if (modelSupports)
         {
             return new FactorScore("MaterialMatch", 40, WeightMaterialMatch, 40 * WeightMaterialMatch, true);
+        }
+
+        // Check printer model's supported filament types via cluster equivalence
+        if (clusterMateNames.Count > 0)
+        {
+            bool modelSupportsCluster = printer.Model?.SupportedFilamentTypes.Any(f =>
+                clusterMateNames.Contains(f.Name)) == true;
+
+            if (modelSupportsCluster)
+            {
+                return new FactorScore("MaterialMatch", 35, WeightMaterialMatch, 35 * WeightMaterialMatch, true);
+            }
         }
 
         // No data about supported materials — don't eliminate, score low
@@ -503,5 +543,33 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         // Printer is not in the required group — hard eliminate
         return new FactorScore("PrinterGroup", 0, 0, 0, true,
             $"G-code requires printer group '{gcode.PrinterGroupId}' but printer is in group '{printer.PrinterGroupId?.ToString() ?? "none"}'");
+    }
+
+    /// <summary>
+    /// Returns the names of all filament types that share a material cluster with the given name.
+    /// Used to score cluster-equivalent materials as a fallback when no exact match exists.
+    /// </summary>
+    private async Task<HashSet<string>> GetClusterMateNamesAsync(string filamentTypeName, CancellationToken ct)
+    {
+        List<Guid> clusterIds = await db.MaterialClusterMembers
+            .Include(m => m.FilamentType)
+            .Where(m => EF.Functions.Like(m.FilamentType.Name, filamentTypeName))
+            .Select(m => m.ClusterId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (clusterIds.Count == 0)
+        {
+            return [];
+        }
+
+        List<string> names = await db.MaterialClusterMembers
+            .Include(m => m.FilamentType)
+            .Where(m => clusterIds.Contains(m.ClusterId))
+            .Select(m => m.FilamentType.Name)
+            .Distinct()
+            .ToListAsync(ct);
+
+        return new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
     }
 }

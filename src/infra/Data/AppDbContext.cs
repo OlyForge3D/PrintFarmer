@@ -175,6 +175,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Catalog version tracking for update detection
     public DbSet<CatalogVersion> CatalogVersions => Set<CatalogVersion>();
 
+    // Material equivalence clusters for auto-matching
+    public DbSet<MaterialCluster> MaterialClusters => Set<MaterialCluster>();
+
+    public DbSet<MaterialClusterMember> MaterialClusterMembers => Set<MaterialClusterMember>();
+
+    // Print quotas and user balances
+    public DbSet<PrintQuota> PrintQuotas => Set<PrintQuota>();
+
+    public DbSet<UserBalance> UserBalances => Set<UserBalance>();
+
+    public DbSet<BalanceTransaction> BalanceTransactions => Set<BalanceTransaction>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

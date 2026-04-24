@@ -1344,6 +1344,34 @@ export interface UpdateFilamentTypeRequest {
   defaultDensity?: number | null;
 }
 
+// ============ Material Cluster Types ============
+
+export interface MaterialClusterMemberDto {
+  filamentTypeId: string;
+  filamentTypeName: string;
+  addedAt: string;
+}
+
+export interface MaterialClusterDto {
+  id: string;
+  name: string;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  members: MaterialClusterMemberDto[];
+}
+
+export interface CreateMaterialClusterRequest {
+  name: string;
+  description?: string | null;
+  filamentTypeIds?: string[];
+}
+
+export interface UpdateMaterialClusterRequest {
+  name: string;
+  description?: string | null;
+}
+
 export interface SpoolmanFilamentImportResult {
   importedCount: number;
   skippedCount: number;
@@ -3728,4 +3756,82 @@ export interface ProfileSchemasResponse {
   process: ProfileTypeSchema;
   machine: ProfileTypeSchema;
   filament: ProfileTypeSchema;
+}
+
+// ── Print Quotas & User Balances ─────────────────────────────────────────
+
+export type QuotaType = 'Cost' | 'Count' | 'Weight';
+export type QuotaPeriodType = 'Daily' | 'Weekly' | 'Monthly' | 'Semester' | 'Manual';
+export type BalanceTransactionType = 'Credit' | 'Debit' | 'Refund' | 'JobCharge';
+
+export interface QuotaDto {
+  id: string;
+  userId: string | null;
+  groupName: string | null;
+  quotaType: QuotaType;
+  limitAmount: number;
+  usedAmount: number;
+  periodType: QuotaPeriodType;
+  resetAt: string | null;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateQuotaRequest {
+  userId?: string;
+  groupName?: string;
+  quotaType: QuotaType;
+  limitAmount: number;
+  periodType: QuotaPeriodType;
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface UpdateQuotaRequest {
+  limitAmount?: number;
+  periodType?: QuotaPeriodType;
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface CheckQuotaRequest {
+  userId: string;
+  estimatedCost?: number;
+  jobCount?: number;
+  estimatedWeightGrams?: number;
+}
+
+export interface QuotaCheckResult {
+  allowed: boolean;
+  reason: string | null;
+  remainingCost: number;
+  remainingCount: number;
+  remainingWeight: number;
+}
+
+export interface UserBalanceDto {
+  id: string;
+  userId: string;
+  balance: number;
+  totalCredited: number;
+  totalDebited: number;
+  updatedAt: string;
+}
+
+export interface BalanceTransactionDto {
+  id: string;
+  type: BalanceTransactionType;
+  amount: number;
+  balanceAfter: number;
+  description: string;
+  performedBy: string | null;
+  printJobId: string | null;
+  createdAt: string;
+}
+
+export interface BalanceAdjustRequest {
+  amount: number;
+  description?: string;
 }

@@ -115,6 +115,17 @@ import {
   ObicoServerHealthResponse,
   TimelineEventDto,
   TimezoneInfo,
+  MaterialClusterDto,
+  CreateMaterialClusterRequest,
+  UpdateMaterialClusterRequest,
+  QuotaDto,
+  CreateQuotaRequest,
+  UpdateQuotaRequest,
+  CheckQuotaRequest,
+  QuotaCheckResult,
+  UserBalanceDto,
+  BalanceTransactionDto,
+  BalanceAdjustRequest,
 } from "@/types/api";
 import type { GeometryUploadResultDto } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
@@ -1420,6 +1431,66 @@ export class ApiClient {
       "/spoolman/scan-network"
     );
     return response.data;
+  }
+
+  // ============ Material Clusters ============
+
+  async getMaterialClusters(): Promise<MaterialClusterDto[]> {
+    const response = await this.client.get<MaterialClusterDto[]>(
+      "/material-clusters"
+    );
+    return response.data;
+  }
+
+  async getMaterialCluster(id: string): Promise<MaterialClusterDto> {
+    const response = await this.client.get<MaterialClusterDto>(
+      `/material-clusters/${id}`
+    );
+    return response.data;
+  }
+
+  async createMaterialCluster(
+    request: CreateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      "/material-clusters",
+      request
+    );
+    return response.data;
+  }
+
+  async updateMaterialCluster(
+    id: string,
+    request: UpdateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.put<MaterialClusterDto>(
+      `/material-clusters/${id}`,
+      request
+    );
+    return response.data;
+  }
+
+  async deleteMaterialCluster(id: string): Promise<void> {
+    await this.client.delete(`/material-clusters/${id}`);
+  }
+
+  async addMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
+    return response.data;
+  }
+
+  async removeMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<void> {
+    await this.client.delete(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
   }
 
   // ============ Network utilities ============
@@ -3909,6 +3980,72 @@ export class ApiClient {
    */
   async clearToolheadSpool(printerId: string, toolheadIndex: number): Promise<void> {
     await this.client.delete(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`);
+  }
+
+  // ── Quotas & Balances ───────────────────────────────────────────────
+
+  async getQuotas(): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>('/quotas');
+    return data;
+  }
+
+  async getQuotasForUser(userId: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/user/${userId}`);
+    return data;
+  }
+
+  async getQuotasForGroup(groupName: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/group/${encodeURIComponent(groupName)}`);
+    return data;
+  }
+
+  async getQuota(id: string): Promise<QuotaDto> {
+    const { data } = await this.client.get<QuotaDto>(`/quotas/${id}`);
+    return data;
+  }
+
+  async createQuota(request: CreateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.post<QuotaDto>('/quotas', request);
+    return data;
+  }
+
+  async updateQuota(id: string, request: UpdateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.put<QuotaDto>(`/quotas/${id}`, request);
+    return data;
+  }
+
+  async deleteQuota(id: string): Promise<void> {
+    await this.client.delete(`/quotas/${id}`);
+  }
+
+  async checkQuota(request: CheckQuotaRequest): Promise<QuotaCheckResult> {
+    const { data } = await this.client.post<QuotaCheckResult>('/quotas/check', request);
+    return data;
+  }
+
+  async resetExpiredQuotas(): Promise<{ resetCount: number }> {
+    const { data } = await this.client.post<{ resetCount: number }>('/quotas/reset-expired');
+    return data;
+  }
+
+  async getBalance(userId: string): Promise<UserBalanceDto> {
+    const { data } = await this.client.get<UserBalanceDto>(`/quotas/balance/${userId}`);
+    return data;
+  }
+
+  async creditBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/credit`, request);
+    return data;
+  }
+
+  async debitBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/debit`, request);
+    return data;
+  }
+
+  async getBalanceTransactions(userId: string, take = 50): Promise<BalanceTransactionDto[]> {
+    const { data } = await this.client.get<BalanceTransactionDto[]>(`/quotas/balance/${userId}/transactions`, { params: { take } });
+    return data;
   }
 }
 

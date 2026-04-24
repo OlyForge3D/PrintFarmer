@@ -144,6 +144,47 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("AuthAuditLogs");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BalanceTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("PerformedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("TransactionType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserBalanceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("UserBalanceId");
+
+                    b.ToTable("BalanceTransactions");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1837,6 +1878,53 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Manufacturers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialCluster", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("MaterialClusters");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialClusterMember", b =>
+                {
+                    b.Property<Guid>("ClusterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FilamentTypeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ClusterId", "FilamentTypeId");
+
+                    b.HasIndex("FilamentTypeId");
+
+                    b.ToTable("MaterialClusterMembers");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Model3DTagMapping", b =>
                 {
                     b.Property<Guid>("Model3DId")
@@ -2823,6 +2911,68 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("SortOrder");
 
                     b.ToTable("PrintProjectTemplateFiles", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintQuota", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GroupName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<decimal>("LimitAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PeriodType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("QuotaType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ResetAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("UsedAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupName");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("ResetAt")
+                        .HasDatabaseName("IX_PrintQuotas_ResetAt");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("PrintQuotas");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
@@ -3979,6 +4129,43 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("UserActions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BalanceAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasDefaultValue("USD");
+
+                    b.Property<DateTime>("LastUpdated")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserBalances");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserRole", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4240,6 +4427,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BalanceTransaction", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.UserBalance", "UserBalance")
+                        .WithMany()
+                        .HasForeignKey("UserBalanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("UserBalance");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
@@ -4550,6 +4748,25 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("MaintenanceTask");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialClusterMember", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.MaterialCluster", "Cluster")
+                        .WithMany("Members")
+                        .HasForeignKey("ClusterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.FilamentType", "FilamentType")
+                        .WithMany()
+                        .HasForeignKey("FilamentTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cluster");
+
+                    b.Navigation("FilamentType");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Model3DTagMapping", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Tag", "Tag")
@@ -4742,6 +4959,16 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired();
 
                     b.Navigation("Template");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintQuota", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
@@ -5029,6 +5256,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Manufacturer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserRole", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Role", "Role")
@@ -5165,6 +5403,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.Manufacturer", b =>
                 {
                     b.Navigation("Models");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialCluster", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>

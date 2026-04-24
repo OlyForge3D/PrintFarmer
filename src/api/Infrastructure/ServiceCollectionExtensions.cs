@@ -177,6 +177,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
+        // Material equivalence clusters
+        _ = services.AddScoped<Farm.Infrastructure.Services.MaterialClusters.IMaterialClusterService, Farm.Infrastructure.Services.MaterialClusters.MaterialClusterService>();
+
         // Printer group service
         _ = services.AddScoped<Farm.Infrastructure.Services.PrinterGroups.IPrinterGroupService, Farm.Infrastructure.Services.PrinterGroups.PrinterGroupService>();
 
@@ -593,6 +596,9 @@ public static class ServiceCollectionExtensions
         // Gcode upload settings and quota - use persisted settings from ISettingsService
         _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
         _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
+
+        // Print quotas and user balances
+        _ = services.AddScoped<Farm.Infrastructure.Services.PrintQuotas.IPrintQuotaService, Farm.Infrastructure.Services.PrintQuotas.PrintQuotaService>();
     }
 
     #endregion
