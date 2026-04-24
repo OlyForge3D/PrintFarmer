@@ -227,6 +227,12 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
+    name: 'Quotas',
+    href: '/admin/quotas',
+    icon: ClipboardListIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
     name: 'Workers',
     href: '/admin/workers',
     icon: WrenchIcon,

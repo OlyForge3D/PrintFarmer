@@ -5,10 +5,11 @@ import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FilamentsTab } from '@/features/filamentManagement/components/FilamentsTab';
 import { SpoolsTab } from '@/features/filamentManagement/components/SpoolsTab';
+import { MaterialClustersTab } from '@/features/filamentManagement/components/MaterialClustersTab';
 import { ScanSpoolModal } from '@/features/filamentManagement/components/ScanSpoolModal';
 import type { SpoolmanSpool } from '@/types/api';
 
-type TabId = 'filaments' | 'spools';
+type TabId = 'filaments' | 'spools' | 'clusters';
 
 interface Tab {
   id: TabId;
@@ -26,6 +27,11 @@ const TABS: Tab[] = [
     id: 'spools',
     label: 'Spools',
     description: 'Physical spool inventory with remaining weight and usage'
+  },
+  {
+    id: 'clusters',
+    label: 'Material Clusters',
+    description: 'Group equivalent materials for smarter auto-dispatch matching'
   }
 ];
 
@@ -40,17 +46,17 @@ export function FilamentManagementPage() {
   const [scanModalOpen, setScanModalOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<TabId>(() => {
-    if (tabId === 'filaments' || tabId === 'spools') return tabId;
+    if (tabId === 'filaments' || tabId === 'spools' || tabId === 'clusters') return tabId;
     const urlTab = searchParams.get('tab');
-    if (urlTab === 'filaments' || urlTab === 'spools') return urlTab;
+    if (urlTab === 'filaments' || urlTab === 'spools' || urlTab === 'clusters') return urlTab;
     const saved = localStorage.getItem('pf.spoolsPageActiveTab');
-    if (saved === 'filaments' || saved === 'spools') return saved as TabId;
+    if (saved === 'filaments' || saved === 'spools' || saved === 'clusters') return saved as TabId;
     return 'filaments';
   });
 
   // Sync URL → state when path param changes externally
   useEffect(() => {
-    if (tabId === 'filaments' || tabId === 'spools') {
+    if (tabId === 'filaments' || tabId === 'spools' || tabId === 'clusters') {
       if (tabId !== activeTab) {
         queueMicrotask(() => {
           setActiveTab(tabId);
@@ -123,7 +129,9 @@ export function FilamentManagementPage() {
         id={`tabpanel-${activeTab}`}
         aria-labelledby={`tab-${activeTab}`}
       >
-        {activeTab === 'filaments' ? <FilamentsTab /> : <SpoolsTab />}
+        {activeTab === 'filaments' && <FilamentsTab />}
+        {activeTab === 'spools' && <SpoolsTab />}
+        {activeTab === 'clusters' && <MaterialClustersTab />}
       </div>
 
       <ScanSpoolModal

@@ -59,6 +59,7 @@ import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
+import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -212,6 +213,7 @@ function AuthenticatedAppRoutes() {
           <Route path="slicer-profiles" element={<Navigate to="/profiles/import" replace />} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="webhooks" element={<WebhooksAdminPage />} />
+          <Route path="quotas" element={<QuotaManagementPage />} />
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
