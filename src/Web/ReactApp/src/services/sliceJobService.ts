@@ -13,6 +13,8 @@ export interface SubmitSliceJobRequest {
   requiredCapabilitiesJson: string;
   priority?: number;
   modelTransformJson?: string;
+  /** Per-extruder filament profile names for multi-toolhead printers (index = extruder index). */
+  extruderFilamentProfileNames?: string[];
 }
 
 export interface SubmitSliceJobResponse {
