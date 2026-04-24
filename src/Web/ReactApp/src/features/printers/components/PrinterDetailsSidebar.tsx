@@ -68,6 +68,7 @@ import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModa
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
+import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 
 // Animation styles
@@ -1153,6 +1154,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             mmuStatus={displayPrinter.mmuStatus}
             isOnline={isOnline}
           />
+        )}
+
+        {/* AMS/MMU Slot Visualization - Show when printer has multiple toolheads */}
+        {printerDetails?.toolheads && printerDetails.toolheads.length > 1 && (
+          <CollapsibleSection title="Material Slots" expanded={true}>
+            <AmsSlotVisualization toolheads={printerDetails.toolheads} />
+          </CollapsibleSection>
         )}
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
