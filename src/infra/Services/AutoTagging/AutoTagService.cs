@@ -86,7 +86,7 @@ public class AutoTagService : IAutoTagService
                 continue;
             }
 
-            // Find or create the tag
+            // Find or create the tag with retry to handle concurrent creation
             Tag? tag = await _db.Tags.FirstOrDefaultAsync(
                 t => t.Name == name && t.Category == category, ct);
 
@@ -102,7 +102,25 @@ public class AutoTagService : IAutoTagService
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
-                _db.Tags.Add(tag);
+
+                try
+                {
+                    _db.Tags.Add(tag);
+                    await _db.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateException)
+                {
+                    // Another concurrent request created this tag — detach our duplicate and re-fetch
+                    _db.Entry(tag).State = EntityState.Detached;
+                    tag = await _db.Tags.FirstOrDefaultAsync(
+                        t => t.Name == name && t.Category == category, ct);
+
+                    if (tag is null)
+                    {
+                        _logger.LogWarning("[AutoTagService] Failed to create or find tag {Category}:{Name}", category, name);
+                        continue;
+                    }
+                }
             }
 
             job.Tags.Add(tag);
