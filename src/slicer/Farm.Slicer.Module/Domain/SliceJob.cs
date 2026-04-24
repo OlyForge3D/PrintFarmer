@@ -173,6 +173,13 @@ public class SliceJob
     /// Format: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} (radians, Y-up).
     /// </summary>
     public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// JSON array of per-extruder filament profile names for multi-toolhead printers.
+    /// Stored as e.g. ["Generic PLA @System","Generic PETG @System"].
+    /// Null for single-extruder jobs.
+    /// </summary>
+    public string? ExtruderFilamentProfileNamesJson { get; set; }
 }
 
 /// <summary>
