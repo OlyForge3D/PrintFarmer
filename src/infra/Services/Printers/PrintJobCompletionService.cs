@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
@@ -30,6 +31,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
     private readonly IDiagnosticChannelService? _diagnostics;
     private readonly IJobCostCalculationService? _jobCostCalculationService;
+    private readonly IAutoTagService? _autoTagService;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -90,7 +92,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         ISpoolmanService? spoolmanService = null,
         IAutoDispatchTrigger? autoDispatchTrigger = null,
         IDiagnosticChannelService? diagnostics = null,
-        IJobCostCalculationService? jobCostCalculationService = null)
+        IJobCostCalculationService? jobCostCalculationService = null,
+        IAutoTagService? autoTagService = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -103,6 +106,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _autoDispatchTrigger = autoDispatchTrigger;
         _diagnostics = diagnostics;
         _jobCostCalculationService = jobCostCalculationService;
+        _autoTagService = autoTagService;
     }
 
     /// <summary>
@@ -206,6 +210,19 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Fetch actual filament usage from backend and record consumption in Spoolman
         await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+
+        // Auto-tag the completed job with material, color, and nozzle info
+        if (_autoTagService is not null && primaryJob.Status == PrintJobStatus.Completed)
+        {
+            try
+            {
+                await _autoTagService.GenerateTagsAsync(primaryJob, printerId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Auto-tagging failed for job {JobId}", primaryJob.Id);
+            }
+        }
 
         await _db.SaveChangesAsync(ct);
 

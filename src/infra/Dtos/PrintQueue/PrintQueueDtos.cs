@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Dtos.PrintQueue;
+﻿using Farm.Infrastructure.Dtos;
+
+namespace Farm.Infrastructure.Dtos.PrintQueue;
 
 // ============= MAIN RESPONSE DTOs =============
 
@@ -436,6 +438,11 @@ public class QueueHistoryEntryDto
     /// Actual cost of the print job (calculated on completion).
     /// </summary>
     public decimal? ActualCost { get; set; }
+
+    /// <summary>
+    /// Tags associated with the print job (auto-generated and manual).
+    /// </summary>
+    public List<TagDto> Tags { get; set; } = [];
 }
 
 // ============= REQUEST DTOs (Phase 3) =============

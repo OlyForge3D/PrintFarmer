@@ -262,4 +262,10 @@ public class PrintJob
     /// Retry history where THIS job is a retry attempt (reference to original in JobRetry.OriginalJobId)
     /// </summary>
     public ICollection<JobRetry> RetriesAsAttempt { get; } = new List<JobRetry>();
+
+    /// <summary>
+    /// Tags associated with this print job. Includes both auto-generated tags
+    /// (material, color, nozzle) and user-applied manual tags.
+    /// </summary>
+    public ICollection<Tag> Tags { get; set; } = new List<Tag>();
 }
