@@ -210,7 +210,22 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
             UpdatedAt = now
         };
         db.UserBalances.Add(balance);
-        await db.SaveChangesAsync(ct);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Concurrent insert — detach the failed entity and re-read
+            db.Entry(balance).State = EntityState.Detached;
+            balance = await db.UserBalances.FirstOrDefaultAsync(b => b.UserId == userId, ct);
+            if (balance is null)
+            {
+                throw;
+            }
+        }
+
         return balance;
     }
 
@@ -241,6 +256,12 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
     public async Task<UserBalance> DebitBalanceAsync(Guid userId, decimal amount, string description, string performedBy, CancellationToken ct = default)
     {
         UserBalance balance = await GetOrCreateBalanceAsync(userId, ct);
+
+        if (balance.BalanceAmount < amount)
+        {
+            throw new InvalidOperationException($"Insufficient balance: current {balance.BalanceAmount}, requested debit {amount}");
+        }
+
         balance.BalanceAmount -= amount;
         DateTime now = DateTime.UtcNow;
         balance.LastUpdated = now;
@@ -293,10 +314,16 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
     private static DateTime? CalculateNextReset(DateTime from, QuotaPeriodType period) => period switch
     {
         QuotaPeriodType.Daily => from.Date.AddDays(1),
-        QuotaPeriodType.Weekly => from.Date.AddDays(7 - (int)from.DayOfWeek + (int)DayOfWeek.Monday),
+        QuotaPeriodType.Weekly => from.Date.AddDays(DaysUntilNextMonday(from.DayOfWeek)),
         QuotaPeriodType.Monthly => new DateTime(from.Year, from.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1),
         QuotaPeriodType.Semester => new DateTime(from.Year, from.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(6),
         QuotaPeriodType.Manual => null,
         _ => null
     };
+
+    private static int DaysUntilNextMonday(DayOfWeek day)
+    {
+        int diff = ((int)DayOfWeek.Monday - (int)day + 7) % 7;
+        return diff == 0 ? 7 : diff;
+    }
 }

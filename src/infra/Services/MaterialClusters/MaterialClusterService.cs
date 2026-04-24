@@ -166,7 +166,7 @@ public class MaterialClusterService(AppDbContext db, ILogger<MaterialClusterServ
         // Find all clusters that contain a filament type with this name
         List<Guid> clusterIds = await db.MaterialClusterMembers
             .Include(m => m.FilamentType)
-            .Where(m => EF.Functions.Like(m.FilamentType.Name, filamentTypeName))
+            .Where(m => m.FilamentType.Name == filamentTypeName)
             .Select(m => m.ClusterId)
             .Distinct()
             .ToListAsync(ct);

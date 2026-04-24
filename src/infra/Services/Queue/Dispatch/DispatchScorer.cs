@@ -67,7 +67,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         {
             requiredFilament = await db.FilamentTypes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(f => EF.Functions.Like(f.Name, requiredMaterial) && f.IsActive, ct);
+                .FirstOrDefaultAsync(f => f.Name == requiredMaterial && f.IsActive, ct);
         }
 
         // Pre-load cluster mate names for the required material (used for fallback matching)
@@ -553,7 +553,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
     {
         List<Guid> clusterIds = await db.MaterialClusterMembers
             .Include(m => m.FilamentType)
-            .Where(m => EF.Functions.Like(m.FilamentType.Name, filamentTypeName))
+            .Where(m => m.FilamentType.Name == filamentTypeName)
             .Select(m => m.ClusterId)
             .Distinct()
             .ToListAsync(ct);
