@@ -28,6 +28,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Returns quotas for a specific user.</summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpGet("user/{userId:guid}")]
     [ProducesResponseType(typeof(QuotaDto[]), 200)]
     public async Task<ActionResult<QuotaDto[]>> GetQuotasForUserAsync(Guid userId, CancellationToken ct)
@@ -37,6 +38,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Returns quotas for a named group.</summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpGet("group/{groupName}")]
     [ProducesResponseType(typeof(QuotaDto[]), 200)]
     public async Task<ActionResult<QuotaDto[]>> GetQuotasForGroupAsync(string groupName, CancellationToken ct)
@@ -46,6 +48,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Gets a single quota by ID.</summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(QuotaDto), 200)]
     [ProducesResponseType(404)]
@@ -110,6 +113,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Checks if a user can submit a job (pre-dispatch check).</summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("check")]
     [ProducesResponseType(typeof(QuotaCheckResult), 200)]
     public async Task<ActionResult<QuotaCheckResult>> CheckQuotaAsync(CheckQuotaRequest request, CancellationToken ct)
@@ -132,6 +136,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     // ── Balance ─────────────────────────────────────────────────────────
 
     /// <summary>Gets a user's balance.</summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpGet("balance/{userId:guid}")]
     [ProducesResponseType(typeof(UserBalanceDto), 200)]
     public async Task<ActionResult<UserBalanceDto>> GetBalanceAsync(Guid userId, CancellationToken ct)
@@ -170,11 +175,19 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
         }
 
         string performedBy = User.Identity?.Name ?? "admin";
-        UserBalance balance = await quotaService.DebitBalanceAsync(userId, request.Amount, request.Description ?? "Manual debit", performedBy, ct);
-        return Ok(MapBalanceToDto(balance));
+        try
+        {
+            UserBalance balance = await quotaService.DebitBalanceAsync(userId, request.Amount, request.Description ?? "Manual debit", performedBy, ct);
+            return Ok(MapBalanceToDto(balance));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     /// <summary>Gets balance transaction history for a user.</summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpGet("balance/{userId:guid}/transactions")]
     [ProducesResponseType(typeof(BalanceTransactionDto[]), 200)]
     public async Task<ActionResult<BalanceTransactionDto[]>> GetTransactionsAsync(Guid userId, [FromQuery] int take = 50, CancellationToken ct = default)

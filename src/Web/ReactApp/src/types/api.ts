@@ -3805,29 +3805,25 @@ export interface CheckQuotaRequest {
 
 export interface QuotaCheckResult {
   allowed: boolean;
-  reason: string | null;
-  remainingCost: number;
-  remainingCount: number;
-  remainingWeight: number;
+  deniedReason: string | null;
+  quotaId: string | null;
 }
 
 export interface UserBalanceDto {
   id: string;
   userId: string;
-  balance: number;
-  totalCredited: number;
-  totalDebited: number;
-  updatedAt: string;
+  balanceAmount: number;
+  currency: string;
+  lastUpdated: string;
 }
 
 export interface BalanceTransactionDto {
   id: string;
-  type: BalanceTransactionType;
+  transactionType: BalanceTransactionType;
   amount: number;
-  balanceAfter: number;
-  description: string;
-  performedBy: string | null;
   printJobId: string | null;
+  description: string | null;
+  performedBy: string | null;
   createdAt: string;
 }
 
