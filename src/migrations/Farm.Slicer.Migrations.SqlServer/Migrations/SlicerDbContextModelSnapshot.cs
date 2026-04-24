@@ -347,6 +347,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<double?>("DimensionZ")
                         .HasColumnType("float");
 
+                    b.Property<string>("ExtractedMetadataJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("FileFormat")
                         .HasColumnType("int");
 
@@ -574,6 +577,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.Property<int?>("EstimatedPrintTimeSeconds")
                         .HasColumnType("int");
+
+                    b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
 
                     b.Property<decimal?>("FilamentUsedGrams")
                         .HasColumnType("decimal(18,2)");

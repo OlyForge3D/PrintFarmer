@@ -4,7 +4,7 @@
  * Includes change tracking with reset-to-original functionality
  */
 import React, { useId, useState, useRef, useEffect, useCallback } from 'react';
-import { Button, Checkbox } from '@/common/components/ui';
+import { Button, Checkbox, Textarea } from '@/common/components/ui';
 
 /** Reset icon - circular arrow matching OrcaSlicer's style */
 export const ResetIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -901,7 +901,7 @@ const TextareaControl: React.FC<TextareaSettingProps & { id: string }> = ({
   placeholder,
   id,
 }) => (
-  <textarea
+  <Textarea
     id={id}
     title="G-code editor"
     className="w-full px-3 py-2 bg-pf-panel border border-pf-border rounded-lg

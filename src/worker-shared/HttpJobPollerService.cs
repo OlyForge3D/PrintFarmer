@@ -507,22 +507,22 @@ public abstract class HttpJobPollerService(
                     string? name = nameElem.GetString();
                     if (string.IsNullOrEmpty(name))
                     {
-                        index++;
-                        continue;
+                        _logger.LogError("Extruder {Index} has null/empty filament profile name — aborting multi-extruder resolution", index);
+                        extruderProfiles.Clear();
+                        break;
                     }
 
                     FilamentProfileDto? resolved = filaments.FirstOrDefault(f =>
                         string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (resolved == null)
+                    if (resolved is null)
                     {
-                        _logger.LogWarning("Extruder {Index} filament profile '{Name}' not found", index, name);
-                    }
-                    else
-                    {
-                        extruderProfiles.Add(resolved);
-                        _logger.LogInformation("Resolved extruder {Index} filament profile: {Name}", index, resolved.Name);
+                        _logger.LogError("Extruder {Index} filament profile '{Name}' not found — aborting multi-extruder resolution", index, name);
+                        extruderProfiles.Clear();
+                        break;
                     }
 
+                    extruderProfiles.Add(resolved);
+                    _logger.LogInformation("Resolved extruder {Index} filament profile: {Name}", index, resolved.Name);
                     index++;
                 }
 

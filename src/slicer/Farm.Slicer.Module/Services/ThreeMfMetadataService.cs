@@ -29,9 +29,18 @@ public class ThreeMfMetadataService(ILogger<ThreeMfMetadataService> logger) : IT
 
     public async Task<ThreeMfMetadataDto?> ExtractMetadataAsync(Stream stream, CancellationToken ct)
     {
+        const long MaxUncompressedEntrySize = 50 * 1024 * 1024; // 50 MB
+        const int MaxArchiveEntries = 1000;
+
         try
         {
             using ZipArchive archive = new(stream, ZipArchiveMode.Read, leaveOpen: true);
+
+            if (archive.Entries.Count > MaxArchiveEntries)
+            {
+                _logger.LogWarning("3MF archive has {Count} entries, exceeding limit of {Max}", archive.Entries.Count, MaxArchiveEntries);
+                return null;
+            }
 
             ZipArchiveEntry? modelEntry = archive.Entries.FirstOrDefault(e =>
                 e.FullName.Equals("3D/3dmodel.model", StringComparison.OrdinalIgnoreCase));
@@ -42,10 +51,26 @@ public class ThreeMfMetadataService(ILogger<ThreeMfMetadataService> logger) : IT
                 return null;
             }
 
-            XDocument doc;
-            using (Stream entryStream = await modelEntry.OpenAsync(ct))
+            if (modelEntry.Length > MaxUncompressedEntrySize)
             {
-                doc = await XDocument.LoadAsync(entryStream, LoadOptions.None, ct);
+                _logger.LogWarning("3MF model entry is {Size} bytes, exceeding limit of {Max}", modelEntry.Length, MaxUncompressedEntrySize);
+                return null;
+            }
+
+            var xmlSettings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersFromEntities = 0,
+                MaxCharactersInDocument = MaxUncompressedEntrySize,
+                Async = true
+            };
+
+            XDocument doc;
+            await using (Stream entryStream = await modelEntry.OpenAsync(ct))
+            using (var xmlReader = System.Xml.XmlReader.Create(entryStream, xmlSettings))
+            {
+                doc = await XDocument.LoadAsync(xmlReader, LoadOptions.None, ct);
             }
 
             XElement? root = doc.Root;
