@@ -4,6 +4,8 @@ import {
   findMatchingMachineProfile,
   findHierarchyManufacturer,
   findHierarchyModel,
+  isMultiToolhead,
+  getPhysicalToolheads,
 } from '../profileMatcher';
 import type { PrinterForSlicing } from '../../components/job/PrinterSlicerSelector';
 import type { MachineProfileListItem, PrinterModelProfilesDto } from '@/services/slicerProfilesService';
@@ -201,6 +203,111 @@ describe('profileMatcher', () => {
     it('should return undefined if modelsRecord is undefined', () => {
       const result = findHierarchyModel('i3 MK3S+', undefined);
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('isMultiToolhead', () => {
+    it('should return false for null/undefined printer', () => {
+      expect(isMultiToolhead(null)).toBe(false);
+      expect(isMultiToolhead(undefined)).toBe(false);
+    });
+
+    it('should return false for printer with no toolheads', () => {
+      const printer = { id: '1', name: 'P' } as PrinterForSlicing;
+      expect(isMultiToolhead(printer)).toBe(false);
+    });
+
+    it('should return false for single-toolhead printer', () => {
+      const printer = {
+        id: '1', name: 'P',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: 'Physical' },
+        ],
+      } as PrinterForSlicing;
+      expect(isMultiToolhead(printer)).toBe(false);
+    });
+
+    it('should return true for multi-toolhead printer with Physical type', () => {
+      const printer = {
+        id: '1', name: 'Prusa XL',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: 'Physical' },
+          { id: 'th2', index: 1, isPrimary: false, nozzleDiameter: 0.4, toolheadType: 'Physical' },
+        ],
+      } as PrinterForSlicing;
+      expect(isMultiToolhead(printer)).toBe(true);
+    });
+
+    it('should return false when extra toolheads are MmuGate (not physical)', () => {
+      const printer = {
+        id: '1', name: 'Bambu AMS',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: 'Physical' },
+          { id: 'mmu1', index: 1, isPrimary: false, toolheadType: 'MmuGate' },
+          { id: 'mmu2', index: 2, isPrimary: false, toolheadType: 'MmuGate' },
+        ],
+      } as PrinterForSlicing;
+      expect(isMultiToolhead(printer)).toBe(false);
+    });
+
+    it('should return true for multi-toolhead without explicit type (backward compat)', () => {
+      const printer = {
+        id: '1', name: 'Dual Extruder',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4 },
+          { id: 'th2', index: 1, isPrimary: false, nozzleDiameter: 0.4 },
+        ],
+      } as PrinterForSlicing;
+      expect(isMultiToolhead(printer)).toBe(true);
+    });
+  });
+
+  describe('getPhysicalToolheads', () => {
+    it('should return empty for null/undefined printer', () => {
+      expect(getPhysicalToolheads(null)).toEqual([]);
+      expect(getPhysicalToolheads(undefined)).toEqual([]);
+    });
+
+    it('should return empty for printer with no toolheads', () => {
+      const printer = { id: '1', name: 'P' } as PrinterForSlicing;
+      expect(getPhysicalToolheads(printer)).toEqual([]);
+    });
+
+    it('should filter to Physical toolheads only', () => {
+      const printer = {
+        id: '1', name: 'P',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: 'Physical' },
+          { id: 'mmu1', index: 1, isPrimary: false, toolheadType: 'MmuGate' },
+        ],
+      } as PrinterForSlicing;
+      const result = getPhysicalToolheads(printer);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('th1');
+    });
+
+    it('should return all toolheads when none have explicit type', () => {
+      const printer = {
+        id: '1', name: 'P',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4 },
+          { id: 'th2', index: 1, isPrimary: false, nozzleDiameter: 0.6 },
+        ],
+      } as PrinterForSlicing;
+      const result = getPhysicalToolheads(printer);
+      expect(result).toHaveLength(2);
+    });
+
+    it('should handle numeric ToolheadType.Physical (0)', () => {
+      const printer = {
+        id: '1', name: 'P',
+        toolheads: [
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: 0 },
+          { id: 'th2', index: 1, isPrimary: false, nozzleDiameter: 0.4, toolheadType: 0 },
+        ],
+      } as PrinterForSlicing;
+      const result = getPhysicalToolheads(printer);
+      expect(result).toHaveLength(2);
     });
   });
 });

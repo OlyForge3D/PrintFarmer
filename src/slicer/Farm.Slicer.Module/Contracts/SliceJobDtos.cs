@@ -34,6 +34,12 @@ public class SubmitSliceJobRequest
     /// Format: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} (radians, Y-up).
     /// </summary>
     public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// Per-extruder filament profile names for multi-toolhead printers.
+    /// Index corresponds to extruder index. Null or empty for single-toolhead printers.
+    /// </summary>
+    public List<string>? ExtruderFilamentProfileNames { get; set; }
 }
 
 /// <summary>

@@ -24,6 +24,7 @@ import {
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
+import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
 import { isZipFile, extractOrcaBundle } from '@/features/slicer/orca/utils/orcaBundleExtractor';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
@@ -110,6 +111,10 @@ export const NewSliceJobPage: React.FC = () => {
     setFilamentFilterConfig(config);
     try { localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(config)); } catch { /* ignore */ }
   }, []);
+
+  // === Multi-extruder filament selection (for multi-toolhead printers) ===
+  // Maps extruder index → filament profile name. Only used when printer has >1 physical toolhead.
+  const [extruderFilamentProfileIds, setExtruderFilamentProfileIds] = useState<Record<number, string>>({});
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
@@ -562,6 +567,16 @@ export const NewSliceJobPage: React.FC = () => {
       nozzleDiameter: selectedPrinterDetails?.toolheads?.[0]?.nozzleDiameter
     };
   }, [printers, selectedPrinterId, selectedPrinterDetails]);
+
+  // Detect multi-toolhead printers (e.g., Bambu H2D, Prusa XL multi-tool)
+  const printerIsMultiToolhead = useMemo(
+    () => isMultiToolhead(selectedPrinterForSlicing),
+    [selectedPrinterForSlicing]
+  );
+  const physicalToolheads = useMemo(
+    () => getPhysicalToolheads(selectedPrinterForSlicing),
+    [selectedPrinterForSlicing]
+  );
 
   // Get selected printer basic info from list
   const selectedPrinter = useMemo(() => {
@@ -1199,6 +1214,22 @@ export const NewSliceJobPage: React.FC = () => {
       return;
     }
 
+    // Multi-toolhead validation: ensure all extruders have filament assigned
+    if (printerIsMultiToolhead) {
+      const missingExtruders = physicalToolheads.filter(
+        (_, i) => !extruderFilamentProfileIds[i]
+      );
+      if (missingExtruders.length > 0) {
+        setError(`Assign a filament profile to all ${physicalToolheads.length} extruders`);
+        return;
+      }
+    }
+
+    // Build per-extruder filament profile name list for multi-toolhead
+    const extruderFilamentNames = printerIsMultiToolhead
+      ? physicalToolheads.map((_, i) => extruderFilamentProfileIds[i] ?? '')
+      : undefined;
+
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       printerId: undefined,
@@ -1208,6 +1239,8 @@ export const NewSliceJobPage: React.FC = () => {
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
             filamentProfileName: selectedFilamentProfileId,
+            // Include per-extruder names in profile JSON so workers can access them
+            ...(extruderFilamentNames ? { filamentProfileNames: extruderFilamentNames } : {}),
             processProfileName: selectedProcessPresetId.startsWith('system:')
               ? selectedProcessPresetId.slice('system:'.length)
               : selectedProcessPresetId.startsWith('custom:')
@@ -1226,14 +1259,18 @@ export const NewSliceJobPage: React.FC = () => {
       modelTransformJson: bedModels[0]
         ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale, position: bedModels[0].position })
         : undefined,
+      extruderFilamentProfileNames: extruderFilamentNames,
     };
 
     submitMutation.mutate(request);
   }, [
     advancedProcessSettings,
     bedModels,
+    extruderFilamentProfileIds,
     modelFileName,
     modelFileUrl,
+    physicalToolheads,
+    printerIsMultiToolhead,
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
@@ -1413,6 +1450,7 @@ export const NewSliceJobPage: React.FC = () => {
               setSelectedFilamentProfileId('');
               setSelectedFilamentMaterial('');
               setSelectedProcessPresetId('');
+              setExtruderFilamentProfileIds({});
               // Machine profile auto-select will happen via the effect
             }}
             className="bg-pf-panel border border-pf-border rounded-lg p-3"
@@ -1544,7 +1582,120 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
 
           {/* FILAMENT PROFILE - cascading dropdown with manufacturer groups */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
+          {/* Multi-toolhead: show per-extruder filament selectors */}
+          {printerIsMultiToolhead ? (
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2" data-testid="multi-extruder-filament-section">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-semibold text-pf-text-primary">
+                  Filament Profiles ({physicalToolheads.length} extruders)
+                </label>
+                <div className="relative" ref={filamentMenuRef}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="p-1 h-auto"
+                    onClick={() => setFilamentMenuOpen(v => !v)}
+                    title="Filament profile options"
+                    aria-label="Filament profile options menu"
+                    aria-expanded={filamentMenuOpen}
+                    aria-haspopup="menu"
+                  >
+                    <MoreVerticalIcon className="w-4 h-4" />
+                  </Button>
+                  {filamentMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                        onClick={handleImportFilament}
+                        iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                      >
+                        Import profile
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                        onClick={() => { setFilamentMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                        iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                      >
+                        Manage profiles
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
+              <input
+                ref={importFilamentFileRef}
+                type="file"
+                accept=".json,.orca_filament"
+                multiple
+                className="sr-only"
+                onChange={handleFilamentFileImport}
+                aria-hidden="true"
+                tabIndex={-1}
+              />
+
+              {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
+                <div className="space-y-3">
+                  {physicalToolheads.map((toolhead, idx) => {
+                    const extruderLabel = toolhead.name || `Extruder ${idx + 1}`;
+                    const nozzleInfo = toolhead.nozzleDiameter ? ` (${toolhead.nozzleDiameter}mm)` : '';
+                    const currentMaterial = toolhead.currentMaterial ? ` • ${toolhead.currentMaterial}` : '';
+                    const selectedName = extruderFilamentProfileIds[idx] ?? '';
+                    const selectedProfile = allFilamentProfiles.find(p => p.name === selectedName);
+
+                    return (
+                      <div key={toolhead.id ?? idx} className="border border-pf-border/50 rounded-md p-2 space-y-1" data-testid={`extruder-filament-${idx}`}>
+                        <div className="text-xs font-medium text-pf-text-secondary">
+                          {extruderLabel}{nozzleInfo}{currentMaterial}
+                        </div>
+                        <FilamentProfileDropdown
+                          profiles={allFilamentProfiles}
+                          customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                          selectedProfileName={selectedName}
+                          disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                          filterConfig={filamentFilterConfig}
+                          onFilterConfigChange={handleFilamentFilterChange}
+                          onSelect={(name, source) => {
+                            setExtruderFilamentProfileIds(prev => ({ ...prev, [idx]: name }));
+                            // Also keep the primary filament in sync (first extruder = primary)
+                            if (idx === 0) {
+                              setSelectedFilamentProfileId(name);
+                              if (source === 'system') {
+                                const sp = allFilamentProfiles.find(p => p.name === name);
+                                setSelectedFilamentMaterial(sp?.material || '');
+                              } else {
+                                setSelectedFilamentMaterial('');
+                              }
+                            }
+                          }}
+                        />
+                        {selectedProfile && (
+                          <div className="text-xs text-pf-text-muted">
+                            {selectedProfile.nozzleTemperature ?? 210}°C nozzle, {selectedProfile.bedTemperature ?? 60}°C bed
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-sm text-pf-text-muted italic">
+                  {isMachineProfilesLoading ? 'Loading machine profiles...' : 
+                   selectedMachineProfileId && isFilamentProfilesLoading ? 'Loading filament profiles...' :
+                   !selectedMachineProfileId ? 'Select a machine profile to see filament options' :
+                   'No filament profiles available'}
+                </div>
+              )}
+            </div>
+          ) : (
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2" data-testid="single-filament-section">
             <div className="flex items-center justify-between">
               <label className="block text-sm font-semibold text-pf-text-primary">Filament Profile</label>
               <div className="relative" ref={filamentMenuRef}>
@@ -1650,6 +1801,7 @@ export const NewSliceJobPage: React.FC = () => {
               </div>
             )}
           </div>
+          )}
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
@@ -1900,7 +2052,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onSettingsProfiles={handleWorkspaceSettingsProfiles}
                 onSlice={submitSliceJob}
                 slicing={submitMutation.isPending}
-                canSlice={!submittedJobId && workspaceModels.length > 0 && (!!selectedModelId || !!modelFileUrl.trim()) && !!selectedMachineProfileId && !!selectedFilamentProfileId && !!selectedProcessPresetId}
+                canSlice={!submittedJobId && workspaceModels.length > 0 && (!!selectedModelId || !!modelFileUrl.trim()) && !!selectedMachineProfileId && (printerIsMultiToolhead ? physicalToolheads.every((_, i) => !!extruderFilamentProfileIds[i]) : !!selectedFilamentProfileId) && !!selectedProcessPresetId}
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
                 onModelsReplace={handleWorkspaceModelsReplace}
