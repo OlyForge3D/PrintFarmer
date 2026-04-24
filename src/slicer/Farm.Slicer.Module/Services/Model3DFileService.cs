@@ -50,6 +50,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     private readonly IThumbnailGenerationService? _thumbnailService;
     private readonly IFolderManagementService _folderManagementService;
     private readonly IStoragePathService _storagePathService;
+    private readonly IThreeMfMetadataService? _threeMfMetadataService;
 
     public Model3DFileService(
         IModel3DFileRepository model3dFiles,
@@ -62,13 +63,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         IStoragePathService storagePathService,
         IStoredFileOperationsService fileOperations,
         IModelAnalysisService? analysisService = null,
-        IThumbnailGenerationService? thumbnailService = null)
+        IThumbnailGenerationService? thumbnailService = null,
+        IThreeMfMetadataService? threeMfMetadataService = null)
     {
         _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
         _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _analysisService = analysisService;
         _thumbnailService = thumbnailService;
+        _threeMfMetadataService = threeMfMetadataService;
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _folderManagementService = folderManagementService ?? throw new ArgumentNullException(nameof(folderManagementService));
@@ -461,6 +464,28 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, analysisEx.Message);
             }
 
+            // Step 2b: Extract 3MF metadata (best-effort)
+            ThreeMfMetadataDto? threeMfMetadata = null;
+            try
+            {
+                if (_threeMfMetadataService != null &&
+                    fileExtension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("Extracting 3MF metadata for {ModelId}", modelId);
+                    threeMfMetadata = await _threeMfMetadataService.ExtractMetadataAsync(tempFilePath, ct);
+                    if (threeMfMetadata != null)
+                    {
+                        _logger.LogDebug(
+                            "3MF metadata extracted for {ModelId}: Title={Title}, Designer={Designer}, AutoTags={TagCount}",
+                            modelId, threeMfMetadata.Title, threeMfMetadata.Designer, threeMfMetadata.AutoTags.Count);
+                    }
+                }
+            }
+            catch (Exception metadataEx)
+            {
+                _logger.LogWarning("3MF metadata extraction failed for {ModelId}: {Message}", modelId, metadataEx.Message);
+            }
+
             // Step 3: Check for duplicates
             Model3D? existingModel = await _model3dFiles.GetByHashAsync(fileHash, ct);
             string baseName = Path.GetFileNameWithoutExtension(originalName);
@@ -552,7 +577,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 DimensionX = analysis?.DimensionX,
                 DimensionY = analysis?.DimensionY,
                 DimensionZ = analysis?.DimensionZ,
-                TriangleCount = analysis?.TriangleCount
+                TriangleCount = analysis?.TriangleCount,
+                ExtractedMetadataJson = threeMfMetadata != null ? System.Text.Json.JsonSerializer.Serialize(threeMfMetadata) : null
             };
 
             await _model3dFiles.AddAsync(model, ct);
@@ -802,8 +828,27 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             UploadedAt = model.UploadedAt,
             Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
             ThumbnailUrl = thumbnailUrl,
-            Tags = tags
+            Tags = tags,
+            ExtractedMetadata = DeserializeMetadata(model.ExtractedMetadataJson),
+            AutoTags = DeserializeMetadata(model.ExtractedMetadataJson)?.AutoTags?.ToArray()
         };
+    }
+
+    private static ThreeMfMetadataDto? DeserializeMetadata(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<ThreeMfMetadataDto>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

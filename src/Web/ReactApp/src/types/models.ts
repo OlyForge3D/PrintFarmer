@@ -22,6 +22,22 @@ export interface Model {
     name: string;
     color?: string;
   }>;
+  extractedMetadata?: ThreeMfMetadata | null;
+  autoTags?: string[];
+}
+
+/**
+ * Metadata extracted from a 3MF file
+ */
+export interface ThreeMfMetadata {
+  title: string | null;
+  designer: string | null;
+  description: string | null;
+  application: string | null;
+  creationDate: string | null;
+  modificationDate: string | null;
+  materials: string[];
+  autoTags: string[];
 }
 
 /**

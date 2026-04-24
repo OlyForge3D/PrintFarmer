@@ -499,6 +499,25 @@ public class Model3DFilesController(
     }
 
     /// <summary>
+    /// Gets extracted 3MF metadata for a model.
+    /// </summary>
+    /// <param name="id">The model's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("{id:guid}/metadata")]
+    [ProducesResponseType(typeof(ThreeMfMetadataDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetModelMetadataAsync(Guid id, CancellationToken ct)
+    {
+        Model3DDto? model = await _modelService.GetModelAsync(id, ct);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(model.ExtractedMetadata);
+    }
+
+    /// <summary>
     /// Determines the MIME content type for a model file extension.
     /// </summary>
     private static string GetContentType(string filePath)
