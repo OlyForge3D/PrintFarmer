@@ -1277,6 +1277,10 @@ export const NewSliceJobPage: React.FC = () => {
         ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale, position: bedModels[0].position })
         : undefined,
       extruderFilamentProfileNames: extruderFilamentNames,
+      // Multi-model support: collect all bed model URLs that are server-hosted (non-blob)
+      modelFileUrls: bedModels.length > 1
+        ? bedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
+        : undefined,
     };
 
     submitMutation.mutate(request);

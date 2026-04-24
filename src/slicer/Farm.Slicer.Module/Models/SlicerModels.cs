@@ -178,6 +178,13 @@ public class DistributedSlicingJob : SlicingJobDto
     /// </summary>
     public string? ModelTransformJson { get; set; }
 
+    /// <summary>
+    /// Multiple model file URLs for multi-model slice jobs.
+    /// When populated, the worker downloads all listed models and passes them to the slicer CLI.
+    /// Falls back to <see cref="ModelFileUrl"/> for single-model jobs.
+    /// </summary>
+    public List<string>? ModelFileUrls { get; set; }
+
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
 

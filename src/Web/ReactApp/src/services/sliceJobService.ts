@@ -15,6 +15,8 @@ export interface SubmitSliceJobRequest {
   modelTransformJson?: string;
   /** Per-extruder filament profile names for multi-toolhead printers (index = extruder index). */
   extruderFilamentProfileNames?: string[];
+  /** Multiple model file URLs for multi-model slice jobs (e.g., split/cut models). */
+  modelFileUrls?: string[];
 }
 
 export interface SubmitSliceJobResponse {

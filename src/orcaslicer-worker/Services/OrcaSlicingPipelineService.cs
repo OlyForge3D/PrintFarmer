@@ -44,11 +44,26 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         try
         {
             _logger.LogInformation("Starting slicing pipeline for job {JobId}", job.Id);
-            await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
-            string stlFilePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
+
+            // Download model file(s)
+            List<string> modelFilePaths;
+            if (job.ModelFileUrls is { Count: > 0 })
+            {
+                await _progressReporter.ReportProgressAsync(job.Id, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
+                modelFilePaths = await FetchMultipleModelsAsync(job.ModelFileUrls, jobWorkDir, cancellationToken);
+                job.InputFileSizeBytes = modelFilePaths.Sum(p => new FileInfo(p).Length);
+                _logger.LogInformation("Downloaded {Count} model files for job {JobId}", modelFilePaths.Count, job.Id);
+            }
+            else
+            {
+                await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
+                string singlePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
+                modelFilePaths = [singlePath];
+            }
+
             await _progressReporter.ReportProgressAsync(job.Id, 20, "Preparing slicer configuration", cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 30, "Running OrcaSlicer", cancellationToken);
-            string gcodeFilePath = await RunOrcaSlicerAsync(stlFilePath, jobWorkDir, job, cancellationToken);
+            string gcodeFilePath = await RunOrcaSlicerAsync(modelFilePaths, jobWorkDir, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
 
@@ -70,6 +85,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             result.Metadata["SlicerVersion"] = "OrcaSlicer 1.8.0";
             result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
             result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
+            if (modelFilePaths.Count > 1)
+            {
+                result.Metadata["ModelCount"] = modelFilePaths.Count.ToString(CultureInfo.InvariantCulture);
+            }
+
             return result;
         }
         finally
@@ -107,6 +127,39 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         await response.Content.CopyToAsync(fileStream, cancellationToken);
         job.InputFileSizeBytes = new FileInfo(stlFilePath).Length;
         return stlFilePath;
+    }
+
+    private async Task<List<string>> FetchMultipleModelsAsync(List<string> modelUrls, string workDir, CancellationToken cancellationToken)
+    {
+        List<string> downloadedPaths = new(modelUrls.Count);
+        for (int i = 0; i < modelUrls.Count; i++)
+        {
+            string url = modelUrls[i];
+            Uri uri = new(url, UriKind.RelativeOrAbsolute);
+            string fileName = Path.GetFileName(uri.LocalPath);
+            if (string.IsNullOrEmpty(fileName))
+            {
+                fileName = $"model_{i}{(url.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase) ? ".3mf" : ".stl")}";
+            }
+
+            // Ensure unique filenames when multiple models share the same name
+            string destPath = Path.Combine(workDir, fileName);
+            if (File.Exists(destPath))
+            {
+                string baseName = Path.GetFileNameWithoutExtension(fileName);
+                string ext = Path.GetExtension(fileName);
+                destPath = Path.Combine(workDir, $"{baseName}_{i}{ext}");
+            }
+
+            HttpResponseMessage response = await _httpClient.GetAsync(uri, cancellationToken);
+            _ = response.EnsureSuccessStatusCode();
+            await using FileStream fileStream = File.Create(destPath);
+            await response.Content.CopyToAsync(fileStream, cancellationToken);
+            downloadedPaths.Add(destPath);
+            _logger.LogInformation("Downloaded model {Index}/{Total}: {Path}", i + 1, modelUrls.Count, destPath);
+        }
+
+        return downloadedPaths;
     }
 
     private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
@@ -160,7 +213,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return result;
     }
 
-    private async Task<string> RunOrcaSlicerAsync(string stlPath, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
+    private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         string gcodeOutputDir = Path.Combine(workDir, "output");
         _ = Directory.CreateDirectory(gcodeOutputDir);
@@ -189,7 +242,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         bool pipeCreated = TryCreateNamedPipe(pipePath);
         string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
 
-        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transform.Flags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+        // Build model arguments: first model is positional, additional models use --load
+        string primaryModel = $"\"{modelPaths[0]}\"";
+        string additionalModels = string.Empty;
+        if (modelPaths.Count > 1)
+        {
+            additionalModels = " " + string.Join(" ", modelPaths.Skip(1).Select(p => $"--load \"{p}\""));
+        }
+
+        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transform.Flags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
