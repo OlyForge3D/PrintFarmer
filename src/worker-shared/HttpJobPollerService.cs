@@ -170,6 +170,7 @@ public abstract class HttpJobPollerService(
                     Status = SlicingJobStatus.Slicing, // in-progress mapping
                     StartedAt = DateTime.UtcNow,
                     ModelTransformJson = jobStatus.ModelTransformJson,
+                    ModelFileUrls = jobStatus.ModelFileUrls,
                 };
 
                 // Resolve profile names from SlicerProfileJson into full SlicerProfileDto

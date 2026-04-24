@@ -180,6 +180,13 @@ public class SliceJob
     /// Null for single-extruder jobs.
     /// </summary>
     public string? ExtruderFilamentProfileNamesJson { get; set; }
+
+    /// <summary>
+    /// JSON array of model file URLs for multi-model slice jobs.
+    /// When populated, the worker downloads all listed models and passes them to the slicer CLI.
+    /// Null or empty for single-model jobs (falls back to <see cref="ModelFileUrl"/>).
+    /// </summary>
+    public string? ModelFileUrlsJson { get; set; }
 }
 
 /// <summary>

@@ -40,6 +40,13 @@ public class SubmitSliceJobRequest
     /// Index corresponds to extruder index. Null or empty for single-toolhead printers.
     /// </summary>
     public List<string>? ExtruderFilamentProfileNames { get; set; }
+
+    /// <summary>
+    /// Multiple model file URLs for multi-model slice jobs.
+    /// When provided, the worker downloads all listed models and slices them together.
+    /// Falls back to <see cref="ModelFileUrl"/> for single-model jobs.
+    /// </summary>
+    public List<string>? ModelFileUrls { get; set; }
 }
 
 /// <summary>
@@ -98,6 +105,13 @@ public class SliceJobStatusResponse
     /// JSON-serialized model transform (rotation/scale) from the UI workspace.
     /// </summary>
     public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// Multiple model file URLs for multi-model slice jobs.
+    /// When populated, the worker should download all listed models.
+    /// Empty or null for single-model jobs (use <see cref="ModelFileUrl"/>).
+    /// </summary>
+    public List<string>? ModelFileUrls { get; set; }
 }
 
 /// <summary>

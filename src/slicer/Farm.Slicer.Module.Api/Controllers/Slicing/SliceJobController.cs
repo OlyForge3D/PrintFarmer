@@ -68,6 +68,17 @@ public class SliceJobController(
             modelFileUrl = $"{scheme}://{host}{modelFileUrl}";
         }
 
+        // Resolve multi-model URLs to absolute
+        List<string>? resolvedModelUrls = null;
+        if (request.ModelFileUrls is { Count: > 0 })
+        {
+            string scheme = HttpContext.Request.Scheme;
+            string host = HttpContext.Request.Host.ToString();
+            resolvedModelUrls = request.ModelFileUrls
+                .Select(u => !string.IsNullOrEmpty(u) && u.StartsWith('/') ? $"{scheme}://{host}{u}" : u)
+                .ToList();
+        }
+
         var job = new SliceJob
         {
             Id = Guid.NewGuid(),
@@ -83,6 +94,9 @@ public class SliceJobController(
             ModelTransformJson = request.ModelTransformJson,
             ExtruderFilamentProfileNamesJson = request.ExtruderFilamentProfileNames is { Count: > 0 }
                 ? JsonSerializer.Serialize(request.ExtruderFilamentProfileNames)
+                : null,
+            ModelFileUrlsJson = resolvedModelUrls is { Count: > 0 }
+                ? JsonSerializer.Serialize(resolvedModelUrls)
                 : null,
             Status = SliceJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
@@ -467,26 +481,43 @@ public class SliceJobController(
         return Ok(new { enabled = true });
     }
 
-    private static SliceJobStatusResponse MapToStatusResponse(SliceJob job) => new()
+    private static SliceJobStatusResponse MapToStatusResponse(SliceJob job)
     {
-        Id = job.Id,
-        Status = job.Status,
-        ProgressPercent = job.ProgressPercent,
-        ProgressMessage = job.ProgressMessage,
-        QueuedAt = job.QueuedAt,
-        StartedAt = job.StartedAt,
-        CompletedAt = job.CompletedAt,
-        ResultFileUrl = job.ResultFileUrl,
-        ErrorMessage = job.ErrorMessage,
-        EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-        FilamentUsedGrams = job.FilamentUsedGrams,
-        WorkerId = job.WorkerId,
-        ModelFileUrl = job.ModelFileUrl,
-        ModelFileName = job.ModelFileName,
-        SlicerEngine = job.SlicerEngine,
-        SlicerProfileJson = job.SlicerProfileJson,
-        ModelTransformJson = job.ModelTransformJson,
-    };
+        List<string>? modelUrls = null;
+        if (!string.IsNullOrEmpty(job.ModelFileUrlsJson))
+        {
+            try
+            {
+                modelUrls = JsonSerializer.Deserialize<List<string>>(job.ModelFileUrlsJson);
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed JSON; fall back to single URL
+            }
+        }
+
+        return new()
+        {
+            Id = job.Id,
+            Status = job.Status,
+            ProgressPercent = job.ProgressPercent,
+            ProgressMessage = job.ProgressMessage,
+            QueuedAt = job.QueuedAt,
+            StartedAt = job.StartedAt,
+            CompletedAt = job.CompletedAt,
+            ResultFileUrl = job.ResultFileUrl,
+            ErrorMessage = job.ErrorMessage,
+            EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+            FilamentUsedGrams = job.FilamentUsedGrams,
+            WorkerId = job.WorkerId,
+            ModelFileUrl = job.ModelFileUrl,
+            ModelFileName = job.ModelFileName,
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson,
+            ModelTransformJson = job.ModelTransformJson,
+            ModelFileUrls = modelUrls,
+        };
+    }
 
     /// <summary>
     /// Ensures the <c>extruderFilamentProfileNames</c> array is present inside SlicerProfileJson

@@ -347,6 +347,10 @@ export const OrcaSlicerPage: React.FC = () => {
       slicerProfileId: selectedProcessPresetId || undefined,
       requiredCapabilitiesJson: JSON.stringify(capabilities),
       priority,
+      // Multi-model support: collect all server-hosted model URLs
+      modelFileUrls: loadedModels.length > 1
+        ? loadedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
+        : undefined,
     };
     
     submitMutation.mutate(request);

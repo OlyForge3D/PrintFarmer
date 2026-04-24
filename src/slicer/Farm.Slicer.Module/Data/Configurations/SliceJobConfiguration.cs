@@ -31,6 +31,7 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.CreatedAt).IsRequired();
         _ = builder.Property(j => j.UpdatedAt).IsRequired();
         _ = builder.Property(j => j.ExtruderFilamentProfileNamesJson).HasColumnType("TEXT");
+        _ = builder.Property(j => j.ModelFileUrlsJson).HasColumnType("TEXT");
 
         // Indexes for efficient querying
         _ = builder.HasIndex(j => j.UserId);
