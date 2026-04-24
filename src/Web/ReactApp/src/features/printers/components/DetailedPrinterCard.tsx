@@ -9,6 +9,7 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
@@ -676,6 +677,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             }
           />
       </div>
+
+      {/* AMS/MMU Slot Visualization - Compact view for card */}
+      {printerDetails?.toolheads && printerDetails.toolheads.length > 1 && (
+        <div className="mb-2">
+          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
+          <AmsSlotVisualization toolheads={printerDetails.toolheads} compact />
+        </div>
+      )}
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
       {(spoolmanReady || printer.spoolInfo) && (() => {
