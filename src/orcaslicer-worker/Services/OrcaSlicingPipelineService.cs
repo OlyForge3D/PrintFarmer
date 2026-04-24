@@ -244,8 +244,37 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
         // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
         // --ensure-on-bed: lift objects partially below Z=0
-        TransformResult transform = BuildTransformFlags(job.ModelTransformJson);
-        string arrangeFlag = transform.HasCustomPosition ? "--arrange 0" : "--arrange 1";
+        //
+        // Per-model transforms: for multi-model jobs with ModelFileTransforms, use the first
+        // entry as the primary model transform. If any model has a custom position, disable
+        // auto-arrange to preserve the user's layout.
+        string? primaryTransformJson = job.ModelTransformJson;
+        bool anyModelHasPosition = false;
+
+        if (job.ModelFileTransforms is { Count: > 0 } && modelPaths.Count > 1)
+        {
+            primaryTransformJson = job.ModelFileTransforms[0];
+            foreach (string? t in job.ModelFileTransforms)
+            {
+                TransformResult check = BuildTransformFlags(t);
+                if (check.HasCustomPosition)
+                {
+                    anyModelHasPosition = true;
+                    break;
+                }
+            }
+
+            if (job.ModelFileTransforms.Count > 1 && job.ModelFileTransforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t)))
+            {
+                _logger.LogWarning(
+                    "Job {JobId}: per-model transforms for additional models are stored but not applied via CLI. " +
+                    "OrcaSlicer CLI only supports transforms on the primary model. Future 3MF project workflow will apply all.",
+                    job.Id);
+            }
+        }
+
+        TransformResult transform = BuildTransformFlags(primaryTransformJson);
+        string arrangeFlag = (transform.HasCustomPosition || anyModelHasPosition) ? "--arrange 0" : "--arrange 1";
 
         // Create a named pipe for real-time progress from OrcaSlicer
         string pipePath = Path.Combine(workDir, "progress.pipe");

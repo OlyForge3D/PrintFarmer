@@ -17,6 +17,8 @@ export interface SubmitSliceJobRequest {
   extruderFilamentProfileNames?: string[];
   /** Multiple model file URLs for multi-model slice jobs (e.g., split/cut models). */
   modelFileUrls?: string[];
+  /** Per-model transforms for multi-model slice jobs. Each entry corresponds positionally to a URL in modelFileUrls. */
+  modelFileTransforms?: (string | null)[];
 }
 
 export interface SubmitSliceJobResponse {
