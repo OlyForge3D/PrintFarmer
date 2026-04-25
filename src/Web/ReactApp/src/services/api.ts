@@ -135,6 +135,11 @@ import {
   BalanceTransactionDto,
   BalanceAdjustRequest,
   ZOffsetSaveRequest,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldValue,
+  CreateCustomFieldDefinitionRequest,
+  UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
 import type { GeometryUploadResultDto, ThreeMfMetadata } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
@@ -1063,6 +1068,36 @@ export class ApiClient {
 
   async deleteBedType(id: string): Promise<void> {
     await this.client.delete(`/bed-types/${id}`);
+  }
+
+  // ============ Custom Fields API methods ============
+
+  async getCustomFieldDefinitions(entityType: CustomFieldEntityType): Promise<CustomFieldDefinition[]> {
+    const response = await this.client.get<CustomFieldDefinition[]>('/custom-fields/definitions', { params: { entityType } });
+    return response.data;
+  }
+
+  async createCustomFieldDefinition(dto: CreateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.post<CustomFieldDefinition>('/custom-fields/definitions', dto);
+    return response.data;
+  }
+
+  async updateCustomFieldDefinition(id: string, dto: UpdateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.put<CustomFieldDefinition>(`/custom-fields/definitions/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteCustomFieldDefinition(id: string): Promise<void> {
+    await this.client.delete(`/custom-fields/definitions/${id}`);
+  }
+
+  async getCustomFieldValues(entityType: CustomFieldEntityType, entityId: string): Promise<CustomFieldValue[]> {
+    const response = await this.client.get<CustomFieldValue[]>(`/custom-fields/values/${entityType}/${entityId}`);
+    return response.data;
+  }
+
+  async setCustomFieldValues(entityType: CustomFieldEntityType, entityId: string, values: Record<string, string | null>): Promise<void> {
+    await this.client.put(`/custom-fields/values/${entityType}/${entityId}`, { values });
   }
 
   // ============ Catalog API methods ============

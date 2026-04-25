@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useState, useEffect, MutableRefObject } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useCallback, MutableRefObject } from 'react';
 // (renderUnknown not required here)
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import {
@@ -11,8 +11,13 @@ import { STLLoader } from 'three-stdlib';
 import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
-import { PerspectiveIcon, OrthographicIcon, RecenterIcon } from '../../../../common/components/icons/MdiIcons';
+import { PerspectiveIcon, OrthographicIcon, RecenterIcon, RulerIcon, SimplifyIcon } from '../../../../common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
+import { MeasurementTool } from './MeasurementTool';
+import { MeasurementOverlay } from './MeasurementOverlay';
+import { DecimationPanel } from './DecimationPanel';
+import { decimateGeometry, type DecimationResult } from '../../utils/meshDecimation';
+import { exportSTL } from '../../utils/stlExporter';
 
 export interface ModelViewerProps {
   modelUrl: string;
@@ -302,11 +307,12 @@ function MockPrintBed({ modelDimensions }: { modelDimensions: ModelDimensions | 
   );
 }
 
-function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange }: { 
+function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange, onGeometryLoaded }: { 
   url: string; 
   color?: string;
   viewMode?: ViewMode;
   onDimensionsChange?: (dimensions: ModelDimensions) => void;
+  onGeometryLoaded?: (geometry: THREE.BufferGeometry) => void;
 }) {
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
@@ -339,8 +345,12 @@ function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChan
       if (onDimensionsChange) {
         onDimensionsChange({ width, depth, height, volume });
       }
+
+      if (onGeometryLoaded) {
+        onGeometryLoaded(geometry.clone());
+      }
     }
-  }, [geometry, onDimensionsChange]);
+  }, [geometry, onDimensionsChange, onGeometryLoaded]);
 
   // Render material based on view mode
   const renderMaterial = () => {
@@ -445,11 +455,12 @@ function CameraFitter() {
 
   return null;
 }
-function PLYModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange }: { 
+function PLYModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange, onGeometryLoaded }: { 
   url: string; 
   color?: string;
   viewMode?: ViewMode;
   onDimensionsChange?: (dimensions: ModelDimensions) => void;
+  onGeometryLoaded?: (geometry: THREE.BufferGeometry) => void;
 }) {
   const geometry = useLoader(PLYLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
@@ -482,8 +493,12 @@ function PLYModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChan
       if (onDimensionsChange) {
         onDimensionsChange({ width, depth, height, volume });
       }
+
+      if (onGeometryLoaded) {
+        onGeometryLoaded(geometry.clone());
+      }
     }
-  }, [geometry, onDimensionsChange]);
+  }, [geometry, onDimensionsChange, onGeometryLoaded]);
 
   // Render material based on view mode
   const renderMaterial = () => {
@@ -679,6 +694,13 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   const [isPerspective, setIsPerspective] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('solid');
   const [isGridVisible, setIsGridVisible] = useState(showGrid);
+  const [measurementActive, setMeasurementActive] = useState(false);
+  const [lastDistance, setLastDistance] = useState<number | null>(null);
+  const [measurementKey, setMeasurementKey] = useState(0);
+  const [decimationActive, setDecimationActive] = useState(false);
+  const [decimationResult, setDecimationResult] = useState<DecimationResult | null>(null);
+  const [originalGeometry, setOriginalGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [isDecimating, setIsDecimating] = useState(false);
   // orbitControlsRef holds the R3F OrbitControls instance. Use `any` here to avoid importing three internals.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orbitControlsRef = useRef<any>(null) as MutableRefObject<any>;
@@ -712,18 +734,127 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
     setIsGridVisible(!isGridVisible);
   };
 
+  const handleToggleMeasurement = () => {
+    setMeasurementActive((prev) => {
+      if (!prev) {
+        setMeasurementKey((k) => k + 1);
+      }
+      setLastDistance(null);
+      return !prev;
+    });
+  };
+
+  const handleMeasurement = useCallback((distance: number | null) => {
+    setLastDistance(distance);
+  }, []);
+
+  const handleClearMeasurement = useCallback(() => {
+    setLastDistance(null);
+  }, []);
+
+  const handleGeometryLoaded = useCallback((geo: THREE.BufferGeometry) => {
+    setOriginalGeometry(geo);
+  }, []);
+
+  // Reset decimation state when model changes
+  useEffect(() => {
+    setDecimationActive(false);
+    setDecimationResult((prev) => {
+      prev?.geometry.dispose();
+      return null;
+    });
+  }, [modelUrl, fileType]);
+
+  // Dispose GPU geometry on unmount
+  useEffect(() => {
+    return () => {
+      decimationResult?.geometry.dispose();
+      originalGeometry?.dispose();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDecimationPreview = useCallback((reduction: number) => {
+    if (!originalGeometry) return;
+    setIsDecimating(true);
+    requestAnimationFrame(() => {
+      const result = decimateGeometry(originalGeometry, reduction);
+      setDecimationResult((prev) => {
+        prev?.geometry.dispose();
+        return result;
+      });
+      setIsDecimating(false);
+    });
+  }, [originalGeometry]);
+
+  const handleDecimationApply = useCallback(() => {
+    if (!decimationResult) return;
+    const filename = modelUrl.split('/').pop() ?? 'model';
+    exportSTL(decimationResult.geometry, filename);
+  }, [decimationResult, modelUrl]);
+
+  const handleDecimationReset = useCallback(() => {
+    setDecimationResult((prev) => {
+      prev?.geometry.dispose();
+      return null;
+    });
+  }, []);
+
+  const handleToggleDecimation = useCallback(() => {
+    setDecimationActive((prev) => {
+      if (prev) {
+        // Turning off: clear and dispose decimation result
+        setDecimationResult((old) => {
+          old?.geometry.dispose();
+          return null;
+        });
+      }
+      return !prev;
+    });
+  }, []);
+
+  // Compute face/vertex counts from the original geometry for the panel
+  const originalFaces = originalGeometry
+    ? (originalGeometry.index
+        ? originalGeometry.index.count / 3
+        : originalGeometry.getAttribute('position').count / 3)
+    : 0;
+  const originalVertices = originalGeometry
+    ? originalGeometry.getAttribute('position').count
+    : 0;
+
   const renderModel = () => {
+    // When decimation preview is active, render the decimated geometry directly
+    if (decimationResult) {
+      return (
+        <mesh
+          geometry={decimationResult.geometry}
+          position={[0, 0, 0]}
+          castShadow={viewMode === 'solid'}
+          receiveShadow={viewMode === 'solid'}
+        >
+          <meshStandardMaterial
+            color="#0969da"
+            metalness={0.3}
+            roughness={0.4}
+            wireframe={viewMode === 'wireframe'}
+            transparent={viewMode === 'xray'}
+            opacity={viewMode === 'xray' ? 0.3 : 1}
+            side={viewMode === 'xray' ? THREE.DoubleSide : THREE.FrontSide}
+          />
+        </mesh>
+      );
+    }
+
     switch (fileType) {
       case 'stl':
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       case 'ply':
-        return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       case '3mf':
-        // 3MF files will be converted to STL by backend service
-        // Frontend treats them as STL after conversion
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       default:
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
     }
   };
 
@@ -814,18 +945,21 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         {/* Auto-fit camera to model bounds */}
         <CameraFitter />
 
+        {/* Measurement tool (inside Canvas for raycasting) */}
+        <MeasurementTool key={measurementKey} active={measurementActive} onMeasurement={handleMeasurement} />
+
         {/* Enhanced controls with full 360° rotation and zoom limits */}
         <OrbitControls
           ref={orbitControlsRef}
           enableDamping
           dampingFactor={0.05}
-          autoRotate={autoRotate}
+          autoRotate={autoRotate && !measurementActive}
           autoRotateSpeed={0.5}
-          target={[0, 0, 0]} // Orbit around model center
+          target={[0, 0, 0]}
           enablePan={true}
           enableZoom={true}
-          minDistance={10}  // Prevent zooming too close
-          maxDistance={800} // Prevent zooming too far (model disappearing)
+          minDistance={10}
+          maxDistance={800}
         />
 
         {/* Camera Controller for view animations */}
@@ -842,8 +976,37 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         {showAxes && <SimpleAxisIndicators size={modelDimensions ? Math.max(modelDimensions.width, modelDimensions.depth) * 0.2 : 30} />}
       </Canvas>
 
+      {/* Measurement overlay (outside Canvas) */}
+      <MeasurementOverlay
+        active={measurementActive}
+        distance={lastDistance}
+        onClear={handleClearMeasurement}
+        onDeactivate={handleToggleMeasurement}
+      />
+
       {/* Camera Controls */}
       <div className="absolute top-4 right-4 flex gap-2">
+        <Button
+          onClick={handleToggleDecimation}
+          variant="subtle"
+          size="sm"
+          className={`${decimationActive ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          title={decimationActive ? "Close Simplifier" : "Simplify Mesh"}
+          disabled={!originalGeometry}
+        >
+          <SimplifyIcon className="w-5 h-5 text-pf-text-primary" />
+        </Button>
+
+        <Button
+          onClick={handleToggleMeasurement}
+          variant="subtle"
+          size="sm"
+          className={`${measurementActive ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          title={measurementActive ? "Disable Measurement" : "Measure Distance"}
+        >
+          <RulerIcon className="w-5 h-5 text-pf-text-primary" />
+        </Button>
+
         <Button
           onClick={handleToggleGrid}
           variant="subtle"
@@ -893,8 +1056,25 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         </Button>
       </div>
 
-      {/* Model dimensions badge */}
-      {modelDimensions && (
+      {/* Decimation panel */}
+      {decimationActive && originalGeometry && (
+        <DecimationPanel
+          originalFaces={originalFaces}
+          originalVertices={originalVertices}
+          onPreview={handleDecimationPreview}
+          onApply={handleDecimationApply}
+          onReset={handleDecimationReset}
+          previewResult={decimationResult ? {
+            resultFaces: decimationResult.resultFaces,
+            resultVertices: decimationResult.resultVertices,
+            reductionPercent: decimationResult.reductionPercent,
+          } : undefined}
+          isProcessing={isDecimating}
+        />
+      )}
+
+      {/* Model dimensions badge — shift right when decimation panel is open */}
+      {modelDimensions && !decimationActive && (
         <div className="absolute bottom-3 left-3 bg-pf-bg-2/90 backdrop-blur-sm px-2 py-1 rounded text-xs border border-pf-border text-pf-text-secondary">
           {modelDimensions.width.toFixed(1)} × {modelDimensions.depth.toFixed(1)} × {modelDimensions.height.toFixed(1)} mm
         </div>

@@ -186,6 +186,9 @@ public static class ServiceCollectionExtensions
         // Bed type service
         _ = services.AddScoped<Farm.Infrastructure.Services.BedTypes.IBedTypeService, Farm.Infrastructure.Services.BedTypes.BedTypeService>();
 
+        // Custom field service
+        _ = services.AddScoped<Farm.Infrastructure.Services.CustomFields.ICustomFieldService, Farm.Infrastructure.Services.CustomFields.CustomFieldService>();
+
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
         _ = services.AddSingleton(autoDispatchTrigger);

@@ -69,6 +69,9 @@ import {
   JobStateHistoryDto,
   UpdateObicoServerRequest,
   TimezoneInfo,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldValue,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -141,6 +144,8 @@ export const queryKeys = {
     ['job-queue-analytics', 'jobs', jobId ?? null, 'state-history'] as const
   ),
   bedTypes: ['bed-types'] as const,
+  customFieldDefinitions: (entityType: string) => ['custom-field-definitions', entityType] as const,
+  customFieldValues: (entityType: string, entityId: string) => ['custom-field-values', entityType, entityId] as const,
 } as const;
 
 // ============ Printer Hooks ============
@@ -800,6 +805,27 @@ export function useBedTypes(options?: QueryOptions<BedType[]>) {
     queryKey: queryKeys.bedTypes,
     queryFn: () => apiClient.getBedTypes(),
     staleTime: 300000, // 5 minutes
+    ...options,
+  });
+}
+
+// ---- Custom Field Hooks ----
+
+export function useCustomFieldDefinitions(entityType: CustomFieldEntityType, options?: QueryOptions<CustomFieldDefinition[]>) {
+  return useQuery({
+    queryKey: queryKeys.customFieldDefinitions(entityType),
+    queryFn: () => apiClient.getCustomFieldDefinitions(entityType),
+    staleTime: 300000,
+    ...options,
+  });
+}
+
+export function useCustomFieldValues(entityType: CustomFieldEntityType, entityId: string, options?: QueryOptions<CustomFieldValue[]>) {
+  return useQuery({
+    queryKey: queryKeys.customFieldValues(entityType, entityId),
+    queryFn: () => apiClient.getCustomFieldValues(entityType, entityId),
+    staleTime: 30000,
+    enabled: !!entityId,
     ...options,
   });
 }

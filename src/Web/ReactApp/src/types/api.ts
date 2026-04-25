@@ -3964,3 +3964,56 @@ export interface BalanceAdjustRequest {
   amount: number;
   description?: string;
 }
+
+// ============ Custom Field Types ============
+
+export type CustomFieldEntityType = 'Printer' | 'User';
+export type CustomFieldType = 'Text' | 'Number' | 'Boolean' | 'Date' | 'Select';
+
+export interface CustomFieldDefinition {
+  id: string;
+  entityType: CustomFieldEntityType;
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  options?: string;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+  defaultValue?: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
+export interface CreateCustomFieldDefinitionRequest {
+  entityType: CustomFieldEntityType;
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  options?: string;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+  defaultValue?: string;
+}
+
+export interface UpdateCustomFieldDefinitionRequest {
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  options?: string;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+  defaultValue?: string;
+}
+
+export interface CustomFieldValue {
+  definitionId: string;
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  value?: string;
+  options?: string;
+  isRequired: boolean;
+}
