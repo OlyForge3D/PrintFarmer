@@ -15,6 +15,8 @@ import {
   MeasureIcon,
   SupportPaintIcon,
   SeamPaintIcon,
+  ColorPaintIcon,
+  FuzzySkinPaintIcon,
   UndoIcon,
   RedoIcon,
   AssemblyIcon,
@@ -82,6 +84,8 @@ export interface SlicerToolbarProps {
   onMeasure?: () => void;
   onSupportPaint?: () => void;
   onSeamPaint?: () => void;
+  onColorPaint?: () => void;
+  onFuzzySkinPaint?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
   onAssemblyView?: () => void;
@@ -99,6 +103,8 @@ export interface SlicerToolbarProps {
   cutActive?: boolean;
   supportPaintActive?: boolean;
   seamPaintActive?: boolean;
+  colorPaintActive?: boolean;
+  fuzzySkinPaintActive?: boolean;
   sequentialActive?: boolean;
 }
 
@@ -121,6 +127,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   onMeasure,
   onSupportPaint,
   onSeamPaint,
+  onColorPaint,
+  onFuzzySkinPaint,
   onUndo,
   onRedo,
   onAssemblyView,
@@ -138,6 +146,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   cutActive = false,
   supportPaintActive = false,
   seamPaintActive = false,
+  colorPaintActive = false,
+  fuzzySkinPaintActive = false,
   sequentialActive = false,
 }) => {
   return (
@@ -215,6 +225,13 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
 
         {/* Paint group */}
         <ToolbarButton
+          icon={<ColorPaintIcon />}
+          title="Color Painting (P)"
+          onClick={onColorPaint}
+          disabled={!hasSelection}
+          active={colorPaintActive}
+        />
+        <ToolbarButton
           icon={<SupportPaintIcon />}
           title="Support Painting"
           onClick={onSupportPaint}
@@ -227,6 +244,13 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
           onClick={onSeamPaint}
           disabled={!hasSelection}
           active={seamPaintActive}
+        />
+        <ToolbarButton
+          icon={<FuzzySkinPaintIcon />}
+          title="Fuzzy Skin Painting"
+          onClick={onFuzzySkinPaint}
+          disabled={!hasSelection}
+          active={fuzzySkinPaintActive}
         />
       </div>
 

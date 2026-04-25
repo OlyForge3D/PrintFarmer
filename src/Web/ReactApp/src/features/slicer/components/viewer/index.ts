@@ -12,6 +12,8 @@ export { TextTool, type TextToolConfig, type TextToolProps } from './TextTool';
 export { PlateTabBar, type PlateTabBarProps } from './PlateTabBar';
 export { ClearanceZoneOverlay, type ClearanceZoneOverlayProps } from './ClearanceZoneOverlay';
 export { SequentialPrintPanel, type SequentialPrintPanelProps } from './SequentialPrintPanel';
+export { PaintToolPanel, type PaintToolPanelProps, type PaintToolType, type PaintMode, type BrushShape } from './PaintToolPanel';
+export { ColorPaintOverlay, type ColorPaintOverlayProps } from './ColorPaintOverlay';
 
 // Re-export plate manager types and utilities
 export type { BuildPlate, PlateManagerState } from '@/features/slicer/utils/plateManager';

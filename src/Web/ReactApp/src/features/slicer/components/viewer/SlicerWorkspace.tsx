@@ -28,6 +28,7 @@ import {
 } from '../../utils/sequentialPrinting';
 import { ClearanceZoneOverlay } from './ClearanceZoneOverlay';
 import { SequentialPrintPanel } from './SequentialPrintPanel';
+import { PaintToolPanel, type PaintToolType, type PaintMode, type BrushShape, type SupportPaintVariant, type SeamPaintVariant } from './PaintToolPanel';
 import {
   type PlateManagerState,
   createInitialPlateState,
@@ -154,8 +155,18 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [cutMode, setCutMode] = useState(false);
   const [supportPaintMode, setSupportPaintMode] = useState(false);
   const [seamPaintMode, setSeamPaintMode] = useState(false);
+  const [colorPaintMode, setColorPaintMode] = useState(false);
+  const [fuzzySkinPaintMode, setFuzzySkinPaintMode] = useState(false);
   const [supportPaintData, setSupportPaintData] = useState<Map<string, Set<number>>>(new Map());
   const [seamPaintData, setSeamPaintData] = useState<Map<string, Set<number>>>(new Map());
+  const [colorPaintData, setColorPaintData] = useState<Map<string, Map<number, number>>>(new Map());
+  const [fuzzySkinPaintData, setFuzzySkinPaintData] = useState<Map<string, Set<number>>>(new Map());
+  const [paintBrushSize, setPaintBrushSize] = useState(5);
+  const [paintMode, setPaintMode] = useState<PaintMode>('paint');
+  const [paintBrushShape, setPaintBrushShape] = useState<BrushShape>('circle');
+  const [activeExtruder, setActiveExtruder] = useState(0);
+  const [supportVariant, setSupportVariant] = useState<SupportPaintVariant>('enforce');
+  const [seamVariant, setSeamVariant] = useState<SeamPaintVariant>('preferred');
   const [textToolActive, setTextToolActive] = useState(false);
   const [textPlacementMode, setTextPlacementMode] = useState(false);
   const [textToolConfig, setTextToolConfig] = useState<TextToolConfig | null>(null);
@@ -191,6 +202,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       if (!currentIds.has(id)) { nextState = removeModelFromPlates(nextState, id); changed = true; }
     }
     if (changed) setPlateState(nextState);
+    // Clean up paint data for removed models
+    const removedIds = [...prevIds].filter(id => !currentIds.has(id));
+    if (removedIds.length > 0) {
+      for (const id of removedIds) {
+        setSupportPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
+        setSeamPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
+        setColorPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
+        setFuzzySkinPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
+      }
+    }
   }
 
   // Filter models to active plate
@@ -611,6 +632,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setCutMode(false);
     setSupportPaintMode(false);
     setSeamPaintMode(false);
+    setColorPaintMode(false);
+    setFuzzySkinPaintMode(false);
     setMeasureMode(false);
     setLayFlatMode(false);
     setTextToolActive(false);
@@ -671,6 +694,34 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setSeamPaintMode(true);
     toast.info('Seam paint: left-click to paint, right-click to erase, Escape to exit');
   }, [hasSelection, seamPaintMode, exitAllToolModes]);
+
+  const handleColorPaint = useCallback(() => {
+    if (!hasSelection) {
+      toast.info('Select a model first to paint colors');
+      return;
+    }
+    if (colorPaintMode) {
+      setColorPaintMode(false);
+      return;
+    }
+    exitAllToolModes();
+    setColorPaintMode(true);
+    toast.info('Color paint: left-click to paint, right-click to erase, Escape to exit');
+  }, [hasSelection, colorPaintMode, exitAllToolModes]);
+
+  const handleFuzzySkinPaint = useCallback(() => {
+    if (!hasSelection) {
+      toast.info('Select a model first to paint fuzzy skin');
+      return;
+    }
+    if (fuzzySkinPaintMode) {
+      setFuzzySkinPaintMode(false);
+      return;
+    }
+    exitAllToolModes();
+    setFuzzySkinPaintMode(true);
+    toast.info('Fuzzy skin paint: left-click to paint, right-click to erase, Escape to exit');
+  }, [hasSelection, fuzzySkinPaintMode, exitAllToolModes]);
 
   const handleTextTool = useCallback(() => {
     if (textToolActive) {
@@ -803,6 +854,49 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     });
   }, [selectedModelId]);
 
+  const handleColorPaintUpdate = useCallback((faces: Map<number, number>) => {
+    if (!selectedModelId) return;
+    setColorPaintData(prev => {
+      const next = new Map(prev);
+      next.set(selectedModelId, faces);
+      return next;
+    });
+  }, [selectedModelId]);
+
+  const handleFuzzySkinPaintUpdate = useCallback((faces: Set<number>) => {
+    if (!selectedModelId) return;
+    setFuzzySkinPaintData(prev => {
+      const next = new Map(prev);
+      next.set(selectedModelId, faces);
+      return next;
+    });
+  }, [selectedModelId]);
+
+  /** Determine which paint tool is currently active (if any) */
+  const activePaintTool: PaintToolType | null = colorPaintMode
+    ? 'color'
+    : supportPaintMode
+      ? 'support'
+      : seamPaintMode
+        ? 'seam'
+        : fuzzySkinPaintMode
+          ? 'fuzzySkin'
+          : null;
+
+  const handleClearPaint = useCallback(() => {
+    if (!selectedModelId) return;
+    if (colorPaintMode) {
+      setColorPaintData(prev => { const next = new Map(prev); next.delete(selectedModelId); return next; });
+    } else if (supportPaintMode) {
+      setSupportPaintData(prev => { const next = new Map(prev); next.delete(selectedModelId); return next; });
+    } else if (seamPaintMode) {
+      setSeamPaintData(prev => { const next = new Map(prev); next.delete(selectedModelId); return next; });
+    } else if (fuzzySkinPaintMode) {
+      setFuzzySkinPaintData(prev => { const next = new Map(prev); next.delete(selectedModelId); return next; });
+    }
+    toast.success('Paint cleared');
+  }, [selectedModelId, colorPaintMode, supportPaintMode, seamPaintMode, fuzzySkinPaintMode]);
+
   const handleUndo = useCallback(() => {
     if (undoStack.length > 0) {
       const lastAction = undoStack[undoStack.length - 1];
@@ -895,7 +989,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
 
       if (event.key === 'Escape') {
-        if (cutMode || supportPaintMode || seamPaintMode || measureMode || layFlatMode || textToolActive) {
+        if (cutMode || supportPaintMode || seamPaintMode || colorPaintMode || fuzzySkinPaintMode || measureMode || layFlatMode || textToolActive) {
           event.preventDefault();
           exitAllToolModes();
           toast.info('Tool mode exited');
@@ -912,9 +1006,42 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         return;
       }
 
+      // Paint tool shortcuts — work with any active paint mode
+      if (event.key === '[') {
+        event.preventDefault();
+        setPaintBrushSize(prev => Math.max(1, prev - 1));
+        return;
+      }
+      if (event.key === ']') {
+        event.preventDefault();
+        setPaintBrushSize(prev => Math.min(20, prev + 1));
+        return;
+      }
+      if (event.key.toLowerCase() === 'x' && activePaintTool) {
+        event.preventDefault();
+        setPaintMode(prev => prev === 'paint' ? 'erase' : 'paint');
+        return;
+      }
+
       if (!hasSelection) return;
 
       const key = event.key.toLowerCase();
+
+      // P — cycle through paint tools
+      if (key === 'p') {
+        event.preventDefault();
+        const tools: Array<() => void> = [handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint];
+        const activeIndex = colorPaintMode ? 0 : supportPaintMode ? 1 : seamPaintMode ? 2 : fuzzySkinPaintMode ? 3 : -1;
+        if (activeIndex === -1) {
+          handleColorPaint();
+        } else if (activeIndex === 3) {
+          exitAllToolModes();
+        } else {
+          tools[activeIndex + 1]();
+        }
+        return;
+      }
+
       if (key === 't') {
         event.preventDefault();
         handleToolChange('move');
@@ -929,7 +1056,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleTextTool]);
+  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleTextTool, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
@@ -1016,6 +1143,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         cutActive={cutMode}
         supportPaintActive={supportPaintMode}
         seamPaintActive={seamPaintMode}
+        onColorPaint={handleColorPaint}
+        onFuzzySkinPaint={handleFuzzySkinPaint}
+        colorPaintActive={colorPaintMode}
+        fuzzySkinPaintActive={fuzzySkinPaintMode}
         onSequentialToggle={handleSequentialToggle}
         sequentialActive={sequentialMode}
       />
@@ -1058,6 +1189,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           seamPaintMode={seamPaintMode}
           seamPaintData={seamPaintData}
           onSeamPaintUpdate={handleSeamPaintUpdate}
+          colorPaintMode={colorPaintMode}
+          colorPaintData={colorPaintData}
+          onColorPaintUpdate={handleColorPaintUpdate}
+          activeColorIndex={activeExtruder}
+          fuzzySkinPaintMode={fuzzySkinPaintMode}
+          fuzzySkinPaintData={fuzzySkinPaintData}
+          onFuzzySkinPaintUpdate={handleFuzzySkinPaintUpdate}
+          paintMode={paintMode}
+          paintBrushSize={paintBrushSize}
           textPlacementMode={textPlacementMode}
           onTextPlace={handleTextPlace}
           showGrid={true}
@@ -1104,6 +1244,27 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
             placementMode={textPlacementMode}
             onStartPlacement={handleStartTextPlacement}
             onCancel={handleCancelTextTool}
+          />
+        )}
+
+        {/* Paint tool settings panel */}
+        {activePaintTool && (
+          <PaintToolPanel
+            activeTool={activePaintTool}
+            onClose={exitAllToolModes}
+            brushSize={paintBrushSize}
+            onBrushSizeChange={setPaintBrushSize}
+            paintMode={paintMode}
+            onPaintModeChange={setPaintMode}
+            brushShape={paintBrushShape}
+            onBrushShapeChange={setPaintBrushShape}
+            activeExtruder={activeExtruder}
+            onExtruderChange={setActiveExtruder}
+            supportVariant={supportVariant}
+            onSupportVariantChange={setSupportVariant}
+            seamVariant={seamVariant}
+            onSeamVariantChange={setSeamVariant}
+            onClearAll={handleClearPaint}
           />
         )}
 

@@ -10,10 +10,12 @@ import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { toast } from 'sonner';
 import { FacePaintOverlay } from './FacePaintOverlay';
+import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 
 // W4: Module-level constant to avoid creating new Set on every render
 const EMPTY_FACE_SET = new Set<number>();
+const EMPTY_COLOR_FACE_MAP = new Map<number, number>();
 
 export interface LoadedModel {
   id: string;
@@ -105,6 +107,24 @@ export interface SlicerBedVisualizationProps {
   seamPaintData?: Map<string, Set<number>>;
   /** Called when seam paint data changes */
   onSeamPaintUpdate?: (faces: Set<number>) => void;
+  /** Whether color paint mode is active */
+  colorPaintMode?: boolean;
+  /** Painted color face data per model: face index → extruder index */
+  colorPaintData?: Map<string, Map<number, number>>;
+  /** Called when color paint data changes */
+  onColorPaintUpdate?: (faces: Map<number, number>) => void;
+  /** Active extruder index for color painting */
+  activeColorIndex?: number;
+  /** Whether fuzzy skin paint mode is active */
+  fuzzySkinPaintMode?: boolean;
+  /** Painted fuzzy skin face indices per model */
+  fuzzySkinPaintData?: Map<string, Set<number>>;
+  /** Called when fuzzy skin paint data changes */
+  onFuzzySkinPaintUpdate?: (faces: Set<number>) => void;
+  /** Current paint/erase mode for overlays */
+  paintMode?: 'paint' | 'erase';
+  /** Brush size for paint overlays */
+  paintBrushSize?: number;
   /** Whether text placement mode is active (crosshair, click to place) */
   textPlacementMode?: boolean;
   /** Called when the user clicks a model surface during text placement */
@@ -1595,6 +1615,15 @@ function BedScene({
   seamPaintMode = false,
   seamPaintData,
   onSeamPaintUpdate,
+  colorPaintMode = false,
+  colorPaintData,
+  onColorPaintUpdate,
+  activeColorIndex = 0,
+  fuzzySkinPaintMode = false,
+  fuzzySkinPaintData,
+  onFuzzySkinPaintUpdate,
+  paintMode: paintModeOverride,
+  paintBrushSize: paintBrushSizeOverride,
   textPlacementMode = false,
   onTextPlace,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
@@ -2066,6 +2095,8 @@ function BedScene({
           color="#22d3ee"
           opacity={0.4}
           active={supportPaintMode}
+          paintMode={paintModeOverride}
+          brushSize={paintBrushSizeOverride}
         />
       )}
 
@@ -2079,6 +2110,38 @@ function BedScene({
           color="#4ade80"
           opacity={0.4}
           active={seamPaintMode}
+          paintMode={paintModeOverride}
+          brushSize={paintBrushSizeOverride}
+        />
+      )}
+
+      {/* Color paint overlay — multi-color per-face */}
+      {colorPaintMode && selectedModelId && onColorPaintUpdate && (
+        <ColorPaintOverlay
+          key={`color-${selectedModelId}`}
+          meshRef={selectedMeshRef}
+          paintedFaces={colorPaintData?.get(selectedModelId) ?? EMPTY_COLOR_FACE_MAP}
+          onPaintUpdate={onColorPaintUpdate}
+          activeColorIndex={activeColorIndex}
+          opacity={0.5}
+          active={colorPaintMode}
+          paintMode={paintModeOverride}
+          brushSize={paintBrushSizeOverride}
+        />
+      )}
+
+      {/* Fuzzy skin paint overlay */}
+      {fuzzySkinPaintMode && selectedModelId && onFuzzySkinPaintUpdate && (
+        <FacePaintOverlay
+          key={`fuzzy-${selectedModelId}`}
+          meshRef={selectedMeshRef}
+          paintedFaces={fuzzySkinPaintData?.get(selectedModelId) ?? EMPTY_FACE_SET}
+          onPaintUpdate={onFuzzySkinPaintUpdate}
+          color="#f59e0b"
+          opacity={0.35}
+          active={fuzzySkinPaintMode}
+          paintMode={paintModeOverride}
+          brushSize={paintBrushSizeOverride}
         />
       )}
 
@@ -2131,6 +2194,13 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   seamPaintMode = false,
   seamPaintData,
   onSeamPaintUpdate,
+  colorPaintMode = false,
+  colorPaintData,
+  onColorPaintUpdate,
+  activeColorIndex = 0,
+  fuzzySkinPaintMode = false,
+  fuzzySkinPaintData,
+  onFuzzySkinPaintUpdate,
   textPlacementMode = false,
   onTextPlace,
   sceneOverlay,
@@ -2187,6 +2257,13 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             seamPaintMode={seamPaintMode}
             seamPaintData={seamPaintData}
             onSeamPaintUpdate={onSeamPaintUpdate}
+            colorPaintMode={colorPaintMode}
+            colorPaintData={colorPaintData}
+            onColorPaintUpdate={onColorPaintUpdate}
+            activeColorIndex={activeColorIndex}
+            fuzzySkinPaintMode={fuzzySkinPaintMode}
+            fuzzySkinPaintData={fuzzySkinPaintData}
+            onFuzzySkinPaintUpdate={onFuzzySkinPaintUpdate}
             textPlacementMode={textPlacementMode}
             onTextPlace={onTextPlace}
           />
