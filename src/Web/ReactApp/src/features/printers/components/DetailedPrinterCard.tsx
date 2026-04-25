@@ -39,6 +39,7 @@ import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/u
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -575,6 +576,19 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             printerId={printer.id}
             printerName={printer.name ?? 'Printer'}
             autoDispatchStatus={autoDispatchStatus}
+          />
+        </div>
+      )}
+
+      {/* Offline troubleshooting guide */}
+      {!isOnline && (
+        <div className="mb-4">
+          <OfflineTroubleshootingGuide
+            printerBackend={printer.backend}
+            printerIp={printer.ipAddress}
+            serverUrl={printer.serverUrl ?? printer.backendUrl}
+            frontendUrl={printer.frontendUrl}
+            variant="full"
           />
         </div>
       )}

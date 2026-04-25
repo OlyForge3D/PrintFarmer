@@ -16,6 +16,7 @@ import { PrintProgressBar } from '@/features/printers/components/PrintProgressBa
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
@@ -267,6 +268,17 @@ export function CompactPrinterCard({
               cameraSnapshotUrl={cameraSnapshotUrl}
               isPrinting={isPrinting}
               className="mt-2"
+            />
+          )}
+
+          {/* Offline troubleshooting guide */}
+          {!isOnline && (
+            <OfflineTroubleshootingGuide
+              printerBackend={printer.backend}
+              printerIp={printer.ipAddress}
+              serverUrl={printer.serverUrl ?? printer.backendUrl}
+              frontendUrl={printer.frontendUrl}
+              variant="compact"
             />
           )}
 
