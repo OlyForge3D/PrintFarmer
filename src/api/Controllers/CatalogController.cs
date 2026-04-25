@@ -271,6 +271,7 @@ public class CatalogController(
     /// Sets auto-dispatch defaults for a printer model.
     /// </summary>
     [HttpPut("printer-models/{id:guid}/dispatch-defaults")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<PrinterModelDto>> SetModelDispatchDefaultsAsync(
@@ -280,17 +281,19 @@ public class CatalogController(
     {
         try
         {
-            PrinterModelDto? model = await _catalogService.GetModelByIdAsync(id, ct);
-            if (model is null)
+            PrinterModel? entity = await _db.PrinterModels.FindAsync([id], ct);
+            if (entity is null)
             {
                 return NotFound(new { error = "Model not found" });
             }
 
-            PrinterModelDto? updated = await _catalogService.UpdateModelAsync(id, new UpdateModelRequest(
-                null, null, null, null, null, null, null,
-                DefaultAutoDispatchState: request.DefaultAutoDispatchState,
-                DefaultStartBehavior: request.DefaultStartBehavior), ct);
+            entity.DefaultAutoDispatchState = request.DefaultAutoDispatchState;
+            entity.DefaultStartBehavior = request.DefaultStartBehavior;
+            entity.UpdatedAt = DateTime.UtcNow;
 
+            await _db.SaveChangesAsync(ct);
+
+            PrinterModelDto? updated = await _catalogService.GetModelByIdAsync(id, ct);
             return updated is null ? NotFound(new { error = "Model not found" }) : Ok(updated);
         }
         catch (Exception ex)
@@ -304,6 +307,7 @@ public class CatalogController(
     /// Applies a model's dispatch defaults to all existing printers of that model.
     /// </summary>
     [HttpPost("printer-models/{id:guid}/apply-defaults")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(ApplyModelDefaultsResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ApplyModelDefaultsResult>> ApplyModelDefaultsAsync(

@@ -691,12 +691,20 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {/* AMS/MMU Slot Visualization - Compact view for card */}
-      {printerDetails?.toolheads && printerDetails.toolheads.length > 1 && (
-        <div className="mb-2">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
-          <AmsSlotVisualization toolheads={printerDetails.toolheads} compact />
-        </div>
-      )}
+      {(() => {
+        const toolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
+          ? printerDetails.toolheads
+          : printer.mmuStatus?.gates && printer.mmuStatus.gates.length > 0
+            ? mmuGatesToToolheads(printer.mmuStatus.gates)
+            : undefined;
+        if (!toolheads) return null;
+        return (
+          <div className="mb-2">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
+            <AmsSlotVisualization toolheads={toolheads} compact printerId={printer.id} />
+          </div>
+        );
+      })()}
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
       {(spoolmanReady || printer.spoolInfo) && (() => {

@@ -185,6 +185,42 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("BalanceTransactions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(9)
+                        .HasColumnType("nvarchar(9)");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("BedTypes");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2997,6 +3033,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int>("BackendPort")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("nvarchar(max)");
 
@@ -3094,6 +3133,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("TemplateMachineProfileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("UseModelDispatchDefaults")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Username")
                         .HasColumnType("nvarchar(max)");
 
@@ -3104,6 +3146,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BedTypeId");
 
                     b.HasIndex("LocationId");
 
@@ -3221,11 +3265,20 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("CoverImageUrl")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("DefaultAutoDispatchState")
+                        .HasColumnType("int");
+
                     b.Property<int?>("DefaultBackend")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("DefaultBedTypeId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal?>("DefaultHourlyRate")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("DefaultStartBehavior")
+                        .HasColumnType("int");
 
                     b.Property<decimal?>("DefaultWattage")
                         .HasColumnType("decimal(18,2)");
@@ -3338,6 +3391,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DefaultBedTypeId");
 
                     b.HasIndex("ManufacturerId", "NameLowered")
                         .IsUnique();
@@ -5013,6 +5068,11 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
+                    b.HasOne("Farm.Infrastructure.Domain.BedType", "BedType")
+                        .WithMany("Printers")
+                        .HasForeignKey("BedTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Farm.Infrastructure.Domain.Location", "Location")
                         .WithMany("Printers")
                         .HasForeignKey("LocationId")
@@ -5034,6 +5094,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .WithMany("Printers")
                         .HasForeignKey("PrinterGroupId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("BedType");
 
                     b.Navigation("Location");
 
@@ -5076,11 +5138,18 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
                 {
+                    b.HasOne("Farm.Infrastructure.Domain.BedType", "DefaultBedType")
+                        .WithMany()
+                        .HasForeignKey("DefaultBedTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Farm.Infrastructure.Domain.Manufacturer", "Manufacturer")
                         .WithMany("Models")
                         .HasForeignKey("ManufacturerId")
                         .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
+
+                    b.Navigation("DefaultBedType");
 
                     b.Navigation("Manufacturer");
                 });
@@ -5404,6 +5473,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasForeignKey("TagsId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
+                {
+                    b.Navigation("Printers");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>

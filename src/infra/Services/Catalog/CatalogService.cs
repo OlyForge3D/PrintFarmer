@@ -305,7 +305,11 @@ public class CatalogService(
             model.DefaultAutoDispatchState = defaultAutoDispatchState.Value;
         }
 
-        model.DefaultStartBehavior = defaultStartBehavior;
+        if (defaultStartBehavior.HasValue)
+        {
+            model.DefaultStartBehavior = defaultStartBehavior.Value;
+        }
+
         model.UpdatedAt = DateTime.UtcNow;
 
         if (supportedFilamentTypeIds != null)

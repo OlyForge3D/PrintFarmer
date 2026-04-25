@@ -1,6 +1,8 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
 import clsx from 'clsx';
 import { Badge, Tooltip } from '@/common/components/ui';
 import type { ToolheadDto } from '@/types/api';
+import { SlotPopover } from './SlotPopover';
 
 // ── Constants ──
 
@@ -19,6 +21,8 @@ export interface AmsSlotVisualizationProps {
   toolheads: ToolheadDto[];
   /** Compact mode for card views (fewer details, smaller slots) */
   compact?: boolean;
+  /** Printer ID — when provided, slots become clickable with assign/unassign popovers */
+  printerId?: string;
 }
 
 // ── Helpers ──
@@ -62,6 +66,33 @@ function groupIntoUnits(mmuGates: ToolheadDto[]): AmsUnit[] {
   return units;
 }
 
+// ── Hooks ──
+
+/** Close a popover when clicking outside the container or pressing Escape. */
+function useClickOutside(
+  ref: { current: HTMLElement | null },
+  isActive: boolean,
+  onClose: (() => void) | undefined,
+) {
+  useEffect(() => {
+    if (!isActive || !onClose) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [ref, isActive, onClose]);
+}
+
 // ── Sub-components ──
 
 function SlotTooltipContent({ toolhead }: { toolhead: ToolheadDto }) {
@@ -96,12 +127,31 @@ interface SlotProps {
   toolhead: ToolheadDto;
   slotNumber: number;
   compact?: boolean;
+  isPopoverOpen?: boolean;
+  onSlotClick?: () => void;
+  onPopoverClose?: () => void;
+  printerId?: string;
 }
 
-function Slot({ toolhead, slotNumber, compact }: SlotProps) {
+function Slot({ toolhead, slotNumber, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: SlotProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const interactive = !!printerId;
   const hasFilament = toolhead.currentFilamentColor != null || toolhead.currentMaterial != null;
   const color = toolhead.currentFilamentColor;
   const needsBorder = color ? isLightColor(color) : false;
+
+  useClickOutside(containerRef, !!isPopoverOpen, onPopoverClose);
+
+  const handleClick = useCallback(() => {
+    if (interactive && onSlotClick) onSlotClick();
+  }, [interactive, onSlotClick]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (interactive && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      handleClick();
+    }
+  }, [interactive, handleClick]);
 
   const slot = (
     <div
@@ -111,8 +161,18 @@ function Slot({ toolhead, slotNumber, compact }: SlotProps) {
         hasFilament
           ? 'border border-pf-border bg-pf-bg-2'
           : 'border border-dashed border-pf-border-light bg-pf-bg-1',
+        interactive && 'cursor-pointer hover:border-pf-accent',
+        isPopoverOpen && 'border-pf-accent ring-1 ring-pf-accent',
       )}
       data-testid={`ams-slot-${toolhead.index}`}
+      {...(interactive ? {
+        role: 'button',
+        tabIndex: 0,
+        'aria-expanded': isPopoverOpen,
+        'aria-haspopup': 'dialog' as const,
+        onClick: handleClick,
+        onKeyDown: handleKeyDown,
+      } : {})}
     >
       {/* Slot number */}
       <span className={clsx(
@@ -152,31 +212,67 @@ function Slot({ toolhead, slotNumber, compact }: SlotProps) {
     </div>
   );
 
-  if (!hasFilament) return slot;
-
-  return (
+  const wrapped = hasFilament && !isPopoverOpen ? (
     <Tooltip content={<SlotTooltipContent toolhead={toolhead} />} position="top">
       {slot}
     </Tooltip>
+  ) : slot;
+
+  return (
+    <div ref={containerRef} className="relative">
+      {wrapped}
+      {isPopoverOpen && printerId && (
+        <SlotPopover toolhead={toolhead} printerId={printerId} onClose={onPopoverClose ?? (() => {})} />
+      )}
+    </div>
   );
 }
 
 interface NozzleIndicatorProps {
   toolhead: ToolheadDto;
   compact?: boolean;
+  isPopoverOpen?: boolean;
+  onSlotClick?: () => void;
+  onPopoverClose?: () => void;
+  printerId?: string;
 }
 
-function NozzleIndicator({ toolhead, compact }: NozzleIndicatorProps) {
+function NozzleIndicator({ toolhead, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: NozzleIndicatorProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const interactive = !!printerId;
   const hasFilament = toolhead.currentFilamentColor != null || toolhead.currentMaterial != null;
   const color = toolhead.currentFilamentColor;
+
+  useClickOutside(containerRef, !!isPopoverOpen, onPopoverClose);
+
+  const handleClick = useCallback(() => {
+    if (interactive && onSlotClick) onSlotClick();
+  }, [interactive, onSlotClick]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (interactive && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      handleClick();
+    }
+  }, [interactive, handleClick]);
 
   const indicator = (
     <div
       className={clsx(
         'flex items-center gap-2 rounded-lg border border-pf-border bg-pf-bg-2 px-2',
         compact ? 'py-1' : 'py-1.5',
+        interactive && 'cursor-pointer hover:border-pf-accent',
+        isPopoverOpen && 'border-pf-accent ring-1 ring-pf-accent',
       )}
       data-testid={`nozzle-indicator-${toolhead.index}`}
+      {...(interactive ? {
+        role: 'button',
+        tabIndex: 0,
+        'aria-expanded': isPopoverOpen,
+        'aria-haspopup': 'dialog' as const,
+        onClick: handleClick,
+        onKeyDown: handleKeyDown,
+      } : {})}
     >
       {/* Nozzle icon */}
       <svg
@@ -222,12 +318,21 @@ function NozzleIndicator({ toolhead, compact }: NozzleIndicatorProps) {
     </div>
   );
 
-  if (!hasFilament) return indicator;
+  if (!hasFilament && !interactive) return indicator;
 
-  return (
+  const wrapped = hasFilament && !isPopoverOpen ? (
     <Tooltip content={<SlotTooltipContent toolhead={toolhead} />} position="top">
       {indicator}
     </Tooltip>
+  ) : indicator;
+
+  return (
+    <div ref={containerRef} className="relative">
+      {wrapped}
+      {isPopoverOpen && printerId && (
+        <SlotPopover toolhead={toolhead} printerId={printerId} onClose={onPopoverClose ?? (() => {})} />
+      )}
+    </div>
   );
 }
 
@@ -243,7 +348,9 @@ function NozzleIndicator({ toolhead, compact }: NozzleIndicatorProps) {
  *
  * Purely presentational — receives toolheads as prop.
  */
-export function AmsSlotVisualization({ toolheads, compact = false }: AmsSlotVisualizationProps) {
+export function AmsSlotVisualization({ toolheads, compact = false, printerId }: AmsSlotVisualizationProps) {
+  const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
+
   if (!toolheads || toolheads.length === 0) return null;
 
   const physicalHeads = toolheads.filter((t) => !isMmuGate(t));
@@ -269,6 +376,10 @@ export function AmsSlotVisualization({ toolheads, compact = false }: AmsSlotVisu
               key={toolhead.id ?? `phys-${toolhead.index}`}
               toolhead={toolhead}
               compact={compact}
+              printerId={printerId}
+              isPopoverOpen={activeSlotIndex === toolhead.index}
+              onSlotClick={() => setActiveSlotIndex(activeSlotIndex === toolhead.index ? null : toolhead.index)}
+              onPopoverClose={() => setActiveSlotIndex(null)}
             />
           ))}
           {hasOnlyPhysical && topPhysicalHeads.length === 1 && !topPhysicalHeads[0].currentMaterial && (
@@ -297,6 +408,10 @@ export function AmsSlotVisualization({ toolheads, compact = false }: AmsSlotVisu
                 toolhead={slot}
                 slotNumber={slotIdx + 1}
                 compact={compact}
+                printerId={printerId}
+                isPopoverOpen={activeSlotIndex === slot.index}
+                onSlotClick={() => setActiveSlotIndex(activeSlotIndex === slot.index ? null : slot.index)}
+                onPopoverClose={() => setActiveSlotIndex(null)}
               />
             ))}
           </div>
@@ -316,6 +431,10 @@ export function AmsSlotVisualization({ toolheads, compact = false }: AmsSlotVisu
                 key={toolhead.id ?? `ext-${toolhead.index}`}
                 toolhead={toolhead}
                 compact={compact}
+                printerId={printerId}
+                isPopoverOpen={activeSlotIndex === toolhead.index}
+                onSlotClick={() => setActiveSlotIndex(activeSlotIndex === toolhead.index ? null : toolhead.index)}
+                onPopoverClose={() => setActiveSlotIndex(null)}
               />
             ))}
           </div>

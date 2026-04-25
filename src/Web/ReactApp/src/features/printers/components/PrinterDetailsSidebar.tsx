@@ -1157,11 +1157,19 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         )}
 
         {/* AMS/MMU Slot Visualization - Show when printer has multiple toolheads */}
-        {printerDetails?.toolheads && printerDetails.toolheads.length > 1 && (
-          <CollapsibleSection title="Material Slots" expanded={true}>
-            <AmsSlotVisualization toolheads={printerDetails.toolheads} />
-          </CollapsibleSection>
-        )}
+        {(() => {
+          const toolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
+            ? printerDetails.toolheads
+            : displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0
+              ? mmuGatesToToolheads(displayPrinter.mmuStatus.gates)
+              : undefined;
+          if (!toolheads) return null;
+          return (
+            <CollapsibleSection title="Material Slots" expanded={true}>
+              <AmsSlotVisualization toolheads={toolheads} printerId={printerId ?? undefined} />
+            </CollapsibleSection>
+          );
+        })()}
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
