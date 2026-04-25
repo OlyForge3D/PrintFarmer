@@ -137,6 +137,8 @@ export interface SlicerBedVisualizationProps {
   paintMode?: 'paint' | 'erase';
   /** Brush size for paint overlays */
   paintBrushSize?: number;
+  /** Hide bed (grid, axes, build volume) — used during paint mode */
+  hideBed?: boolean;
   /** Whether text placement mode is active (crosshair, click to place) */
   textPlacementMode?: boolean;
   /** Called when the user clicks a model surface during text placement */
@@ -1638,12 +1640,20 @@ function BedScene({
   onFuzzySkinPaintUpdate,
   paintMode: paintModeOverride,
   paintBrushSize: paintBrushSizeOverride,
+  hideBed = false,
   textPlacementMode = false,
   onTextPlace,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Object3D>(null);
+
+  // Disable orbit controls while painting on the model
+  const handlePaintingStateChange = useCallback((isPainting: boolean) => {
+    if (orbitRef.current) {
+      orbitRef.current.enabled = !isPainting;
+    }
+  }, []);
 
   const { startDrag, justDraggedRef } = useBuildPlateDrag({
     bedConfig,
@@ -2008,20 +2018,22 @@ function BedScene({
       {/* Camera controls */}
       <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
 
-      {/* Print bed */}
-      <PrintBedPlatform 
-        width={width} 
-        depth={depth} 
-        textureUrl={textureUrl}
-        textureFormat={textureFormat}
-        showGridLines={showGridLines}
-      />
+      {/* Print bed — hidden during paint mode */}
+      {!hideBed && (
+        <PrintBedPlatform 
+          width={width} 
+          depth={depth} 
+          textureUrl={textureUrl}
+          textureFormat={textureFormat}
+          showGridLines={showGridLines}
+        />
+      )}
 
       {/* Build volume wireframe */}
-      <BuildVolumeWireframe width={width} depth={depth} height={height} />
+      {!hideBed && <BuildVolumeWireframe width={width} depth={depth} height={height} />}
 
       {/* Axis indicators */}
-      {showAxes && <AxisIndicators size={Math.min(width, depth) * 0.15} />}
+      {!hideBed && showAxes && <AxisIndicators size={Math.min(width, depth) * 0.15} />}
 
       {/* Loaded models */}
       <group onPointerMissed={handlePointerMissed}>
@@ -2129,6 +2141,7 @@ function BedScene({
           active={supportPaintMode}
           paintMode={paintModeOverride}
           brushSize={paintBrushSizeOverride}
+          onPaintingStateChange={handlePaintingStateChange}
         />
       )}
 
@@ -2144,6 +2157,7 @@ function BedScene({
           active={seamPaintMode}
           paintMode={paintModeOverride}
           brushSize={paintBrushSizeOverride}
+          onPaintingStateChange={handlePaintingStateChange}
         />
       )}
 
@@ -2159,6 +2173,7 @@ function BedScene({
           active={colorPaintMode}
           paintMode={paintModeOverride}
           brushSize={paintBrushSizeOverride}
+          onPaintingStateChange={handlePaintingStateChange}
         />
       )}
 
@@ -2174,6 +2189,7 @@ function BedScene({
           active={fuzzySkinPaintMode}
           paintMode={paintModeOverride}
           brushSize={paintBrushSizeOverride}
+          onPaintingStateChange={handlePaintingStateChange}
         />
       )}
 
@@ -2233,6 +2249,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   fuzzySkinPaintMode = false,
   fuzzySkinPaintData,
   onFuzzySkinPaintUpdate,
+  paintMode,
+  paintBrushSize,
+  hideBed = false,
   textPlacementMode = false,
   onTextPlace,
   sceneOverlay,
@@ -2296,6 +2315,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             fuzzySkinPaintMode={fuzzySkinPaintMode}
             fuzzySkinPaintData={fuzzySkinPaintData}
             onFuzzySkinPaintUpdate={onFuzzySkinPaintUpdate}
+            paintMode={paintMode}
+            paintBrushSize={paintBrushSize}
+            hideBed={hideBed}
             textPlacementMode={textPlacementMode}
             onTextPlace={onTextPlace}
           />

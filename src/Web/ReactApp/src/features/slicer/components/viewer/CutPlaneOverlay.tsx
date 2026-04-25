@@ -167,11 +167,37 @@ export function CutPlaneOverlay({
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
-      // Map mouse movement to normalized height based on axis
-      const normalized = cutAxis === 'z'
-        ? Math.max(0.02, Math.min(0.98, (ndc.y + 1) / 2))
-        : Math.max(0.02, Math.min(0.98, (ndc.x + 1) / 2));
-      setCutHeight(normalized);
+
+      // Ray-line closest-point: find the world-space coordinate along
+      // the cut axis that is closest to the camera ray through the mouse.
+      raycaster.setFromCamera(ndc, camera);
+      const rayDir = raycaster.ray.direction;
+      const rayOrigin = raycaster.ray.origin;
+      const axisDir = new THREE.Vector3(
+        cutAxis === 'x' ? 1 : 0,
+        cutAxis === 'y' ? 1 : 0,
+        cutAxis === 'z' ? 1 : 0,
+      );
+      const b = axisDir.dot(rayDir);
+      const denom = 1 - b * b;
+
+      let normalized: number;
+      if (denom < 0.01) {
+        // Camera nearly parallel to cut axis — fall back to screen-space
+        normalized = cutAxis === 'z'
+          ? (ndc.y + 1) / 2
+          : (ndc.x + 1) / 2;
+      } else {
+        // W = -rayOrigin (axis line passes through origin)
+        const w = rayOrigin.clone().negate();
+        const d = axisDir.dot(w);
+        const ee = rayDir.dot(w);
+        const t = (d - b * ee) / denom;
+        // t is world-space coordinate along the axis; convert to [0,1]
+        normalized = (t - modelBounds.min) / (modelBounds.max - modelBounds.min);
+      }
+
+      setCutHeight(Math.max(0.02, Math.min(0.98, normalized)));
       invalidate();
     };
 
@@ -193,7 +219,7 @@ export function CutPlaneOverlay({
       isDraggingRef.current = false;
       el.style.cursor = '';
     };
-  }, [active, camera, cutAxis, gl.domElement, invalidate, raycaster, setCutHeight]);
+  }, [active, camera, cutAxis, gl.domElement, invalidate, modelBounds.max, modelBounds.min, raycaster, setCutHeight]);
 
   // Escape to cancel
   useEffect(() => {
@@ -424,8 +450,15 @@ export function CutPlaneOverlay({
                   checked={placeOnCutUpper}
                   onCheckedChange={(c) => setPlaceOnCutUpper(c as boolean)}
                   id="place-upper"
+                  disabled={cutAxis !== 'z'}
+                  title={cutAxis !== 'z' ? 'Coming soon for non-Z axes' : undefined}
+                  className={cutAxis !== 'z' ? 'opacity-50 cursor-not-allowed' : ''}
                 />
-                <label htmlFor="place-upper" className="text-xs cursor-pointer">Place on cut</label>
+                <label
+                  htmlFor="place-upper"
+                  className={`text-xs ${cutAxis !== 'z' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  title={cutAxis !== 'z' ? 'Coming soon for non-Z axes' : undefined}
+                >Place on cut</label>
                 <Checkbox
                   checked={flipUpper}
                   onCheckedChange={(c) => setFlipUpper(c as boolean)}
@@ -452,8 +485,15 @@ export function CutPlaneOverlay({
                   checked={placeOnCutLower}
                   onCheckedChange={(c) => setPlaceOnCutLower(c as boolean)}
                   id="place-lower"
+                  disabled={cutAxis !== 'z'}
+                  title={cutAxis !== 'z' ? 'Coming soon for non-Z axes' : undefined}
+                  className={cutAxis !== 'z' ? 'opacity-50 cursor-not-allowed' : ''}
                 />
-                <label htmlFor="place-lower" className="text-xs cursor-pointer">Place on cut</label>
+                <label
+                  htmlFor="place-lower"
+                  className={`text-xs ${cutAxis !== 'z' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  title={cutAxis !== 'z' ? 'Coming soon for non-Z axes' : undefined}
+                >Place on cut</label>
                 <Checkbox
                   checked={flipLower}
                   onCheckedChange={(c) => setFlipLower(c as boolean)}
