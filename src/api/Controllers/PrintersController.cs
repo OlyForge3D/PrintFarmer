@@ -52,6 +52,7 @@ public class PrintersController(
     ISettingsService settingsService,
     Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     IPrintFarmerTelemetryService telemetryService,
+    Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -70,6 +71,7 @@ public class PrintersController(
     private readonly ISettingsService _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
+    private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -1628,7 +1630,20 @@ public class PrintersController(
 
         if (dto.BedTypeId.HasValue && dto.BedTypeId.Value != p.BedTypeId)
         {
-            p.BedTypeId = dto.BedTypeId.Value == Guid.Empty ? null : dto.BedTypeId.Value;
+            if (dto.BedTypeId.Value == Guid.Empty)
+            {
+                p.BedTypeId = null;
+            }
+            else
+            {
+                var bedType = await _bedTypeService.GetByIdAsync(dto.BedTypeId.Value, ct);
+                if (bedType is null)
+                {
+                    return BadRequest(new { error = $"Bed type '{dto.BedTypeId.Value}' not found" });
+                }
+
+                p.BedTypeId = dto.BedTypeId.Value;
+            }
         }
 
         // Only update LastCapabilityUpdate if capability fields actually changed
