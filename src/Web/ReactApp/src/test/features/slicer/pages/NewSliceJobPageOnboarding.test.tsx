@@ -234,4 +234,58 @@ describe('NewSliceJobPage — Onboarding', () => {
     await user.click(screen.getByTestId('import-profiles-button'));
     expect(mockNavigate).toHaveBeenCalledWith('/profiles/import');
   });
+
+  it('shows normal UI when only custom machine profiles exist (no system profiles)', async () => {
+    mockListExtended.mockResolvedValue({
+      machineProfiles: [
+        { id: 'custom-1', name: 'My Custom Printer', profileType: 'machine', manufacturer: 'Custom', isSystem: false },
+      ],
+      filamentProfiles: [],
+      processProfiles: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('onboarding-banner')).not.toBeInTheDocument();
+  });
+
+  it('"Create Custom Profile" button navigates to profile editor', async () => {
+    mockListExtended.mockResolvedValue({
+      machineProfiles: [],
+      filamentProfiles: [],
+      processProfiles: [],
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('create-custom-profile-button')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('create-custom-profile-button'));
+    expect(mockNavigate).toHaveBeenCalledWith('/profiles');
+  });
+
+  it('onboarding banner mentions both importing and creating profiles', async () => {
+    mockListExtended.mockResolvedValue({
+      machineProfiles: [],
+      filamentProfiles: [],
+      processProfiles: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('onboarding-banner')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Import printer profiles or create custom ones/)).toBeInTheDocument();
+    expect(screen.getByTestId('import-profiles-button')).toBeInTheDocument();
+    expect(screen.getByTestId('create-custom-profile-button')).toBeInTheDocument();
+  });
 });
