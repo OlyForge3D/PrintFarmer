@@ -2,7 +2,6 @@
   "files": [],
   "extends": "./tsconfig.paths.json",
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
     "strict": true,
     "forceConsistentCasingInFileNames": true
   },
