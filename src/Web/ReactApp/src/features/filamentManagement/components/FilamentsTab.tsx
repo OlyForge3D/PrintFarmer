@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useTransition, useCallback, useRef } from 'react';
+import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
   FilterIcon,
   RefreshIcon,
@@ -63,10 +64,60 @@ export function FilamentsTab() {
   useEffect(() => {
     localStorage.setItem('filaments-view-mode', viewMode);
   }, [viewMode]);
-  const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', color: '', search: '' });
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [page, setPage] = useState(1);
+
+  const {
+    search: urlSearch,
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    sortField: urlSortField,
+    sortDir: urlSortDir,
+    page: urlPage,
+    setSearch,
+    setMaterial,
+    setVendor,
+    setColor,
+    setSortField: urlSetSortField,
+    setSortDir: urlSetSortDir,
+    setPage: urlSetPage,
+    resetAll,
+    hasActiveFilters: urlHasActiveFilters,
+  } = useUrlFilterState({
+    search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
+    material: { key: 'material', type: 'string', defaultValue: '' },
+    vendor: { key: 'vendor', type: 'string', defaultValue: '' },
+    color: { key: 'color', type: 'string', defaultValue: '' },
+    sortField: { key: 'sort', type: 'string', defaultValue: 'name' },
+    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc' },
+    page: { key: 'page', type: 'number', defaultValue: 1 },
+  });
+
+  const filters: FilterState = {
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    search: urlSearch,
+  };
+  const setFilters = useCallback((updater: FilterState | ((prev: FilterState) => FilterState)) => {
+    const newVal = typeof updater === 'function' ? updater(filters) : updater;
+    setSearch(newVal.search);
+    setMaterial(newVal.material);
+    setVendor(newVal.vendor);
+    setColor(newVal.color);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearch, urlMaterial, urlVendor, urlColor, setSearch, setMaterial, setVendor, setColor]);
+  const sortField = urlSortField as SortField;
+  const setSortField = useCallback((v: SortField) => urlSetSortField(v), [urlSetSortField]);
+  const sortDir = urlSortDir as 'asc' | 'desc';
+  const setSortDir = useCallback((v: 'asc' | 'desc' | ((prev: 'asc' | 'desc') => 'asc' | 'desc')) => {
+    const newVal = typeof v === 'function' ? v(sortDir) : v;
+    urlSetSortDir(newVal);
+  }, [urlSetSortDir, sortDir]);
+  const page = urlPage as number;
+  const setPage = useCallback((v: number | ((prev: number) => number)) => {
+    const newVal = typeof v === 'function' ? v(page) : v;
+    urlSetPage(newVal);
+  }, [urlSetPage, page]);
   const [pageSize, setPageSize] = useState<number>(() => {
     const saved = localStorage.getItem('filaments-page-size');
     return saved ? Number(saved) : 50;
@@ -182,8 +233,8 @@ export function FilamentsTab() {
     setDragColId(null);
   };
 
-  const hasActiveFilters = filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.search !== '';
-  const resetFilters = () => setFilters({ material: '', vendor: '', color: '', search: '' });
+  const hasActiveFilters = urlHasActiveFilters;
+  const resetFilters = () => resetAll();
 
   // Load filaments on mount
   const loadFilaments = useCallback(async () => {
@@ -238,17 +289,17 @@ export function FilamentsTab() {
 
   const filteredFilaments = useMemo(() => {
     let result = filaments;
-    if (filters.material) {
-      result = result.filter(f => f.material?.toLowerCase() === filters.material.toLowerCase());
+    if (urlMaterial) {
+      result = result.filter(f => f.material?.toLowerCase() === urlMaterial.toLowerCase());
     }
-    if (filters.vendor) {
-      result = result.filter(f => f.vendor?.toLowerCase() === filters.vendor.toLowerCase());
+    if (urlVendor) {
+      result = result.filter(f => f.vendor?.toLowerCase() === urlVendor.toLowerCase());
     }
-    if (filters.color) {
-      result = result.filter(f => classifyColor(f.colorHex) === filters.color);
+    if (urlColor) {
+      result = result.filter(f => classifyColor(f.colorHex) === urlColor);
     }
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
+    if (urlSearch) {
+      const q = (urlSearch as string).toLowerCase();
       result = result.filter(f =>
         (f.name || '').toLowerCase().includes(q) ||
         (f.vendor || '').toLowerCase().includes(q) ||
@@ -257,7 +308,7 @@ export function FilamentsTab() {
       );
     }
     return result;
-  }, [filaments, filters]);
+  }, [filaments, urlMaterial, urlVendor, urlColor, urlSearch]);
 
   const sortedFilaments = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -291,7 +342,14 @@ export function FilamentsTab() {
   }, [sortedFilaments, page, pageSize]);
 
   // Reset page when filters or sort change
-  useEffect(() => { setPage(1); }, [filters, sortField, sortDir]);
+  const filterKey = `${urlSearch}|${urlMaterial}|${urlVendor}|${urlColor}|${sortField}|${sortDir}`;
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current !== filterKey) {
+      prevFilterKey.current = filterKey;
+      setPage(1);
+    }
+  }, [filterKey, setPage]);
 
   // Persist page size preference
   useEffect(() => { localStorage.setItem('filaments-page-size', String(pageSize)); }, [pageSize]);
