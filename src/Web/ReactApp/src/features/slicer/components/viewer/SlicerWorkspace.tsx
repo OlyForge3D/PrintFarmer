@@ -779,7 +779,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
   }, [textToolConfig, onModelsReplace]);
 
-  const handleCutComplete = useCallback((geometryAbove: THREE.BufferGeometry, geometryBelow: THREE.BufferGeometry) => {
+  const handleCutComplete = useCallback((
+    geometryAbove: THREE.BufferGeometry,
+    geometryBelow: THREE.BufferGeometry,
+    options?: {
+      keepUpper: boolean;
+      keepLower: boolean;
+      placeOnCutUpper: boolean;
+      placeOnCutLower: boolean;
+      flipUpper: boolean;
+      flipLower: boolean;
+      cutToParts: boolean;
+    }
+  ) => {
     if (!selectedModelId) return;
     setCutMode(false);
     if (!onModelsReplace) {
@@ -820,11 +832,54 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         blobUrlsRef.current.delete(oldModel.url);
       }
 
-      onModelsReplace(selectedModelId, [
-        { url: aboveUrl, fileName: aboveFileName, geometry: geometryAbove, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
-        { url: belowUrl, fileName: belowFileName, geometry: geometryBelow, position: selectedModel?.position, rotation: selectedModel?.rotation, scale: selectedModel?.scale },
-      ]);
-      toast.success('Model cut into two parts');
+      // Compute correct Z position for each cut piece.
+      // PrebuiltSTLModel offsets group.z by -geo.min.z (halfZ).
+      // World bottom = data_pos.z + (-min.z) + min.z * scaleZ
+      //              = data_pos.z + min.z * (scaleZ - 1)
+      // For bottom at Z=0: data_pos.z = -min.z * (scaleZ - 1)
+      const parentScale = selectedModel?.scale ?? [1, 1, 1];
+      const parentRotation = selectedModel?.rotation ?? [0, 0, 0];
+      const parentPos = selectedModel?.position ?? [0, 0, 0];
+      const sz = parentScale[2];
+
+      const computePieceZ = (geo: THREE.BufferGeometry): number => {
+        geo.computeBoundingBox();
+        const minZ = geo.boundingBox?.min.z ?? 0;
+        return -minZ * (sz - 1);
+      };
+
+      const abovePosZ = computePieceZ(geometryAbove);
+      const belowPosZ = computePieceZ(geometryBelow);
+
+      // Apply keep options - only add models that should be kept
+      const newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }> = [];
+      
+      if (options?.keepUpper !== false) {
+        newModels.push({
+          url: aboveUrl,
+          fileName: aboveFileName,
+          geometry: geometryAbove,
+          position: [parentPos[0], parentPos[1], abovePosZ],
+          rotation: [parentRotation[0], parentRotation[1], parentRotation[2]],
+          scale: [parentScale[0], parentScale[1], parentScale[2]],
+        });
+      }
+      
+      if (options?.keepLower !== false) {
+        newModels.push({
+          url: belowUrl,
+          fileName: belowFileName,
+          geometry: geometryBelow,
+          position: [parentPos[0], parentPos[1], belowPosZ],
+          rotation: [parentRotation[0], parentRotation[1], parentRotation[2]],
+          scale: [parentScale[0], parentScale[1], parentScale[2]],
+        });
+      }
+
+      // TODO: Apply placeOnCut, flip, and cutToParts options (stubs for now)
+      
+      onModelsReplace(selectedModelId, newModels);
+      toast.success(`Model cut into ${newModels.length} part(s)`);
     };
     uploadAndReplace().catch(() => {
       toast.error('Failed to process cut model');
