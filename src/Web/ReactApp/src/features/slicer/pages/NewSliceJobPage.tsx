@@ -749,9 +749,9 @@ export const NewSliceJobPage: React.FC = () => {
           if (compatible && compatible.length > 0) {
             return compatible.some(c => c === selectedMachineProfileId);
           }
-        } catch { /* show profile if can't parse */ }
+        } catch { /* hide profile if can't parse */ }
       }
-      return true;
+      return false;
     });
   }, [customProfilesData, selectedMachineProfileId]);
 
@@ -766,9 +766,9 @@ export const NewSliceJobPage: React.FC = () => {
           if (compatible && compatible.length > 0) {
             return compatible.some(c => c === selectedMachineProfileId);
           }
-        } catch { /* show profile if can't parse */ }
+        } catch { /* hide profile if can't parse */ }
       }
-      return true;
+      return false;
     });
   }, [customProfilesData, selectedMachineProfileId]);
 

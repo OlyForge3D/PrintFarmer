@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
@@ -555,7 +556,7 @@ public class JobQueueServiceTests
     public async Task AddJobToQueueAsync_WithNullRequest_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Func<Task> act = async () => await _sut.AddJobToQueueAsync(null!, CancellationToken.None);
+        Func<Task> act = async () => await _sut.AddJobToQueueAsync(null!, null, CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
@@ -573,7 +574,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((GcodeFile?)null);
 
         // Act
-        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -597,7 +598,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer>());
 
         // Act
-        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
 
         // Assert - no compatible printer → null returned, job NOT created
         result.Should().BeNull();
@@ -637,7 +638,7 @@ public class JobQueueServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -681,11 +682,180 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer> { printer });
 
         // Act
-        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
         result!.Priority.Should().Be(10);
+    }
+
+    #endregion
+
+    #region AddJobToQueueAsync ACL Tests
+
+    [Fact]
+    public async Task AddJobToQueueAsync_UserWithGroupAccess_QueuesJob()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var groupId = Guid.NewGuid();
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            FileName = "test.gcode",
+            PrinterGroupId = groupId
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = 0
+        };
+
+        var mockGroupService = new Mock<IPrinterGroupService>();
+        mockGroupService
+            .Setup(x => x.CanUserSubmitToGroupAsync(groupId, userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var sut = new JobQueueService(
+            _mockRepo.Object, _mockDataService.Object, _mockLogger.Object,
+            printerGroupService: mockGroupService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act
+        JobQueuePrintJobDto? result = await sut.AddJobToQueueAsync(request, userId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        mockGroupService.Verify(x => x.CanUserSubmitToGroupAsync(groupId, userId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_UserWithoutGroupAccess_ThrowsAccessDenied()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var groupId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            FileName = "test.gcode",
+            PrinterGroupId = groupId
+        };
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            Priority = 0
+        };
+
+        var mockGroupService = new Mock<IPrinterGroupService>();
+        mockGroupService
+            .Setup(x => x.CanUserSubmitToGroupAsync(groupId, userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var sut = new JobQueueService(
+            _mockRepo.Object, _mockDataService.Object, _mockLogger.Object,
+            printerGroupService: mockGroupService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+
+        // Act
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, userId, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<QueueGroupAccessDeniedException>();
+        _mockRepo.Verify(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_NullUserId_SkipsAclCheck()
+    {
+        // Arrange — system/API-key caller (userId = null) should bypass ACL
+        var groupId = Guid.NewGuid();
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            FileName = "test.gcode",
+            PrinterGroupId = groupId
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = 0
+        };
+
+        var mockGroupService = new Mock<IPrinterGroupService>();
+
+        var sut = new JobQueueService(
+            _mockRepo.Object, _mockDataService.Object, _mockLogger.Object,
+            printerGroupService: mockGroupService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act
+        JobQueuePrintJobDto? result = await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        // Assert — job queued, ACL never consulted
+        result.Should().NotBeNull();
+        mockGroupService.Verify(x => x.CanUserSubmitToGroupAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_NoGroupOnFile_SkipsAclCheck()
+    {
+        // Arrange — GcodeFile with no PrinterGroupId → open to all
+        var userId = Guid.NewGuid();
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            FileName = "test.gcode",
+            PrinterGroupId = null
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = 0
+        };
+
+        var mockGroupService = new Mock<IPrinterGroupService>();
+
+        var sut = new JobQueueService(
+            _mockRepo.Object, _mockDataService.Object, _mockLogger.Object,
+            printerGroupService: mockGroupService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act
+        JobQueuePrintJobDto? result = await sut.AddJobToQueueAsync(request, userId, CancellationToken.None);
+
+        // Assert — job queued, ACL never consulted
+        result.Should().NotBeNull();
+        mockGroupService.Verify(x => x.CanUserSubmitToGroupAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion
