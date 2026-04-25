@@ -153,6 +153,12 @@ export interface PrinterMetadata {
   zOffsetMm?: number;
   /** ISO datetime of last Z-offset calibration. */
   lastZOffsetCalibrationAt?: string;
+  /** Bed type ID (foreign key) */
+  bedTypeId?: string;
+  /** Bed type display name (e.g., "PEI Smooth", "Glass") */
+  bedTypeName?: string;
+  /** Hex color code for bed type badge (e.g., "#E67E22") */
+  bedTypeColor?: string;
 }
 
 /**
@@ -1124,6 +1130,11 @@ export interface PrinterModelDto {
   /** Default machine hourly rate for cost calculations. */
   defaultHourlyRate?: number;
 
+  /** Default auto-dispatch state for new printers of this model. */
+  defaultAutoDispatchState?: AutoDispatchState;
+  /** Default start behavior for new printers of this model. */
+  defaultStartBehavior?: StartBehavior;
+
   // Toolhead templates for multi-toolhead printers
   toolheads?: PrinterModelToolheadDto[];
 }
@@ -1527,6 +1538,10 @@ export interface UpdateModelRequest {
   maxPrintSpeed?: number;
   defaultWattage?: number;
   defaultHourlyRate?: number;
+
+  // Auto-dispatch defaults
+  defaultAutoDispatchState?: AutoDispatchState;
+  defaultStartBehavior?: StartBehavior;
 
   // Toolhead templates
   toolheads?: PrinterModelToolheadDto[];
@@ -3176,6 +3191,18 @@ export interface WebhookDelivery {
 
 export type AutoDispatchState = 'None' | 'PendingReady' | 'Ready';
 
+export type StartBehavior = 'Manual' | 'AutoStart' | 'WaitForConfirmation';
+
+export interface SetModelDispatchDefaultsRequest {
+  defaultAutoDispatchState: AutoDispatchState;
+  defaultStartBehavior?: StartBehavior;
+}
+
+export interface ApplyModelDefaultsResult {
+  updatedCount: number;
+  skippedCount: number;
+}
+
 export interface AutoDispatchStatus {
   printerId: string;
   enabled: boolean;
@@ -3267,6 +3294,39 @@ export interface CreatePrinterGroupRequest {
 export interface UpdatePrinterGroupRequest {
   name: string;
   description?: string;
+}
+
+// ============ Bed Type Types ============
+
+/**
+ * Bed surface type DTO
+ */
+export interface BedType {
+  id: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  color?: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
+/**
+ * Request DTO for creating a bed type
+ */
+export interface CreateBedTypeRequest {
+  name: string;
+  description?: string;
+  color?: string;
+}
+
+/**
+ * Request DTO for updating a bed type
+ */
+export interface UpdateBedTypeRequest {
+  name: string;
+  description?: string;
+  color?: string;
 }
 
 /**

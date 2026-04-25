@@ -5,8 +5,10 @@ import {
   ApiError,
   PrintJobStatusDto,
   AuthenticationResult,
+  BedType,
   CatalogContext,
   CommandResult,
+  CreateBedTypeRequest,
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
@@ -72,6 +74,8 @@ import {
   UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
+  SetModelDispatchDefaultsRequest,
+  ApplyModelDefaultsResult,
   GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
@@ -100,6 +104,7 @@ import {
     FailureDetectionEvent,
     NotificationDto,
   NotificationPreferencesDto,
+  UpdateBedTypeRequest,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
   ScheduledJob,
@@ -1013,6 +1018,27 @@ export class ApiClient {
     await this.client.delete(`/printer-groups/${groupId}/printers/${printerId}`);
   }
 
+  // ============ Bed Type API methods ============
+
+  async getBedTypes(): Promise<BedType[]> {
+    const response = await this.client.get<BedType[]>("/bed-types");
+    return response.data;
+  }
+
+  async createBedType(dto: CreateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.post<BedType>("/bed-types", dto);
+    return response.data;
+  }
+
+  async updateBedType(id: string, dto: UpdateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.put<BedType>(`/bed-types/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteBedType(id: string): Promise<void> {
+    await this.client.delete(`/bed-types/${id}`);
+  }
+
   // ============ Catalog API methods ============
 
   async getManufacturers(): Promise<ManufacturerDto[]> {
@@ -1098,6 +1124,24 @@ export class ApiClient {
     const response = await this.client.put<SlicerModelAliasDto[]>(
       `/catalog/printer-models/${modelId}/aliases`,
       request
+    );
+    return response.data;
+  }
+
+  async setModelDispatchDefaults(
+    modelId: string,
+    request: SetModelDispatchDefaultsRequest
+  ): Promise<PrinterModelDto> {
+    const response = await this.client.put<PrinterModelDto>(
+      `/catalog/printer-models/${modelId}/dispatch-defaults`,
+      request
+    );
+    return response.data;
+  }
+
+  async applyModelDefaults(modelId: string): Promise<ApplyModelDefaultsResult> {
+    const response = await this.client.post<ApplyModelDefaultsResult>(
+      `/catalog/printer-models/${modelId}/apply-defaults`
     );
     return response.data;
   }

@@ -851,7 +851,10 @@ public class PrintersService(
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
                     HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
-                    EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null));
+                    EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color));
             }
             catch (Exception ex)
             {
@@ -897,7 +900,10 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color));
             }
         }
 
@@ -1534,7 +1540,12 @@ public class PrintersService(
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
-            MachineHourlyRate = dto.MachineHourlyRate
+            MachineHourlyRate = dto.MachineHourlyRate,
+
+            // Inherit auto-dispatch defaults from model template
+            AutoDispatchEnabled = modelTemplate?.DefaultAutoDispatchState != null
+                && modelTemplate.DefaultAutoDispatchState != AutoDispatchState.None,
+            UseModelDispatchDefaults = true
         };
 
         // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
