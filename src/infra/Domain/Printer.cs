@@ -247,6 +247,17 @@ public class Printer
     /// </summary>
     public ICollection<Tag> Tags { get; set; } = new List<Tag>();
 
+    /// <summary>
+    /// Calibrated Z-offset in millimeters. Negative values move the nozzle closer to the bed.
+    /// Null indicates the printer has not been calibrated via the wizard.
+    /// </summary>
+    public decimal? ZOffsetMm { get; set; }
+
+    /// <summary>
+    /// UTC timestamp of the last Z-offset calibration via the wizard.
+    /// </summary>
+    public DateTime? LastZOffsetCalibrationAt { get; set; }
+
     public bool InMaintenance { get; set; } = false;
 
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin

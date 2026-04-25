@@ -126,6 +126,7 @@ import {
   UserBalanceDto,
   BalanceTransactionDto,
   BalanceAdjustRequest,
+  ZOffsetSaveRequest,
 } from "@/types/api";
 import type { GeometryUploadResultDto, ThreeMfMetadata } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
@@ -848,6 +849,19 @@ export class ApiClient {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/gcode`,
       { command }
+    );
+    return response.data;
+  }
+
+  /**
+   * Save calibrated Z-offset to the printer and optionally to firmware.
+   * @param printerId The printer's GUID
+   * @param request The Z-offset save payload
+   */
+  async saveZOffset(printerId: string, request: ZOffsetSaveRequest): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/z-offset`,
+      request
     );
     return response.data;
   }

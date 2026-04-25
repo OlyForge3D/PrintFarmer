@@ -14,6 +14,7 @@ import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolhea
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
+import { ZOffsetCalibrationWizard } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
@@ -95,6 +96,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
+  const [showZOffsetWizard, setShowZOffsetWizard] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
   const [movementActionPending, setMovementActionPending] = useState(false);
@@ -673,6 +675,16 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     onFilamentAction={handleFilamentAction}
                   />
                 )}
+                {support.supportsMovement && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!isOnline || isPrinting}
+                    onClick={() => setShowZOffsetWizard(true)}
+                  >
+                    Calibrate Z-Offset
+                  </Button>
+                )}
               </div>
             }
           />
@@ -813,6 +825,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             setSpoolActionPending(false);
           }
         }}
+      />
+
+      <ZOffsetCalibrationWizard
+        isOpen={showZOffsetWizard}
+        onClose={() => setShowZOffsetWizard(false)}
+        printer={printer}
+        bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
+        bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
       />
     </div>
   );
