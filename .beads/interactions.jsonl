@@ -235,3 +235,10 @@
 {"id":"int-fbbb13a3","kind":"field_change","created_at":"2026-04-25T19:30:15.761368Z","actor":"Jeff Papiez","issue_id":"PFarm1-4ex2","extra":{"field":"status","new_value":"closed","old_value":"open"}}
 {"id":"int-d8aba985","kind":"field_change","created_at":"2026-04-25T22:01:51.965994Z","actor":"Jeff Papiez","issue_id":"PFarm1-603w","extra":{"field":"status","new_value":"closed","old_value":"open"}}
 {"id":"int-34036e41","kind":"field_change","created_at":"2026-04-25T22:02:04.11194Z","actor":"Jeff Papiez","issue_id":"PFarm1-b00r","extra":{"field":"status","new_value":"closed","old_value":"open"}}
+{"id":"int-70f5c65c","kind":"field_change","created_at":"2026-04-25T22:30:52.305466Z","actor":"Jeff Papiez","issue_id":"PFarm1-2t6x","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-0a1d4b70","kind":"field_change","created_at":"2026-04-25T22:31:04.643477Z","actor":"Jeff Papiez","issue_id":"PFarm1-yxgs","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-6bbb157a","kind":"field_change","created_at":"2026-04-25T22:31:05.457925Z","actor":"Jeff Papiez","issue_id":"PFarm1-iycg","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-75c6dd06","kind":"field_change","created_at":"2026-04-25T22:31:06.139274Z","actor":"Jeff Papiez","issue_id":"PFarm1-nlug","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-34f57ec0","kind":"field_change","created_at":"2026-04-25T22:31:06.655366Z","actor":"Jeff Papiez","issue_id":"PFarm1-n3y2","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-2693b010","kind":"field_change","created_at":"2026-04-25T22:31:07.300114Z","actor":"Jeff Papiez","issue_id":"PFarm1-fmkz","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-a4ea50a0","kind":"field_change","created_at":"2026-04-25T22:31:07.985165Z","actor":"Jeff Papiez","issue_id":"PFarm1-irb7","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}

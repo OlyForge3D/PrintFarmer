@@ -34,6 +34,8 @@ export interface ColorPaintOverlayProps {
   paintMode?: 'paint' | 'erase';
   /** Brush radius in world units */
   brushSize?: number;
+  /** Called when a paint stroke starts/ends on the model (for orbit control gating) */
+  onPaintingStateChange?: (isPainting: boolean) => void;
 }
 
 function buildColorFaceColors(
@@ -80,6 +82,7 @@ export function ColorPaintOverlay({
   active,
   paintMode: externalPaintMode,
   brushSize = 5,
+  onPaintingStateChange,
 }: ColorPaintOverlayProps) {
   const { camera, gl, invalidate } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -106,6 +109,9 @@ export function ColorPaintOverlay({
   useEffect(() => { onPaintUpdateRef.current = onPaintUpdate; }, [onPaintUpdate]);
   useEffect(() => { activeColorIndexRef.current = activeColorIndex; }, [activeColorIndex]);
   useEffect(() => { externalPaintModeRef.current = externalPaintMode; }, [externalPaintMode]);
+
+  const onPaintingStateChangeRef = useRef(onPaintingStateChange);
+  useEffect(() => { onPaintingStateChangeRef.current = onPaintingStateChange; }, [onPaintingStateChange]);
 
   const pendingPaintRef = useRef<Map<number, number> | null>(null);
   const revisionRef = useRef(0);
@@ -181,16 +187,22 @@ export function ColorPaintOverlay({
     const onPointerDown = (e: PointerEvent) => {
       const eraseMode = externalPaintModeRef.current === 'erase';
       if (e.button === 0) {
-        isPaintingRef.current = !eraseMode;
-        isErasingRef.current = eraseMode;
         const hit = raycastFace(e.clientX, e.clientY);
-        if (hit) applyPaint(hit.faceIndex, eraseMode);
+        if (hit) {
+          isPaintingRef.current = !eraseMode;
+          isErasingRef.current = eraseMode;
+          applyPaint(hit.faceIndex, eraseMode);
+          onPaintingStateChangeRef.current?.(true);
+        }
         e.preventDefault();
       } else if (e.button === 2) {
-        isErasingRef.current = true;
-        isPaintingRef.current = false;
         const hit = raycastFace(e.clientX, e.clientY);
-        if (hit) applyPaint(hit.faceIndex, true);
+        if (hit) {
+          isErasingRef.current = true;
+          isPaintingRef.current = false;
+          applyPaint(hit.faceIndex, true);
+          onPaintingStateChangeRef.current?.(true);
+        }
         e.preventDefault();
       }
     };
@@ -218,9 +230,13 @@ export function ColorPaintOverlay({
     };
 
     const onPointerUp = () => {
+      const wasPainting = isPaintingRef.current || isErasingRef.current;
       isPaintingRef.current = false;
       isErasingRef.current = false;
       flushPaint();
+      if (wasPainting) {
+        onPaintingStateChangeRef.current?.(false);
+      }
     };
 
     const onContextMenu = (e: Event) => { e.preventDefault(); };

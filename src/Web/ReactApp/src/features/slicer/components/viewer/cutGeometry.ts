@@ -73,6 +73,127 @@ export function orderCapEdges(
   return loops;
 }
 
+/**
+ * Compute 2D signed area of a polygon in the given projection.
+ * Positive = CCW, negative = CW.
+ */
+function signedArea2D(
+  polygon: THREE.Vector3[],
+  project: (v: THREE.Vector3) => [number, number],
+): number {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const [x1, y1] = project(polygon[i]);
+    const [x2, y2] = project(polygon[(i + 1) % polygon.length]);
+    area += x1 * y2 - x2 * y1;
+  }
+  return area;
+}
+
+/**
+ * Bridge hole polygons into the outer polygon to produce a single simple
+ * polygon suitable for ear-clipping.  Uses the standard rightmost-vertex
+ * ray-cast algorithm: for each hole find its rightmost projected vertex,
+ * cast a ray to +X, locate the nearest outer-polygon edge, and insert a
+ * zero-width bridge connecting the two polygons.
+ *
+ * Outer polygon must be CCW; holes must be CW (in the 2D projection).
+ */
+function bridgeHoles(
+  outer: THREE.Vector3[],
+  holes: THREE.Vector3[][],
+  project: (v: THREE.Vector3) => [number, number],
+): THREE.Vector3[] {
+  if (holes.length === 0) return outer;
+
+  // Ensure winding: outer CCW, holes CW
+  let merged = signedArea2D(outer, project) >= 0 ? [...outer] : [...outer].reverse();
+  const cwHoles = holes.map(h =>
+    signedArea2D(h, project) < 0 ? [...h] : [...h].reverse(),
+  );
+
+  // Sort holes by rightmost projected X (descending) so the outermost
+  // holes are bridged first, keeping bridge edges short.
+  const holeInfos = cwHoles.map(hole => {
+    let maxX = -Infinity;
+    let idx = 0;
+    for (let i = 0; i < hole.length; i++) {
+      const x = project(hole[i])[0];
+      if (x > maxX) { maxX = x; idx = i; }
+    }
+    return { hole, rightIdx: idx, rightX: maxX };
+  }).sort((a, b) => b.rightX - a.rightX);
+
+  for (const { hole, rightIdx } of holeInfos) {
+    const hv = hole[rightIdx];
+    const [hx, hy] = project(hv);
+
+    // Cast a horizontal ray to +X from hv; find the nearest intersecting
+    // edge of `merged`.
+    let bestDist = Infinity;
+    let bestEdge = -1;
+    let bestIx = 0;
+    for (let i = 0; i < merged.length; i++) {
+      const j = (i + 1) % merged.length;
+      const [ay, ax] = [project(merged[i])[1], project(merged[i])[0]];
+      const [by, bx] = [project(merged[j])[1], project(merged[j])[0]];
+      // Edge must straddle the ray's Y
+      if ((ay <= hy && by <= hy) || (ay > hy && by > hy)) continue;
+      const t = (hy - ay) / (by - ay);
+      const ix = ax + t * (bx - ax);
+      if (ix < hx) continue;
+      const d = ix - hx;
+      if (d < bestDist) { bestDist = d; bestEdge = i; bestIx = ix; }
+    }
+    if (bestEdge === -1) continue;
+
+    // Pick the bridge vertex on the outer polygon: the endpoint of the
+    // intersected edge with the larger projected X (visible from hv).
+    const eA = bestEdge;
+    const eB = (bestEdge + 1) % merged.length;
+    let bridgeIdx = project(merged[eA])[0] >= project(merged[eB])[0] ? eA : eB;
+
+    // Reflex-vertex visibility refinement: check if any merged vertex
+    // sits inside the triangle (hv, intersection, candidate) and is
+    // closer to hv — if so, use that vertex as the bridge target.
+    const [cx, cy] = project(merged[bridgeIdx]);
+    for (let k = 0; k < merged.length; k++) {
+      if (k === bridgeIdx) continue;
+      const [px, py] = project(merged[k]);
+      // Must be inside the X-band [hx, bestIx] and Y-band
+      if (px < hx || px > bestIx) continue;
+      const minY = Math.min(hy, cy);
+      const maxY = Math.max(hy, cy);
+      if (py < minY || py > maxY) continue;
+      if (pointInTriangle2D(px, py, hx, hy, bestIx, hy, cx, cy)) {
+        // Closer reflex vertex — use it instead
+        const dOld = (cx - hx) * (cx - hx) + (cy - hy) * (cy - hy);
+        const dNew = (px - hx) * (px - hx) + (py - hy) * (py - hy);
+        if (dNew < dOld) {
+          bridgeIdx = k;
+        }
+      }
+    }
+
+    // Reorder hole starting from rightIdx
+    const reordered: THREE.Vector3[] = [];
+    for (let k = 0; k < hole.length; k++) {
+      reordered.push(hole[(rightIdx + k) % hole.length]);
+    }
+
+    // Splice: merged[..bridgeIdx] → hole[rightIdx..] → hole[rightIdx] → merged[bridgeIdx] → merged[bridgeIdx+1..]
+    merged = [
+      ...merged.slice(0, bridgeIdx + 1),
+      ...reordered,
+      reordered[0].clone(),
+      merged[bridgeIdx].clone(),
+      ...merged.slice(bridgeIdx + 1),
+    ];
+  }
+
+  return merged;
+}
+
 /** Drop adjacent duplicate and collinear vertices from a polygon. */
 function removeCollinearVertices(
   polygon: THREE.Vector3[],
@@ -162,6 +283,10 @@ export function earClipTriangulate(
       for (const idx of indices) {
         if (idx === prevIdx || idx === currIdx || idx === nextIdx) continue;
         const [tx, ty] = project(work[idx]);
+        // Skip vertices coincident with ear vertices (from hole bridges)
+        if (Math.abs(tx - px) < 1e-8 && Math.abs(ty - py) < 1e-8) continue;
+        if (Math.abs(tx - cx) < 1e-8 && Math.abs(ty - cy) < 1e-8) continue;
+        if (Math.abs(tx - nx) < 1e-8 && Math.abs(ty - ny) < 1e-8) continue;
         if (pointInTriangle2D(tx, ty, px, py, cx, cy, nx, ny)) {
           containsPoint = true;
           break;
@@ -176,7 +301,6 @@ export function earClipTriangulate(
     }
     if (!earFound) {
       if (--safety <= 0) {
-        // eslint-disable-next-line no-console
         console.warn('earClipTriangulate: fallback fan triangulation', {
           remaining: indices.length,
           axis,
@@ -350,13 +474,17 @@ export function splitGeometryAtPlane(
         : Math.abs(ln.y) >= Math.abs(ln.z) ? 'y'
         : 'z';
     const loops = orderCapEdges(capEdges);
-    // v1 limitation: detect nested loops (likely hollow cross-section / true holes)
-    // and warn once. Same projection convention as earClipTriangulate.
+
+    const projectXY = (v: THREE.Vector3): [number, number] =>
+      localAxis === 'x' ? [v.y, v.z]
+        : localAxis === 'y' ? [v.z, v.x]
+        : [v.x, v.y];
+
+    // Detect nested loops (hollow cross-sections).  When one loop's AABB
+    // is entirely inside another's the inner loop is a hole that must be
+    // bridged into the outer polygon before triangulation.
+    let polygonsToTriangulate: THREE.Vector3[][] = [];
     if (loops.length >= 2) {
-      const projectXY = (v: THREE.Vector3): [number, number] =>
-        localAxis === 'x' ? [v.y, v.z]
-          : localAxis === 'y' ? [v.z, v.x]
-          : [v.x, v.y];
       const aabbs = loops.map((loop) => {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const v of loop) {
@@ -366,22 +494,57 @@ export function splitGeometryAtPlane(
         }
         return { minX, minY, maxX, maxY };
       });
-      let nested = false;
-      for (let i = 0; i < aabbs.length && !nested; i++) {
-        for (let j = 0; j < aabbs.length; j++) {
+      const areas = loops.map(l => Math.abs(signedArea2D(l, projectXY)));
+
+      // Build containment map: parent[i] = index of the loop that
+      // directly contains loop i (-1 if top-level).
+      const parent = new Array<number>(loops.length).fill(-1);
+      for (let i = 0; i < loops.length; i++) {
+        let bestArea = Infinity;
+        for (let j = 0; j < loops.length; j++) {
           if (i === j) continue;
           const a = aabbs[i], b = aabbs[j];
           if (a.minX >= b.minX && a.minY >= b.minY && a.maxX <= b.maxX && a.maxY <= b.maxY) {
-            nested = true; break;
+            if (areas[j] < bestArea) { bestArea = areas[j]; parent[i] = j; }
           }
         }
       }
-      if (nested) {
-        // eslint-disable-next-line no-console
-        console.warn('[CutPlaneOverlay] Nested cap loops detected (likely hollow cross-section). Cap will render as filled discs rather than a true ring — true hole bridging is not yet implemented.');
+
+      // Group: top-level loops (parent === -1) are outers; their direct
+      // children are holes.
+      const childrenOf = new Map<number, number[]>();
+      const topLevel: number[] = [];
+      for (let i = 0; i < loops.length; i++) {
+        if (parent[i] === -1) {
+          topLevel.push(i);
+        } else {
+          const siblings = childrenOf.get(parent[i]) ?? [];
+          siblings.push(i);
+          childrenOf.set(parent[i], siblings);
+        }
       }
+
+      for (const outerIdx of topLevel) {
+        const holes = (childrenOf.get(outerIdx) ?? []).map(i => loops[i]);
+        if (holes.length > 0) {
+          polygonsToTriangulate.push(bridgeHoles(loops[outerIdx], holes, projectXY));
+        } else {
+          polygonsToTriangulate.push(loops[outerIdx]);
+        }
+        // Holes' own children become independent outers (nested solids
+        // inside a hollow); handle recursively would be ideal but for
+        // practical 3D-print cross-sections one nesting level suffices.
+        for (const holeIdx of childrenOf.get(outerIdx) ?? []) {
+          for (const grandchild of childrenOf.get(holeIdx) ?? []) {
+            polygonsToTriangulate.push(loops[grandchild]);
+          }
+        }
+      }
+    } else {
+      polygonsToTriangulate = loops;
     }
-    for (const polygon of loops) {
+
+    for (const polygon of polygonsToTriangulate) {
       if (polygon.length < 3) continue;
       const tris = earClipTriangulate(polygon, localAxis);
       for (const [a, b, c] of tris) {

@@ -28,7 +28,7 @@ import {
 } from '../../utils/sequentialPrinting';
 import { ClearanceZoneOverlay } from './ClearanceZoneOverlay';
 import { SequentialPrintPanel } from './SequentialPrintPanel';
-import { PaintToolPanel, type PaintToolType, type PaintMode, type BrushShape, type SupportPaintVariant, type SeamPaintVariant } from './PaintToolPanel';
+import { PaintToolPanel, type PaintToolType, type PaintMode, type BrushShape, type BrushToolType, type SupportPaintVariant, type SeamPaintVariant } from './PaintToolPanel';
 import {
   type PlateManagerState,
   createInitialPlateState,
@@ -164,6 +164,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [paintBrushSize, setPaintBrushSize] = useState(5);
   const [paintMode, setPaintMode] = useState<PaintMode>('paint');
   const [paintBrushShape, setPaintBrushShape] = useState<BrushShape>('circle');
+  const [paintBrushToolType, setPaintBrushToolType] = useState<BrushToolType>('circle');
+  const [sectionViewEnabled, setSectionViewEnabled] = useState(false);
+  const [sectionViewDepth, setSectionViewDepth] = useState(50);
+  const [overhangOnly, setOverhangOnly] = useState(false);
+  const [highlightOverhangAngle, setHighlightOverhangAngle] = useState(45);
   const [activeExtruder, setActiveExtruder] = useState(0);
   const [supportVariant, setSupportVariant] = useState<SupportPaintVariant>('enforce');
   const [seamVariant, setSeamVariant] = useState<SeamPaintVariant>('preferred');
@@ -844,8 +849,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         URL.revokeObjectURL(oldModel.url);
         blobUrlsRef.current.delete(oldModel.url);
       }
-      // m2: dispose old GPU buffer geometry to avoid leak across cuts.
+      // Compute parent halfZ from old geometry BEFORE disposing it.
+      // The render pipeline adds halfZ to position.z, so pieces with different
+      // halfZ values need compensation to maintain the same world-space Z.
       const oldGeo = (oldModel as { geometry?: THREE.BufferGeometry } | undefined)?.geometry;
+      let parentHalfZ = 0;
+      if (oldGeo) {
+        oldGeo.computeBoundingBox();
+        parentHalfZ = oldGeo.boundingBox ? -oldGeo.boundingBox.min.z : 0;
+      }
+      // m2: dispose old GPU buffer geometry to avoid leak across cuts.
       if (oldGeo && typeof oldGeo.dispose === 'function') {
         oldGeo.dispose();
       }
@@ -879,18 +892,29 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         return -halfZ - minRotatedZ;
       };
 
-      // Decide each piece's Z. Default behavior preserves the parent's Z so
-      // cutting a model raised at z=20 keeps both pieces at z=20. The
-      // `placeOnCut*` options drop a piece to the bed (matches OrcaSlicer's
-      // "Place on cut" UX). For non-Z cuts these options have no Z meaning, so
-      // we always preserve parent Z in that case.
+      // Computes the piece halfZ (same formula the render pipeline uses).
+      const pieceHalfZ = (geo: THREE.BufferGeometry): number => {
+        geo.computeBoundingBox();
+        return geo.boundingBox ? -geo.boundingBox.min.z : 0;
+      };
+
+      // Compute the data-Z that preserves the parent's world-space Z for a piece
+      // whose halfZ differs from the parent's. The render pipeline positions each
+      // model at (pos.z + halfZ), so to keep the world Z identical we compensate:
+      //   pieceDataZ = parentPos[2] + parentHalfZ - pieceHalfZ
+      const preserveParentZ = (geo: THREE.BufferGeometry): number =>
+        parentPos[2] + parentHalfZ - pieceHalfZ(geo);
+
+      // Decide each piece's Z. Default behavior preserves the parent's world Z so
+      // cutting a model raised at z=20 keeps both pieces at the same visual Z.
+      // `placeOnCut*` drops a piece to the bed (matches OrcaSlicer's UX).
       const isZCut = cutAxis === 'z';
       const abovePosZ = isZCut && options?.placeOnCutUpper
         ? computeBedZ(geometryAbove)
-        : parentPos[2];
+        : preserveParentZ(geometryAbove);
       const belowPosZ = isZCut && options?.placeOnCutLower
         ? computeBedZ(geometryBelow)
-        : parentPos[2];
+        : preserveParentZ(geometryBelow);
 
       const newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }> = [];
 
@@ -977,6 +1001,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         : fuzzySkinPaintMode
           ? 'fuzzySkin'
           : null;
+
+  const hideBed = activePaintTool !== null;
 
   const handleClearPaint = useCallback(() => {
     if (!selectedModelId) return;
@@ -1104,12 +1130,12 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       // Paint tool shortcuts — work with any active paint mode
       if (event.key === '[') {
         event.preventDefault();
-        setPaintBrushSize(prev => Math.max(1, prev - 1));
+        setPaintBrushSize(prev => Math.max(0.1, +(prev - 0.5).toFixed(1)));
         return;
       }
       if (event.key === ']') {
         event.preventDefault();
-        setPaintBrushSize(prev => Math.min(20, prev + 1));
+        setPaintBrushSize(prev => Math.min(10, +(prev + 0.5).toFixed(1)));
         return;
       }
       if (event.key.toLowerCase() === 'x' && activePaintTool) {
@@ -1293,6 +1319,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onFuzzySkinPaintUpdate={handleFuzzySkinPaintUpdate}
           paintMode={paintMode}
           paintBrushSize={paintBrushSize}
+          hideBed={hideBed}
           textPlacementMode={textPlacementMode}
           onTextPlace={handleTextPlace}
           showGrid={true}
@@ -1353,6 +1380,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
             onPaintModeChange={setPaintMode}
             brushShape={paintBrushShape}
             onBrushShapeChange={setPaintBrushShape}
+            brushToolType={paintBrushToolType}
+            onBrushToolTypeChange={setPaintBrushToolType}
+            sectionViewEnabled={sectionViewEnabled}
+            onSectionViewEnabledChange={setSectionViewEnabled}
+            sectionViewDepth={sectionViewDepth}
+            onSectionViewDepthChange={setSectionViewDepth}
+            overhangOnly={overhangOnly}
+            onOverhangOnlyChange={setOverhangOnly}
+            highlightOverhangAngle={highlightOverhangAngle}
+            onHighlightOverhangAngleChange={setHighlightOverhangAngle}
             activeExtruder={activeExtruder}
             onExtruderChange={setActiveExtruder}
             supportVariant={supportVariant}
