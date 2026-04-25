@@ -197,6 +197,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Quota group memberships (user ↔ named group associations)
     public DbSet<UserQuotaGroupMembership> UserQuotaGroupMemberships => Set<UserQuotaGroupMembership>();
 
+    // Custom fields (extensible metadata for Printers and Users)
+    public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
+
+    public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

@@ -34,6 +34,7 @@ import {
   ExternalLinkIcon,
   AlertIcon,
   ClipboardListIcon,
+  ListIcon,
   PlayIcon,
   CalendarIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -224,6 +225,12 @@ const navigation: NavigationElement[] = [
     name: 'Bed Types',
     href: '/admin/bed-types',
     icon: LayersIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Custom Fields',
+    href: '/admin/custom-fields',
+    icon: ListIcon,
     requiredRole: 'farm_admin'
   },
   {

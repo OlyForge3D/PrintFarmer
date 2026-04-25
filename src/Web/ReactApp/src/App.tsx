@@ -33,6 +33,7 @@ import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
+import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
 import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
@@ -214,6 +215,7 @@ function AuthenticatedAppRoutes() {
           <Route path="slicer-profiles" element={<Navigate to="/profiles/import" replace />} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="bed-types" element={<BedTypeAdminPage />} />
+          <Route path="custom-fields" element={<CustomFieldsAdminPage />} />
           <Route path="webhooks" element={<WebhooksAdminPage />} />
           <Route path="quotas" element={<QuotaManagementPage />} />
           <Route path="data" element={<DataManagementPage />} />
