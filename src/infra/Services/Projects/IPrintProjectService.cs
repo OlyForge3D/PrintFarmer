@@ -75,6 +75,7 @@ public interface IPrintProjectService
     /// <summary>
     /// Queue all pending files from a project to the job queue.
     /// Files are ordered by material type and color to minimize filament changes.
+    /// When <paramref name="userId"/> is provided, printer group ACL is enforced per file.
     /// </summary>
-    Task<QueueProjectResultDto?> QueueProjectAsync(Guid projectId, QueueProjectRequest request, CancellationToken ct = default);
+    Task<QueueProjectResultDto?> QueueProjectAsync(Guid projectId, QueueProjectRequest request, Guid? userId = null, CancellationToken ct = default);
 }

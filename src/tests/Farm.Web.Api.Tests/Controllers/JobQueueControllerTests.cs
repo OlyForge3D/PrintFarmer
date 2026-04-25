@@ -1,14 +1,13 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -25,8 +24,6 @@ public class JobQueueControllerTests
     private readonly Mock<IBatchDispatchService> _batchDispatchServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly Mock<IPrintFarmerTelemetryService> _telemetryServiceMock;
-    private readonly Mock<IPrinterGroupService> _printerGroupServiceMock;
-    private readonly AppDbContext _dbContext;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
@@ -39,11 +36,6 @@ public class JobQueueControllerTests
         _batchDispatchServiceMock = new Mock<IBatchDispatchService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
         _telemetryServiceMock = new Mock<IPrintFarmerTelemetryService>();
-        _printerGroupServiceMock = new Mock<IPrinterGroupService>();
-        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(databaseName: $"JobQueueTests-{Guid.NewGuid()}")
-            .Options;
-        _dbContext = new AppDbContext(dbOptions);
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
@@ -52,9 +44,16 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
-            _printerGroupServiceMock.Object,
-            _dbContext,
             _loggerMock.Object);
+
+        // Set up authenticated user with valid GUID claim for ACL enforcement
+        var userId = Guid.NewGuid();
+        var claims = new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) };
+        var identity = new ClaimsIdentity(claims, "TestAuth");
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
     }
 
     [Fact]
@@ -69,8 +68,6 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
-            _printerGroupServiceMock.Object,
-            _dbContext,
             _loggerMock.Object);
 
         // Assert
@@ -160,7 +157,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobDto);
 
         // Act
@@ -184,7 +181,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
         // Act

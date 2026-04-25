@@ -8,6 +8,7 @@ import { FormField } from '@/common/components/ui/FormField';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { PrinterIcon } from '@/common/components/icons/MdiIcons';
 import { usePrintersFast } from '@/common/hooks/useApi';
+import { sortPrintersByAvailability } from '@/utils/printerSort';
 import { sliceJobService } from '@/services/sliceJobService';
 import type { SendToPrinterResponse } from '@/services/sliceJobService';
 
@@ -38,7 +39,7 @@ function SendToPrinterForm({ jobId, onClose }: { jobId: string; onClose: () => v
   const [startPrint, setStartPrint] = useState(false);
 
   const { data: printers = [] } = usePrintersFast();
-  const onlinePrinters = printers.filter(p => p.isOnline);
+  const onlinePrinters = sortPrintersByAvailability(printers.filter(p => p.isOnline));
 
   const sendMutation = useMutation({
     mutationFn: () =>
