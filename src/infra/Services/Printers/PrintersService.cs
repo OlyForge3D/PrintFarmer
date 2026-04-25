@@ -854,7 +854,8 @@ public class PrintersService(
                     EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
-                    BedTypeColor: p.BedType?.Color));
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
             catch (Exception ex)
             {
@@ -903,7 +904,8 @@ public class PrintersService(
                     HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
-                    BedTypeColor: p.BedType?.Color));
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
         }
 
@@ -1326,7 +1328,8 @@ public class PrintersService(
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
-            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults);
     }
 
     /// <summary>

@@ -922,7 +922,8 @@ public class PrintersController(
             p.MachineHourlyRate,
             p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
             p.ZOffsetMm,
-            p.LastZOffsetCalibrationAt);
+            p.LastZOffsetCalibrationAt,
+            p.UseModelDispatchDefaults);
     }
 
     /// <summary>
@@ -1658,6 +1659,11 @@ public class PrintersController(
             p.ServiceState.LastCapabilityUpdate = DateTime.UtcNow;
         }
 
+        if (dto.UseModelDispatchDefaults.HasValue)
+        {
+            p.UseModelDispatchDefaults = dto.UseModelDispatchDefaults.Value;
+        }
+
         // Update toolheads if provided
         if (dto.Toolheads?.Length > 0 && p.Toolheads != null)
         {
@@ -1785,7 +1791,8 @@ public class PrintersController(
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
-            ObicoEnabled: p.ObicoEnabled);
+            ObicoEnabled: p.ObicoEnabled,
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults);
 
         return Ok(dtoResponse);
     }

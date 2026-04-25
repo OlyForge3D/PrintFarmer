@@ -59,5 +59,8 @@ public record UpdatePrinterDto(
     // Bed surface type
     Guid? BedTypeId = null,
 
+    // Auto-dispatch model defaults opt-out
+    bool? UseModelDispatchDefaults = null,
+
     // Toolheads - for updating individual toolhead settings
     UpdateToolheadDto[]? Toolheads = null);

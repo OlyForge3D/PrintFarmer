@@ -8,6 +8,7 @@ import {
   PackageIcon,
   EditIcon,
   GridIcon,
+  ListIcon,
   TableIcon,
   GearIcon,
   CloseIcon,
@@ -26,6 +27,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { SpoolCard } from '@/features/filamentManagement/components/SpoolCard';
+import { SpoolCompactView } from '@/features/filamentManagement/components/SpoolCompactView';
 import { SpoolTableView } from '@/features/filamentManagement/components/SpoolTableView';
 import { EditSpoolModal } from '@/features/filamentManagement/components/EditSpoolModal';
 import { AddSpoolModal } from '@/features/filamentManagement/components/AddSpoolModal';
@@ -138,9 +140,10 @@ export function SpoolsTab() {
     const newVal = typeof v === 'function' ? v(sortDir) : v;
     urlSetSortDir(newVal);
   }, [urlSetSortDir, sortDir]);
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+  const [viewMode, setViewMode] = useState<'cards' | 'compact' | 'table'>(() => {
     const saved = localStorage.getItem('spools-view-mode');
-    return saved === 'table' ? 'table' : 'cards';
+    if (saved === 'table' || saved === 'compact') return saved;
+    return 'cards';
   });
 
   // Filter dropdown options — accumulated from loaded data
@@ -224,8 +227,8 @@ export function SpoolsTab() {
     },
     {
       key: 'v',
-      handler: () => setViewMode(viewMode === 'cards' ? 'table' : 'cards'),
-      description: 'Toggle view mode (cards/table)'
+      handler: () => setViewMode(prev => prev === 'cards' ? 'compact' : prev === 'compact' ? 'table' : 'cards'),
+      description: 'Cycle view mode (cards/compact/table)'
     }
   ]);
 
@@ -571,6 +574,15 @@ export function SpoolsTab() {
               <GridIcon className="h-4 w-4" />
             </Button>
             <Button
+              variant={viewMode === 'compact' ? 'primary' : 'secondary'}
+              size="sm"
+              aria-label="Compact list view"
+              title="Compact list view"
+              onClick={() => setViewMode('compact')}
+            >
+              <ListIcon className="h-4 w-4" />
+            </Button>
+            <Button
               variant={viewMode === 'table' ? 'primary' : 'secondary'}
               size="sm"
               aria-label="Table view"
@@ -794,7 +806,7 @@ export function SpoolsTab() {
                 </Select>
               </div>
 
-              {viewMode === 'cards' && (
+              {(viewMode === 'cards' || viewMode === 'compact') && (
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-pf-text-secondary" htmlFor="sort-field">Sort</label>
                   <div className="flex gap-1 items-center">
@@ -951,6 +963,19 @@ export function SpoolsTab() {
                 />
               ))}
             </div>
+          )}
+          {viewMode === 'compact' && (
+            <SpoolCompactView
+              spools={displayedSpools}
+              selectedIds={selectedIds}
+              allSelected={allSelected}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onEdit={(s) => setEditingSpool(s)}
+              onClone={(s) => setCloningSpool(s)}
+              onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
+              onPrintLabel={(s) => setLabelSpool(s)}
+            />
           )}
           {viewMode === 'table' && (
             <SpoolTableView
