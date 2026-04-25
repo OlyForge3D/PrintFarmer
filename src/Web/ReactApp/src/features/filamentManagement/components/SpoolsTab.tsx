@@ -103,10 +103,10 @@ export function SpoolsTab() {
     color: { key: 'color', type: 'string', defaultValue: '' },
     location: { key: 'location', type: 'string', defaultValue: '' },
     showEmpty: { key: 'showEmpty', type: 'boolean', defaultValue: false },
-    pageSize: { key: 'pageSize', type: 'number', defaultValue: 50 },
-    sortField: { key: 'sort', type: 'string', defaultValue: 'id' },
-    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc' },
-    page: { key: 'page', type: 'number', defaultValue: 0 },
+    pageSize: { key: 'pageSize', type: 'number', defaultValue: 50, filterable: false },
+    sortField: { key: 'sort', type: 'string', defaultValue: 'id', filterable: false },
+    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc', filterable: false },
+    page: { key: 'page', type: 'number', defaultValue: 0, filterable: false },
   });
 
   const currentPage = urlPage as number;

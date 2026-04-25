@@ -9,6 +9,8 @@ interface ParamDefinition<T> {
   defaultValue: T;
   /** Debounce delay in ms for URL updates (useful for text inputs). 0 = immediate. */
   debounce?: number;
+  /** Whether this param is a user-facing filter (vs navigation/sort). Affects hasActiveFilters and resetAll. Defaults to true. */
+  filterable?: boolean;
 }
 
 type ParamConfig = Record<string, ParamDefinition<string | number | boolean>>;
@@ -123,7 +125,9 @@ export function useUrlFilterState<C extends ParamConfig>(config: C): UseUrlFilte
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       for (const [, def] of configEntries) {
-        next.delete(def.key);
+        if (def.filterable !== false) {
+          next.delete(def.key);
+        }
       }
       return next;
     }, { replace: true });
@@ -131,6 +135,7 @@ export function useUrlFilterState<C extends ParamConfig>(config: C): UseUrlFilte
 
   const hasActiveFilters = useMemo(() => {
     for (const [name, def] of configEntries) {
+      if (def.filterable === false) continue;
       if (values[name as keyof typeof values] !== def.defaultValue) return true;
     }
     return false;

@@ -68,6 +68,13 @@ public class SliceJobController(
             modelFileUrl = $"{scheme}://{host}{modelFileUrl}";
         }
 
+        // Validate per-model transforms require model URLs
+        if (request.ModelFileTransforms is { Count: > 0 }
+            && request.ModelFileUrls is not { Count: > 0 })
+        {
+            return BadRequest("ModelFileTransforms requires ModelFileUrls to be provided.");
+        }
+
         // Validate per-model transforms length matches model URLs
         if (request.ModelFileTransforms is { Count: > 0 }
             && request.ModelFileUrls is { Count: > 0 }

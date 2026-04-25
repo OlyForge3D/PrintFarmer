@@ -32,7 +32,7 @@ interface ZOffsetCalibrationWizardProps {
 export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 220, bedSizeY = 220 }: ZOffsetCalibrationWizardProps) {
   const queryClient = useQueryClient();
   const [stepIndex, setStepIndex] = useState(0);
-  const [zOffset, setZOffset] = useState(0);
+  const [zOffset, setZOffset] = useState(printer.zOffsetMm ?? 0);
   const [selectedIncrement, setSelectedIncrement] = useState<number>(0.05);
   const [isCommandRunning, setIsCommandRunning] = useState(false);
 
@@ -108,11 +108,11 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
 
   const handleClose = useCallback(() => {
     setStepIndex(0);
-    setZOffset(0);
+    setZOffset(printer.zOffsetMm ?? 0);
     setSelectedIncrement(0.05);
     setIsCommandRunning(false);
     onClose();
-  }, [onClose]);
+  }, [onClose, printer.zOffsetMm]);
 
   const renderStepContent = () => {
     switch (currentStep) {

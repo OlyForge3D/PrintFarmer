@@ -2229,35 +2229,47 @@ public class PrintersController(
     /// <response code="400">If the offset value is out of range.</response>
     /// <response code="404">If the printer was not found.</response>
     [HttpPost("{id:guid}/z-offset")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> SaveZOffsetAsync(Guid id, [FromBody] ZOffsetSaveRequest request, CancellationToken ct)
     {
+        if (request.OffsetMm is null)
+        {
+            return BadRequest(new CommandResult(false, "offsetMm is required"));
+        }
+
+        decimal offsetMm = request.OffsetMm.Value;
         Printer? p = await _printersService.FindByIdAsync(id, ct);
         if (p is null)
         {
             return NotFound();
         }
 
-        // Optionally send save commands to the printer firmware
+        // Send save commands to the printer firmware and verify success
         if (request.SaveToFirmware)
         {
             PrinterBackend backend = (PrinterBackend)p.Backend;
             string saveCommands = backend switch
             {
-                PrinterBackend.Moonraker => $"SET_GCODE_OFFSET Z={request.OffsetMm:F3}\nSAVE_CONFIG",
-                _ => $"M851 Z{request.OffsetMm:F3}\nM500"
+                PrinterBackend.Moonraker => $"SET_GCODE_OFFSET Z={offsetMm:F3}\nSAVE_CONFIG",
+                _ => $"M851 Z{offsetMm:F3}\nM500"
             };
 
             foreach (string cmd in saveCommands.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                await _printersService.SendGcodeAsync(id, cmd.Trim(), ct);
+                bool sent = await _printersService.SendGcodeAsync(id, cmd.Trim(), ct);
+                if (!sent)
+                {
+                    _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), false);
+                    return BadRequest(new CommandResult(false, $"Firmware command failed: {cmd.Trim()}"));
+                }
             }
         }
 
-        // Persist the Z-offset to the database
-        p.ZOffsetMm = request.OffsetMm;
+        // Persist the Z-offset to the database only after firmware success
+        p.ZOffsetMm = offsetMm;
         p.LastZOffsetCalibrationAt = DateTime.UtcNow;
         await _printersService.SaveChangesAsync(ct);
 
