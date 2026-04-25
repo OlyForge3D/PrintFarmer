@@ -50,4 +50,7 @@ public record CompletePrinterDto(
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,
     bool HasCatalogUpdate = false,
-    DateTime? EstimatedCompletionTimeUtc = null);
+    DateTime? EstimatedCompletionTimeUtc = null,
+    Guid? BedTypeId = null,
+    string? BedTypeName = null,
+    string? BedTypeColor = null);

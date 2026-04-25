@@ -2,6 +2,7 @@ import { apiClient } from '@/services/api';
 import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/types/api';
 import {
   ApiError,
+  BedType,
   CatalogContext,
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
@@ -139,6 +140,7 @@ export const queryKeys = {
   printSessionTimeline: (jobId?: string) => (
     ['job-queue-analytics', 'jobs', jobId ?? null, 'state-history'] as const
   ),
+  bedTypes: ['bed-types'] as const,
 } as const;
 
 // ============ Printer Hooks ============
@@ -790,6 +792,19 @@ export function useManufacturersByContext(
 }
 
 // ============ Settings Hooks ============
+
+// ---- Bed Type Hooks ----
+
+export function useBedTypes(options?: QueryOptions<BedType[]>) {
+  return useQuery({
+    queryKey: queryKeys.bedTypes,
+    queryFn: () => apiClient.getBedTypes(),
+    staleTime: 300000, // 5 minutes
+    ...options,
+  });
+}
+
+// ---- Filament Type Hooks ----
 
 export function useFilamentTypes(options?: QueryOptions<FilamentTypeDto[]>) {
   return useQuery({

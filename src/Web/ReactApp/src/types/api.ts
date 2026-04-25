@@ -726,6 +726,8 @@ export interface UpdatePrinterDto {
   // Z-offset calibration
   /** Calibrated Z-offset in mm. Negative values move the nozzle closer to the bed. */
   zOffsetMm?: number;
+  /** Bed surface type ID. Set to empty string to clear. */
+  bedTypeId?: string;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }

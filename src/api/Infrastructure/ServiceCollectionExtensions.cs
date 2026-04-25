@@ -183,6 +183,9 @@ public static class ServiceCollectionExtensions
         // Printer group service
         _ = services.AddScoped<Farm.Infrastructure.Services.PrinterGroups.IPrinterGroupService, Farm.Infrastructure.Services.PrinterGroups.PrinterGroupService>();
 
+        // Bed type service
+        _ = services.AddScoped<Farm.Infrastructure.Services.BedTypes.IBedTypeService, Farm.Infrastructure.Services.BedTypes.BedTypeService>();
+
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
         _ = services.AddSingleton(autoDispatchTrigger);

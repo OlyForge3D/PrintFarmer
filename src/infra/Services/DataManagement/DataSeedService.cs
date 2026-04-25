@@ -34,6 +34,7 @@ public class DataSeedService : IDataSeedService
 
         await SeedManufacturersAsync();
         await SeedFilamentTypesAsync();
+        await SeedBedTypesAsync();
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
         await SeedMaintenanceTasksAsync();
@@ -123,6 +124,53 @@ public class DataSeedService : IDataSeedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding filament types: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Seeds default bed surface types. These are system types that cannot be deleted by users.
+    /// </summary>
+    public async Task SeedBedTypesAsync()
+    {
+        try
+        {
+            var defaultBedTypes = new (string Name, string Description, string Color)[]
+            {
+                ("PEI Smooth", "Smooth PEI (polyetherimide) sheet — excellent adhesion for PLA, PETG", "#4CAF50"),
+                ("PEI Textured", "Textured PEI powder-coated sheet — easy release, matte finish", "#8BC34A"),
+                ("Glass", "Borosilicate glass bed — flat surface, good for PLA with adhesive", "#2196F3"),
+                ("BuildTak", "BuildTak adhesive sheet — strong adhesion, good for ABS", "#FF9800"),
+                ("Spring Steel", "Flexible spring steel sheet — magnetic, easy print removal", "#9E9E9E"),
+                ("Garolite", "Garolite (G10/FR4) sheet — ideal for nylon and high-temp materials", "#795548"),
+            };
+
+            _logger.LogInformation("[SeedData] Seeding {Count} default bed types", defaultBedTypes.Length);
+
+            foreach ((string name, string description, string color) in defaultBedTypes)
+            {
+                bool exists = await _context.BedTypes.AnyAsync(b => b.Name == name);
+                if (!exists)
+                {
+                    _context.BedTypes.Add(new BedType
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = name,
+                        Description = description,
+                        Color = color,
+                        IsSystem = true,
+                        CreatedDate = DateTimeOffset.UtcNow,
+                        UpdatedDate = DateTimeOffset.UtcNow,
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Bed types seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding bed types: {Message}", ex.Message);
             throw;
         }
     }

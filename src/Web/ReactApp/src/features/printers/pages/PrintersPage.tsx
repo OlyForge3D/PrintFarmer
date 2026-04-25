@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities } from '@/common/hooks/useApi';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -65,6 +65,8 @@ export function PrintersPage() {
     isLoading,
     refetch: refetchPrinters
   } = usePrinters();
+
+  const { data: bedTypes = [] } = useBedTypes();
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
@@ -161,6 +163,7 @@ export function PrintersPage() {
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
+  const [bedTypeFilter, setBedTypeFilter] = useState<string>('all');
   const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
     const saved = localStorage.getItem('printerSortMode');
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
@@ -217,6 +220,10 @@ export function PrintersPage() {
         return new Date(p.estimatedCompletionTimeUtc).getTime() <= cutoffMs;
       });
     }
+    // Bed type filter
+    if (bedTypeFilter !== 'all') {
+      filtered = filtered.filter(p => p.bedTypeId === bedTypeFilter);
+    }
     // Sort based on selected mode
     filtered.sort((a, b) => {
       if (sortMode === 'state') {
@@ -238,7 +245,7 @@ export function PrintersPage() {
       return 0;
     });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds]);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -458,6 +465,25 @@ export function PrintersPage() {
                     <option value="24">≤ 24 hours</option>
                   </Select>
                 </div>
+
+                {/* Bed Type Filter */}
+                {bedTypes.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="bed-type-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Bed:</label>
+                    <Select
+                      id="bed-type-filter"
+                      value={bedTypeFilter}
+                      onChange={e => setBedTypeFilter(e.target.value)}
+                      aria-label="Filter by bed type"
+                      className="min-w-0"
+                    >
+                      <option value="all">All Beds</option>
+                      {bedTypes.map(bt => (
+                        <option key={bt.id} value={bt.id}>{bt.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
 
                 {/* Sort Order */}
                 <div className="flex items-center gap-2">

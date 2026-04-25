@@ -221,6 +221,12 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
+    name: 'Bed Types',
+    href: '/admin/bed-types',
+    icon: LayersIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
     name: 'Webhooks',
     href: '/admin/webhooks',
     icon: ExternalLinkIcon,
