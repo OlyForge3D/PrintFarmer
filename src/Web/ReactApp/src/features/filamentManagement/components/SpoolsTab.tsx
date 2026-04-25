@@ -1,5 +1,6 @@
 import { useState, useEffect, useTransition, useCallback, useMemo, useRef } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
+import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
   FilterIcon,
   RefreshIcon,
@@ -71,18 +72,72 @@ export function SpoolsTab() {
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const importCsvMutation = useImportSpoolmanSpoolsCsv();
   const [,startTransition] = useTransition();
-  const [currentPage, setCurrentPage] = useState(0);
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    material: '',
-    vendor: '',
-    color: '',
-    pageSize: 50,
-    location: '',
-    showEmpty: false
+
+  const {
+    search: urlSearch,
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    location: urlLocation,
+    showEmpty: urlShowEmpty,
+    pageSize: urlPageSize,
+    sortField: urlSortField,
+    sortDir: urlSortDir,
+    page: urlPage,
+    setSearch,
+    setMaterial,
+    setVendor,
+    setColor,
+    setLocation,
+    setShowEmpty,
+    setPageSize,
+    setSortField: urlSetSortField,
+    setSortDir: urlSetSortDir,
+    setPage,
+    resetAll,
+    hasActiveFilters: urlHasActiveFilters,
+  } = useUrlFilterState({
+    search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
+    material: { key: 'material', type: 'string', defaultValue: '' },
+    vendor: { key: 'vendor', type: 'string', defaultValue: '' },
+    color: { key: 'color', type: 'string', defaultValue: '' },
+    location: { key: 'location', type: 'string', defaultValue: '' },
+    showEmpty: { key: 'showEmpty', type: 'boolean', defaultValue: false },
+    pageSize: { key: 'pageSize', type: 'number', defaultValue: 50 },
+    sortField: { key: 'sort', type: 'string', defaultValue: 'id' },
+    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc' },
+    page: { key: 'page', type: 'number', defaultValue: 0 },
   });
-  const [sortField, setSortField] = useState<string>('id');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const currentPage = urlPage as number;
+  const setCurrentPage = setPage;
+  const filters: FilterState = {
+    search: urlSearch,
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    pageSize: urlPageSize as number,
+    location: urlLocation,
+    showEmpty: urlShowEmpty as boolean,
+  };
+  const setFilters = useCallback((updater: FilterState | ((prev: FilterState) => FilterState)) => {
+    const newVal = typeof updater === 'function' ? updater(filters) : updater;
+    setSearch(newVal.search);
+    setMaterial(newVal.material);
+    setVendor(newVal.vendor);
+    setColor(newVal.color);
+    setLocation(newVal.location);
+    setShowEmpty(newVal.showEmpty);
+    setPageSize(newVal.pageSize);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearch, urlMaterial, urlVendor, urlColor, urlLocation, urlShowEmpty, urlPageSize, setSearch, setMaterial, setVendor, setColor, setLocation, setShowEmpty, setPageSize]);
+  const sortField = urlSortField as string;
+  const setSortField = useCallback((v: string) => urlSetSortField(v), [urlSetSortField]);
+  const sortDir = urlSortDir as 'asc' | 'desc';
+  const setSortDir = useCallback((v: 'asc' | 'desc' | ((prev: 'asc' | 'desc') => 'asc' | 'desc')) => {
+    const newVal = typeof v === 'function' ? v(sortDir) : v;
+    urlSetSortDir(newVal);
+  }, [urlSetSortDir, sortDir]);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
     const saved = localStorage.getItem('spools-view-mode');
     return saved === 'table' ? 'table' : 'cards';
@@ -237,10 +292,9 @@ export function SpoolsTab() {
     });
   };
 
-  const hasActiveSpoolFilters = filters.search !== '' || filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.location !== '' || filters.showEmpty;
+  const hasActiveSpoolFilters = urlHasActiveFilters;
   const resetSpoolFilters = () => {
-    setFilters(prev => ({ ...prev, search: '', material: '', vendor: '', color: '', location: '', showEmpty: false }));
-    setCurrentPage(0);
+    resetAll();
   };
 
   const loadSpools = useCallback(async () => {
