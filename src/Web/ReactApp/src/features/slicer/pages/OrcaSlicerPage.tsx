@@ -194,7 +194,7 @@ export const OrcaSlicerPage: React.FC = () => {
           id: model.id,
           url: `${apiBase}/3d-models/file/${model.id}`,
           fileName: model.originalFileName || model.fileName,
-          fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : 'stl',
+          fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : ext === 'step' || ext === 'stp' ? 'step' : 'stl',
           position: [0, 0, 0],
           rotation: [0, 0, 0],
           scale: [1, 1, 1],
@@ -236,7 +236,7 @@ export const OrcaSlicerPage: React.FC = () => {
     // For now, just toggle a simple file input
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.stl,.3mf,.ply,.obj';
+    input.accept = '.stl,.3mf,.ply,.obj,.step,.stp';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
@@ -253,7 +253,7 @@ export const OrcaSlicerPage: React.FC = () => {
             id: uploaded.id,
             url: `${apiBase}/3d-models/file/${uploaded.id}`,
             fileName: file.name,
-            fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : 'stl',
+            fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : ext === 'step' || ext === 'stp' ? 'step' : 'stl',
             position: [0, 0, 0],
             rotation: [0, 0, 0],
             scale: [1, 1, 1],

@@ -192,12 +192,12 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
         <div className="flex flex-col items-center space-y-2">
           <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
           <p className="text-sm font-medium text-pf-text-secondary">Drag files here or click to browse</p>
-          <p className="text-xs text-pf-text-tertiary">STL, 3MF, OBJ, PLY</p>
+          <p className="text-xs text-pf-text-tertiary">STL, 3MF, OBJ, PLY, STEP</p>
         </div>
         <FileUpload
           id="model-file-upload"
           multiple
-          accept=".stl,.3mf,.obj,.ply"
+          accept=".stl,.3mf,.obj,.ply,.step,.stp"
           onChange={handleFileSelect}
           buttonText="Browse Files"
           buttonVariant="secondary"

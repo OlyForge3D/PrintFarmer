@@ -38,7 +38,7 @@ x-orcaslicer-build: &orcaslicer-build
   target: orcaslicer-worker
   args:
     ALLOW_STUB: "false"
-    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.2}
 
 # Volume definitions
 x-worker-volumes: &worker-volumes

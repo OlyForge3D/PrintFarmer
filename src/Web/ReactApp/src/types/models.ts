@@ -13,7 +13,7 @@ export interface Model {
   name: string;
   fileName: string;
   fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
+  fileType: 'stl' | '3mf' | 'obj' | 'ply' | 'step' | 'stp';
   uploadedAt: string;
   url?: string;
   thumbnailUrl?: string;

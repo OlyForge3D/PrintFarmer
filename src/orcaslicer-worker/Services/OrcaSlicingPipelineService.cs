@@ -149,7 +149,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
             if (string.IsNullOrEmpty(fileName))
             {
-                fileName = $"model_{i}{(url.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase) ? ".3mf" : ".stl")}";
+                fileName = $"model_{i}{(url.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase) ? ".3mf" : url.EndsWith(".step", StringComparison.OrdinalIgnoreCase) ? ".step" : url.EndsWith(".stp", StringComparison.OrdinalIgnoreCase) ? ".stp" : ".stl")}";
             }
 
             // Ensure unique filenames when multiple models share the same name

@@ -304,7 +304,7 @@ ORCA_WORKER_COUNT=2
 ENABLE_ORCA_WORKER=yes
 ENABLE_SPOOLMAN=yes
 SPOOLMAN_BASE_URL=http://spoolman:7912
-ORCASLICER_VERSION=2.3.1
+ORCASLICER_VERSION=2.3.2
 EOF
     
     # Run deployment to generate environment file from repo root

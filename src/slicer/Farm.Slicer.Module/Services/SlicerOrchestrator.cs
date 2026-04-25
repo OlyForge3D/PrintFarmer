@@ -481,8 +481,8 @@ public class SlicerOrchestrator(
         }
     }
 
-    private static readonly string[] s_orcaSupportedExtensions = [".stl", ".3mf", ".obj"]; // reuse to avoid repeated allocations
-    private static readonly string[] s_prusaSupportedExtensions = [".stl", ".3mf", ".obj"]; // same set currently
+    private static readonly string[] s_orcaSupportedExtensions = [".stl", ".3mf", ".obj", ".step", ".stp"]; // OrcaSlicer 2.2+ supports STEP via OpenCASCADE
+    private static readonly string[] s_prusaSupportedExtensions = [".stl", ".3mf", ".obj", ".step", ".stp"]; // PrusaSlicer 2.8+ supports STEP
 
     private static Dictionary<SlicerEngineType, EngineMetadata> BuildStaticCatalog() =>
         new()

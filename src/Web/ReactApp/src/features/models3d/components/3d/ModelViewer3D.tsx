@@ -16,7 +16,7 @@ import { Button } from '@/common/components/ui/Button';
 
 export interface ModelViewerProps {
   modelUrl: string;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
+  fileType: 'stl' | '3mf' | 'obj' | 'ply' | 'step' | 'stp';
   showGrid?: boolean;
   showAxes?: boolean;
   autoRotate?: boolean;
@@ -726,6 +726,18 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
     }
   };
+
+  // STEP/STP files are supported for slicing but cannot be previewed in browser (Three.js has no STEP loader)
+  if (fileType === 'step' || fileType === 'stp') {
+    return (
+      <div className={`${className} flex items-center justify-center bg-pf-bg-1 rounded-lg border border-pf-border`}>
+        <div className="text-center">
+          <p className="text-pf-text-secondary font-medium">Preview not available for STEP files</p>
+          <p className="text-pf-text-tertiary text-sm mt-1">STEP files can still be sliced by OrcaSlicer and PrusaSlicer</p>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
