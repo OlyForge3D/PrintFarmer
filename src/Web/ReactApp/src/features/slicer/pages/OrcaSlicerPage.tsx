@@ -2,7 +2,7 @@
  * OrcaSlicer-Style Slice Job Page
  * A full-screen slicer interface matching OrcaSlicer's layout
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as THREE from 'three';
@@ -16,6 +16,7 @@ import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
+import type { PlateManagerState } from '@/features/slicer/utils/plateManager';
 import { SlicerSettingsPanel, type OrcaProcessSettings } from '@/features/slicer/components/settings';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
@@ -63,6 +64,11 @@ export const OrcaSlicerPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [slicing, setSlicing] = useState(false);
+  const plateStateRef = useRef<PlateManagerState | null>(null);
+
+  const handlePlateStateChange = useCallback((state: PlateManagerState) => {
+    plateStateRef.current = state;
+  }, []);
 
   // === Queries ===
   const { data: availableWorkers = [] } = useQuery<WorkerResponse[], Error>({
@@ -317,8 +323,17 @@ export const OrcaSlicerPage: React.FC = () => {
   }, []);
 
   const handleSlice = useCallback(() => {
-    if (loadedModels.length === 0) {
-      setError('Please add a model to slice');
+    // Determine which models belong to the active plate
+    const ps = plateStateRef.current;
+    const activePlateModelIds = ps
+      ? new Set(ps.plates.find(p => p.id === ps.activePlateId)?.modelIds ?? [])
+      : null;
+    const plateModels = activePlateModelIds
+      ? loadedModels.filter(m => activePlateModelIds.has(m.id))
+      : loadedModels;
+
+    if (plateModels.length === 0) {
+      setError('Please add a model to the active plate to slice');
       return;
     }
     if (!user?.id) {
@@ -327,7 +342,7 @@ export const OrcaSlicerPage: React.FC = () => {
     }
 
     // Find first model with a valid server URL (not a blob URL from a failed upload)
-    const model = loadedModels.find(m => m.url && !m.url.startsWith('blob:')) ?? loadedModels[0];
+    const model = plateModels.find(m => m.url && !m.url.startsWith('blob:')) ?? plateModels[0];
     if (model.url.startsWith('blob:')) {
       setError('No uploadable model available — all models have local-only blob URLs. Please re-add a model.');
       toast.warning('Cannot slice: model files were not uploaded to server.');
@@ -347,13 +362,15 @@ export const OrcaSlicerPage: React.FC = () => {
       slicerProfileId: selectedProcessPresetId || undefined,
       requiredCapabilitiesJson: JSON.stringify(capabilities),
       priority,
-      // Multi-model support: collect all server-hosted model URLs
-      modelFileUrls: loadedModels.length > 1
-        ? loadedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
+      // Multi-model support: collect all server-hosted model URLs for the active plate.
+      // NOTE (v1 limitation): Models created via the Text Tool use blob: URLs and are
+      // excluded here. A future version should upload text STLs as temp models first.
+      modelFileUrls: plateModels.length > 1
+        ? plateModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
         : undefined,
       // Per-model transforms: send each model's transform alongside its URL
-      modelFileTransforms: loadedModels.length > 1
-        ? loadedModels
+      modelFileTransforms: plateModels.length > 1
+        ? plateModels
             .filter(m => m.url && !m.url.startsWith('blob:'))
             .map(m => JSON.stringify({ rotation: m.rotation, scale: m.scale, position: m.position }))
         : undefined,
@@ -513,6 +530,7 @@ export const OrcaSlicerPage: React.FC = () => {
             slicesRemaining={30}
             slicesTotal={30}
             onModelsReplace={handleModelsReplace}
+            onPlateStateChange={handlePlateStateChange}
           />
         </div>
       </div>

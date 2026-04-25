@@ -11,9 +11,10 @@ import {
   ScaleToolIcon,
   LayersViewIcon,
   GridIcon,
+  TextToolIcon,
 } from './SlicerToolbarIcons';
 
-export type ToolType = 'move' | 'rotate' | 'scale' | 'layers';
+export type ToolType = 'move' | 'rotate' | 'scale' | 'layers' | 'text';
 
 interface ToolButtonProps {
   icon: React.ReactNode;
@@ -53,6 +54,8 @@ export interface SlicerLeftToolsProps {
   hasSelection?: boolean;
   showGridLines?: boolean;
   onGridToggle?: () => void;
+  textToolActive?: boolean;
+  onTextTool?: () => void;
 }
 
 export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
@@ -63,6 +66,8 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
   hasSelection = false,
   showGridLines = false,
   onGridToggle,
+  textToolActive = false,
+  onTextTool,
 }) => {
   return (
     <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10 pointer-events-none">
@@ -104,6 +109,16 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
           title="Toggle Grid (G)"
           active={showGridLines}
           onClick={onGridToggle}
+        />
+      </div>
+
+      {/* Text annotation tool */}
+      <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg pointer-events-auto">
+        <ToolButton
+          icon={<TextToolIcon />}
+          title="3D Text (A)"
+          active={textToolActive}
+          onClick={onTextTool}
         />
       </div>
     </div>

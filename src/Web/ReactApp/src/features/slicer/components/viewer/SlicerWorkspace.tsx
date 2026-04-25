@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/preserve-manual-memoization -- Complex R3F component; compiler cannot infer deps for 3D scene callbacks */
 /**
  * Slicer Workspace Component
  * Main container combining toolbar, 3D bed visualization, left tools, and status bar
@@ -11,9 +12,34 @@ import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
 import { SlicerBedVisualization, type LoadedModel, type BedConfig } from './SlicerBedVisualization';
+import { TextTool, type TextToolConfig } from './TextTool';
+import { generateTextGeometry, geometryToStlBlobUrl } from '@/features/models3d/utils/textGeometry';
+import { PlateTabBar } from './PlateTabBar';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
+import {
+  type PrintheadClearance,
+  type ModelFootprint,
+  type SequentialPrintOrder,
+  DEFAULT_PRINTHEAD_CLEARANCE,
+  computeClearanceZones,
+  computePrintOrder,
+} from '../../utils/sequentialPrinting';
+import { ClearanceZoneOverlay } from './ClearanceZoneOverlay';
+import { SequentialPrintPanel } from './SequentialPrintPanel';
+import {
+  type PlateManagerState,
+  createInitialPlateState,
+  addPlate,
+  removePlate,
+  setActivePlate,
+  addModelToActivePlate,
+  removeModelFromPlates,
+  renamePlate,
+  duplicatePlate,
+  getModelsForPlate,
+} from '@/features/slicer/utils/plateManager';
 
 export interface SlicerWorkspaceProps {
   /** Bed configuration including dimensions */
@@ -56,6 +82,8 @@ export interface SlicerWorkspaceProps {
   sidebarOpen?: boolean;
   /** Callback when models need to be replaced (e.g., after cut) */
   onModelsReplace?: (removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => void;
+  /** Called whenever the plate state changes so the parent can read active plate for slicing */
+  onPlateStateChange?: (state: PlateManagerState) => void;
   /** Additional CSS class */
   className?: string;
 }
@@ -112,6 +140,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   onToggleSidebar,
   sidebarOpen = true,
   onModelsReplace,
+  onPlateStateChange,
   className = '',
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
@@ -127,10 +156,57 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [seamPaintMode, setSeamPaintMode] = useState(false);
   const [supportPaintData, setSupportPaintData] = useState<Map<string, Set<number>>>(new Map());
   const [seamPaintData, setSeamPaintData] = useState<Map<string, Set<number>>>(new Map());
+  const [textToolActive, setTextToolActive] = useState(false);
+  const [textPlacementMode, setTextPlacementMode] = useState(false);
+  const [textToolConfig, setTextToolConfig] = useState<TextToolConfig | null>(null);
+  const [sequentialMode, setSequentialMode] = useState(false);
+  const [printheadClearance, setPrintheadClearance] = useState<PrintheadClearance>(DEFAULT_PRINTHEAD_CLEARANCE);
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
   const blobUrlsRef = useRef<Set<string>>(new Set());
+
+  // --- Multi-plate state ---
+  const [plateState, setPlateState] = useState<PlateManagerState>(() => createInitialPlateState());
+
+  const handleAddPlate = useCallback(() => setPlateState(s => addPlate(s)), [setPlateState]);
+  const handleRemovePlate = useCallback((id: string) => setPlateState(s => removePlate(s, id)), [setPlateState]);
+  const handleActivePlateChange = useCallback((id: string) => setPlateState(s => setActivePlate(s, id)), [setPlateState]);
+  const handleRenamePlate = useCallback((id: string, name: string) => setPlateState(s => renamePlate(s, id, name)), [setPlateState]);
+  const handleDuplicatePlate = useCallback((id: string) => setPlateState(s => duplicatePlate(s, id)), [setPlateState]);
+
+  // Sync plate assignments when models change (React-recommended render-time reset pattern)
+  const [prevModelIdKey, setPrevModelIdKey] = useState(() => models.map(m => m.id).join(','));
+  const modelIdKey = models.map(m => m.id).join(',');
+  if (modelIdKey !== prevModelIdKey) {
+    setPrevModelIdKey(modelIdKey);
+    const prevIds = new Set(prevModelIdKey.split(',').filter(Boolean));
+    const currentIds = new Set(models.map(m => m.id));
+    let nextState = plateState;
+    let changed = false;
+    for (const id of currentIds) {
+      if (!prevIds.has(id)) { nextState = addModelToActivePlate(nextState, id); changed = true; }
+    }
+    for (const id of prevIds) {
+      if (!currentIds.has(id)) { nextState = removeModelFromPlates(nextState, id); changed = true; }
+    }
+    if (changed) setPlateState(nextState);
+  }
+
+  // Filter models to active plate
+  const activePlateModelIds = useMemo(
+    () => new Set(getModelsForPlate(plateState, plateState.activePlateId)),
+    [plateState],
+  );
+  const visibleModels = useMemo(
+    () => models.filter(m => activePlateModelIds.has(m.id)),
+    [models, activePlateModelIds],
+  );
+
+  // Notify parent of plate state changes
+  useEffect(() => {
+    onPlateStateChange?.(plateState);
+  }, [plateState, onPlateStateChange]);
 
   // Revoke all tracked blob URLs on unmount to prevent memory leaks
   useEffect(() => {
@@ -158,8 +234,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     currentScale: [number, number, number];
   } | null>(null);
 
-  const hasModels = models.length > 0;
-  const hasSelection = selectedModelId != null && models.some(m => m.id === selectedModelId);
+  const hasModels = visibleModels.length > 0;
+  const hasSelection = selectedModelId != null && visibleModels.some(m => m.id === selectedModelId);
 
   // Compute which models exceed the build volume.
   // For each model we approximate the axis-aligned bounding box from
@@ -216,6 +292,70 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
     return ids;
   }, [bedConfig.depth, bedConfig.height, bedConfig.width, models, selectedModelMetrics]);
+
+  // Sequential printing: derive model footprints from loaded models' bounding boxes
+  // NOTE (v1 limitation): selectedModelMetrics only holds dimensions for the
+  // currently selected model. Non-selected models fall back to a 30mm cube.
+  // A future version should store per-model metrics in a Map for accuracy.
+  const modelFootprints: ModelFootprint[] = useMemo(() => {
+    if (!sequentialMode || visibleModels.length < 2) return [];
+    return visibleModels.map((model) => {
+      // Approximate bounding box using known metrics or scale
+      let bx: number, by: number, bz: number;
+      if (selectedModelMetrics && selectedModelMetrics.modelId === model.id) {
+        bx = selectedModelMetrics.baseSize[0] * model.scale[0];
+        by = selectedModelMetrics.baseSize[1] * model.scale[1];
+        bz = selectedModelMetrics.baseSize[2] * model.scale[2];
+      } else {
+        // Without geometry metrics we use scale as a rough proxy
+        bx = 30 * model.scale[0];
+        by = 30 * model.scale[1];
+        bz = 30 * model.scale[2];
+      }
+      return {
+        modelId: model.id,
+        minX: model.position[0] - bx / 2,
+        maxX: model.position[0] + bx / 2,
+        minY: model.position[1] - by / 2,
+        maxY: model.position[1] + by / 2,
+        height: bz,
+      };
+    });
+  }, [sequentialMode, visibleModels, selectedModelMetrics]);
+
+  const sequentialClearanceZones = useMemo(
+    () => (sequentialMode ? computeClearanceZones(modelFootprints, printheadClearance) : []),
+    [sequentialMode, modelFootprints, printheadClearance],
+  );
+
+  const sequentialPrintOrder: SequentialPrintOrder = useMemo(
+    () =>
+      sequentialMode && modelFootprints.length >= 2
+        ? computePrintOrder(modelFootprints, printheadClearance)
+        : { order: visibleModels.map((m) => m.id), collisions: [], feasible: true },
+    [sequentialMode, modelFootprints, printheadClearance, visibleModels],
+  );
+
+  const sequentialModelNames = useMemo(
+    () => new Map(visibleModels.map((m) => [m.id, m.fileName])),
+    [visibleModels],
+  );
+
+  const sequentialModelPositions = useMemo(
+    () => new Map(visibleModels.map((m) => [m.id, m.position[1]])),
+    [visibleModels],
+  );
+
+  const handleSequentialToggle = useCallback((value?: boolean) => {
+    const next = value ?? !sequentialMode;
+    if (next && visibleModels.length < 2) {
+      toast.info('Add at least 2 models for sequential printing');
+      return;
+    }
+    setSequentialMode(next);
+    toast.info(next ? 'Sequential mode: print objects one at a time' : 'Sequential mode off');
+  }, [sequentialMode, visibleModels.length]);
+
   const radToDeg = (radians: number) => radians * (180 / Math.PI);
   const degToRad = (degrees: number) => degrees * (Math.PI / 180);
 
@@ -399,16 +539,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   // Toolbar action handlers
   const handleArrange = useCallback(() => {
-    if (!onModelTransform || models.length === 0) return;
+    if (!onModelTransform || visibleModels.length === 0) return;
 
-    const cols = Math.max(1, Math.ceil(Math.sqrt(models.length)));
-    const rows = Math.max(1, Math.ceil(models.length / cols));
+    const cols = Math.max(1, Math.ceil(Math.sqrt(visibleModels.length)));
+    const rows = Math.max(1, Math.ceil(visibleModels.length / cols));
     const stepX = bedConfig.width / (cols + 1);
     const stepY = bedConfig.depth / (rows + 1);
 
     const deltas: TransformDelta[] = [];
 
-    models.forEach((model, index) => {
+    visibleModels.forEach((model, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
 
@@ -439,7 +579,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (deltas.length > 0) {
       pushHistoryEntry({ action: 'Auto Arrange', deltas });
     }
-  }, [bedConfig.depth, bedConfig.width, handleModelTransform, models, onModelTransform, pushHistoryEntry, triplesEqual]);
+  }, [bedConfig.depth, bedConfig.width, handleModelTransform, visibleModels, onModelTransform, pushHistoryEntry, triplesEqual]);
 
   const handleOrient = useCallback(() => {
     if (!onModelTransform) return;
@@ -473,6 +613,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setSeamPaintMode(false);
     setMeasureMode(false);
     setLayFlatMode(false);
+    setTextToolActive(false);
+    setTextPlacementMode(false);
+    setTextToolConfig(null);
   }, []);
 
   const handleCut = useCallback(() => {
@@ -528,6 +671,62 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setSeamPaintMode(true);
     toast.info('Seam paint: left-click to paint, right-click to erase, Escape to exit');
   }, [hasSelection, seamPaintMode, exitAllToolModes]);
+
+  const handleTextTool = useCallback(() => {
+    if (textToolActive) {
+      setTextToolActive(false);
+      setTextPlacementMode(false);
+      setTextToolConfig(null);
+      return;
+    }
+    exitAllToolModes();
+    setTextToolActive(true);
+  }, [textToolActive, exitAllToolModes]);
+
+  const handleStartTextPlacement = useCallback((config: TextToolConfig) => {
+    setTextToolConfig(config);
+    setTextPlacementMode(true);
+    toast.info('Click on a model surface to place text');
+  }, []);
+
+  const handleCancelTextTool = useCallback(() => {
+    setTextToolActive(false);
+    setTextPlacementMode(false);
+    setTextToolConfig(null);
+  }, []);
+
+  const handleTextPlace = useCallback(async (point: THREE.Vector3, normal: THREE.Vector3) => {
+    if (!textToolConfig || !onModelsReplace) return;
+    setTextPlacementMode(false);
+
+    try {
+      const { geometry, width, height } = await generateTextGeometry(textToolConfig);
+      const blobUrl = geometryToStlBlobUrl(geometry);
+      // Dispose the transient geometry — it was only needed for STL serialization
+      geometry.dispose();
+      blobUrlsRef.current.add(blobUrl);
+
+      // Build rotation quaternion to align text extrusion (local +Z) with surface normal
+      const quat = new THREE.Quaternion();
+      quat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+      const euler = new THREE.Euler().setFromQuaternion(quat);
+
+      const newModel: LoadedModel = {
+        id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        fileName: `text_${textToolConfig.text.slice(0, 16).replace(/\s+/g, '_')}.stl`,
+        url: blobUrl,
+        position: [point.x, point.y, point.z],
+        rotation: [euler.x, euler.y, euler.z],
+        scale: [1, 1, 1],
+      };
+
+      // Use a non-existent removedId to add without removing
+      onModelsReplace('__text_add__', [newModel]);
+      toast.success(`Placed "${textToolConfig.text}" (${width.toFixed(1)}×${height.toFixed(1)} mm)`);
+    } catch (err) {
+      toast.error(`Failed to generate text: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [textToolConfig, onModelsReplace]);
 
   const handleCutComplete = useCallback((geometryAbove: THREE.BufferGeometry, geometryBelow: THREE.BufferGeometry) => {
     if (!selectedModelId) return;
@@ -696,7 +895,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
 
       if (event.key === 'Escape') {
-        if (cutMode || supportPaintMode || seamPaintMode || measureMode || layFlatMode) {
+        if (cutMode || supportPaintMode || seamPaintMode || measureMode || layFlatMode || textToolActive) {
           event.preventDefault();
           exitAllToolModes();
           toast.info('Tool mode exited');
@@ -704,9 +903,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         }
       }
 
-      if (!hasSelection) return;
-
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      // Text tool shortcut works without selection (raycasts any model)
+      if (event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        handleTextTool();
+        return;
+      }
+
+      if (!hasSelection) return;
 
       const key = event.key.toLowerCase();
       if (key === 't') {
@@ -723,7 +929,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, measureMode, layFlatMode, exitAllToolModes]);
+  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleTextTool]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
@@ -810,6 +1016,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         cutActive={cutMode}
         supportPaintActive={supportPaintMode}
         seamPaintActive={seamPaintMode}
+        onSequentialToggle={handleSequentialToggle}
+        sequentialActive={sequentialMode}
+      />
+
+      {/* Plate Tab Bar */}
+      <PlateTabBar
+        plates={plateState.plates}
+        activePlateId={plateState.activePlateId}
+        onActivePlateChange={handleActivePlateChange}
+        onAddPlate={handleAddPlate}
+        onRemovePlate={handleRemovePlate}
+        onRenamePlate={handleRenamePlate}
+        onDuplicatePlate={handleDuplicatePlate}
       />
 
       {/* Main content area with 3D bed and left tools */}
@@ -817,7 +1036,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         {/* 3D Bed Visualization */}
         <SlicerBedVisualization
           bedConfig={bedConfig}
-          models={models}
+          models={visibleModels}
           selectedModelId={selectedModelId}
           onModelSelect={onModelSelect}
           transformMode={transformMode}
@@ -839,10 +1058,23 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           seamPaintMode={seamPaintMode}
           seamPaintData={seamPaintData}
           onSeamPaintUpdate={handleSeamPaintUpdate}
+          textPlacementMode={textPlacementMode}
+          onTextPlace={handleTextPlace}
           showGrid={true}
           showAxes={true}
           showGridLines={showGridLines}
           className="w-full h-full"
+          sceneOverlay={
+            sequentialMode && visibleModels.length >= 2 ? (
+              <ClearanceZoneOverlay
+                zones={sequentialClearanceZones}
+                collisions={sequentialPrintOrder.collisions}
+                models={modelFootprints}
+                clearanceHeight={printheadClearance.clearanceHeight}
+                visible={true}
+              />
+            ) : undefined
+          }
         />
 
         {/* Out-of-bounds warning banner */}
@@ -851,6 +1083,28 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
             <AlertTriangle size={14} className="shrink-0" />
             <span>Object outside build volume</span>
           </div>
+        )}
+
+        {/* Sequential printing panel */}
+        {sequentialMode && visibleModels.length >= 2 && (
+          <SequentialPrintPanel
+            enabled={sequentialMode}
+            onToggle={handleSequentialToggle}
+            clearance={printheadClearance}
+            onClearanceChange={setPrintheadClearance}
+            printOrder={sequentialPrintOrder}
+            modelNames={sequentialModelNames}
+            modelPositions={sequentialModelPositions}
+          />
+        )}
+
+        {/* Text tool panel */}
+        {textToolActive && (
+          <TextTool
+            placementMode={textPlacementMode}
+            onStartPlacement={handleStartTextPlacement}
+            onCancel={handleCancelTextTool}
+          />
         )}
 
         {/* Left manipulation tools */}
@@ -862,10 +1116,12 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           hasSelection={hasSelection}
           showGridLines={showGridLines}
           onGridToggle={() => setShowGridLines(prev => !prev)}
+          textToolActive={textToolActive}
+          onTextTool={handleTextTool}
         />
 
         {/* Non-modal transform panel: can be used alongside gizmo controls */}
-        {hasSelection && activeTool && activeTool !== 'layers' && (
+        {hasSelection && activeTool && activeTool !== 'layers' && activeTool !== 'text' && (
           <div className="absolute right-4 bottom-8 z-20 w-80 rounded-md border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-3">
             <div className="text-sm font-semibold text-pf-text-primary mb-2">
               {activeTool === 'move' ? 'Move' : activeTool === 'rotate' ? 'Rotate' : 'Scale'}
@@ -946,7 +1202,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
       {/* Bottom Status Bar */}
       <SlicerStatusBar
-        objectCount={models.length}
+        objectCount={visibleModels.length}
         bedWidth={bedConfig.width}
         bedDepth={bedConfig.depth}
         bedHeight={bedConfig.height}

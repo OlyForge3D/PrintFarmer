@@ -121,6 +121,19 @@ export const InfoIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
   </svg>
 );
 
+/** Sequential/by-object print mode icon — shows stacked objects with numbering */
+export const SequentialIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="14" width="7" height="7" rx="1" fill="#009688" fillOpacity="0.15" stroke="#009688" strokeWidth="1.2" />
+    <rect x="14" y="14" width="7" height="7" rx="1" fill="#009688" fillOpacity="0.15" stroke="#009688" strokeWidth="1.2" />
+    <text x="6.5" y="19.5" textAnchor="middle" fontSize="5" fill="#009688" fontWeight="bold">1</text>
+    <text x="17.5" y="19.5" textAnchor="middle" fontSize="5" fill="#009688" fontWeight="bold">2</text>
+    <path d="M6.5 13 V8 H17.5 V13" stroke="#009688" strokeWidth="1" strokeDasharray="2 1.5" fill="none" />
+    <circle cx="12" cy="5" r="2" fill="#009688" fillOpacity="0.2" stroke="#009688" strokeWidth="1" />
+    <path d="M11 5 L13 5 M12 4 L12 6" stroke="#009688" strokeWidth="0.8" strokeLinecap="round" />
+  </svg>
+);
+
 export const GridIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
     <rect x="3" y="3" width="18" height="18" rx="1" />
@@ -128,6 +141,12 @@ export const GridIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
     <line x1="3" y1="15" x2="21" y2="15" />
     <line x1="9" y1="3" x2="9" y2="21" />
     <line x1="15" y1="3" x2="15" y2="21" />
+  </svg>
+);
+
+export const TextToolIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M9.6,14L12,7.7L14.4,14M11,5L5.5,19H7.7L8.8,16H15.2L16.3,19H18.5L13,5H11Z" />
   </svg>
 );
 
@@ -152,4 +171,6 @@ export default {
   LayersViewIcon,
   InfoIcon,
   GridIcon,
+  TextToolIcon,
+  SequentialIcon,
 };

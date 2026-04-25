@@ -105,6 +105,12 @@ export interface SlicerBedVisualizationProps {
   seamPaintData?: Map<string, Set<number>>;
   /** Called when seam paint data changes */
   onSeamPaintUpdate?: (faces: Set<number>) => void;
+  /** Whether text placement mode is active (crosshair, click to place) */
+  textPlacementMode?: boolean;
+  /** Called when the user clicks a model surface during text placement */
+  onTextPlace?: (point: THREE.Vector3, normal: THREE.Vector3) => void;
+  /** Optional React Three Fiber elements to render inside the canvas scene */
+  sceneOverlay?: React.ReactNode;
 }
 
 /**
@@ -886,6 +892,7 @@ function STLModel({
     >
       <mesh
         geometry={geometry}
+        userData={{ isModelMesh: true }}
         onPointerDown={(e) => {
           e.stopPropagation();
           onClick?.();
@@ -1019,6 +1026,7 @@ function PrebuiltSTLModel({
     >
       <mesh
         geometry={geometry}
+        userData={{ isModelMesh: true }}
         onPointerDown={(e) => {
           e.stopPropagation();
           onClick?.();
@@ -1413,7 +1421,7 @@ function MeasureTool() {
       // Raycast against all mesh children in the scene
       const meshes: THREE.Object3D[] = [];
       scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) meshes.push(obj);
+        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh) meshes.push(obj);
       });
       const hits = raycaster.intersectObjects(meshes, false);
       if (hits.length === 0) return;
@@ -1509,6 +1517,56 @@ function MeasureTool() {
 }
 
 /**
+ * Text placement tool — rendered inside the R3F Canvas.
+ * Sets a crosshair cursor and raycasts on click to find a surface point +
+ * face normal for placing 3D text geometry.
+ */
+function TextPlacementTool({ onPlace }: { onPlace: (point: THREE.Vector3, normal: THREE.Vector3) => void }) {
+  const { camera, gl, scene } = useThree();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+
+  useEffect(() => {
+    canvasRef.current = gl.domElement;
+    canvasRef.current.style.cursor = 'crosshair';
+    return () => {
+      if (canvasRef.current) canvasRef.current.style.cursor = '';
+    };
+  }, [gl.domElement]);
+
+  useEffect(() => {
+    const el = gl.domElement;
+
+    const onClick = (e: MouseEvent) => {
+      const rect = el.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+
+      const meshes: THREE.Object3D[] = [];
+      scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh) meshes.push(obj);
+      });
+
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length === 0) return;
+
+      const hit = hits[0];
+      const point = hit.point.clone();
+      const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : new THREE.Vector3(0, 0, 1);
+      onPlace(point, normal);
+    };
+
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [camera, gl.domElement, onPlace, raycaster, scene]);
+
+  return null;
+}
+
+/**
  * Main scene content
  */
 function BedScene({
@@ -1537,6 +1595,8 @@ function BedScene({
   seamPaintMode = false,
   seamPaintData,
   onSeamPaintUpdate,
+  textPlacementMode = false,
+  onTextPlace,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
@@ -1983,6 +2043,9 @@ function BedScene({
       {/* Measure tool overlay */}
       {measureMode && <MeasureTool />}
 
+      {/* Text placement overlay */}
+      {textPlacementMode && onTextPlace && <TextPlacementTool onPlace={onTextPlace} />}
+
       {/* Cut plane overlay */}
       {cutMode && selectedModelId && onCutComplete && onCutCancel && (
         <CutPlaneOverlay
@@ -2068,6 +2131,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   seamPaintMode = false,
   seamPaintData,
   onSeamPaintUpdate,
+  textPlacementMode = false,
+  onTextPlace,
+  sceneOverlay,
 }) => {
   return (
     <div className={`w-full h-full ${className}`}>
@@ -2121,7 +2187,10 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             seamPaintMode={seamPaintMode}
             seamPaintData={seamPaintData}
             onSeamPaintUpdate={onSeamPaintUpdate}
+            textPlacementMode={textPlacementMode}
+            onTextPlace={onTextPlace}
           />
+          {sceneOverlay}
         </Suspense>
       </Canvas>
     </div>
