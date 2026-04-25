@@ -90,30 +90,35 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
     // ── Quota enforcement ───────────────────────────────────────────────
     public async Task<QuotaCheckResult> CheckQuotaAsync(Guid userId, decimal estimatedCost, int jobCount, double estimatedWeightGrams, CancellationToken ct = default)
     {
-        PrintQuota[] quotas = await db.PrintQuotas
+        // 1. Check user-level quotas
+        PrintQuota[] userQuotas = await db.PrintQuotas
             .Where(q => q.IsActive && q.UserId == userId)
             .ToArrayAsync(ct);
 
-        foreach (PrintQuota q in quotas)
+        QuotaCheckResult? denied = CheckQuotaList(userQuotas, estimatedCost, jobCount, estimatedWeightGrams);
+        if (denied is not null)
         {
-            if (IsExpired(q))
-            {
-                ResetQuota(q);
-                continue;
-            }
+            await db.SaveChangesAsync(ct);
+            return denied;
+        }
 
-            decimal projected = q.QuotaType switch
-            {
-                QuotaType.Cost => q.UsedAmount + estimatedCost,
-                QuotaType.Count => q.UsedAmount + jobCount,
-                QuotaType.Weight => q.UsedAmount + (decimal)estimatedWeightGrams,
-                _ => q.UsedAmount
-            };
+        // 2. Look up user's groups and check group-level quotas
+        string[] userGroups = await db.UserQuotaGroupMemberships
+            .Where(m => m.UserId == userId)
+            .Select(m => m.GroupName)
+            .ToArrayAsync(ct);
 
-            if (projected > q.LimitAmount)
+        if (userGroups.Length > 0)
+        {
+            PrintQuota[] groupQuotas = await db.PrintQuotas
+                .Where(q => q.IsActive && q.GroupName != null && userGroups.Contains(q.GroupName))
+                .ToArrayAsync(ct);
+
+            denied = CheckQuotaList(groupQuotas, estimatedCost, jobCount, estimatedWeightGrams);
+            if (denied is not null)
             {
-                string reason = $"Quota exceeded: {q.QuotaType} limit is {q.LimitAmount}, current usage is {q.UsedAmount}, requested {projected - q.UsedAmount}";
-                return new QuotaCheckResult(false, reason, q.Id);
+                await db.SaveChangesAsync(ct);
+                return denied;
             }
         }
 
@@ -123,25 +128,26 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
 
     public async Task DeductQuotaUsageAsync(Guid userId, decimal actualCost, double actualWeightGrams, CancellationToken ct = default)
     {
-        PrintQuota[] quotas = await db.PrintQuotas
+        // Deduct from user-level quotas
+        PrintQuota[] userQuotas = await db.PrintQuotas
             .Where(q => q.IsActive && q.UserId == userId)
             .ToArrayAsync(ct);
 
-        foreach (PrintQuota q in quotas)
-        {
-            if (IsExpired(q))
-            {
-                ResetQuota(q);
-            }
+        DeductFromQuotas(userQuotas, actualCost, actualWeightGrams);
 
-            q.UsedAmount += q.QuotaType switch
-            {
-                QuotaType.Cost => actualCost,
-                QuotaType.Count => 1,
-                QuotaType.Weight => (decimal)actualWeightGrams,
-                _ => 0
-            };
-            q.UpdatedAt = DateTime.UtcNow;
+        // Deduct from group-level quotas
+        string[] userGroups = await db.UserQuotaGroupMemberships
+            .Where(m => m.UserId == userId)
+            .Select(m => m.GroupName)
+            .ToArrayAsync(ct);
+
+        if (userGroups.Length > 0)
+        {
+            PrintQuota[] groupQuotas = await db.PrintQuotas
+                .Where(q => q.IsActive && q.GroupName != null && userGroups.Contains(q.GroupName))
+                .ToArrayAsync(ct);
+
+            DeductFromQuotas(groupQuotas, actualCost, actualWeightGrams);
         }
 
         await db.SaveChangesAsync(ct);
@@ -149,21 +155,26 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
 
     public async Task RefundQuotaUsageAsync(Guid userId, decimal refundCost, double refundWeightGrams, CancellationToken ct = default)
     {
-        PrintQuota[] quotas = await db.PrintQuotas
+        // Refund user-level quotas
+        PrintQuota[] userQuotas = await db.PrintQuotas
             .Where(q => q.IsActive && q.UserId == userId)
             .ToArrayAsync(ct);
 
-        foreach (PrintQuota q in quotas)
+        RefundQuotas(userQuotas, refundCost, refundWeightGrams);
+
+        // Refund group-level quotas
+        string[] userGroups = await db.UserQuotaGroupMemberships
+            .Where(m => m.UserId == userId)
+            .Select(m => m.GroupName)
+            .ToArrayAsync(ct);
+
+        if (userGroups.Length > 0)
         {
-            decimal refund = q.QuotaType switch
-            {
-                QuotaType.Cost => refundCost,
-                QuotaType.Count => 1,
-                QuotaType.Weight => (decimal)refundWeightGrams,
-                _ => 0
-            };
-            q.UsedAmount = Math.Max(0, q.UsedAmount - refund);
-            q.UpdatedAt = DateTime.UtcNow;
+            PrintQuota[] groupQuotas = await db.PrintQuotas
+                .Where(q => q.IsActive && q.GroupName != null && userGroups.Contains(q.GroupName))
+                .ToArrayAsync(ct);
+
+            RefundQuotas(groupQuotas, refundCost, refundWeightGrams);
         }
 
         await db.SaveChangesAsync(ct);
@@ -298,7 +309,121 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
             .ToArrayAsync(ct);
     }
 
+    // ── Group membership ────────────────────────────────────────────────
+    public async Task<string[]> GetUserGroupsAsync(Guid userId, CancellationToken ct = default)
+        => await db.UserQuotaGroupMemberships
+            .Where(m => m.UserId == userId)
+            .Select(m => m.GroupName)
+            .OrderBy(g => g)
+            .ToArrayAsync(ct);
+
+    public async Task<UserQuotaGroupMembership> AddUserToGroupAsync(Guid userId, string groupName, CancellationToken ct = default)
+    {
+        UserQuotaGroupMembership membership = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            GroupName = groupName.Trim(),
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.UserQuotaGroupMemberships.Add(membership);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Added user {UserId} to quota group {GroupName}", userId, groupName);
+        return membership;
+    }
+
+    public async Task<bool> RemoveUserFromGroupAsync(Guid userId, string groupName, CancellationToken ct = default)
+    {
+        UserQuotaGroupMembership? membership = await db.UserQuotaGroupMemberships
+            .FirstOrDefaultAsync(m => m.UserId == userId && m.GroupName == groupName, ct);
+
+        if (membership is null)
+        {
+            return false;
+        }
+
+        db.UserQuotaGroupMemberships.Remove(membership);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Removed user {UserId} from quota group {GroupName}", userId, groupName);
+        return true;
+    }
+
+    public async Task<UserQuotaGroupMembership[]> GetGroupMembersAsync(string groupName, CancellationToken ct = default)
+        => await db.UserQuotaGroupMemberships
+            .Include(m => m.User)
+            .Where(m => m.GroupName == groupName)
+            .OrderBy(m => m.CreatedAt)
+            .ToArrayAsync(ct);
+
     // ── Helpers ──────────────────────────────────────────────────────────
+    private static QuotaCheckResult? CheckQuotaList(PrintQuota[] quotas, decimal estimatedCost, int jobCount, double estimatedWeightGrams)
+    {
+        foreach (PrintQuota q in quotas)
+        {
+            if (IsExpired(q))
+            {
+                ResetQuota(q);
+                continue;
+            }
+
+            decimal projected = q.QuotaType switch
+            {
+                QuotaType.Cost => q.UsedAmount + estimatedCost,
+                QuotaType.Count => q.UsedAmount + jobCount,
+                QuotaType.Weight => q.UsedAmount + (decimal)estimatedWeightGrams,
+                _ => q.UsedAmount
+            };
+
+            if (projected > q.LimitAmount)
+            {
+                string scope = q.GroupName is not null ? $" (group: {q.GroupName})" : string.Empty;
+                string reason = $"Quota exceeded{scope}: {q.QuotaType} limit is {q.LimitAmount}, current usage is {q.UsedAmount}, requested {projected - q.UsedAmount}";
+                return new QuotaCheckResult(false, reason, q.Id);
+            }
+        }
+
+        return null;
+    }
+
+    private static void DeductFromQuotas(PrintQuota[] quotas, decimal actualCost, double actualWeightGrams)
+    {
+        foreach (PrintQuota q in quotas)
+        {
+            if (IsExpired(q))
+            {
+                ResetQuota(q);
+            }
+
+            q.UsedAmount += q.QuotaType switch
+            {
+                QuotaType.Cost => actualCost,
+                QuotaType.Count => 1,
+                QuotaType.Weight => (decimal)actualWeightGrams,
+                _ => 0
+            };
+            q.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
+    private static void RefundQuotas(PrintQuota[] quotas, decimal refundCost, double refundWeightGrams)
+    {
+        foreach (PrintQuota q in quotas)
+        {
+            decimal refund = q.QuotaType switch
+            {
+                QuotaType.Cost => refundCost,
+                QuotaType.Count => 1,
+                QuotaType.Weight => (decimal)refundWeightGrams,
+                _ => 0
+            };
+            q.UsedAmount = Math.Max(0, q.UsedAmount - refund);
+            q.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
     private static bool IsExpired(PrintQuota q)
         => q.ResetAt.HasValue && q.ResetAt.Value <= DateTime.UtcNow;
 

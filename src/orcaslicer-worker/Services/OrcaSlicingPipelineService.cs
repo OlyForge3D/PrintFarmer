@@ -248,8 +248,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Per-model transforms: for multi-model jobs with ModelFileTransforms, use the first
         // entry as the primary model transform. If any model has a custom position, disable
         // auto-arrange to preserve the user's layout.
+        //
+        // When additional models (2..N) also carry transforms, embed all models in a 3MF
+        // project file so OrcaSlicer applies every transform instead of auto-arranging.
         string? primaryTransformJson = job.ModelTransformJson;
         bool anyModelHasPosition = false;
+        bool useThreeMfProject = false;
 
         if (job.ModelFileTransforms is { Count: > 0 } && modelPaths.Count > 1)
         {
@@ -264,17 +268,52 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
             }
 
-            if (job.ModelFileTransforms.Count > 1 && job.ModelFileTransforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t)))
+            if (job.ModelFileTransforms.Count > 1
+                && job.ModelFileTransforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t)))
             {
-                _logger.LogWarning(
-                    "Job {JobId}: per-model transforms for additional models are stored but not applied via CLI. " +
-                    "OrcaSlicer CLI only supports transforms on the primary model. Future 3MF project workflow will apply all.",
-                    job.Id);
+                useThreeMfProject = true;
             }
         }
 
-        TransformResult transform = BuildTransformFlags(primaryTransformJson);
-        string arrangeFlag = (transform.HasCustomPosition || anyModelHasPosition) ? "--arrange 0" : "--arrange 1";
+        string arrangeFlag;
+        string transformFlags;
+        List<string> effectiveModelPaths;
+
+        bool allStl = modelPaths.All(p => p.EndsWith(".stl", StringComparison.OrdinalIgnoreCase));
+
+        if (useThreeMfProject && allStl)
+        {
+            _logger.LogInformation(
+                "Job {JobId}: using 3MF project workflow to embed transforms for {Count} models",
+                job.Id, modelPaths.Count);
+
+            var entries = new List<ThreeMfProjectBuilder.ModelEntry>(modelPaths.Count);
+            for (int i = 0; i < modelPaths.Count; i++)
+            {
+                string? tfJson = i < job.ModelFileTransforms!.Count ? job.ModelFileTransforms[i] : null;
+                entries.Add(new ThreeMfProjectBuilder.ModelEntry(modelPaths[i], tfJson));
+            }
+
+            string threeMfPath = ThreeMfProjectBuilder.Build(entries, workDir);
+            effectiveModelPaths = [threeMfPath];
+            arrangeFlag = "--arrange 0";
+            transformFlags = string.Empty;
+        }
+        else
+        {
+            if (useThreeMfProject)
+            {
+                _logger.LogWarning(
+                    "Job {JobId}: 3MF project workflow skipped — not all inputs are STL files. Falling back to CLI flags.",
+                    job.Id);
+                useThreeMfProject = false;
+            }
+
+            effectiveModelPaths = modelPaths;
+            TransformResult transform = BuildTransformFlags(primaryTransformJson);
+            arrangeFlag = (transform.HasCustomPosition || anyModelHasPosition) ? "--arrange 0" : "--arrange 1";
+            transformFlags = transform.Flags;
+        }
 
         // Create a named pipe for real-time progress from OrcaSlicer
         string pipePath = Path.Combine(workDir, "progress.pipe");
@@ -282,14 +321,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
 
         // Build model arguments: first model is positional, additional models use --load
-        string primaryModel = $"\"{modelPaths[0]}\"";
+        string primaryModel = $"\"{effectiveModelPaths[0]}\"";
         string additionalModels = string.Empty;
-        if (modelPaths.Count > 1)
+        if (effectiveModelPaths.Count > 1)
         {
-            additionalModels = " " + string.Join(" ", modelPaths.Skip(1).Select(p => $"--load \"{p}\""));
+            additionalModels = " " + string.Join(" ", effectiveModelPaths.Skip(1).Select(p => $"--load \"{p}\""));
         }
 
-        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transform.Flags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
+        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;

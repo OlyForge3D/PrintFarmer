@@ -4273,6 +4273,35 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("UserBalances");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GroupName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupName")
+                        .HasDatabaseName("IX_UserQuotaGroupMemberships_GroupName");
+
+                    b.HasIndex("UserId", "GroupName")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserQuotaGroupMemberships_UserId_GroupName");
+
+                    b.ToTable("UserQuotaGroupMemberships");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserRole", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5412,6 +5441,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
                         .WithMany()
