@@ -20,6 +20,7 @@ import {
   AssemblyIcon,
   SettingsProfilesIcon,
   KeyboardIcon,
+  SequentialIcon,
 } from './SlicerToolbarIcons';
 
 interface ToolbarButtonProps {
@@ -87,6 +88,7 @@ export interface SlicerToolbarProps {
   onSettingsProfiles?: () => void;
   onKeyboardShortcuts?: () => void;
   onToggleSidebar?: () => void;
+  onSequentialToggle?: () => void;
   sidebarOpen?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
@@ -97,6 +99,7 @@ export interface SlicerToolbarProps {
   cutActive?: boolean;
   supportPaintActive?: boolean;
   seamPaintActive?: boolean;
+  sequentialActive?: boolean;
 }
 
 /** Hamburger icon for sidebar toggle */
@@ -124,6 +127,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   onSettingsProfiles,
   onKeyboardShortcuts,
   onToggleSidebar,
+  onSequentialToggle,
   sidebarOpen = true,
   canUndo = false,
   canRedo = false,
@@ -134,6 +138,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   cutActive = false,
   supportPaintActive = false,
   seamPaintActive = false,
+  sequentialActive = false,
 }) => {
   return (
     <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border shrink-0">
@@ -251,6 +256,15 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
           onClick={onAssemblyView}
           disabled={!hasModels}
           active={assemblyActive}
+        />
+
+        {/* Sequential printing */}
+        <ToolbarButton
+          icon={<SequentialIcon />}
+          title="Sequential Printing (by object)"
+          onClick={onSequentialToggle}
+          disabled={!hasModels}
+          active={sequentialActive}
         />
       </div>
 
