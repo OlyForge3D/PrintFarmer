@@ -196,9 +196,18 @@ export function CompactPrinterCard({
             </span>
           )}
         </div>
-        {/* Tags row */}
-        {printerTags.length > 0 && (
+        {/* Tags row + bed type badge */}
+        {(printerTags.length > 0 || printer.bedTypeName) && (
           <div className="flex flex-wrap gap-1 mt-1.5">
+            {printer.bedTypeName && (
+              <span
+                className="text-xs px-1.5 py-0.5 rounded-full border border-white/10 text-pf-text-secondary"
+                style={printer.bedTypeColor ? { backgroundColor: `${printer.bedTypeColor}33`, borderColor: `${printer.bedTypeColor}66` } : { backgroundColor: 'rgba(0,0,0,0.3)' }}
+                title={`Bed type: ${printer.bedTypeName}`}
+              >
+                {printer.bedTypeName}
+              </span>
+            )}
             {printerTags.map(tag => (
               <span
                 key={tag.id}

@@ -50,5 +50,11 @@ public class PrinterModelConfiguration : IEntityTypeConfiguration<PrinterModel>
         // Configure many-to-many relationship between PrinterModel and FilamentType using skip navigation
         _ = builder.HasMany(p => p.SupportedFilamentTypes)
             .WithMany(f => f.PrinterModels);
+
+        // Default bed type for new printers of this model
+        _ = builder.HasOne(m => m.DefaultBedType)
+            .WithMany()
+            .HasForeignKey(m => m.DefaultBedTypeId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

@@ -506,6 +506,7 @@ public class PrintersController(
     /// <param name="includeDisabled">Return disabled printers as well (admin-only).</param>
     /// <param name="doneWithinMinutes">Only return printers estimated to finish within this many minutes.</param>
     /// <param name="doneAfterMinutes">Only return printers estimated to finish after this many minutes.</param>
+    /// <param name="bedTypeId">Filter printers by bed type ID.</param>
     /// <returns>A complete list of all printers with configuration and live status merged.</returns>
     /// <response code="200">Returns the list of complete printer data with live status.</response>
     [HttpGet]
@@ -515,7 +516,8 @@ public class PrintersController(
         CancellationToken ct,
         [FromQuery] bool includeDisabled = false,
         [FromQuery] int? doneWithinMinutes = null,
-        [FromQuery] int? doneAfterMinutes = null)
+        [FromQuery] int? doneAfterMinutes = null,
+        [FromQuery] Guid? bedTypeId = null)
     {
         try
         {
@@ -546,6 +548,11 @@ public class PrintersController(
                 DateTime cutoff = DateTime.UtcNow.AddMinutes(doneAfterMinutes.Value);
                 result = result.Where(p =>
                     p.EstimatedCompletionTimeUtc.HasValue && p.EstimatedCompletionTimeUtc.Value > cutoff);
+            }
+
+            if (bedTypeId.HasValue)
+            {
+                result = result.Where(p => p.BedTypeId == bedTypeId.Value);
             }
 
             return Ok(result.ToList());
@@ -1617,6 +1624,11 @@ public class PrintersController(
         {
             p.ZOffsetMm = dto.ZOffsetMm.Value;
             p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        }
+
+        if (dto.BedTypeId.HasValue && dto.BedTypeId.Value != p.BedTypeId)
+        {
+            p.BedTypeId = dto.BedTypeId.Value == Guid.Empty ? null : dto.BedTypeId.Value;
         }
 
         // Only update LastCapabilityUpdate if capability fields actually changed

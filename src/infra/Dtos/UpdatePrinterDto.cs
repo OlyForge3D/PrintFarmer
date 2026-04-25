@@ -56,5 +56,8 @@ public record UpdatePrinterDto(
     // Z-offset calibration
     decimal? ZOffsetMm = null,
 
+    // Bed surface type
+    Guid? BedTypeId = null,
+
     // Toolheads - for updating individual toolhead settings
     UpdateToolheadDto[]? Toolheads = null);
