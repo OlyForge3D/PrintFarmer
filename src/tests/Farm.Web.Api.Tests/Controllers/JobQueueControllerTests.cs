@@ -1,11 +1,14 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -22,6 +25,8 @@ public class JobQueueControllerTests
     private readonly Mock<IBatchDispatchService> _batchDispatchServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly Mock<IPrintFarmerTelemetryService> _telemetryServiceMock;
+    private readonly Mock<IPrinterGroupService> _printerGroupServiceMock;
+    private readonly AppDbContext _dbContext;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
@@ -34,6 +39,11 @@ public class JobQueueControllerTests
         _batchDispatchServiceMock = new Mock<IBatchDispatchService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
         _telemetryServiceMock = new Mock<IPrintFarmerTelemetryService>();
+        _printerGroupServiceMock = new Mock<IPrinterGroupService>();
+        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName: $"JobQueueTests-{Guid.NewGuid()}")
+            .Options;
+        _dbContext = new AppDbContext(dbOptions);
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
@@ -42,6 +52,8 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
+            _printerGroupServiceMock.Object,
+            _dbContext,
             _loggerMock.Object);
     }
 
@@ -57,6 +69,8 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
+            _printerGroupServiceMock.Object,
+            _dbContext,
             _loggerMock.Object);
 
         // Assert

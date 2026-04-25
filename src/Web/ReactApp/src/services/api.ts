@@ -44,6 +44,7 @@ import {
   PrinterFast,
   PrinterFileDto,
   PrinterGroup,
+  PrinterGroupAccessRule,
   PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
@@ -52,6 +53,8 @@ import {
   QueueOverviewDto,
   RegisterRequest,
   ResolveHostnameRequest,
+  RoleDto,
+  SetAccessRulesRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
   ProfileSchemasResponse,
@@ -1016,6 +1019,29 @@ export class ApiClient {
 
   async removePrinterFromGroup(groupId: string, printerId: string): Promise<void> {
     await this.client.delete(`/printer-groups/${groupId}/printers/${printerId}`);
+  }
+
+  async getPrinterGroupAccessRules(groupId: string): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.get<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`
+    );
+    return response.data;
+  }
+
+  async setPrinterGroupAccessRules(
+    groupId: string,
+    dto: SetAccessRulesRequest
+  ): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.put<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`,
+      dto
+    );
+    return response.data;
+  }
+
+  async getRoles(): Promise<RoleDto[]> {
+    const response = await this.client.get<RoleDto[]>("/users/roles");
+    return response.data;
   }
 
   // ============ Bed Type API methods ============
