@@ -150,6 +150,31 @@ export const TextToolIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => 
   </svg>
 );
 
+/** Color/multi-material paint icon — paint palette */
+export const ColorPaintIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none">
+    <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67a.528.528 0 0 1-.13-.33c0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9z" fill="#009688" fillOpacity="0.1" stroke="#009688" strokeWidth="1.3" />
+    <circle cx="8" cy="10" r="1.5" fill="#ef4444" />
+    <circle cx="12" cy="7.5" r="1.5" fill="#3b82f6" />
+    <circle cx="16" cy="10" r="1.5" fill="#22c55e" />
+    <circle cx="9" cy="14" r="1.5" fill="#eab308" />
+  </svg>
+);
+
+/** Fuzzy skin paint icon — textured surface */
+export const FuzzySkinPaintIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="5" width="18" height="14" rx="2" fill="#009688" fillOpacity="0.08" stroke="#009688" strokeWidth="1.3" />
+    <path d="M5 15c1-2 2 0 3-1s1.5-3 3-1 2 1 3-1 1.5 1 3 0" stroke="#009688" strokeWidth="1" strokeLinecap="round" fill="none" />
+    <path d="M5 11c1.5-1.5 2.5 1 3.5-0.5s1-2.5 2.5-0.5 2.5 0.5 3.5-0.5 1 1.5 3 0.5" stroke="#009688" strokeWidth="0.8" strokeLinecap="round" fill="none" strokeOpacity="0.5" />
+    <circle cx="6" cy="8" r="0.5" fill="#009688" fillOpacity="0.4" />
+    <circle cx="9" cy="7.5" r="0.5" fill="#009688" fillOpacity="0.4" />
+    <circle cx="12" cy="8.2" r="0.5" fill="#009688" fillOpacity="0.4" />
+    <circle cx="15" cy="7.8" r="0.5" fill="#009688" fillOpacity="0.4" />
+    <circle cx="18" cy="8" r="0.5" fill="#009688" fillOpacity="0.4" />
+  </svg>
+);
+
 export default {
   AddModelIcon,
   ArrangeIcon,
@@ -173,4 +198,6 @@ export default {
   GridIcon,
   TextToolIcon,
   SequentialIcon,
+  ColorPaintIcon,
+  FuzzySkinPaintIcon,
 };
