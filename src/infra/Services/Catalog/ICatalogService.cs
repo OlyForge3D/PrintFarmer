@@ -88,6 +88,8 @@ public interface ICatalogService
     /// <param name="defaultWattage">Optional default power consumption in watts.</param>
     /// <param name="defaultHourlyRate">Optional default machine hourly rate.</param>
     /// <param name="toolheads">Optional array of toolhead configurations.</param>
+    /// <param name="defaultAutoDispatchState">Optional default auto-dispatch state for new printers.</param>
+    /// <param name="defaultStartBehavior">Optional default start behavior for new printers.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<PrinterModelDto?> UpdateModelAsync(
         Guid id,
@@ -107,6 +109,8 @@ public interface ICatalogService
         decimal? defaultWattage,
         decimal? defaultHourlyRate,
         PrinterModelToolheadDto[]? toolheads,
+        AutoDispatchState? defaultAutoDispatchState,
+        StartBehavior? defaultStartBehavior,
         CancellationToken ct);
 
     /// <summary>Deletes a printer model.</summary>

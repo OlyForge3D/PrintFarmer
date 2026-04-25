@@ -3,7 +3,7 @@ import { CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIc
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterModelToolheadDto } from '@/types/api';
+import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterModelToolheadDto, AutoDispatchState, StartBehavior } from '@/types/api';
 import { NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -105,6 +105,10 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
           // Cost/energy defaults
           defaultWattage: model.defaultWattage,
           defaultHourlyRate: model.defaultHourlyRate,
+
+          // Auto-dispatch defaults
+          defaultAutoDispatchState: model.defaultAutoDispatchState,
+          defaultStartBehavior: model.defaultStartBehavior,
         };
         
         setFormData(initialData);
@@ -150,7 +154,8 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
     const fields: (keyof UpdateModelRequest)[] = [
       'name', 'motionType', 'maxX', 'maxY', 'maxZ', 'defaultBackend',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
-      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed', 'defaultWattage', 'defaultHourlyRate'
+      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed', 'defaultWattage', 'defaultHourlyRate',
+      'defaultAutoDispatchState', 'defaultStartBehavior'
     ];
     
     for (const field of fields) {
@@ -622,6 +627,37 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                 />
               </FormField>
             </div>
+          </div>
+        </div>
+
+        {/* Auto-Dispatch Defaults Section */}
+        <div className="border-t pt-5">
+          <h4 className="text-base font-medium text-pf-text-primary mb-3">Auto-Dispatch Defaults</h4>
+          <p className="text-xs text-pf-text-secondary mb-4">
+            New printers of this model will inherit these dispatch settings.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label="Default Dispatch State" helper="Auto-dispatch readiness when printer is added">
+              <Select
+                value={formData.defaultAutoDispatchState || 'None'}
+                onChange={e => handleInputChange('defaultAutoDispatchState', e.target.value as AutoDispatchState)}
+              >
+                <option value="None">None (disabled)</option>
+                <option value="PendingReady">Pending Ready</option>
+                <option value="Ready">Ready</option>
+              </Select>
+            </FormField>
+            <FormField label="Default Start Behavior" helper="How print jobs are started on new printers">
+              <Select
+                value={formData.defaultStartBehavior || ''}
+                onChange={e => handleInputChange('defaultStartBehavior', (e.target.value || undefined) as StartBehavior | undefined)}
+              >
+                <option value="">Not set</option>
+                <option value="Manual">Manual</option>
+                <option value="AutoStart">Auto Start</option>
+                <option value="WaitForConfirmation">Wait for Confirmation</option>
+              </Select>
+            </FormField>
           </div>
         </div>
 

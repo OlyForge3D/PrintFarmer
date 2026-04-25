@@ -95,6 +95,10 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
                 // Default machine hourly rate
                 DefaultHourlyRate: m.DefaultHourlyRate,
 
+                // Auto-dispatch defaults
+                DefaultAutoDispatchState: m.DefaultAutoDispatchState,
+                DefaultStartBehavior: m.DefaultStartBehavior,
+
                 // Toolheads
                 m.Toolheads.OrderBy(t => t.Index).Select(t => new PrinterModelToolheadDto(
                     t.Id,

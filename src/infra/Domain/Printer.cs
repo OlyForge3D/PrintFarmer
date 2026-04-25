@@ -172,6 +172,10 @@ public class Printer
 
     public PrinterGroup? PrinterGroup { get; set; }
 
+    public Guid? BedTypeId { get; set; } // Optional bed surface type for matching and filtering
+
+    public BedType? BedType { get; set; }
+
     public DateTime? DateAcquired { get; set; }
 
     // Hardware Specifications (previously in PrinterCapabilities)
@@ -269,6 +273,12 @@ public class Printer
     /// waiting for operator confirmation before dispatching the next queued job.
     /// </summary>
     public bool AutoDispatchEnabled { get; set; }
+
+    /// <summary>
+    /// When true, dispatch settings are inherited from the printer model defaults.
+    /// When false, this printer uses its own custom dispatch configuration.
+    /// </summary>
+    public bool UseModelDispatchDefaults { get; set; } = true;
 
     /// <summary>
     /// Dispatch-related state (AutoDispatchState, BedPreConfirmed) stored in a separate
