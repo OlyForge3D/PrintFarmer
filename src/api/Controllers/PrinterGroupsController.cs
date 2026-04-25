@@ -208,4 +208,59 @@ public class PrinterGroupsController(
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to remove printer from group" });
         }
     }
+
+    /// <summary>
+    /// Gets the access rules for a printer group.
+    /// </summary>
+    [HttpGet("{id:guid}/access")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterGroupAccessDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<PrinterGroupAccessDto>>> GetAccessRulesAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            PrinterGroupDetailDto? group = await groupService.GetByIdAsync(id, ct);
+            if (group is null)
+            {
+                return NotFound(new { error = "Printer group not found" });
+            }
+
+            IReadOnlyList<PrinterGroupAccessDto> rules = await groupService.GetAccessRulesAsync(id, ct);
+            return Ok(rules);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[PrinterGroupsController] GetAccessRulesAsync failed for {Id}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve access rules" });
+        }
+    }
+
+    /// <summary>
+    /// Sets access rules for a printer group (replaces all existing rules).
+    /// </summary>
+    [HttpPut("{id:guid}/access")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterGroupAccessDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<PrinterGroupAccessDto>>> SetAccessRulesAsync(
+        Guid id,
+        [FromBody] SetAccessRulesDto dto,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<PrinterGroupAccessDto> rules = await groupService.SetAccessRulesAsync(id, dto, ct);
+            return Ok(rules);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[PrinterGroupsController] SetAccessRulesAsync failed for {Id}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to set access rules" });
+        }
+    }
 }

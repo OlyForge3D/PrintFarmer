@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { Card, Button, Spinner, Badge } from '@/common/components/ui';
+import { Card, Button, Spinner, Badge, Tabs } from '@/common/components/ui';
 import { ArrowLeftIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { PrinterAssignment } from './PrinterAssignment';
+import { AccessControlTab } from './AccessControlTab';
 import type { PrinterGroup } from '@/types/api';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -104,7 +105,20 @@ export function PrinterGroupDetail({ groupId, onBack, onEdit, onDelete }: Printe
             <span>Updated {formatDistanceToNow(new Date(group.updatedDate), { addSuffix: true })}</span>
           </div>
 
-          <PrinterAssignment groupId={group.id} assignedPrinters={group.printers} />
+          <Tabs defaultTab="printers">
+            <Tabs.List>
+              <Tabs.Tab id="printers">Printers</Tabs.Tab>
+              <Tabs.Tab id="access">Access Control</Tabs.Tab>
+            </Tabs.List>
+            <Tabs.Panels>
+              <Tabs.Panel id="printers">
+                <PrinterAssignment groupId={group.id} assignedPrinters={group.printers} />
+              </Tabs.Panel>
+              <Tabs.Panel id="access">
+                <AccessControlTab groupId={group.id} />
+              </Tabs.Panel>
+            </Tabs.Panels>
+          </Tabs>
         </Card.Body>
       </Card>
     </div>

@@ -59,3 +59,25 @@ public record UpdatePrinterGroupDto
 
     public string? Description { get; init; }
 }
+
+/// <summary>
+/// Represents a single access rule for a printer group.
+/// </summary>
+public record PrinterGroupAccessDto(
+    Guid Id,
+    Guid RoleId,
+    string RoleName,
+    Farm.Infrastructure.Domain.PrinterGroupAccessLevel AccessLevel,
+    DateTimeOffset CreatedDate);
+
+/// <summary>
+/// Request DTO for replacing all access rules on a printer group.
+/// </summary>
+public record SetAccessRulesDto(IReadOnlyList<SetAccessRuleItem> Rules);
+
+/// <summary>
+/// A single rule item within a SetAccessRulesDto request.
+/// </summary>
+public record SetAccessRuleItem(
+    Guid RoleId,
+    Farm.Infrastructure.Domain.PrinterGroupAccessLevel AccessLevel);

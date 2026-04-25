@@ -3304,6 +3304,56 @@ export interface UpdatePrinterGroupRequest {
   description?: string;
 }
 
+// ============ Printer Group Access Control ============
+
+/**
+ * Access levels for printer group operations.
+ * Higher values imply all lower-level permissions.
+ */
+export enum PrinterGroupAccessLevel {
+  View = 'View',
+  Submit = 'Submit',
+  Manage = 'Manage',
+}
+
+/**
+ * A single access rule for a printer group
+ */
+export interface PrinterGroupAccessRule {
+  id: string;
+  roleId: string;
+  roleName: string;
+  accessLevel: PrinterGroupAccessLevel;
+  createdDate: string;
+}
+
+/**
+ * Request item for setting access rules
+ */
+export interface SetAccessRuleItem {
+  roleId: string;
+  accessLevel: PrinterGroupAccessLevel;
+}
+
+/**
+ * Request DTO for setting access rules on a printer group
+ */
+export interface SetAccessRulesRequest {
+  rules: SetAccessRuleItem[];
+}
+
+/**
+ * Role DTO for access control UI
+ */
+export interface RoleDto {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  isSystemRole: boolean;
+  isActive: boolean;
+}
+
 // ============ Bed Type Types ============
 
 /**
