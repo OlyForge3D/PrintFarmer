@@ -673,3 +673,13 @@ Both needed fixes, but they're orthogonal. The cache fix unblocked visibility, t
 5. **OrcaSlicer has intentional typos in key names.** `elefant_foot_compensation` (not "elephant") is the real key. The migration must preserve these exact spellings — they're what OrcaSlicer expects in the JSON.
 
 6. **Risk: types and editors must ship together.** You can't merge WI-01 (new types) without WI-06 (updated editor) — it would break compilation. The merge strategy should batch types+editors per profile domain.
+
+---
+
+## Session: Disable Non-Functional Cut Options (PFarm1-603w)
+
+## Learnings
+
+- **Cut tool checkboxes `flipUpper` / `flipLower` / `cutToParts` are placeholder UI** — wired through `CutOptions` and passed to `onCutComplete`, but `SlicerWorkspace.tsx:919` has a TODO confirming `flipUpper/flipLower and cutToParts are not yet implemented.` In contrast, `placeOnCutUpper` / `placeOnCutLower` are fully wired (used by `handleCutComplete` for Z-axis bed placement). Only the truly inert toggles should be disabled.
+- **"Coming soon" visual pattern in CutPlaneOverlay.tsx** — matches the existing `Add connectors` button (CutPlaneOverlay.tsx ~L802-811): `disabled` + `className="opacity-50 cursor-not-allowed"` + `title="Coming soon"`. Applied the same trio to each disabled `Checkbox` and dimmed the adjacent `<label>` (replacing `cursor-pointer` with `opacity-50 cursor-not-allowed` and adding the same `title`) so the entire control row reads as inert.
+- **`Checkbox` component accepts native `disabled` and `title`** — `src/Web/ReactApp/src/common/components/ui/Checkbox.tsx` extends `React.InputHTMLAttributes<HTMLInputElement>`, so no wrapper span was needed; the native HTML `disabled` attribute prevents user interaction and the `title` shows the tooltip on hover.
