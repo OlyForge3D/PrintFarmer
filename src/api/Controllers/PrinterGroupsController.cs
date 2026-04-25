@@ -257,6 +257,10 @@ public class PrinterGroupsController(
         {
             return NotFound(new { error = ex.Message });
         }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "[PrinterGroupsController] SetAccessRulesAsync failed for {Id}", id);

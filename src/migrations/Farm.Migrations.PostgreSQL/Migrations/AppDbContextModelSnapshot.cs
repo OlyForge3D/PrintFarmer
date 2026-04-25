@@ -3211,6 +3211,36 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("PrinterGroups");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroupAccess", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccessLevel")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PrinterGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("PrinterGroupId", "RoleId", "AccessLevel")
+                        .IsUnique();
+
+                    b.ToTable("PrinterGroupAccesses");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5114,6 +5144,25 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Printer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroupAccess", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
+                        .WithMany("AccessRules")
+                        .HasForeignKey("PrinterGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Role", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PrinterGroup");
+
+                    b.Navigation("Role");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.MaintenancePlan", "MaintenancePlan")
@@ -5588,6 +5637,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
                 {
+                    b.Navigation("AccessRules");
+
                     b.Navigation("Printers");
                 });
 

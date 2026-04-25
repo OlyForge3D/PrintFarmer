@@ -94,15 +94,20 @@ public class JobQueueController(
                 string? userIdStr = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                     ?? User?.FindFirst("sub")?.Value;
 
-                if (Guid.TryParse(userIdStr, out Guid userId))
+                if (!Guid.TryParse(userIdStr, out Guid userId))
                 {
-                    bool canSubmit = await printerGroupService.CanUserSubmitToGroupAsync(groupId.Value, userId, HttpContext?.RequestAborted ?? CancellationToken.None);
-                    if (!canSubmit)
-                    {
-                        return StatusCode(
-                            StatusCodes.Status403Forbidden,
-                            new { error = "You do not have permission to submit jobs to this printer group." });
-                    }
+                    logger.LogWarning("Cannot resolve user ID from claims for group ACL check. Claim value: {UserIdStr}", userIdStr);
+                    return StatusCode(
+                        StatusCodes.Status403Forbidden,
+                        new { error = "Unable to verify group access — user identity could not be resolved." });
+                }
+
+                bool canSubmit = await printerGroupService.CanUserSubmitToGroupAsync(groupId.Value, userId, HttpContext?.RequestAborted ?? CancellationToken.None);
+                if (!canSubmit)
+                {
+                    return StatusCode(
+                        StatusCodes.Status403Forbidden,
+                        new { error = "You do not have permission to submit jobs to this printer group." });
                 }
             }
 

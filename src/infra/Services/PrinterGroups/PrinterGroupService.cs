@@ -186,6 +186,21 @@ public class PrinterGroupService(
             throw new KeyNotFoundException($"Printer group {groupId} not found.");
         }
 
+        // Validate all RoleIds reference existing roles
+        if (dto.Rules.Count > 0)
+        {
+            List<Guid> requestedRoleIds = dto.Rules.Select(r => r.RoleId).Distinct().ToList();
+            List<Guid> existingRoleIds = await db.Roles
+                .Where(r => requestedRoleIds.Contains(r.Id))
+                .Select(r => r.Id)
+                .ToListAsync(ct);
+            List<Guid> invalidIds = requestedRoleIds.Except(existingRoleIds).ToList();
+            if (invalidIds.Count > 0)
+            {
+                throw new ArgumentException($"Invalid role ID(s): {string.Join(", ", invalidIds)}");
+            }
+        }
+
         // Replace-all: remove existing rules, insert new ones
         List<PrinterGroupAccess> existing = await db.PrinterGroupAccesses
             .Where(a => a.PrinterGroupId == groupId)
