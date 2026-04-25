@@ -21,6 +21,10 @@ import toolbarSettingsSvg from '@/assets/orcaslicer/toolbar_settings.svg';
 import toolbarLayerHeightSvg from '@/assets/orcaslicer/toolbar_variable_layer_height.svg';
 import splitObjectsSvg from '@/assets/orcaslicer/split_objects.svg';
 import undoToolbarSvg from '@/assets/orcaslicer/undo_toolbar.svg';
+import toolbarTextSvg from '@/assets/orcaslicer/toolbar_text.svg';
+import toolbarFuzzySkinPaintSvg from '@/assets/orcaslicer/toolbar_fuzzy_skin_paint.svg';
+import toolbarMeshBooleanSvg from '@/assets/orcaslicer/toolbar_meshboolean.svg';
+import toolbarAddPlateSvg from '@/assets/orcaslicer/toolbar_add_plate.svg';
 
 interface IconProps {
   className?: string;
@@ -161,18 +165,20 @@ export const ColorPaintIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) =
   </svg>
 );
 
-/** Fuzzy skin paint icon — textured surface */
-export const FuzzySkinPaintIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none">
-    <rect x="3" y="5" width="18" height="14" rx="2" fill="#009688" fillOpacity="0.08" stroke="#009688" strokeWidth="1.3" />
-    <path d="M5 15c1-2 2 0 3-1s1.5-3 3-1 2 1 3-1 1.5 1 3 0" stroke="#009688" strokeWidth="1" strokeLinecap="round" fill="none" />
-    <path d="M5 11c1.5-1.5 2.5 1 3.5-0.5s1-2.5 2.5-0.5 2.5 0.5 3.5-0.5 1 1.5 3 0.5" stroke="#009688" strokeWidth="0.8" strokeLinecap="round" fill="none" strokeOpacity="0.5" />
-    <circle cx="6" cy="8" r="0.5" fill="#009688" fillOpacity="0.4" />
-    <circle cx="9" cy="7.5" r="0.5" fill="#009688" fillOpacity="0.4" />
-    <circle cx="12" cy="8.2" r="0.5" fill="#009688" fillOpacity="0.4" />
-    <circle cx="15" cy="7.8" r="0.5" fill="#009688" fillOpacity="0.4" />
-    <circle cx="18" cy="8" r="0.5" fill="#009688" fillOpacity="0.4" />
-  </svg>
+export const FuzzySkinPaintIcon: React.FC<IconProps> = ({ className }) => (
+  <OrcaIcon src={toolbarFuzzySkinPaintSvg} alt="Fuzzy skin paint" className={className} />
+);
+
+export const AddPlateIcon: React.FC<IconProps> = ({ className }) => (
+  <OrcaIcon src={toolbarAddPlateSvg} alt="Add plate" className={className} />
+);
+
+export const TextToolSvgIcon: React.FC<IconProps> = ({ className }) => (
+  <OrcaIcon src={toolbarTextSvg} alt="Text tool" className={className} />
+);
+
+export const MeshBooleanIcon: React.FC<IconProps> = ({ className }) => (
+  <OrcaIcon src={toolbarMeshBooleanSvg} alt="Mesh boolean" className={className} />
 );
 
 export default {
@@ -200,4 +206,7 @@ export default {
   SequentialIcon,
   ColorPaintIcon,
   FuzzySkinPaintIcon,
+  AddPlateIcon,
+  TextToolSvgIcon,
+  MeshBooleanIcon,
 };

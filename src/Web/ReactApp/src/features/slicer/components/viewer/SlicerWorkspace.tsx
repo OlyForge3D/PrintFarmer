@@ -176,6 +176,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [textPlacementMode, setTextPlacementMode] = useState(false);
   const [textToolConfig, setTextToolConfig] = useState<TextToolConfig | null>(null);
   const [sequentialMode, setSequentialMode] = useState(false);
+  const [modelMetricsMap, setModelMetricsMap] = useState<Map<string, { baseSize: [number, number, number] }>>(new Map());
   const [printheadClearance, setPrintheadClearance] = useState<PrintheadClearance>(DEFAULT_PRINTHEAD_CLEARANCE);
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
@@ -198,17 +199,17 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setPrevModelIdKey(modelIdKey);
     const prevIds = new Set(prevModelIdKey.split(',').filter(Boolean));
     const currentIds = new Set(models.map(m => m.id));
-    let nextState = plateState;
-    let changed = false;
-    for (const id of currentIds) {
-      if (!prevIds.has(id)) { nextState = addModelToActivePlate(nextState, id); changed = true; }
-    }
-    for (const id of prevIds) {
-      if (!currentIds.has(id)) { nextState = removeModelFromPlates(nextState, id); changed = true; }
-    }
-    if (changed) setPlateState(nextState);
-    // Clean up paint data for removed models
+    const addedIds = [...currentIds].filter(id => !prevIds.has(id));
     const removedIds = [...prevIds].filter(id => !currentIds.has(id));
+    if (addedIds.length > 0 || removedIds.length > 0) {
+      setPlateState(prev => {
+        let s = prev;
+        for (const id of addedIds) s = addModelToActivePlate(s, id);
+        for (const id of removedIds) s = removeModelFromPlates(s, id);
+        return s;
+      });
+    }
+    // Clean up paint data for removed models
     if (removedIds.length > 0) {
       for (const id of removedIds) {
         setSupportPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
@@ -319,19 +320,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     return ids;
   }, [bedConfig.depth, bedConfig.height, bedConfig.width, models, selectedModelMetrics]);
 
-  // Sequential printing: derive model footprints from loaded models' bounding boxes
-  // NOTE (v1 limitation): selectedModelMetrics only holds dimensions for the
-  // currently selected model. Non-selected models fall back to a 30mm cube.
-  // A future version should store per-model metrics in a Map for accuracy.
+  // Sequential printing: derive model footprints from loaded models' bounding boxes.
+  // Uses modelMetricsMap for per-model dimensions; falls back to selectedModelMetrics
+  // for the active model, then a 30mm cube default for unknown models.
   const modelFootprints: ModelFootprint[] = useMemo(() => {
     if (!sequentialMode || visibleModels.length < 2) return [];
     return visibleModels.map((model) => {
-      // Approximate bounding box using known metrics or scale
       let bx: number, by: number, bz: number;
-      if (selectedModelMetrics && selectedModelMetrics.modelId === model.id) {
-        bx = selectedModelMetrics.baseSize[0] * model.scale[0];
-        by = selectedModelMetrics.baseSize[1] * model.scale[1];
-        bz = selectedModelMetrics.baseSize[2] * model.scale[2];
+      const cached = modelMetricsMap.get(model.id);
+      const metrics = cached ?? (selectedModelMetrics?.modelId === model.id ? selectedModelMetrics : null);
+      if (metrics) {
+        bx = metrics.baseSize[0] * model.scale[0];
+        by = metrics.baseSize[1] * model.scale[1];
+        bz = metrics.baseSize[2] * model.scale[2];
       } else {
         // Without geometry metrics we use scale as a rough proxy
         bx = 30 * model.scale[0];
@@ -347,7 +348,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         height: bz,
       };
     });
-  }, [sequentialMode, visibleModels, selectedModelMetrics]);
+  }, [sequentialMode, visibleModels, selectedModelMetrics, modelMetricsMap]);
 
   const sequentialClearanceZones = useMemo(
     () => (sequentialMode ? computeClearanceZones(modelFootprints, printheadClearance) : []),
@@ -661,16 +662,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [hasSelection, cutMode, exitAllToolModes]);
 
   const handleMeasure = useCallback(() => {
-    setMeasureMode((prev) => {
-      const next = !prev;
-      if (next) {
-        toast.info('Measure mode: click two points on a model surface to measure distance');
-      } else {
-        toast.info('Measure mode off');
-      }
-      return next;
-    });
-  }, []);
+    const next = !measureMode;
+    setMeasureMode(next);
+    toast.info(next ? 'Measure mode: click two points on a model surface to measure distance' : 'Measure mode off');
+  }, [measureMode]);
 
   const handleSupportPaint = useCallback(() => {
     if (!hasSelection) {
@@ -767,9 +762,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       quat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
       const euler = new THREE.Euler().setFromQuaternion(quat);
 
+      // TODO: Text model blob URLs are local-only and cannot be sent to the backend slicer.
+      // A full fix requires uploading the STL blob to the server before slice job submission.
       const newModel: LoadedModel = {
         id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        fileName: `text_${textToolConfig.text.slice(0, 16).replace(/\s+/g, '_')}.stl`,
+        fileName: `[text]_${textToolConfig.text.slice(0, 16).replace(/\s+/g, '_')}.stl`,
         url: blobUrl,
         position: [point.x, point.y, point.z],
         rotation: [euler.x, euler.y, euler.z],
@@ -1041,16 +1038,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [applyHistoryEntry, redoStack]);
 
   const handleAssemblyView = useCallback(() => {
-    setAssemblyViewActive((prev) => {
-      const next = !prev;
-      if (next) {
-        toast.info('Assembly view: models offset for inspection');
-      } else {
-        toast.info('Assembly view off — positions restored');
-      }
-      return next;
-    });
-  }, []);
+    const next = !assemblyViewActive;
+    setAssemblyViewActive(next);
+    toast.info(next ? 'Assembly view: models offset for inspection' : 'Assembly view off — positions restored');
+  }, [assemblyViewActive]);
 
   const handleKeyboardShortcuts = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Show keyboard shortcuts'); }
@@ -1120,10 +1111,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
-      // Text tool shortcut works without selection (raycasts any model)
+      // Auto Arrange shortcut (A)
       if (event.key.toLowerCase() === 'a') {
         event.preventDefault();
-        handleTextTool();
+        handleArrange();
         return;
       }
 
@@ -1177,7 +1168,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleTextTool, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint]);
+  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
@@ -1293,7 +1284,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onModelSelect={onModelSelect}
           transformMode={transformMode}
           onModelTransform={handleModelTransform}
-          onSelectedModelMetricsChange={setSelectedModelMetrics}
+          onSelectedModelMetricsChange={(metrics) => {
+            setSelectedModelMetrics(metrics);
+            if (metrics) {
+              setModelMetricsMap(prev => {
+                const next = new Map(prev);
+                next.set(metrics.modelId, { baseSize: metrics.baseSize });
+                return next;
+              });
+            }
+          }}
           outOfBoundsModelIds={outOfBoundsModelIds}
           layFlatMode={layFlatMode}
           onLayFlatComplete={() => setLayFlatMode(false)}
@@ -1320,6 +1320,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           paintMode={paintMode}
           paintBrushSize={paintBrushSize}
           hideBed={hideBed}
+          // Text placement raycast is scoped to model meshes in SlicerBedVisualization (userData.isModelMesh filter)
           textPlacementMode={textPlacementMode}
           onTextPlace={handleTextPlace}
           showGrid={true}
