@@ -602,3 +602,70 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - **Multi-file import pattern:** Use `Array.from(files)` to iterate FileList, accumulate counts, and show aggregate results. Per-file `try/catch` prevents one bad file from blocking the rest.
 - **Filament settings types (PFarm1-pysq.2):** Created filamentSettingsTypes.ts with 108 OrcaSlicer filament settings using native snake_case keys from orcaSettingsMetadata.json. Compound (per-extruder) fields typed as string; non-compound use number/boolean/string. Mode map marks 12 core keys as simple, rest as advanced. Category map matches OrcaSlicer Tab.cpp tab structure. Defaults use typical PLA values.
 - **coFloats rendering (PFarm1-suv8):** `coType: "coFloats"` settings store comma-separated per-extruder values (e.g. "500,200"). Added `'coFloats'` control type to `resolveControlType` and compound rendering in `MetadataSettingRow` that splits on commas, renders per-extruder inputs, and joins back on change. Single values still render as normal number inputs. The `metadata-editors.test.ts` VALID_CONTROLS set must include any new control types.
+
+### 2025-01-12: Multi-axis Cut + Drag Interference Fix
+
+**Issue 1: Drag-to-move interfering with Cut/Paint tools**
+- Root cause: `draggable` prop on `STLModel` and `PrebuiltSTLModel` only checked `layFlatMode`, `assemblyViewActive`, and `transformMode`, but not tool modes
+- Fix: Extended draggable condition to also be false when any modifying tool is active:
+  - `cutMode`, `supportPaintMode`, `seamPaintMode`, `colorPaintMode`, `fuzzySkinPaintMode`, `measureMode`, `textPlacementMode`
+- Both `STLModel` and `PrebuiltSTLModel` components updated in `SlicerBedVisualization.tsx`
+
+**Issue 2: Multi-axis cut control (OrcaSlicer-style)**
+- Completely rewrote `CutPlaneOverlay.tsx` to support X/Y/Z axis cuts
+- Key changes:
+  - Added `CutAxis` type: `'x' | 'y' | 'z'`
+  - Generalized `splitGeometryAtPlane` to accept axis parameter
+  - Updated `classifyPoint` to work with any axis value
+  - Plane orientation:
+    - Z: rotation (0,0,0) - horizontal (unchanged)
+    - X: rotation (0, π/2, 0) - vertical perpendicular to X
+    - Y: rotation (π/2, 0, 0) - vertical perpendicular to Y
+  - Added red sphere drag handle (3mm radius) at plane center
+  - Drag cursor changes based on axis: `ns-resize` for Z, `ew-resize` for X/Y
+  
+**New UI Panel (matching OrcaSlicer):**
+- Mode selector: "Planar" (static, disabled)
+- Build Volume display: shows bed dimensions
+- Cut position: axis dropdown (X/Y/Z) + numeric input (mm) + reset button
+- Action buttons: "Add connectors" (disabled/coming soon), "Reset cut"
+- After cut section:
+  - Upper part: Keep ✓, Place on cut ✓, Flip □ (with teal color indicator)
+  - Lower part: Keep ✓, Place on cut □, Flip □ (with purple color indicator)
+  - Cut to parts □
+- "Perform cut" button (primary)
+
+**Interface Changes:**
+- Updated `CutPlaneOverlayProps` to accept `bedConfig: BedConfig`
+- Added `CutOptions` interface with all cut configuration options
+- Updated `onCutComplete` callback signature to accept optional `CutOptions`
+- Updated `SlicerBedVisualizationProps.onCutComplete` type to match
+- Modified `handleCutComplete` in `SlicerWorkspace.tsx` to:
+  - Accept optional `CutOptions` parameter
+  - Respect `keepUpper`/`keepLower` options (only add models that should be kept)
+  - Added TODO stubs for `placeOnCut`, `flip`, and `cutToParts` options
+
+**Implementation Details:**
+- Reset cutHeight to 0.5 (center) when axis changes
+- Compute axis-specific bounds from model bounding box
+- Handle sphere moved to child of plane mesh for correct transformation
+- Panel positioned top-right at fixed world coordinates (not attached to plane)
+- Used Button components (not raw buttons) to satisfy ESLint rules
+- Avoided raw `<select>` elements (used styled button for axis toggle instead)
+
+**Patterns:**
+- R3F `useFrame` for syncing plane/handle position with model transform
+- `useMemo` for expensive bounding box calculations
+- `useCallback` for event handlers to prevent re-renders
+- Ref-based dragging state (`isDraggingRef`) to avoid render loops
+- Toast notifications for user feedback
+
+**Validation:**
+- TypeScript: ✅ No errors
+- ESLint: ✅ No errors or warnings
+- Tests: Pre-existing failures unrelated to our changes (import resolution issues in test setup)
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/slicer/components/viewer/CutPlaneOverlay.tsx` (complete rewrite, ~580 lines)
+- `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerBedVisualization.tsx` (draggable guards, bedConfig prop)
+- `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx` (handleCutComplete signature)
