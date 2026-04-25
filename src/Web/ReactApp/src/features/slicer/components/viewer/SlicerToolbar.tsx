@@ -7,22 +7,29 @@ import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import {
   AddModelIcon,
+  AddPlateIcon,
   ArrangeIcon,
   OrientIcon,
   LayFlatIcon,
+  MoveToolIcon,
+  RotateToolIcon,
+  ScaleToolIcon,
   SplitIcon,
   CutIcon,
-  MeasureIcon,
+  MeshBooleanIcon,
+  LayersViewIcon,
+  ColorPaintIcon,
   SupportPaintIcon,
   SeamPaintIcon,
-  ColorPaintIcon,
   FuzzySkinPaintIcon,
+  TextToolSvgIcon,
+  MeasureIcon,
+  AssemblyIcon,
+  SequentialIcon,
   UndoIcon,
   RedoIcon,
-  AssemblyIcon,
   SettingsProfilesIcon,
   KeyboardIcon,
-  SequentialIcon,
 } from './SlicerToolbarIcons';
 
 interface ToolbarButtonProps {
@@ -44,7 +51,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 }) => {
   const sizedIcon = React.isValidElement<{ className?: string }>(icon)
     ? React.cloneElement(icon, {
-        className: clsx('w-9 h-9 shrink-0', icon.props.className),
+        className: clsx('w-7 h-7 shrink-0', icon.props.className),
       })
     : icon;
 
@@ -56,12 +63,11 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
       disabled={disabled}
       title={title || label}
       className={clsx(
-        'flex items-center justify-center p-1.5 rounded-lg transition-all shrink-0',
-        'border shadow-sm',
+        'flex items-center justify-center p-1 rounded transition-all shrink-0',
         active
-          ? 'bg-pf-accent/20 border-pf-accent shadow-pf-accent/20'
-          : 'bg-pf-bg-2 border-pf-border/60 hover:bg-pf-bg-2/80 hover:border-pf-accent/50 hover:shadow-md',
-        disabled && 'opacity-40 cursor-not-allowed',
+          ? 'bg-pf-accent/20 text-pf-accent'
+          : 'text-pf-text-muted hover:text-pf-text-primary hover:bg-pf-bg-2/50',
+        disabled && 'opacity-30 cursor-not-allowed',
       )}
       iconLeft={label ? sizedIcon : undefined}
     >
@@ -71,40 +77,51 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 };
 
 const ToolbarDivider: React.FC = () => (
-  <div className="w-px h-6 bg-pf-border mx-1" />
+  <div className="w-px h-5 bg-pf-border/40 mx-0.5" />
 );
 
 export interface SlicerToolbarProps {
   onAddModel?: () => void;
+  onAddPlate?: () => void;
   onArrange?: () => void;
   onOrient?: () => void;
   onLayFlat?: () => void;
+  onMove?: () => void;
+  onRotate?: () => void;
+  onScale?: () => void;
   onSplit?: () => void;
   onCut?: () => void;
-  onMeasure?: () => void;
+  onMeshBoolean?: () => void;
+  onVariableLayerHeight?: () => void;
+  onColorPaint?: () => void;
   onSupportPaint?: () => void;
   onSeamPaint?: () => void;
-  onColorPaint?: () => void;
   onFuzzySkinPaint?: () => void;
+  onTextTool?: () => void;
+  onMeasure?: () => void;
+  onAssemblyView?: () => void;
+  onSequentialToggle?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
-  onAssemblyView?: () => void;
   onSettingsProfiles?: () => void;
   onKeyboardShortcuts?: () => void;
   onToggleSidebar?: () => void;
-  onSequentialToggle?: () => void;
   sidebarOpen?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
   hasModels?: boolean;
   hasSelection?: boolean;
+  moveActive?: boolean;
+  rotateActive?: boolean;
+  scaleActive?: boolean;
+  cutActive?: boolean;
   measureActive?: boolean;
   assemblyActive?: boolean;
-  cutActive?: boolean;
+  colorPaintActive?: boolean;
   supportPaintActive?: boolean;
   seamPaintActive?: boolean;
-  colorPaintActive?: boolean;
   fuzzySkinPaintActive?: boolean;
+  textToolActive?: boolean;
   sequentialActive?: boolean;
 }
 
@@ -119,39 +136,50 @@ const HamburgerIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   onAddModel,
+  onAddPlate,
   onArrange,
   onOrient,
   onLayFlat,
+  onMove,
+  onRotate,
+  onScale,
   onSplit,
   onCut,
-  onMeasure,
+  onMeshBoolean,
+  onVariableLayerHeight,
+  onColorPaint,
   onSupportPaint,
   onSeamPaint,
-  onColorPaint,
   onFuzzySkinPaint,
+  onTextTool,
+  onMeasure,
+  onAssemblyView,
+  onSequentialToggle,
   onUndo,
   onRedo,
-  onAssemblyView,
   onSettingsProfiles,
   onKeyboardShortcuts,
   onToggleSidebar,
-  onSequentialToggle,
   sidebarOpen = true,
   canUndo = false,
   canRedo = false,
   hasModels = false,
   hasSelection = false,
+  moveActive = false,
+  rotateActive = false,
+  scaleActive = false,
+  cutActive = false,
   measureActive = false,
   assemblyActive = false,
-  cutActive = false,
+  colorPaintActive = false,
   supportPaintActive = false,
   seamPaintActive = false,
-  colorPaintActive = false,
   fuzzySkinPaintActive = false,
+  textToolActive = false,
   sequentialActive = false,
 }) => {
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border shrink-0">
+    <div className="flex items-center gap-0.5 px-2 py-1 bg-pf-bg-1 border-b border-pf-border shrink-0">
       {/* Hamburger toggle */}
       {onToggleSidebar && (
         <ToolbarButton
@@ -162,11 +190,16 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         />
       )}
 
-      {/* Add/Arrange group */}
+      {/* ── Group 1: Object Operations ── */}
       <ToolbarButton
         icon={<AddModelIcon />}
         title="Add Model (Ctrl+O)"
         onClick={onAddModel}
+      />
+      <ToolbarButton
+        icon={<AddPlateIcon />}
+        title="Add Plate"
+        onClick={onAddPlate}
       />
       <ToolbarButton
         icon={<ArrangeIcon />}
@@ -174,10 +207,6 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         onClick={onArrange}
         disabled={!hasModels}
       />
-
-      <ToolbarDivider />
-
-      {/* Orient group */}
       <ToolbarButton
         icon={<OrientIcon />}
         title="Auto-Orient"
@@ -191,72 +220,116 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!hasSelection}
       />
 
-      {/* Less-essential buttons — hidden on very narrow viewports */}
-      <div className="hidden md:contents">
-        <ToolbarDivider />
+      <ToolbarDivider />
 
-        {/* Split/Cut group */}
-        <ToolbarButton
-          icon={<SplitIcon />}
-          title="Split Model"
-          onClick={onSplit}
-          disabled={!hasSelection}
-        />
-        <ToolbarButton
-          icon={<CutIcon />}
-          title="Cut Model (C)"
-          onClick={onCut}
-          disabled={!hasSelection}
-          active={cutActive}
-        />
-
-        <ToolbarDivider />
-
-        {/* Measure */}
-        <ToolbarButton
-          icon={<MeasureIcon />}
-          title="Measure (M)"
-          onClick={onMeasure}
-          disabled={!hasSelection}
-          active={measureActive}
-        />
-
-        <ToolbarDivider />
-
-        {/* Paint group */}
-        <ToolbarButton
-          icon={<ColorPaintIcon />}
-          title="Color Painting (P)"
-          onClick={onColorPaint}
-          disabled={!hasSelection}
-          active={colorPaintActive}
-        />
-        <ToolbarButton
-          icon={<SupportPaintIcon />}
-          title="Support Painting"
-          onClick={onSupportPaint}
-          disabled={!hasSelection}
-          active={supportPaintActive}
-        />
-        <ToolbarButton
-          icon={<SeamPaintIcon />}
-          title="Seam Painting"
-          onClick={onSeamPaint}
-          disabled={!hasSelection}
-          active={seamPaintActive}
-        />
-        <ToolbarButton
-          icon={<FuzzySkinPaintIcon />}
-          title="Fuzzy Skin Painting"
-          onClick={onFuzzySkinPaint}
-          disabled={!hasSelection}
-          active={fuzzySkinPaintActive}
-        />
-      </div>
+      {/* ── Group 2: Transform & Tools ── */}
+      <ToolbarButton
+        icon={<MoveToolIcon />}
+        title="Move"
+        onClick={onMove}
+        active={moveActive}
+      />
+      <ToolbarButton
+        icon={<RotateToolIcon />}
+        title="Rotate"
+        onClick={onRotate}
+        active={rotateActive}
+      />
+      <ToolbarButton
+        icon={<ScaleToolIcon />}
+        title="Scale"
+        onClick={onScale}
+        active={scaleActive}
+      />
+      <ToolbarButton
+        icon={<SplitIcon />}
+        title="Split Model"
+        onClick={onSplit}
+        disabled={!hasSelection}
+      />
+      <ToolbarButton
+        icon={<CutIcon />}
+        title="Cut Model (C)"
+        onClick={onCut}
+        disabled={!hasSelection}
+        active={cutActive}
+      />
+      <ToolbarButton
+        icon={<MeshBooleanIcon />}
+        title="Mesh Boolean (Coming Soon)"
+        onClick={onMeshBoolean}
+        disabled
+      />
+      <ToolbarButton
+        icon={<LayersViewIcon />}
+        title="Variable Layer Height (Coming Soon)"
+        onClick={onVariableLayerHeight}
+        disabled
+      />
 
       <ToolbarDivider />
 
-      {/* Undo/Redo group */}
+      {/* ── Group 3: Paint & Inspection Tools ── */}
+      <ToolbarButton
+        icon={<ColorPaintIcon />}
+        title="Color Painting (P)"
+        onClick={onColorPaint}
+        disabled={!hasSelection}
+        active={colorPaintActive}
+      />
+      <ToolbarButton
+        icon={<SupportPaintIcon />}
+        title="Support Painting"
+        onClick={onSupportPaint}
+        disabled={!hasSelection}
+        active={supportPaintActive}
+      />
+      <ToolbarButton
+        icon={<SeamPaintIcon />}
+        title="Seam Painting"
+        onClick={onSeamPaint}
+        disabled={!hasSelection}
+        active={seamPaintActive}
+      />
+      <ToolbarButton
+        icon={<FuzzySkinPaintIcon />}
+        title="Fuzzy Skin Painting"
+        onClick={onFuzzySkinPaint}
+        disabled={!hasSelection}
+        active={fuzzySkinPaintActive}
+      />
+      <ToolbarButton
+        icon={<TextToolSvgIcon />}
+        title="Text Tool"
+        onClick={onTextTool}
+        active={textToolActive}
+      />
+      <ToolbarButton
+        icon={<MeasureIcon />}
+        title="Measure (M)"
+        onClick={onMeasure}
+        disabled={!hasSelection}
+        active={measureActive}
+      />
+      <ToolbarButton
+        icon={<AssemblyIcon />}
+        title="Assembly View"
+        onClick={onAssemblyView}
+        disabled={!hasModels}
+        active={assemblyActive}
+      />
+      <ToolbarButton
+        icon={<SequentialIcon />}
+        title="Sequential Printing (by object)"
+        onClick={onSequentialToggle}
+        disabled={!hasModels}
+        active={sequentialActive}
+      />
+
+      {/* Spacer to push right-side items */}
+      <div className="flex-1 min-w-1" />
+
+      {/* ── Right side ── */}
       <ToolbarButton
         icon={<UndoIcon />}
         title="Undo (Ctrl+Z)"
@@ -270,30 +343,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!canRedo}
       />
 
-      <div className="hidden md:contents">
-        <ToolbarDivider />
-
-        {/* Assembly view */}
-        <ToolbarButton
-          icon={<AssemblyIcon />}
-          title="Assembly View"
-          onClick={onAssemblyView}
-          disabled={!hasModels}
-          active={assemblyActive}
-        />
-
-        {/* Sequential printing */}
-        <ToolbarButton
-          icon={<SequentialIcon />}
-          title="Sequential Printing (by object)"
-          onClick={onSequentialToggle}
-          disabled={!hasModels}
-          active={sequentialActive}
-        />
-      </div>
-
-      {/* Spacer to push settings to right */}
-      <div className="flex-1 min-w-1" />
+      <ToolbarDivider />
 
       {/* Settings & Profiles button */}
       <Button

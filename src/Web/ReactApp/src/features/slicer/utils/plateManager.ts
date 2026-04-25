@@ -115,10 +115,10 @@ export function renamePlate(state: PlateManagerState, plateId: string, name: str
 }
 
 /**
- * Duplicates a plate's metadata. Note: model IDs are shared references —
- * transforms applied on the duplicate affect the same global model objects.
- * A future version should deep-clone models with new IDs to achieve true
- * independent plate copies.
+ * Duplicates a plate's metadata with an empty model list.
+ * Models are managed externally — copying model IDs would cause shared
+ * references where transforms on one plate affect the other.
+ * The user should add models to the duplicate manually.
  */
 export function duplicatePlate(state: PlateManagerState, plateId: string): PlateManagerState {
   if (state.plates.length >= MAX_PLATES) return state;
@@ -128,8 +128,8 @@ export function duplicatePlate(state: PlateManagerState, plateId: string): Plate
   const id = nextPlateId();
   const newPlate: BuildPlate = {
     id,
-    name: `${source.name} (copy)`,
-    modelIds: [...source.modelIds],
+    name: `${source.name} (empty copy)`,
+    modelIds: [],  // Start empty — shared model refs would cause transform bleed
     locked: false,
   };
 

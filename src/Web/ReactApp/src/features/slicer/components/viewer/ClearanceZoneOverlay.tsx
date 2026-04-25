@@ -49,6 +49,22 @@ function ZoneEdges({ width, depth, height }: { width: number; depth: number; hei
   return <primitive object={edgesGeo} attach="geometry" />;
 }
 
+/** Memoized fill geometry that properly disposes its BoxGeometry on change. */
+function ZoneFill({ width, depth, height, color, opacity }: { width: number; depth: number; height: number; color: THREE.Color; opacity: number }) {
+  const geometry = useMemo(() => new THREE.BoxGeometry(width, depth, height), [width, depth, height]);
+
+  useEffect(() => {
+    return () => { geometry.dispose(); };
+  }, [geometry]);
+
+  return (
+    <mesh>
+      <primitive object={geometry} attach="geometry" />
+      <meshBasicMaterial color={color} transparent opacity={opacity} side={THREE.DoubleSide} depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
 export function ClearanceZoneOverlay({
   zones,
   collisions,
@@ -86,21 +102,13 @@ export function ClearanceZoneOverlay({
         const opacity = isColliding ? COLLISION_OPACITY : CLEAR_OPACITY;
 
         return (
-          <mesh
+          <group
             key={zone.modelId}
             position={[centerX, centerY, boxHeight / 2]}
             renderOrder={1}
           >
-            <boxGeometry args={[width, depth, boxHeight]} />
-            <meshBasicMaterial
-              color={color}
-              transparent
-              opacity={opacity}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-              toneMapped={false}
-            />
-          </mesh>
+            <ZoneFill width={width} depth={depth} height={boxHeight} color={color} opacity={opacity} />
+          </group>
         );
       })}
 
