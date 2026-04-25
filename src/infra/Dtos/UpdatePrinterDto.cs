@@ -53,5 +53,8 @@ public record UpdatePrinterDto(
     // Obico AI failure detection opt-in
     bool? ObicoEnabled = null,
 
+    // Z-offset calibration
+    decimal? ZOffsetMm = null,
+
     // Toolheads - for updating individual toolhead settings
     UpdateToolheadDto[]? Toolheads = null);

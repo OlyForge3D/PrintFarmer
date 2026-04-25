@@ -35,4 +35,6 @@ public record PrinterDetailsDto(
     string? ObicoServerName = null,
     decimal? Wattage = null,
     decimal? MachineHourlyRate = null,
-    bool HasCatalogUpdate = false);
+    bool HasCatalogUpdate = false,
+    decimal? ZOffsetMm = null,
+    DateTime? LastZOffsetCalibrationAt = null);

@@ -1252,6 +1252,10 @@ public class PrintersService(
             ["lastUpdated"] = p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             ["maxBedTemp"] = p.MaxBedTemp,
 
+            // Z-offset calibration
+            ["zOffsetMm"] = p.ZOffsetMm,
+            ["lastZOffsetCalibrationAt"] = p.LastZOffsetCalibrationAt,
+
             // All toolheads as array (supports multi-toolhead printers)
             ["toolheads"] = p.Toolheads?.Select(t => new Dictionary<string, object?>
             {

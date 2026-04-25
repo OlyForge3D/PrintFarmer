@@ -911,7 +911,9 @@ public class PrintersController(
             p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
             p.MachineHourlyRate,
-            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            p.ZOffsetMm,
+            p.LastZOffsetCalibrationAt);
     }
 
     /// <summary>
@@ -1611,6 +1613,12 @@ public class PrintersController(
             p.MachineHourlyRate = dto.MachineHourlyRate.Value;
         }
 
+        if (dto.ZOffsetMm.HasValue && dto.ZOffsetMm.Value != p.ZOffsetMm)
+        {
+            p.ZOffsetMm = dto.ZOffsetMm.Value;
+            p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        }
+
         // Only update LastCapabilityUpdate if capability fields actually changed
         if (capabilityChanged)
         {
@@ -2205,6 +2213,56 @@ public class PrintersController(
         bool ok = await _printersService.SendGcodeAsync(id, request.Command.Trim(), ct);
         _telemetryService.RecordPrinterOperation("send_gcode", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    // Z-offset calibration endpoint
+
+    /// <summary>
+    /// Saves the calibrated Z-offset for a printer.
+    /// Persists the value to the database and optionally sends save commands to the printer firmware.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">The Z-offset save request containing the offset value.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure.</returns>
+    /// <response code="200">Z-offset saved successfully.</response>
+    /// <response code="400">If the offset value is out of range.</response>
+    /// <response code="404">If the printer was not found.</response>
+    [HttpPost("{id:guid}/z-offset")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> SaveZOffsetAsync(Guid id, [FromBody] ZOffsetSaveRequest request, CancellationToken ct)
+    {
+        Printer? p = await _printersService.FindByIdAsync(id, ct);
+        if (p is null)
+        {
+            return NotFound();
+        }
+
+        // Optionally send save commands to the printer firmware
+        if (request.SaveToFirmware)
+        {
+            PrinterBackend backend = (PrinterBackend)p.Backend;
+            string saveCommands = backend switch
+            {
+                PrinterBackend.Moonraker => $"SET_GCODE_OFFSET Z={request.OffsetMm:F3}\nSAVE_CONFIG",
+                _ => $"M851 Z{request.OffsetMm:F3}\nM500"
+            };
+
+            foreach (string cmd in saveCommands.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                await _printersService.SendGcodeAsync(id, cmd.Trim(), ct);
+            }
+        }
+
+        // Persist the Z-offset to the database
+        p.ZOffsetMm = request.OffsetMm;
+        p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        await _printersService.SaveChangesAsync(ct);
+
+        _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), true);
+        return new CommandResult(true, null);
     }
 
     // Filament control endpoints
