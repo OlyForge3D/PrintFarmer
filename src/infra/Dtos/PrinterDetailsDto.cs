@@ -37,4 +37,5 @@ public record PrinterDetailsDto(
     decimal? MachineHourlyRate = null,
     bool HasCatalogUpdate = false,
     decimal? ZOffsetMm = null,
-    DateTime? LastZOffsetCalibrationAt = null);
+    DateTime? LastZOffsetCalibrationAt = null,
+    bool UseModelDispatchDefaults = true);

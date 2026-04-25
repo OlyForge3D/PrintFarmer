@@ -139,6 +139,8 @@ export interface PrinterMetadata {
   notes?: string;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Whether this printer inherits dispatch settings from its model. */
+  useModelDispatchDefaults?: boolean;
   /** True when the printer's linked catalog model has been updated since the last template sync. */
   hasCatalogUpdate?: boolean;
   /** Manufacturer ID (foreign key) */
@@ -702,6 +704,8 @@ export interface UpdatePrinterDto {
   cameraSnapshotUrl?: string;
   /** Optional Obico ML monitoring opt-in. When true, the app auto-assigns a healthy server. */
   obicoEnabled?: boolean;
+  /** Whether this printer inherits dispatch settings from its model. */
+  useModelDispatchDefaults?: boolean;
   // Printer capabilities
   nozzleDiameter?: number;
   supportedMaterials?: string[];
@@ -1248,6 +1252,8 @@ export interface PrinterDetails {
   machineHourlyRate?: number;
   /** True when the printer's linked catalog model has been updated since the last template sync. */
   hasCatalogUpdate?: boolean;
+  /** Whether this printer inherits dispatch settings from its model. */
+  useModelDispatchDefaults?: boolean;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }

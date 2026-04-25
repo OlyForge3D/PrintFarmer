@@ -53,4 +53,5 @@ public record CompletePrinterDto(
     DateTime? EstimatedCompletionTimeUtc = null,
     Guid? BedTypeId = null,
     string? BedTypeName = null,
-    string? BedTypeColor = null);
+    string? BedTypeColor = null,
+    bool UseModelDispatchDefaults = true);

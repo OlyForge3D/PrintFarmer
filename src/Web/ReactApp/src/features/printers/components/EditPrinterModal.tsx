@@ -7,7 +7,7 @@ import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
-import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, AccordionButton } from '@/common/components/ui';
+import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, Toggle, AccordionButton } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
 import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
@@ -92,6 +92,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
         obicoEnabled: printerDetails.obicoEnabled ?? false,
+        useModelDispatchDefaults: printerDetails.useModelDispatchDefaults ?? true,
         wattage: printerDetails.wattage ?? undefined,
         machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
       };
@@ -179,7 +180,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
-      'backendPort', 'frontendPort', 'obicoEnabled',
+      'backendPort', 'frontendPort', 'obicoEnabled', 'useModelDispatchDefaults',
       'wattage', 'machineHourlyRate'
     ];
     
@@ -1114,6 +1115,20 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             </div>
+
+            {/* Auto-Dispatch Defaults */}
+            <FormField
+              label="Model Dispatch Defaults"
+              htmlFor="use-model-dispatch-defaults"
+              helper="When enabled, this printer inherits dispatch settings from its model"
+            >
+              <Toggle
+                id="use-model-dispatch-defaults"
+                checked={formData.useModelDispatchDefaults ?? true}
+                onChange={e => handleInputChange('useModelDispatchDefaults', e.target.checked)}
+                label="Use model dispatch defaults"
+              />
+            </FormField>
 
             {/* Obico AI Failure Detection */}
             <FormField 

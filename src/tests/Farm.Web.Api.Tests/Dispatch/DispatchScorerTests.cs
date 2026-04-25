@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Web.Api.Tests.Builders;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -493,6 +494,96 @@ public class DispatchScorerTests : IDisposable
     }
 
     // =========================================================================
+    // COLOR MATCH FACTOR TESTS
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_ExactHexMatch_Returns100()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000";
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(100, "exact hex match should score 100");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_SameColorFamily_Returns80()
+    {
+        // Both are red family but different hex values
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#CC0000"; // Dark red
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000"; // Bright red
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(80, "same color family should score 80");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_DifferentFamily_Returns20()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#0000FF"; // Blue
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000"; // Red
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(20, "different color family should score 20");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_NoJobColor_ReturnsNeutral()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = null;
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(50, "no job color should return neutral 50");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_NoPrinterColor_ReturnsNeutral()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = null;
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000";
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(50, "no printer color should return neutral 50");
+    }
+
+    // =========================================================================
     // SCORING HELPER METHODS
     // These implement the scoring logic from the specification.
     // When Lambert's IDispatchScorer lands, these tests should be adapted
@@ -667,6 +758,54 @@ public class DispatchScorerTests : IDisposable
         }
 
         return printer.Toolheads.Count > 0 ? 100 : -1;
+    }
+
+    /// <summary>
+    /// Scores color match between printer's loaded filament and job's required color.
+    /// Returns 100 (exact hex), 80 (same family), 50 (neutral/no data), or 20 (different family).
+    /// </summary>
+    private static int ScoreColorMatch(Printer printer, PrintJob job)
+    {
+        if (string.IsNullOrWhiteSpace(job.FilamentColor))
+        {
+            return 50; // No job color — neutral
+        }
+
+        string? printerColor = printer.Toolheads
+            .Where(t => t.IsPrimary)
+            .Select(t => t.CurrentFilamentColor)
+            .FirstOrDefault()
+            ?? printer.Toolheads
+                .Select(t => t.CurrentFilamentColor)
+                .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+
+        if (string.IsNullOrWhiteSpace(printerColor))
+        {
+            return 50; // No printer color — neutral
+        }
+
+        string jobHex = job.FilamentColor.Trim().TrimStart('#').ToUpperInvariant();
+        string printerHex = printerColor.Trim().TrimStart('#').ToUpperInvariant();
+
+        if (string.Equals(jobHex, printerHex, StringComparison.Ordinal))
+        {
+            return 100; // Exact hex match
+        }
+
+        (string Name, string Hex)? jobFamily = AutoTagService.HexToColorFamily(job.FilamentColor);
+        (string Name, string Hex)? printerFamily = AutoTagService.HexToColorFamily(printerColor);
+
+        if (jobFamily is null || printerFamily is null)
+        {
+            return 50; // Unparseable color — neutral
+        }
+
+        if (string.Equals(jobFamily.Value.Name, printerFamily.Value.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return 80; // Same color family
+        }
+
+        return 20; // Different family — slight penalty
     }
 
     /// <summary>
