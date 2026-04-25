@@ -2761,14 +2761,6 @@ export class ApiClient {
   }
 
   /**
-   * Get all roles
-   */
-  async getRoles(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/users/roles');
-    return response.data || [];
-  }
-
-  /**
    * Check username and email availability
    */
   async checkUserAvailability(
