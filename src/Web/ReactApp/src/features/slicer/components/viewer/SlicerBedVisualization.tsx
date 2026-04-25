@@ -92,7 +92,19 @@ export interface SlicerBedVisualizationProps {
   /** Whether cut mode is active */
   cutMode?: boolean;
   /** Called when a cut is completed with two new geometries */
-  onCutComplete?: (geometryAbove: THREE.BufferGeometry, geometryBelow: THREE.BufferGeometry) => void;
+  onCutComplete?: (
+    geometryAbove: THREE.BufferGeometry,
+    geometryBelow: THREE.BufferGeometry,
+    options?: {
+      keepUpper: boolean;
+      keepLower: boolean;
+      placeOnCutUpper: boolean;
+      placeOnCutLower: boolean;
+      flipUpper: boolean;
+      flipLower: boolean;
+      cutToParts: boolean;
+    }
+  ) => void;
   /** Called when cut is cancelled */
   onCutCancel?: () => void;
   /** Whether support paint mode is active */
@@ -792,13 +804,15 @@ function computeZForBedPlacement(
     if (v.z < minRotatedZ) minRotatedZ = v.z;
   }
 
-  // The centered geometry has halfZ = (max.z - min.z) / 2.
-  // STLModel group position.z = data_pz + halfZ.
+  // Both STLModel and PrebuiltSTLModel offset group.z by halfZ:
+  //   STLModel (centered geo): halfZ = (max.z - min.z) / 2 = -min.z (since centered)
+  //   PrebuiltSTLModel (uncentered cut geo): halfZ = -min.z
+  // Using -min.z works universally for both model types.
   // World Z of lowest vertex = data_pz + halfZ + minScaledRotatedZ.
   // For bed placement (lowest at 0): data_pz = -halfZ - minScaledRotatedZ.
   geometry.computeBoundingBox();
   const halfZ = geometry.boundingBox
-    ? (geometry.boundingBox.max.z - geometry.boundingBox.min.z) / 2
+    ? -geometry.boundingBox.min.z
     : 0;
   return -halfZ - minRotatedZ;
 }
@@ -2025,7 +2039,19 @@ function BedScene({
                     selected={model.id === selectedModelId}
                     outOfBounds={outOfBoundsModelIds?.has(model.id)}
                     layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={!layFlatMode && !assemblyViewActive && transformMode !== 'rotate' && transformMode !== 'scale'}
+                    draggable={
+                      !layFlatMode &&
+                      !assemblyViewActive &&
+                      !cutMode &&
+                      !supportPaintMode &&
+                      !seamPaintMode &&
+                      !colorPaintMode &&
+                      !fuzzySkinPaintMode &&
+                      !measureMode &&
+                      !textPlacementMode &&
+                      transformMode !== 'rotate' &&
+                      transformMode !== 'scale'
+                    }
                     onClick={() => onModelSelect?.(model.id)}
                     onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                     onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
@@ -2048,7 +2074,19 @@ function BedScene({
                     selected={model.id === selectedModelId}
                     outOfBounds={outOfBoundsModelIds?.has(model.id)}
                     layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={!layFlatMode && !assemblyViewActive && transformMode !== 'rotate' && transformMode !== 'scale'}
+                    draggable={
+                      !layFlatMode &&
+                      !assemblyViewActive &&
+                      !cutMode &&
+                      !supportPaintMode &&
+                      !seamPaintMode &&
+                      !colorPaintMode &&
+                      !fuzzySkinPaintMode &&
+                      !measureMode &&
+                      !textPlacementMode &&
+                      transformMode !== 'rotate' &&
+                      transformMode !== 'scale'
+                    }
                     onClick={() => onModelSelect?.(model.id)}
                     onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                     onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
@@ -2080,6 +2118,7 @@ function BedScene({
         <CutPlaneOverlay
           meshRef={selectedMeshRef}
           active={cutMode}
+          bedConfig={bedConfig}
           onCutComplete={onCutComplete}
           onCutCancel={onCutCancel}
         />
