@@ -15,7 +15,7 @@
 
 import React, { useState } from 'react';
 import { UploadIcon, CheckCircleIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { orcaProfilesService } from '../services/orcaProfilesService';
 import type { OrcaBundlePreview } from '../types/orcaProfiles';
@@ -24,6 +24,7 @@ import { isZipFile, extractOrcaBundle } from '../utils/orcaBundleExtractor';
 type WizardStep = 'upload' | 'preview' | 'review' | 'import' | 'complete';
 
 export const OrcaImportWizard: React.FC = () => {
+    const qc = useQueryClient();
     const [currentStep, setCurrentStep] = useState<WizardStep>('upload');
     const [bundleJson, setBundleJson] = useState<string>('');
     const [preview, setPreview] = useState<OrcaBundlePreview | null>(null);
@@ -55,6 +56,9 @@ export const OrcaImportWizard: React.FC = () => {
                 selectedProcesses: Array.from(selectedProcesses),
             }),
         onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+            qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+            qc.invalidateQueries({ queryKey: ['customProfiles'] });
             setCurrentStep('complete');
         },
     });

@@ -247,6 +247,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setAllowSystemOverride(false);
       setSetDefault(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => {
       setImportError(err.message);
@@ -258,6 +259,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: () => {
       setMessage('Default profile updated.');
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
   });
@@ -268,6 +270,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
       setSelectedProfileIds(new Set());
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
@@ -279,6 +282,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: (result) => {
       setMessage(`Created custom profile: ${result.name}`);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
@@ -294,6 +298,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setUploadError(null);
       setIsUploadModalOpen(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setUploadError(err.message)
@@ -308,6 +313,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setEditingProfile(null);
       setEditError(null);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setEditError(err.message)
@@ -319,6 +325,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: () => {
       setMessage('Profile deleted');
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to delete profile: ${err.message}`)
@@ -826,6 +833,7 @@ export const SlicerProfilesPage: React.FC = () => {
           setReseedMessage(`✅ ${data.imported} profiles imported, ${data.skipped} skipped, ${data.deleted} deleted`);
           // Refresh the profiles list
           qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
         }
       });
 

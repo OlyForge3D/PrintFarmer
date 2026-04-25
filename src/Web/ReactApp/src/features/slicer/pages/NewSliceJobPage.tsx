@@ -172,6 +172,7 @@ export const NewSliceJobPage: React.FC = () => {
       });
       toast.success(`Profile "${saveProfileState.name.trim()}" saved`);
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       setSaveProfileState({ open: false, name: '' });
     } catch {
       toast.error('Failed to save profile');
@@ -243,6 +244,7 @@ export const NewSliceJobPage: React.FC = () => {
     }
 
     qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
   }, [qc]);
 
   // === Machine Profile Import handlers ===
@@ -310,6 +312,7 @@ export const NewSliceJobPage: React.FC = () => {
 
     qc.invalidateQueries({ queryKey: ['customProfiles'] });
     qc.invalidateQueries({ queryKey: ['machineProfilesForPrinter'] });
+    qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
   }, [qc]);
 
   // === Filament Profile Import handlers ===
@@ -377,6 +380,7 @@ export const NewSliceJobPage: React.FC = () => {
 
     qc.invalidateQueries({ queryKey: ['customProfiles'] });
     qc.invalidateQueries({ queryKey: ['filamentProfilesAll'] });
+    qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
   }, [qc]);
 
   // Close profile menu when clicking outside
@@ -1417,7 +1421,7 @@ export const NewSliceJobPage: React.FC = () => {
             Get started with slicing
           </h2>
           <p className="text-sm text-pf-text-secondary mb-6 max-w-md">
-            Import printer profiles to configure your first slice job. Profiles define machine settings, filament parameters, and print quality presets.
+            Import printer profiles or create custom ones to configure your first slice job. Profiles define machine settings, filament parameters, and print quality presets.
           </p>
           <div className="flex gap-3">
             <Button
@@ -1426,6 +1430,13 @@ export const NewSliceJobPage: React.FC = () => {
               data-testid="import-profiles-button"
             >
               Import Profiles
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => navigate('/profiles')}
+              data-testid="create-custom-profile-button"
+            >
+              Create Custom Profile
             </Button>
           </div>
         </div>
@@ -2111,6 +2122,7 @@ export const NewSliceJobPage: React.FC = () => {
             qc.invalidateQueries({ queryKey: ['slicerProfiles'] });
             qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
             qc.invalidateQueries({ queryKey: ['machineProfilesForModel'] });
+            qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
           }}
         />
       )}
@@ -2126,6 +2138,7 @@ export const NewSliceJobPage: React.FC = () => {
         }
         onSaveSuccess={(_profileId, profileName) => {
           qc.invalidateQueries({ queryKey: ['customProfiles'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
           setMessage(`Custom profile "${profileName}" saved successfully`);
         }}
       />
@@ -2144,6 +2157,7 @@ export const NewSliceJobPage: React.FC = () => {
         onSaveSuccess={(_profileId, profileName) => {
           qc.invalidateQueries({ queryKey: ['customProfiles'] });
           qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
           setMessage(`Custom process profile "${profileName}" saved successfully`);
         }}
       />
