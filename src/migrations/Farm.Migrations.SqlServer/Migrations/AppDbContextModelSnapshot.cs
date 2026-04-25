@@ -3024,6 +3024,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
 
+                    b.Property<DateTime?>("LastZOffsetCalibrationAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -3095,6 +3098,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal?>("Wattage")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("ZOffsetMm")
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");

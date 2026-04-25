@@ -587,6 +587,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<string>("ModelFileTransformsJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)

@@ -87,9 +87,9 @@ export function FilamentsTab() {
     material: { key: 'material', type: 'string', defaultValue: '' },
     vendor: { key: 'vendor', type: 'string', defaultValue: '' },
     color: { key: 'color', type: 'string', defaultValue: '' },
-    sortField: { key: 'sort', type: 'string', defaultValue: 'name' },
-    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc' },
-    page: { key: 'page', type: 'number', defaultValue: 1 },
+    sortField: { key: 'sort', type: 'string', defaultValue: 'name', filterable: false },
+    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc', filterable: false },
+    page: { key: 'page', type: 'number', defaultValue: 1, filterable: false },
   });
 
   const filters: FilterState = {

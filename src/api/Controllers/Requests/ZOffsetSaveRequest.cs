@@ -14,7 +14,7 @@ public sealed class ZOffsetSaveRequest
     [JsonPropertyName("offsetMm")]
     [Required(ErrorMessage = "offsetMm is required")]
     [Range(-5.0, 5.0, ErrorMessage = "offsetMm must be between -5.0 and 5.0")]
-    public decimal OffsetMm { get; set; }
+    public decimal? OffsetMm { get; set; }
 
     /// <summary>
     /// Whether to also send save commands to the printer firmware (M500 for Marlin, SAVE_CONFIG for Klipper).
