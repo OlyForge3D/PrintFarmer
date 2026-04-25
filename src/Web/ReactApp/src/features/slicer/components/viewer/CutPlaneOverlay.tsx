@@ -10,6 +10,10 @@ import { Button, Input, Checkbox } from '@/common/components/ui';
 import type { BedConfig } from './SlicerBedVisualization';
 
 export interface CutOptions {
+  /** Cut axis. "Upper" maps to +axis side, "Lower" maps to -axis side. */
+  cutAxis: 'x' | 'y' | 'z';
+  /** World-space plane position along cutAxis. */
+  worldPlanePos: number;
   keepUpper: boolean;
   keepLower: boolean;
   placeOnCutUpper: boolean;
@@ -38,13 +42,6 @@ interface CutPlaneOverlayProps {
 
 type CutAxis = 'x' | 'y' | 'z';
 
-/** Classify a vertex as above, below, or on the plane along specified axis */
-function classifyPoint(value: number, planeValue: number, epsilon = 1e-6): -1 | 0 | 1 {
-  if (value > planeValue + epsilon) return 1;
-  if (value < planeValue - epsilon) return -1;
-  return 0;
-}
-
 /** Linearly interpolate between two 3D points */
 function lerpVertex(a: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector3 {
   return new THREE.Vector3(
@@ -55,42 +52,89 @@ function lerpVertex(a: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector
 }
 
 /**
- * Order cap edges into a closed polygon by matching endpoints.
- * Returns vertex loop (without repeating the first vertex at the end).
+ * Order cap edges into one or more closed polygon loops by matching endpoints.
+ * A planar cross-section of a non-convex / multi-region mesh may produce several
+ * disjoint loops; each is returned as a separate polygon (without repeating the
+ * first vertex at the end).
  */
-function orderCapEdges(edges: Array<[THREE.Vector3, THREE.Vector3]>, epsilon = 1e-5): THREE.Vector3[] {
+function orderCapEdges(
+  edges: Array<[THREE.Vector3, THREE.Vector3]>,
+  epsilon = 1e-5,
+): THREE.Vector3[][] {
   if (edges.length === 0) return [];
   const eq = (a: THREE.Vector3, b: THREE.Vector3) => a.distanceTo(b) < epsilon;
 
-  const polygon: THREE.Vector3[] = [edges[0][0], edges[0][1]];
-  const used = new Set([0]);
+  const loops: THREE.Vector3[][] = [];
+  const used = new Set<number>();
 
   while (used.size < edges.length) {
-    const last = polygon[polygon.length - 1];
-    let found = false;
+    // Pick the next unused edge as the seed for a new loop
+    let seed = -1;
     for (let i = 0; i < edges.length; i++) {
-      if (used.has(i)) continue;
-      if (eq(edges[i][0], last)) {
-        polygon.push(edges[i][1]);
-        used.add(i);
-        found = true;
-        break;
+      if (!used.has(i)) { seed = i; break; }
+    }
+    if (seed === -1) break;
+
+    const polygon: THREE.Vector3[] = [edges[seed][0], edges[seed][1]];
+    used.add(seed);
+
+    // Extend the polygon by chaining edges that share an endpoint with `last`
+    while (used.size < edges.length) {
+      const last = polygon[polygon.length - 1];
+      let found = false;
+      for (let i = 0; i < edges.length; i++) {
+        if (used.has(i)) continue;
+        if (eq(edges[i][0], last)) {
+          polygon.push(edges[i][1]);
+          used.add(i);
+          found = true;
+          break;
+        }
+        if (eq(edges[i][1], last)) {
+          polygon.push(edges[i][0]);
+          used.add(i);
+          found = true;
+          break;
+        }
       }
-      if (eq(edges[i][1], last)) {
-        polygon.push(edges[i][0]);
-        used.add(i);
-        found = true;
+      if (!found) break;
+      // Loop closed back to start?
+      if (eq(polygon[0], polygon[polygon.length - 1])) {
+        polygon.pop();
         break;
       }
     }
-    if (!found) break;
+
+    if (polygon.length >= 3) loops.push(polygon);
   }
 
-  // Remove closing duplicate
-  if (polygon.length > 1 && eq(polygon[0], polygon[polygon.length - 1])) {
-    polygon.pop();
+  return loops;
+}
+
+/** Drop adjacent duplicate and collinear vertices from a polygon (in-place safe). */
+function removeCollinearVertices(
+  polygon: THREE.Vector3[],
+  project: (v: THREE.Vector3) => [number, number],
+  epsilon = 1e-9,
+): THREE.Vector3[] {
+  if (polygon.length < 3) return polygon;
+  const out: THREE.Vector3[] = [];
+  const n = polygon.length;
+  for (let i = 0; i < n; i++) {
+    const prev = polygon[(i + n - 1) % n];
+    const curr = polygon[i];
+    const next = polygon[(i + 1) % n];
+    const [px, py] = project(prev);
+    const [cx, cy] = project(curr);
+    const [nx, ny] = project(next);
+    // Drop exact duplicates of the previous vertex
+    if (Math.abs(cx - px) < epsilon && Math.abs(cy - py) < epsilon) continue;
+    // Drop collinear vertices (cross product near zero)
+    const cross = (cx - px) * (ny - py) - (cy - py) * (nx - px);
+    if (Math.abs(cross) < epsilon) continue;
+    out.push(curr);
   }
-  return polygon;
+  return out.length >= 3 ? out : polygon;
 }
 
 /** Check if point (px,py) is inside triangle (x1,y1)-(x2,y2)-(x3,y3). */
@@ -107,8 +151,10 @@ function pointInTriangle2D(
 }
 
 /**
- * Triangulate a polygon using ear-clipping. Projects to 2D based on cut axis.
- * Returns array of [v0, v1, v2] triangles with the original 3D vertices.
+ * Triangulate a polygon using ear-clipping. Projects to 2D such that CCW winding
+ * in the projection corresponds to a +cutAxis triangle normal in 3D. Returns the
+ * triangles preserving original 3D vertices. Robust to collinear vertices and
+ * uses a quadratic safety bound (worst-case ear-clipping is O(n²)).
  */
 function earClipTriangulate(
   polygon: THREE.Vector3[],
@@ -117,44 +163,58 @@ function earClipTriangulate(
   if (polygon.length < 3) return [];
   if (polygon.length === 3) return [[polygon[0], polygon[1], polygon[2]]];
 
+  // Project so that 2D CCW winding ↔ +cutAxis 3D normal.
+  // axis='x': (y,z) → y×z = +x ✓
+  // axis='y': (z,x) → z×x = +y ✓
+  // axis='z': (x,y) → x×y = +z ✓
   const project = (v: THREE.Vector3): [number, number] => {
     if (axis === 'x') return [v.y, v.z];
-    if (axis === 'y') return [v.x, v.z];
+    if (axis === 'y') return [v.z, v.x];
     return [v.x, v.y];
   };
 
-  // Compute signed area to determine winding
-  let signedArea = 0;
-  for (let i = 0; i < polygon.length; i++) {
-    const [x1, y1] = project(polygon[i]);
-    const [x2, y2] = project(polygon[(i + 1) % polygon.length]);
-    signedArea += (x2 - x1) * (y2 + y1);
-  }
-  const isCCW = signedArea < 0;
+  // Pre-pass: drop adjacent duplicates and collinear vertices.
+  let work = removeCollinearVertices(polygon, project);
+  if (work.length < 3) return [];
+  if (work.length === 3) return [[work[0], work[1], work[2]]];
 
-  const indices = Array.from({ length: polygon.length }, (_, i) => i);
+  // Compute signed area (shoelace, conventional sign: > 0 means CCW).
+  let signedArea = 0;
+  for (let i = 0; i < work.length; i++) {
+    const [x1, y1] = project(work[i]);
+    const [x2, y2] = project(work[(i + 1) % work.length]);
+    signedArea += x1 * y2 - x2 * y1;
+  }
+
+  // Force CCW orientation so emitted triangles have +cutAxis normal.
+  if (signedArea < 0) work = work.slice().reverse();
+
+  const indices = Array.from({ length: work.length }, (_, i) => i);
   const triangles: Array<[THREE.Vector3, THREE.Vector3, THREE.Vector3]> = [];
 
-  let safety = indices.length * 2;
-  while (indices.length > 3 && safety-- > 0) {
+  // O(n²) worst-case bound on failed-ear iterations.
+  let safety = indices.length * indices.length + 4;
+  while (indices.length > 3) {
     let earFound = false;
     for (let i = 0; i < indices.length; i++) {
       const prevIdx = indices[(i + indices.length - 1) % indices.length];
       const currIdx = indices[i];
       const nextIdx = indices[(i + 1) % indices.length];
 
-      const [px, py] = project(polygon[prevIdx]);
-      const [cx, cy] = project(polygon[currIdx]);
-      const [nx, ny] = project(polygon[nextIdx]);
+      const [px, py] = project(work[prevIdx]);
+      const [cx, cy] = project(work[currIdx]);
+      const [nx, ny] = project(work[nextIdx]);
 
+      // Convex test in CCW orientation. Treat collinear (cross == 0) as non-ear
+      // to avoid emitting zero-area triangles; collinear vertices were already
+      // pruned but float noise may leave near-zero values.
       const cross = (cx - px) * (ny - py) - (cy - py) * (nx - px);
-      const isConvex = isCCW ? cross > 0 : cross < 0;
-      if (!isConvex) continue;
+      if (cross <= 1e-12) continue;
 
       let containsPoint = false;
       for (const idx of indices) {
         if (idx === prevIdx || idx === currIdx || idx === nextIdx) continue;
-        const [tx, ty] = project(polygon[idx]);
+        const [tx, ty] = project(work[idx]);
         if (pointInTriangle2D(tx, ty, px, py, cx, cy, nx, ny)) {
           containsPoint = true;
           break;
@@ -162,16 +222,31 @@ function earClipTriangulate(
       }
       if (containsPoint) continue;
 
-      triangles.push([polygon[prevIdx], polygon[currIdx], polygon[nextIdx]]);
+      triangles.push([work[prevIdx], work[currIdx], work[nextIdx]]);
       indices.splice(i, 1);
       earFound = true;
       break;
     }
-    if (!earFound) break;
+    if (!earFound) {
+      if (--safety <= 0) {
+        // Fallback fan from indices[0] over remaining indices. This is not ideal
+        // for non-convex remainders, but is preferable to silently dropping the
+        // cap. Surfaces it via console for diagnostics.
+        // eslint-disable-next-line no-console
+        console.warn('earClipTriangulate: fallback fan triangulation', {
+          remaining: indices.length,
+          axis,
+        });
+        for (let i = 1; i < indices.length - 1; i++) {
+          triangles.push([work[indices[0]], work[indices[i]], work[indices[i + 1]]]);
+        }
+        return triangles;
+      }
+    }
   }
 
   if (indices.length === 3) {
-    triangles.push([polygon[indices[0]], polygon[indices[1]], polygon[indices[2]]]);
+    triangles.push([work[indices[0]], work[indices[1]], work[indices[2]]]);
   }
   return triangles;
 }
@@ -197,25 +272,35 @@ function filterDegenerateTriangles(verts: number[], minArea2 = 1e-16): number[] 
 }
 
 /**
- * Split geometry along a plane at specified position on the given axis.
+ * Split geometry along a world-space plane. Caller specifies the plane axis
+ * (which determines the +/- side meaning) and a point on the plane in world
+ * space. The plane is transformed into model-local space via the inverse of
+ * `modelMatrix`, supporting rotated/scaled parents correctly.
+ *
+ * "above" = vertices on the +cutAxis side of the plane in world space.
+ * "below" = vertices on the -cutAxis side.
  */
 function splitGeometryAtPlane(
   geometry: THREE.BufferGeometry,
   axis: CutAxis,
-  planePosition: number,
+  worldPlanePos: number,
   modelMatrix?: THREE.Matrix4,
 ): { above: THREE.BufferGeometry; below: THREE.BufferGeometry } {
-  // Transform world-space cutting plane into model-local space
-  let localPlanePos = planePosition;
+  // Build the world-space plane as a THREE.Plane (normal + constant).
+  const worldNormal = axis === 'x'
+    ? new THREE.Vector3(1, 0, 0)
+    : axis === 'y'
+    ? new THREE.Vector3(0, 1, 0)
+    : new THREE.Vector3(0, 0, 1);
+  const worldPlane = new THREE.Plane(worldNormal.clone(), -worldPlanePos);
+
+  // Transform the world plane into local space. THREE.Plane.applyMatrix4 with the
+  // inverse model matrix yields the equivalent local plane (correctly handles
+  // rotation; for non-uniform scale it will renormalize the normal).
+  const localPlane = worldPlane.clone();
   if (modelMatrix) {
     const inv = modelMatrix.clone().invert();
-    const planePoint = axis === 'x'
-      ? new THREE.Vector3(planePosition, 0, 0)
-      : axis === 'y'
-      ? new THREE.Vector3(0, planePosition, 0)
-      : new THREE.Vector3(0, 0, planePosition);
-    planePoint.applyMatrix4(inv);
-    localPlanePos = axis === 'x' ? planePoint.x : axis === 'y' ? planePoint.y : planePoint.z;
+    localPlane.applyMatrix4(inv);
   }
 
   const posAttr = geometry.getAttribute('position');
@@ -226,16 +311,25 @@ function splitGeometryAtPlane(
   const belowVerts: number[] = [];
   const capEdges: Array<[THREE.Vector3, THREE.Vector3]> = [];
 
-  const getVertex = (i: number): THREE.Vector3 => {
-    return new THREE.Vector3(
-      posAttr.getX(i),
-      posAttr.getY(i),
-      posAttr.getZ(i),
-    );
-  };
+  const getVertex = (i: number): THREE.Vector3 => new THREE.Vector3(
+    posAttr.getX(i),
+    posAttr.getY(i),
+    posAttr.getZ(i),
+  );
 
-  const getAxisValue = (v: THREE.Vector3): number => {
-    return axis === 'x' ? v.x : axis === 'y' ? v.y : v.z;
+  // Signed distance from local plane. >0 = above (+cutAxis side), <0 = below.
+  const signedDist = (v: THREE.Vector3): number => localPlane.distanceToPoint(v);
+  const classify = (d: number, eps = 1e-6): -1 | 0 | 1 =>
+    d > eps ? 1 : d < -eps ? -1 : 0;
+
+  // Project a vertex onto the local plane along the edge a→b using signed
+  // distances. Used to compute cap-edge intersection points.
+  const intersectOnPlane = (a: THREE.Vector3, b: THREE.Vector3, dA: number, dB: number): THREE.Vector3 => {
+    const denom = dA - dB;
+    // m1: guard against zero denominator (both endpoints on the plane).
+    if (Math.abs(denom) < 1e-12) return a.clone();
+    const t = Math.max(0, Math.min(1, dA / denom));
+    return lerpVertex(a, b, t);
   };
 
   const pushTriVerts = (arr: number[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
@@ -251,9 +345,13 @@ function splitGeometryAtPlane(
     const v1 = getVertex(i1);
     const v2 = getVertex(i2);
 
-    const c0 = classifyPoint(getAxisValue(v0), localPlanePos);
-    const c1 = classifyPoint(getAxisValue(v1), localPlanePos);
-    const c2 = classifyPoint(getAxisValue(v2), localPlanePos);
+    const d0 = signedDist(v0);
+    const d1 = signedDist(v1);
+    const d2 = signedDist(v2);
+
+    const c0 = classify(d0);
+    const c1 = classify(d1);
+    const c2 = classify(d2);
 
     // All above
     if (c0 >= 0 && c1 >= 0 && c2 >= 0) {
@@ -266,8 +364,11 @@ function splitGeometryAtPlane(
       continue;
     }
 
-    // Triangle intersects the plane
+    // Triangle intersects the plane. Find the lone vertex (the one whose sign
+    // differs from the other two) so we can split the triangle into one above-
+    // side fragment and two below-side fragments (or vice versa).
     const verts = [v0, v1, v2];
+    const dists = [d0, d1, d2];
     const classes = [c0, c1, c2];
 
     let loneIdx = -1;
@@ -282,26 +383,23 @@ function splitGeometryAtPlane(
     }
 
     if (loneIdx === -1) {
-      if (c0 > 0 || c1 > 0 || c2 > 0) {
-        pushTriVerts(aboveVerts, v0, v1, v2);
-      } else {
-        pushTriVerts(belowVerts, v0, v1, v2);
-      }
+      // Triangle straddles via a degenerate case (e.g. one vertex exactly on
+      // the plane). Assign by majority sign.
+      if (d0 + d1 + d2 > 0) pushTriVerts(aboveVerts, v0, v1, v2);
+      else pushTriVerts(belowVerts, v0, v1, v2);
       continue;
     }
 
     const vA = verts[loneIdx];
     const vB = verts[(loneIdx + 1) % 3];
     const vC = verts[(loneIdx + 2) % 3];
+    const dA = dists[loneIdx];
+    const dB = dists[(loneIdx + 1) % 3];
+    const dC = dists[(loneIdx + 2) % 3];
     const cA = classes[loneIdx];
 
-    const valA = getAxisValue(vA);
-    const valB = getAxisValue(vB);
-    const valC = getAxisValue(vC);
-    const tAB = (localPlanePos - valA) / (valB - valA);
-    const tAC = (localPlanePos - valA) / (valC - valA);
-    const pAB = lerpVertex(vA, vB, Math.max(0, Math.min(1, tAB)));
-    const pAC = lerpVertex(vA, vC, Math.max(0, Math.min(1, tAC)));
+    const pAB = intersectOnPlane(vA, vB, dA, dB);
+    const pAC = intersectOnPlane(vA, vC, dA, dC);
 
     capEdges.push([pAB.clone(), pAC.clone()]);
 
@@ -316,15 +414,30 @@ function splitGeometryAtPlane(
     }
   }
 
-  // Build cap faces using ordered polygon + ear-clipping triangulation
+  // Build cap faces. Walk every closed loop in capEdges (a non-convex cut may
+  // produce multiple disjoint loops). earClipTriangulate emits triangles with
+  // +cutAxis-aligned normals, so the below-cap uses (a,b,c) and the above-cap
+  // reverses the winding to produce -cutAxis-aligned normals.
   if (capEdges.length > 0) {
-    const polygon = orderCapEdges(capEdges);
-    if (polygon.length >= 3) {
-      const tris = earClipTriangulate(polygon, axis);
+    // For non-Z cuts, the local-plane normal in local space differs from
+    // worldNormal once the model is rotated; but our cap edges are in local
+    // coordinates, so we triangulate against the *local* plane orientation.
+    // The CutAxis-projected ear-clip uses world-axis projection though, so we
+    // approximate: triangulate using the major axis of localPlane.normal.
+    const ln = localPlane.normal;
+    const localAxis: CutAxis =
+      Math.abs(ln.x) >= Math.abs(ln.y) && Math.abs(ln.x) >= Math.abs(ln.z) ? 'x'
+        : Math.abs(ln.y) >= Math.abs(ln.z) ? 'y'
+        : 'z';
+    const loops = orderCapEdges(capEdges);
+    for (const polygon of loops) {
+      if (polygon.length < 3) continue;
+      const tris = earClipTriangulate(polygon, localAxis);
       for (const [a, b, c] of tris) {
-        // Above cap: winding opposite to below
-        pushTriVerts(aboveVerts, c, b, a);
+        // Below-cap normal points in +localAxis direction (toward removed top).
+        // Above-cap reverses.
         pushTriVerts(belowVerts, a, b, c);
+        pushTriVerts(aboveVerts, c, b, a);
       }
     }
   }
@@ -356,7 +469,18 @@ export function CutPlaneOverlay({
   const planeRef = useRef<THREE.Mesh>(null);
   const handleRef = useRef<THREE.Mesh>(null);
   const [cutAxis, setCutAxis] = useState<CutAxis>('z');
-  const [cutHeight, setCutHeight] = useState(0.5);
+  // n1: per-axis cut height so toggling axes preserves typed positions.
+  const [cutHeights, setCutHeights] = useState<Record<CutAxis, number>>({ x: 0.5, y: 0.5, z: 0.5 });
+  const cutHeight = cutHeights[cutAxis];
+  const setCutHeight = useCallback(
+    (h: number | ((prev: number) => number)) => {
+      setCutHeights(prev => ({
+        ...prev,
+        [cutAxis]: typeof h === 'function' ? (h as (p: number) => number)(prev[cutAxis]) : h,
+      }));
+    },
+    [cutAxis],
+  );
   const [keepUpper, setKeepUpper] = useState(true);
   const [keepLower, setKeepLower] = useState(true);
   const [placeOnCutUpper, setPlaceOnCutUpper] = useState(true);
@@ -367,40 +491,62 @@ export function CutPlaneOverlay({
   const isDraggingRef = useRef(false);
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
 
-  // Reset height when axis changes
-  useEffect(() => {
-    setCutHeight(0.5);
-  }, [cutAxis]);
-
-  // Compute model bounds for current axis
+  // Compute model world-space bounds along the cut axis. Walks all vertices
+  // through matrixWorld so rotated/scaled parents produce a correct world-axis
+  // cut range. (M4: the cut plane is a world-axis plane, so bounds must be in
+  // world coordinates too.)
   const modelBounds = useMemo(() => {
-    const geo: THREE.BufferGeometry | undefined = meshRef.current?.userData.geometry;
-    if (!geo) return { min: 0, max: 10, center: new THREE.Vector3() };
-    geo.computeBoundingBox();
-    const bb = geo.boundingBox!;
-    const axisMin = cutAxis === 'x' ? bb.min.x : cutAxis === 'y' ? bb.min.y : bb.min.z;
-    const axisMax = cutAxis === 'x' ? bb.max.x : cutAxis === 'y' ? bb.max.y : bb.max.z;
-    return {
-      min: axisMin,
-      max: axisMax,
-      center: new THREE.Vector3(
-        (bb.min.x + bb.max.x) / 2,
-        (bb.min.y + bb.max.y) / 2,
-        (bb.min.z + bb.max.z) / 2,
-      ),
-    };
+    const obj = meshRef.current;
+    const geo: THREE.BufferGeometry | undefined = obj?.userData.geometry;
+    if (!geo || !obj) return { min: 0, max: 10 };
+    obj.updateMatrixWorld();
+    const pos = geo.getAttribute('position');
+    if (!pos) return { min: 0, max: 10 };
+    const v = new THREE.Vector3();
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(obj.matrixWorld);
+      const value = cutAxis === 'x' ? v.x : cutAxis === 'y' ? v.y : v.z;
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    if (!isFinite(min) || !isFinite(max) || min === max) return { min: 0, max: 10 };
+    return { min, max };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meshRef.current, active, cutAxis]);
 
+  // World-space position of the cut plane along cutAxis.
   const actualPlanePos = modelBounds.min + cutHeight * (modelBounds.max - modelBounds.min);
 
-  // Plane size based on model extents
+  // Plane size: largest world-space extent of the model.
   const planeSize = useMemo(() => {
-    const geo: THREE.BufferGeometry | undefined = meshRef.current?.userData.geometry;
-    if (!geo || !geo.boundingBox) return 100;
-    const size = new THREE.Vector3();
-    geo.boundingBox.getSize(size);
-    return Math.max(size.x, size.y, size.z) * 1.4;
+    const obj = meshRef.current;
+    const geo: THREE.BufferGeometry | undefined = obj?.userData.geometry;
+    if (!geo || !obj) return 100;
+    obj.updateMatrixWorld();
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    if (!bb) return 100;
+    // Sample bounding-box corners through matrixWorld to estimate world extent.
+    const corners = [
+      new THREE.Vector3(bb.min.x, bb.min.y, bb.min.z),
+      new THREE.Vector3(bb.max.x, bb.min.y, bb.min.z),
+      new THREE.Vector3(bb.min.x, bb.max.y, bb.min.z),
+      new THREE.Vector3(bb.max.x, bb.max.y, bb.min.z),
+      new THREE.Vector3(bb.min.x, bb.min.y, bb.max.z),
+      new THREE.Vector3(bb.max.x, bb.min.y, bb.max.z),
+      new THREE.Vector3(bb.min.x, bb.max.y, bb.max.z),
+      new THREE.Vector3(bb.max.x, bb.max.y, bb.max.z),
+    ];
+    const wMin = new THREE.Vector3(Infinity, Infinity, Infinity);
+    const wMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    for (const c of corners) {
+      c.applyMatrix4(obj.matrixWorld);
+      wMin.min(c);
+      wMax.max(c);
+    }
+    return Math.max(wMax.x - wMin.x, wMax.y - wMin.y, wMax.z - wMin.z) * 1.4;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meshRef.current, active]);
 
@@ -481,9 +627,9 @@ export function CutPlaneOverlay({
     const geo: THREE.BufferGeometry | undefined = obj?.userData.geometry;
     if (!geo || !obj) return;
 
-    const objPos = cutAxis === 'x' ? obj.position.x : cutAxis === 'y' ? obj.position.y : obj.position.z;
-    const objScale = cutAxis === 'x' ? obj.scale.x : cutAxis === 'y' ? obj.scale.y : obj.scale.z;
-    const worldPlanePos = objPos + (modelBounds.min + cutHeight * (modelBounds.max - modelBounds.min)) * objScale;
+    obj.updateMatrixWorld();
+    // actualPlanePos is already a world-space coordinate.
+    const worldPlanePos = actualPlanePos;
     const { above, below } = splitGeometryAtPlane(geo, cutAxis, worldPlanePos, obj.matrixWorld);
 
     const aboveCount = above.getAttribute('position')?.count ?? 0;
@@ -494,6 +640,8 @@ export function CutPlaneOverlay({
     }
 
     onCutComplete(above, below, {
+      cutAxis,
+      worldPlanePos,
       keepUpper,
       keepLower,
       placeOnCutUpper,
@@ -504,8 +652,7 @@ export function CutPlaneOverlay({
     });
   }, [
     meshRef,
-    modelBounds,
-    cutHeight,
+    actualPlanePos,
     cutAxis,
     keepUpper,
     keepLower,
@@ -519,7 +666,7 @@ export function CutPlaneOverlay({
   ]);
 
   const handleReset = useCallback(() => {
-    setCutHeight(0.5);
+    setCutHeights({ x: 0.5, y: 0.5, z: 0.5 });
     setCutAxis('z');
     setKeepUpper(true);
     setKeepLower(true);
@@ -530,25 +677,35 @@ export function CutPlaneOverlay({
     setCutToParts(false);
   }, []);
 
-  // Sync plane position and rotation with model
+  // Sync plane position with model. The plane is world-axis aligned (the cut
+  // happens in world space), so its rotation does not depend on the model's
+  // orientation. Position is in world coords; place the plane at the world-axis
+  // center of the model along the two non-cut axes so it visibly spans the model.
   useFrame(() => {
     const obj = meshRef.current;
     if (!obj || !planeRef.current || !handleRef.current) return;
+    const geo: THREE.BufferGeometry | undefined = obj?.userData.geometry;
+    if (!geo) return;
+    obj.updateMatrixWorld();
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    if (!bb) return;
+    // World-space center of the model along non-cut axes.
+    const center = new THREE.Vector3();
+    bb.getCenter(center).applyMatrix4(obj.matrixWorld);
 
-    const pos = actualPlanePos;
-    
     if (cutAxis === 'z') {
-      planeRef.current.position.set(obj.position.x, obj.position.y, obj.position.z + pos * obj.scale.z);
+      planeRef.current.position.set(center.x, center.y, actualPlanePos);
       planeRef.current.rotation.set(0, 0, 0);
     } else if (cutAxis === 'x') {
-      planeRef.current.position.set(obj.position.x + pos * obj.scale.x, obj.position.y, obj.position.z);
+      planeRef.current.position.set(actualPlanePos, center.y, center.z);
       planeRef.current.rotation.set(0, Math.PI / 2, 0);
     } else {
-      planeRef.current.position.set(obj.position.x, obj.position.y + pos * obj.scale.y, obj.position.z);
+      planeRef.current.position.set(center.x, actualPlanePos, center.z);
       planeRef.current.rotation.set(Math.PI / 2, 0, 0);
     }
 
-    planeRef.current.scale.copy(obj.scale);
+    planeRef.current.scale.set(1, 1, 1);
     handleRef.current.position.copy(planeRef.current.position);
   });
 
@@ -666,10 +823,10 @@ export function CutPlaneOverlay({
             <div className="mb-4">
               <div className="text-pf-text-secondary mb-2">After cut:</div>
               
-              {/* Upper part */}
+              {/* Upper part — labelled per axis ("Upper" only makes sense for Z) */}
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-4 h-4 rounded" style={{ backgroundColor: '#009688' }}></div>
-                <span className="text-xs">Upper part</span>
+                <span className="text-xs">{cutAxis === 'z' ? 'Upper part' : `+${cutAxis.toUpperCase()} part`}</span>
                 <Checkbox
                   checked={keepUpper}
                   onCheckedChange={(c) => setKeepUpper(c as boolean)}
@@ -691,10 +848,10 @@ export function CutPlaneOverlay({
                 <label htmlFor="flip-upper" className="text-xs cursor-pointer">Flip</label>
               </div>
 
-              {/* Lower part */}
+              {/* Lower part — labelled per axis */}
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-4 h-4 rounded" style={{ backgroundColor: '#9c27b0' }}></div>
-                <span className="text-xs">Lower part</span>
+                <span className="text-xs">{cutAxis === 'z' ? 'Lower part' : `−${cutAxis.toUpperCase()} part`}</span>
                 <Checkbox
                   checked={keepLower}
                   onCheckedChange={(c) => setKeepLower(c as boolean)}

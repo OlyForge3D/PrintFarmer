@@ -783,6 +783,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     geometryAbove: THREE.BufferGeometry,
     geometryBelow: THREE.BufferGeometry,
     options?: {
+      cutAxis: 'x' | 'y' | 'z';
+      worldPlanePos: number;
       keepUpper: boolean;
       keepLower: boolean;
       placeOnCutUpper: boolean;
@@ -802,27 +804,38 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     const selectedModel = models.find(m => m.id === selectedModelId);
     const baseName = selectedModel?.fileName?.replace(/\.stl$/i, '') ?? 'model';
     const oldModel = models.find(m => m.id === selectedModelId);
+    const cutAxis = options?.cutAxis ?? 'z';
 
-    const aboveFileName = `${baseName}_top.stl`;
-    const belowFileName = `${baseName}_bottom.stl`;
+    // M5/n3: name pieces by axis-aware suffix.
+    const upperSuffix = cutAxis === 'z' ? 'top' : `${cutAxis}plus`;
+    const lowerSuffix = cutAxis === 'z' ? 'bottom' : `${cutAxis}minus`;
+    const aboveFileName = `${baseName}_${upperSuffix}.stl`;
+    const belowFileName = `${baseName}_${lowerSuffix}.stl`;
 
-    // Upload STL geometry to server, falling back to local blob URLs on failure
+    const keepUpper = options?.keepUpper !== false;
+    const keepLower = options?.keepLower !== false;
+
+    // Upload STL geometry to server, falling back to local blob URLs on failure.
+    // n2: only upload pieces the user wants to keep.
     const uploadAndReplace = async () => {
-      const aboveBlob = geometryToStlBlob(geometryAbove);
-      const belowBlob = geometryToStlBlob(geometryBelow);
-      const results = await Promise.allSettled([
-        apiClient.uploadGeometry(aboveBlob, aboveFileName),
-        apiClient.uploadGeometry(belowBlob, belowFileName),
-      ]);
+      const tasks: Array<Promise<{ fileUrl: string } | null>> = [];
+      tasks.push(keepUpper
+        ? apiClient.uploadGeometry(geometryToStlBlob(geometryAbove), aboveFileName).catch(() => null)
+        : Promise.resolve(null));
+      tasks.push(keepLower
+        ? apiClient.uploadGeometry(geometryToStlBlob(geometryBelow), belowFileName).catch(() => null)
+        : Promise.resolve(null));
+      const [aboveResult, belowResult] = await Promise.all(tasks);
 
-      const aboveResult = results[0].status === 'fulfilled' ? results[0].value : null;
-      const belowResult = results[1].status === 'fulfilled' ? results[1].value : null;
+      const aboveUrl = keepUpper
+        ? (aboveResult?.fileUrl ?? geometryToBlobUrl(geometryAbove, blobUrlsRef))
+        : '';
+      const belowUrl = keepLower
+        ? (belowResult?.fileUrl ?? geometryToBlobUrl(geometryBelow, blobUrlsRef))
+        : '';
 
-      const aboveUrl = aboveResult?.fileUrl ?? geometryToBlobUrl(geometryAbove, blobUrlsRef);
-      const belowUrl = belowResult?.fileUrl ?? geometryToBlobUrl(geometryBelow, blobUrlsRef);
-
-      if (!aboveResult || !belowResult) {
-        const failCount = [aboveResult, belowResult].filter(r => !r).length;
+      const failCount = (keepUpper && !aboveResult ? 1 : 0) + (keepLower && !belowResult ? 1 : 0);
+      if (failCount > 0) {
         toast.error(`Failed to upload ${failCount} cut piece(s) — using local preview`);
       }
 
@@ -831,30 +844,57 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         URL.revokeObjectURL(oldModel.url);
         blobUrlsRef.current.delete(oldModel.url);
       }
+      // m2: dispose old GPU buffer geometry to avoid leak across cuts.
+      const oldGeo = (oldModel as { geometry?: THREE.BufferGeometry } | undefined)?.geometry;
+      if (oldGeo && typeof oldGeo.dispose === 'function') {
+        oldGeo.dispose();
+      }
 
-      // Compute correct Z position for each cut piece.
-      // PrebuiltSTLModel offsets group.z by -geo.min.z (halfZ).
-      // World bottom = data_pos.z + (-min.z) + min.z * scaleZ
-      //              = data_pos.z + min.z * (scaleZ - 1)
-      // For bottom at Z=0: data_pos.z = -min.z * (scaleZ - 1)
       const parentScale = selectedModel?.scale ?? [1, 1, 1];
       const parentRotation = selectedModel?.rotation ?? [0, 0, 0];
       const parentPos = selectedModel?.position ?? [0, 0, 0];
-      const sz = parentScale[2];
 
-      const computePieceZ = (geo: THREE.BufferGeometry): number => {
+      // Build the parent's quaternion + scale once; we reuse it to compute the
+      // world-space minimum Z of each piece exactly the way SlicerBedVisualization
+      // does for its bed-placement helper. This keeps cut Z math consistent with
+      // the rest of the workspace and supports rotated/scaled parents.
+      const parentQuat = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(parentRotation[0], parentRotation[1], parentRotation[2]),
+      );
+      const parentScaleVec = new THREE.Vector3(parentScale[0], parentScale[1], parentScale[2]);
+
+      // Computes the data-Z that places the piece's world-bottom on the bed
+      // (equivalent to the bed-placement helper used elsewhere).
+      const computeBedZ = (geo: THREE.BufferGeometry): number => {
+        const pos = geo.getAttribute('position');
+        if (!pos) return 0;
+        const v = new THREE.Vector3();
+        let minRotatedZ = Infinity;
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i).multiply(parentScaleVec).applyQuaternion(parentQuat);
+          if (v.z < minRotatedZ) minRotatedZ = v.z;
+        }
         geo.computeBoundingBox();
-        const minZ = geo.boundingBox?.min.z ?? 0;
-        return -minZ * (sz - 1);
+        const halfZ = geo.boundingBox ? -geo.boundingBox.min.z : 0;
+        return -halfZ - minRotatedZ;
       };
 
-      const abovePosZ = computePieceZ(geometryAbove);
-      const belowPosZ = computePieceZ(geometryBelow);
+      // Decide each piece's Z. Default behavior preserves the parent's Z so
+      // cutting a model raised at z=20 keeps both pieces at z=20. The
+      // `placeOnCut*` options drop a piece to the bed (matches OrcaSlicer's
+      // "Place on cut" UX). For non-Z cuts these options have no Z meaning, so
+      // we always preserve parent Z in that case.
+      const isZCut = cutAxis === 'z';
+      const abovePosZ = isZCut && options?.placeOnCutUpper
+        ? computeBedZ(geometryAbove)
+        : parentPos[2];
+      const belowPosZ = isZCut && options?.placeOnCutLower
+        ? computeBedZ(geometryBelow)
+        : parentPos[2];
 
-      // Apply keep options - only add models that should be kept
       const newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }> = [];
-      
-      if (options?.keepUpper !== false) {
+
+      if (keepUpper) {
         newModels.push({
           url: aboveUrl,
           fileName: aboveFileName,
@@ -864,8 +904,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           scale: [parentScale[0], parentScale[1], parentScale[2]],
         });
       }
-      
-      if (options?.keepLower !== false) {
+
+      if (keepLower) {
         newModels.push({
           url: belowUrl,
           fileName: belowFileName,
@@ -876,8 +916,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         });
       }
 
-      // TODO: Apply placeOnCut, flip, and cutToParts options (stubs for now)
-      
+      // TODO: flipUpper/flipLower and cutToParts are not yet implemented.
+
       onModelsReplace(selectedModelId, newModels);
       toast.success(`Model cut into ${newModels.length} part(s)`);
     };
