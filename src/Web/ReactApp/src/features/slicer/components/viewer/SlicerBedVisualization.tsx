@@ -2025,7 +2025,23 @@ function BedScene({
 
       {/* Loaded models */}
       <group onPointerMissed={handlePointerMissed}>
-        {models.map((model) => {
+        {(() => {
+          // m3: single source of truth for "any tool/mode active that should
+          // suppress drag". Used by both PrebuiltSTLModel and STLModel branches
+          // below so the two `draggable` predicates can never drift.
+          const isToolActive =
+            layFlatMode ||
+            assemblyViewActive ||
+            cutMode ||
+            supportPaintMode ||
+            seamPaintMode ||
+            colorPaintMode ||
+            fuzzySkinPaintMode ||
+            measureMode ||
+            textPlacementMode ||
+            transformMode === 'rotate' ||
+            transformMode === 'scale';
+          return models.map((model) => {
           const displayPos = assemblyPositions?.get(model.id) ?? model.position;
           return (
             <Suspense key={model.id} fallback={<LoadingIndicator />}>
@@ -2039,19 +2055,7 @@ function BedScene({
                     selected={model.id === selectedModelId}
                     outOfBounds={outOfBoundsModelIds?.has(model.id)}
                     layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={
-                      !layFlatMode &&
-                      !assemblyViewActive &&
-                      !cutMode &&
-                      !supportPaintMode &&
-                      !seamPaintMode &&
-                      !colorPaintMode &&
-                      !fuzzySkinPaintMode &&
-                      !measureMode &&
-                      !textPlacementMode &&
-                      transformMode !== 'rotate' &&
-                      transformMode !== 'scale'
-                    }
+                    draggable={!isToolActive}
                     onClick={() => onModelSelect?.(model.id)}
                     onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                     onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
@@ -2074,19 +2078,7 @@ function BedScene({
                     selected={model.id === selectedModelId}
                     outOfBounds={outOfBoundsModelIds?.has(model.id)}
                     layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={
-                      !layFlatMode &&
-                      !assemblyViewActive &&
-                      !cutMode &&
-                      !supportPaintMode &&
-                      !seamPaintMode &&
-                      !colorPaintMode &&
-                      !fuzzySkinPaintMode &&
-                      !measureMode &&
-                      !textPlacementMode &&
-                      transformMode !== 'rotate' &&
-                      transformMode !== 'scale'
-                    }
+                    draggable={!isToolActive}
                     onClick={() => onModelSelect?.(model.id)}
                     onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                     onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
@@ -2104,7 +2096,8 @@ function BedScene({
               )}
             </Suspense>
           );
-        })}
+        });
+        })()}
       </group>
 
       {/* Measure tool overlay */}
