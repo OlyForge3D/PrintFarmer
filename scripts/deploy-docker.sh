@@ -203,7 +203,7 @@ DOCKER_BUILDKIT_IMAGE="docker/dockerfile:1"
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
 DOCKER_LOCAL_IMAGES=(
-    "orcaslicer-binaries:2.3.1"
+    "orcaslicer-binaries:2.3.2"
 )
 
 # Derived arrays from DOCKER_IMAGES_CONFIG (for backward compatibility with existing code)
@@ -1606,12 +1606,12 @@ build_base_images() {
     # Build OrcaSlicer binary layer
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    # Check if orcaslicer-binaries:2.3.1 already exists locally
-    if docker image inspect "orcaslicer-binaries:2.3.1" >/dev/null 2>&1; then
-        print_success "✓ orcaslicer-binaries:2.3.1 already exists locally (skipping rebuild)"
+    # Check if orcaslicer-binaries:2.3.2 already exists locally
+    if docker image inspect "orcaslicer-binaries:2.3.2" >/dev/null 2>&1; then
+        print_success "✓ orcaslicer-binaries:2.3.2 already exists locally (skipping rebuild)"
         ((successful++))
     else
-        print_info "Building: orcaslicer-binaries:2.3.1"
+        print_info "Building: orcaslicer-binaries:2.3.2"
         print_info "  Extracts OrcaSlicer Linux AppImage for caching"
         print_info "  Dockerfile: Dockerfile.base-orcaslicer-binaries"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1619,9 +1619,9 @@ build_base_images() {
         # Prepare build args - include ORCA_ASSET_PATH if available for offline builds
         local build_args=(
             -f "$docker_dir/Dockerfile.base-orcaslicer-binaries"
-            -t "orcaslicer-binaries:2.3.1"
+            -t "orcaslicer-binaries:2.3.2"
             --label="printfarmer-precache=true"
-            --build-arg ORCASLICER_VERSION=2.3.1
+            --build-arg ORCASLICER_VERSION=2.3.2
             --build-arg "CACHE_BUST=$cache_bust"
         )
         
@@ -1640,10 +1640,10 @@ build_base_images() {
         
         if docker build "${build_args[@]}" > /dev/null 2>&1; then
             
-            print_success "✓ Build successful: orcaslicer-binaries:2.3.1"
+            print_success "✓ Build successful: orcaslicer-binaries:2.3.2"
             ((successful++))
         else
-            print_warning "⚠ Build failed: orcaslicer-binaries:2.3.1 (optional, continuing)"
+            print_warning "⚠ Build failed: orcaslicer-binaries:2.3.2 (optional, continuing)"
             # Don't count as failure - OrcaSlicer binaries are optional
         fi
     fi
@@ -2695,7 +2695,7 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.2}
 
 EOF
 
@@ -3289,7 +3289,7 @@ configure_slicing() {
         # Default to 'no' to avoid accidental enabling when slicer work is paused
         prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
+            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.2}" "ORCASLICER_VERSION"
             prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
         else
             ORCA_WORKER_COUNT=0
@@ -4057,7 +4057,7 @@ PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" ||
 DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Slicer Versions
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.2}
 
 # Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
 # If not set by config file, these defaults are used
@@ -4589,7 +4589,7 @@ EOF
             ENABLE_ORCA_WORKER="no"
         fi
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
+            ORCA_VERSION="${ORCASLICER_VERSION:-2.3.2}"
             print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching via Dockerfile.multistage)..."
             
             # Build binary layer with automatic download and extraction

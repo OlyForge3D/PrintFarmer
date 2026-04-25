@@ -338,7 +338,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <remarks>
     /// Validates:
     /// - File is not null or empty
-    /// - File extension is supported (.stl, .obj, .3mf)
+    /// - File extension is supported (.stl, .obj, .3mf, .step, .stp)
     /// - File size is within limits (max 100 MB)
     /// </remarks>
     public Model3DValidationResultDto ValidateModel(IFormFile modelFile)

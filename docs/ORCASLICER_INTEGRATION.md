@@ -146,7 +146,7 @@ Original builds downloaded 200MB+ OrcaSlicer AppImage on every rebuild, taking 8
 
 ```dockerfile
 FROM ubuntu:24.04 AS orcaslicer-binaries-base
-ARG ORCASLICER_VERSION=2.3.1
+ARG ORCASLICER_VERSION=2.3.2
 ARG GITHUB_TOKEN
 
 # Install extraction tools
@@ -175,7 +175,7 @@ LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSIO
 ./scripts/build-orcaslicer-optimized.sh
 
 # With specific version
-ORCASLICER_VERSION=2.3.1 ./scripts/build-orcaslicer-optimized.sh
+ORCASLICER_VERSION=2.3.2 ./scripts/build-orcaslicer-optimized.sh
 
 # With GitHub token (avoid rate limits)
 GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
@@ -183,15 +183,15 @@ GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
 # Option 2: Manual two-stage build
 # Step 1: Build binary layer (slow first time, cached after)
 docker build -f scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries \
-  -t orcaslicer-binaries:2.3.1 \
-  --build-arg ORCASLICER_VERSION=2.3.1 \
+  -t orcaslicer-binaries:2.3.2 \
+  --build-arg ORCASLICER_VERSION=2.3.2 \
   .
 
 # Step 2: Build worker (fast, uses cached binaries)
 docker build -f Dockerfile.multistage \
   --target orcaslicer-worker \
   -t printfarmer-orcaslicer-worker \
-  --build-arg ORCASLICER_VERSION=2.3.1 \
+  --build-arg ORCASLICER_VERSION=2.3.2 \
   .
 
 # Option 3: Docker Compose
@@ -203,7 +203,7 @@ docker compose --profile orca build orcaslicer-worker
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `ORCASLICER_VERSION` | 2.3.1 | OrcaSlicer release version to download |
+| `ORCASLICER_VERSION` | 2.3.2 | OrcaSlicer release version to download |
 | `ORCASLICER_URL` | (auto-discovered) | Override download URL |
 | `ALLOW_STUB` | true | Create stub binary if download fails |
 | `GITHUB_TOKEN` | (optional) | Avoid GitHub API rate limits |

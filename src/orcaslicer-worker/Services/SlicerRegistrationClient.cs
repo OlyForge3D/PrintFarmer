@@ -84,7 +84,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 UiManifestUrl = null, // Optional: can be added later for embedded UI
                 CapabilitiesJson = JsonSerializer.Serialize(new
                 {
-                    supportedFormats = new[] { "stl", "obj", "3mf" },
+                    supportedFormats = new[] { "stl", "obj", "3mf", "step", "stp" },
                     supportedFeatures = new[] { "multi-material", "variable-layer-height", "auto-arrange" },
                     capabilities = WorkerConstants.Capabilities
                 }),

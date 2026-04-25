@@ -6,7 +6,7 @@ on:
       orca_version:
         description: 'OrcaSlicer version to fetch/build'
         required: false
-        default: '2.3.1'
+        default: '2.3.2'
       prusa_version:
         description: 'PrusaSlicer version / tag for preseed'
         required: false
@@ -30,7 +30,7 @@ jobs:
 
       - name: Set versions
         run: |
-          echo "ORCA_VERSION=${{ github.event.inputs.orca_version || '2.3.1' }}" >> $GITHUB_ENV
+          echo "ORCA_VERSION=${{ github.event.inputs.orca_version || '2.3.2' }}" >> $GITHUB_ENV
           echo "PRUSA_VERSION=${{ github.event.inputs.prusa_version || '2.9.3' }}" >> $GITHUB_ENV
 
       - name: Download Orca AppImage and extract (placeholder)

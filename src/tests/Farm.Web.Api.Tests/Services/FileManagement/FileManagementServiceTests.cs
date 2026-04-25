@@ -258,7 +258,7 @@ public class FileManagementServiceTests
     {
         FileManagementService sut = CreateSut();
 
-        sut.GetAllowedModelExtensions().Should().BeEquivalentTo(new[] { ".stl", ".3mf", ".obj", ".ply", ".step" });
+        sut.GetAllowedModelExtensions().Should().BeEquivalentTo(new[] { ".stl", ".3mf", ".obj", ".ply", ".step", ".stp" });
     }
 
     [Fact]

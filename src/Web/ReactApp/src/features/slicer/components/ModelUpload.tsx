@@ -55,11 +55,11 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         className={`border-2 rounded-md p-6 text-center ${dragOver ? 'border-pf-accent bg-pf-accent-bg/15' : 'border-dashed'}`}>
-        <p className="mb-2">Drag & drop model file here (.stl, .3mf, .obj, .ply, .step)</p>
+        <p className="mb-2">Drag & drop model file here (.stl, .3mf, .obj, .ply, .step, .stp)</p>
         <p className="text-sm text-pf-text-secondary">Or click to select a file</p>
         <FileUpload
           id="model-upload-input"
-          accept=".stl,.3mf,.obj,.ply,.step"
+          accept=".stl,.3mf,.obj,.ply,.step,.stp"
           onChange={(files) => {
             if (files) {
               const event = { target: { files } } as unknown as React.ChangeEvent<HTMLInputElement>;
