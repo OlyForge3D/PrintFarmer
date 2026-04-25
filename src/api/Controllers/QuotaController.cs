@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.PrintQuotas;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -196,6 +197,64 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
         return Ok(txns.Select(MapTransactionToDto).ToArray());
     }
 
+    // ── Group membership ────────────────────────────────────────────────
+
+    /// <summary>Lists the quota groups a user belongs to.</summary>
+    [Authorize(Roles = "farm_admin")]
+    [HttpGet("user/{userId:guid}/groups")]
+    [ProducesResponseType(typeof(string[]), 200)]
+    public async Task<ActionResult<string[]>> GetUserGroupsAsync(Guid userId, CancellationToken ct)
+    {
+        string[] groups = await quotaService.GetUserGroupsAsync(userId, ct);
+        return Ok(groups);
+    }
+
+    /// <summary>Adds a user to a quota group.</summary>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("user/{userId:guid}/groups")]
+    [ProducesResponseType(typeof(GroupMembershipDto), 201)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<GroupMembershipDto>> AddUserToGroupAsync(Guid userId, AddUserToGroupRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.GroupName))
+        {
+            return BadRequest(new { message = "groupName is required" });
+        }
+
+        try
+        {
+            UserQuotaGroupMembership membership = await quotaService.AddUserToGroupAsync(userId, request.GroupName, ct);
+            return StatusCode(201, MapMembershipToDto(membership));
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) == true
+            || ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true
+            || ex.InnerException?.Message.Contains("IX_UserQuotaGroupMemberships", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return BadRequest(new { message = $"User is already a member of group '{request.GroupName}'" });
+        }
+    }
+
+    /// <summary>Removes a user from a quota group.</summary>
+    [Authorize(Roles = "farm_admin")]
+    [HttpDelete("user/{userId:guid}/groups/{groupName}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> RemoveUserFromGroupAsync(Guid userId, string groupName, CancellationToken ct)
+    {
+        bool removed = await quotaService.RemoveUserFromGroupAsync(userId, groupName, ct);
+        return removed ? NoContent() : NotFound(new { message = "Membership not found" });
+    }
+
+    /// <summary>Lists all members of a quota group.</summary>
+    [Authorize(Roles = "farm_admin")]
+    [HttpGet("group/{groupName}/members")]
+    [ProducesResponseType(typeof(GroupMembershipDto[]), 200)]
+    public async Task<ActionResult<GroupMembershipDto[]>> GetGroupMembersAsync(string groupName, CancellationToken ct)
+    {
+        UserQuotaGroupMembership[] members = await quotaService.GetGroupMembersAsync(groupName, ct);
+        return Ok(members.Select(MapMembershipToDto).ToArray());
+    }
+
     // ── Mapping ─────────────────────────────────────────────────────────
     private static QuotaDto MapToDto(PrintQuota q) => new()
     {
@@ -234,6 +293,15 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
         Description = t.Description,
         PerformedBy = t.PerformedBy,
         CreatedAt = t.CreatedAt
+    };
+
+    private static GroupMembershipDto MapMembershipToDto(UserQuotaGroupMembership m) => new()
+    {
+        Id = m.Id,
+        UserId = m.UserId,
+        UserName = m.User?.Username,
+        GroupName = m.GroupName,
+        CreatedAt = m.CreatedAt
     };
 }
 
@@ -343,6 +411,26 @@ public sealed class BalanceTransactionDto
     public string? Description { get; set; }
 
     public string? PerformedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+}
+
+public sealed class AddUserToGroupRequest
+{
+    [Required]
+    [MaxLength(200)]
+    public string GroupName { get; set; } = string.Empty;
+}
+
+public sealed class GroupMembershipDto
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public string? UserName { get; set; }
+
+    public string GroupName { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; }
 }

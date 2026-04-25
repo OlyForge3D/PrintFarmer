@@ -50,6 +50,20 @@ public interface IPrintQuotaService
     Task<UserBalance> DebitBalanceAsync(Guid userId, decimal amount, string description, string performedBy, CancellationToken ct = default);
 
     Task<BalanceTransaction[]> GetTransactionHistoryAsync(Guid userId, int take = 50, CancellationToken ct = default);
+
+    // ── Group membership ──────────────────────────────────────────────
+
+    /// <summary>Returns the quota group names a user belongs to.</summary>
+    Task<string[]> GetUserGroupsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>Adds a user to a named quota group. Returns the membership entity.</summary>
+    Task<UserQuotaGroupMembership> AddUserToGroupAsync(Guid userId, string groupName, CancellationToken ct = default);
+
+    /// <summary>Removes a user from a named quota group. Returns true if removed.</summary>
+    Task<bool> RemoveUserFromGroupAsync(Guid userId, string groupName, CancellationToken ct = default);
+
+    /// <summary>Returns all memberships for a given quota group.</summary>
+    Task<UserQuotaGroupMembership[]> GetGroupMembersAsync(string groupName, CancellationToken ct = default);
 }
 
 public sealed record QuotaCheckResult(bool Allowed, string? DeniedReason, Guid? DeniedByQuotaId);
