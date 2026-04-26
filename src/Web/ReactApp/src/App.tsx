@@ -48,7 +48,6 @@ import { ProfileImportWizardPage } from '@/features/tasks';
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
-import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
@@ -78,9 +77,6 @@ const LazyWorkerManagementPage = lazy(() =>
 
 const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
-);
-const LazySliceJobsPage = lazy(() =>
-  import('@/features/slicer/pages/SliceJobsPage').then(mod => ({ default: mod.SliceJobsPage }))
 );
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
@@ -210,7 +206,6 @@ function AuthenticatedAppRoutes() {
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
-          <Route path="slicer/job-status/:id" element={<FeatureGate feature="slicing"><SlicerJobStatus /></FeatureGate>} />
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
@@ -226,7 +221,7 @@ function AuthenticatedAppRoutes() {
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
-        <Route path="slice-jobs" element={<FeatureGate feature="slicing"><RouteSuspense><LazySliceJobsPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slice-jobs" element={<Navigate to="/admin/workers?tab=jobs" replace />} />
         <Route path="slicer-profiles" element={<FeatureGate feature="slicing"><RouteSuspense><LazySlicerProfilesPage /></RouteSuspense></FeatureGate>} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />

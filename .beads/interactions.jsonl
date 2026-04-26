@@ -252,3 +252,5 @@
 {"id":"int-67f5a1ab","kind":"field_change","created_at":"2026-04-26T18:55:30.260618Z","actor":"Jeff Papiez","issue_id":"PFarm1-ymub","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-165c407f","kind":"field_change","created_at":"2026-04-26T18:55:30.775684Z","actor":"Jeff Papiez","issue_id":"PFarm1-e0w3","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-a4d53447","kind":"field_change","created_at":"2026-04-26T18:55:31.312605Z","actor":"Jeff Papiez","issue_id":"PFarm1-yodl","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-95ff5b36","kind":"field_change","created_at":"2026-04-26T19:55:11.980185Z","actor":"Jeff Papiez","issue_id":"PFarm1-5gp3","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-6a61d694","kind":"field_change","created_at":"2026-04-26T20:08:24.075826Z","actor":"Jeff Papiez","issue_id":"PFarm1-5gp3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
