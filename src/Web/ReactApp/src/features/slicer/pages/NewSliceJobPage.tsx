@@ -792,31 +792,22 @@ export const NewSliceJobPage: React.FC = () => {
     return processProfilesData ?? [];
   }, [processProfilesData]);
 
-  // Group process profiles by quality level for better UX
-  const processProfilesByQuality = useMemo(() => {
+  // Split process profiles into User presets (first) and System presets (second),
+  // matching OrcaSlicer's grouping. Within each group, preserve the server-provided order.
+  const processProfilesBySource = useMemo(() => {
     const profiles = processProfilesData ?? [];
-    const qualityOrder = ['fine', 'standard', 'draft', 'speed'];
-    const grouped: Record<string, typeof profiles> = {};
-    
+    const user: typeof profiles = [];
+    const system: typeof profiles = [];
     for (const profile of profiles) {
-      const quality = (profile.quality ?? 'other').toLowerCase();
-      if (!grouped[quality]) {
-        grouped[quality] = [];
+      // isSystem is the canonical flag from the slicer worker; treat missing as system
+      // so bundle profiles never accidentally land in the user group.
+      if ((profile as { isSystem?: boolean }).isSystem === false) {
+        user.push(profile);
+      } else {
+        system.push(profile);
       }
-      grouped[quality].push(profile);
     }
-    
-    // Sort groups by quality order, with unknown qualities at the end
-    const sortedEntries = Object.entries(grouped).sort(([a], [b]) => {
-      const indexA = qualityOrder.indexOf(a);
-      const indexB = qualityOrder.indexOf(b);
-      // If not in order list, put at end
-      const posA = indexA === -1 ? 999 : indexA;
-      const posB = indexB === -1 ? 999 : indexB;
-      return posA - posB;
-    });
-    
-    return sortedEntries;
+    return { user, system };
   }, [processProfilesData]);
 
   // Auto-select machine profile when printer is selected and machine profiles are loaded
@@ -1944,16 +1935,25 @@ export const NewSliceJobPage: React.FC = () => {
                         ))}
                       </optgroup>
                     )}
-                    {/* System presets grouped by quality level */}
-                    {processProfilesByQuality.map(([quality, profiles]) => (
-                      <optgroup key={quality} label={quality.charAt(0).toUpperCase() + quality.slice(1)}>
-                        {profiles.map(profile => (
+                    {/* System presets (bundled OrcaSlicer profiles) */}
+                    {processProfilesBySource.user.length > 0 && (
+                      <optgroup label="User presets">
+                        {processProfilesBySource.user.map(profile => (
                           <option key={profile.name} value={`system:${profile.name}`}>
                             {profile.name} ({profile.layerHeight}mm)
                           </option>
                         ))}
                       </optgroup>
-                    ))}
+                    )}
+                    {processProfilesBySource.system.length > 0 && (
+                      <optgroup label="System presets">
+                        {processProfilesBySource.system.map(profile => (
+                          <option key={profile.name} value={`system:${profile.name}`}>
+                            {profile.name} ({profile.layerHeight}mm)
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </Select>
                   <Button
                     type="button"
@@ -2133,7 +2133,7 @@ export const NewSliceJobPage: React.FC = () => {
             setCloneProfilesDismissed(true); // Prevent re-opening on cancel
           }}
           printerId={selectedPrinterId}
-          printerName={selectedPrinter.name}
+          printerName={selectedPrinterModel || selectedPrinter.name}
           onSuccess={() => {
             // Invalidate profiles cache to reload when modal closes
             qc.invalidateQueries({ queryKey: ['slicerProfiles'] });
