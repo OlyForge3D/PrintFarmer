@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { workerService, WorkerResponse, WorkerStatus, WorkerJobResponse } from '@/services/workerService';
 import { slicerHubService, SlicerRegisteredEvent, SlicerHeartbeatEvent, SlicerDeregisteredEvent } from '@/services/slicerHubService';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -11,11 +12,13 @@ import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
-import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
+import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 
 export function WorkerManagementPage() {
-  const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>('workers');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>(tabParam === 'jobs' ? 'jobs' : 'workers');
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +33,11 @@ export function WorkerManagementPage() {
   const [workerJobs, setWorkerJobs] = useState<Map<string, WorkerJobResponse[]>>(new Map());
   const [loadingJobs, setLoadingJobs] = useState<Set<string>>(new Set());
   const [workerToDelete, setWorkerToDelete] = useState<WorkerResponse | null>(null);
+
+  const handleTabChange = (tab: 'workers' | 'jobs') => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'jobs' ? { tab: 'jobs' } : {}, { replace: true });
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -277,8 +285,8 @@ export function WorkerManagementPage() {
     >
       {/* Tab buttons */}
       <div className="mb-4 flex items-center gap-2">
-        <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('workers')}>Workers</Button>
-        <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
+        <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('workers')}>Workers</Button>
+        <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
       </div>
 
       {/* Connection status */}
@@ -510,7 +518,7 @@ export function WorkerManagementPage() {
       )}
       {activeTab === 'jobs' && (
         <div className="mt-4">
-          <SlicerJobStatus />
+          <SliceJobsPanel />
         </div>
       )}
 

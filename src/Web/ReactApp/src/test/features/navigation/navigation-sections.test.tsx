@@ -80,7 +80,6 @@ describe('Navigation Section Headers', () => {
       renderLayout();
 
       expect(screen.getByRole('link', { name: /^slice$/i })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /slice jobs/i })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: /slicer profiles/i })).toBeInTheDocument();
     });
   });
