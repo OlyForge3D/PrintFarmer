@@ -1782,13 +1782,10 @@ public class ProfilesService(
     }
 
     /// <summary>
-    /// Fetches machine profiles for a catalog model by trying exact OrcaSlicer aliases first,
-    /// then falling back to the worker's manufacturer/model lookup.
+    /// Fetches machine profiles for a catalog model by trying only configured OrcaSlicer aliases.
     /// </summary>
     public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
         HttpClient httpClient,
-        string manufacturer,
-        string model,
         IEnumerable<string> orcaAliases,
         CancellationToken ct)
     {
@@ -1809,17 +1806,7 @@ public class ProfilesService(
             _logger.LogWarning("No machine profiles found for OrcaSlicer alias '{Alias}'", alias);
         }
 
-        if (string.IsNullOrWhiteSpace(manufacturer) || string.IsNullOrWhiteSpace(model))
-        {
-            return [];
-        }
-
-        _logger.LogInformation(
-            "Retrying machine profile lookup using manufacturer/model fallback: {Manufacturer}/{Model}",
-            manufacturer,
-            model);
-
-        return await GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct);
+        return [];
     }
 
     /// <summary>
