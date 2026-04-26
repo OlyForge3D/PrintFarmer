@@ -184,30 +184,40 @@ export function ColorPaintOverlay({
     if (!active) return;
     const el = gl.domElement;
 
+    const capturePaintEvent = (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+
     const onPointerDown = (e: PointerEvent) => {
       const eraseMode = externalPaintModeRef.current === 'erase';
       if (e.button === 0) {
         const hit = raycastFace(e.clientX, e.clientY);
         if (hit) {
+          capturePaintEvent(e);
           isPaintingRef.current = !eraseMode;
           isErasingRef.current = eraseMode;
           applyPaint(hit.faceIndex, eraseMode);
           onPaintingStateChangeRef.current?.(true);
         }
-        e.preventDefault();
       } else if (e.button === 2) {
         const hit = raycastFace(e.clientX, e.clientY);
         if (hit) {
+          capturePaintEvent(e);
           isErasingRef.current = true;
           isPaintingRef.current = false;
           applyPaint(hit.faceIndex, true);
           onPaintingStateChangeRef.current?.(true);
         }
-        e.preventDefault();
       }
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      const isPaintingStroke = isPaintingRef.current || isErasingRef.current;
+      if (isPaintingStroke) {
+        capturePaintEvent(e);
+      }
+
       const hit = raycastFace(e.clientX, e.clientY);
       if (hit) {
         setHoveredFace(hit.faceIndex);
@@ -229,8 +239,11 @@ export function ColorPaintOverlay({
       invalidate();
     };
 
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
       const wasPainting = isPaintingRef.current || isErasingRef.current;
+      if (wasPainting) {
+        capturePaintEvent(e);
+      }
       isPaintingRef.current = false;
       isErasingRef.current = false;
       flushPaint();
@@ -241,17 +254,17 @@ export function ColorPaintOverlay({
 
     const onContextMenu = (e: Event) => { e.preventDefault(); };
 
-    el.addEventListener('pointerdown', onPointerDown);
-    el.addEventListener('pointermove', onPointerMove);
-    el.addEventListener('pointerup', onPointerUp);
-    el.addEventListener('pointerleave', onPointerUp);
+    el.addEventListener('pointerdown', onPointerDown, true);
+    el.addEventListener('pointermove', onPointerMove, true);
+    el.addEventListener('pointerup', onPointerUp, true);
+    el.addEventListener('pointerleave', onPointerUp, true);
     el.addEventListener('contextmenu', onContextMenu);
 
     return () => {
-      el.removeEventListener('pointerdown', onPointerDown);
-      el.removeEventListener('pointermove', onPointerMove);
-      el.removeEventListener('pointerup', onPointerUp);
-      el.removeEventListener('pointerleave', onPointerUp);
+      el.removeEventListener('pointerdown', onPointerDown, true);
+      el.removeEventListener('pointermove', onPointerMove, true);
+      el.removeEventListener('pointerup', onPointerUp, true);
+      el.removeEventListener('pointerleave', onPointerUp, true);
       el.removeEventListener('contextmenu', onContextMenu);
     };
   }, [active, applyPaint, flushPaint, gl.domElement, invalidate, raycastFace]);
