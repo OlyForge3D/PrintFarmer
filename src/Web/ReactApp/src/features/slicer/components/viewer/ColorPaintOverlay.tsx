@@ -266,6 +266,13 @@ export function ColorPaintOverlay({
       el.removeEventListener('pointerup', onPointerUp, true);
       el.removeEventListener('pointerleave', onPointerUp, true);
       el.removeEventListener('contextmenu', onContextMenu);
+      const wasPainting = isPaintingRef.current || isErasingRef.current;
+      isPaintingRef.current = false;
+      isErasingRef.current = false;
+      flushPaint();
+      if (wasPainting) {
+        onPaintingStateChangeRef.current?.(false);
+      }
     };
   }, [active, applyPaint, flushPaint, gl.domElement, invalidate, raycastFace]);
 
