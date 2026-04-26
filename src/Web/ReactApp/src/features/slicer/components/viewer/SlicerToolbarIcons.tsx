@@ -75,7 +75,7 @@ export const UndoIcon: React.FC<IconProps> = ({ className }) => (
 );
 
 export const RedoIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
-  <img src={undoToolbarSvg} alt="Redo" className={className} draggable={false} style={{ transform: 'scaleX(-1)' }} />
+  <img src={undoToolbarSvg} alt="Redo" className={clsx('shrink-0 -scale-x-100', className)} draggable={false} />
 );
 
 export const AssemblyIcon: React.FC<IconProps> = ({ className }) => (

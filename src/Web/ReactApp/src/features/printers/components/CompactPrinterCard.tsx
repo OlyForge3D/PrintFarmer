@@ -46,6 +46,46 @@ interface CompactPrinterCardProps {
   onEdit?: (printer: Printer) => void;
 }
 
+function BedTypeBadge({ name, color }: { name: string; color?: string | null }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.backgroundColor = color ? `${color}33` : 'rgba(0,0,0,0.3)';
+    ref.current.style.borderColor = color ? `${color}66` : 'rgba(255,255,255,0.1)';
+  }, [color]);
+
+  return (
+    <span
+      ref={ref}
+      className="text-xs px-1.5 py-0.5 rounded-full border text-pf-text-secondary"
+      title={`Bed type: ${name}`}
+    >
+      {name}
+    </span>
+  );
+}
+
+function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: string; tooltip: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.backgroundColor = isLoaded ? color : 'transparent';
+    ref.current.style.borderStyle = isLoaded ? 'solid' : 'dashed';
+    ref.current.style.opacity = isLoaded ? '1' : '0.4';
+  }, [color, isLoaded]);
+
+  return (
+    <span
+      ref={ref}
+      className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
+      title={tooltip}
+      aria-label={tooltip}
+    />
+  );
+}
+
 export function CompactPrinterCard({
   printer: printerProp,
   backendCapabilities,
@@ -201,13 +241,7 @@ export function CompactPrinterCard({
         {(printerTags.length > 0 || printer.bedTypeName) && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {printer.bedTypeName && (
-              <span
-                className="text-xs px-1.5 py-0.5 rounded-full border border-white/10 text-pf-text-secondary"
-                style={printer.bedTypeColor ? { backgroundColor: `${printer.bedTypeColor}33`, borderColor: `${printer.bedTypeColor}66` } : { backgroundColor: 'rgba(0,0,0,0.3)' }}
-                title={`Bed type: ${printer.bedTypeName}`}
-              >
-                {printer.bedTypeName}
-              </span>
+              <BedTypeBadge name={printer.bedTypeName} color={printer.bedTypeColor} />
             )}
             {printerTags.map(tag => (
               <span
@@ -348,16 +382,11 @@ export function CompactPrinterCard({
                         ? `T${gate.index}: ${gate.filamentName ?? gate.material ?? 'Unknown'}`
                         : `T${gate.index}: Empty`;
                       return (
-                        <span
+                        <MmuGateDot
                           key={gate.index}
-                          className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
-                          title={tooltip}
-                          aria-label={tooltip}
-                          style={{
-                            backgroundColor: isLoaded ? color : 'transparent',
-                            borderStyle: isLoaded ? 'solid' : 'dashed',
-                            opacity: isLoaded ? 1 : 0.4,
-                          }}
+                          isLoaded={isLoaded}
+                          color={color}
+                          tooltip={tooltip}
                         />
                       );
                     })}

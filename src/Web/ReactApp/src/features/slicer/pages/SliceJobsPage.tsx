@@ -578,9 +578,6 @@ function ProgressCell({ job }: { job: SliceJobStatusResponse }) {
           <div
             className="flex-1 h-1.5 bg-pf-bg-2 rounded-full overflow-hidden"
             role="progressbar"
-            aria-valuenow={Math.min(job.progressPercent, 100) as number}
-            aria-valuemin={0 as number}
-            aria-valuemax={100 as number}
             aria-label={`Slice progress: ${job.progressPercent}%`}
           >
             <div

@@ -377,7 +377,7 @@ export function CutPlaneOverlay({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="bg-pf-bg-3 border border-pf-border rounded px-2 py-1 text-xs min-w-[3rem]"
+                  className="bg-pf-bg-3 border border-pf-border rounded px-2 py-1 text-xs min-w-12"
                   onClick={() => {
                     const nextAxis = cutAxis === 'x' ? 'y' : cutAxis === 'y' ? 'z' : 'x';
                     setCutAxis(nextAxis);
@@ -437,18 +437,18 @@ export function CutPlaneOverlay({
               
               {/* Upper part — labelled per axis ("Upper" only makes sense for Z) */}
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#009688' }}></div>
+                <div className="w-4 h-4 rounded bg-[#009688]"></div>
                 <span className="text-xs">{cutAxis === 'z' ? 'Upper part' : `+${cutAxis.toUpperCase()} part`}</span>
                 <Checkbox
                   checked={keepUpper}
-                  onCheckedChange={(c) => setKeepUpper(c as boolean)}
+                  onChange={(e) => setKeepUpper(e.target.checked)}
                   id="keep-upper"
                   className="ml-auto"
                 />
                 <label htmlFor="keep-upper" className="text-xs cursor-pointer">Keep</label>
                 <Checkbox
                   checked={placeOnCutUpper}
-                  onCheckedChange={(c) => setPlaceOnCutUpper(c as boolean)}
+                  onChange={(e) => setPlaceOnCutUpper(e.target.checked)}
                   id="place-upper"
                   disabled={cutAxis !== 'z'}
                   title={cutAxis !== 'z' ? 'Coming soon for non-Z axes' : undefined}
@@ -461,7 +461,7 @@ export function CutPlaneOverlay({
                 >Place on cut</label>
                 <Checkbox
                   checked={flipUpper}
-                  onCheckedChange={(c) => setFlipUpper(c as boolean)}
+                  onChange={(e) => setFlipUpper(e.target.checked)}
                   id="flip-upper"
                   disabled
                   title="Coming soon"
@@ -472,18 +472,18 @@ export function CutPlaneOverlay({
 
               {/* Lower part — labelled per axis */}
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#9c27b0' }}></div>
+                <div className="w-4 h-4 rounded bg-[#9c27b0]"></div>
                 <span className="text-xs">{cutAxis === 'z' ? 'Lower part' : `−${cutAxis.toUpperCase()} part`}</span>
                 <Checkbox
                   checked={keepLower}
-                  onCheckedChange={(c) => setKeepLower(c as boolean)}
+                  onChange={(e) => setKeepLower(e.target.checked)}
                   id="keep-lower"
                   className="ml-auto"
                 />
                 <label htmlFor="keep-lower" className="text-xs cursor-pointer">Keep</label>
                 <Checkbox
                   checked={placeOnCutLower}
-                  onCheckedChange={(c) => setPlaceOnCutLower(c as boolean)}
+                  onChange={(e) => setPlaceOnCutLower(e.target.checked)}
                   id="place-lower"
                   disabled={cutAxis !== 'z'}
                   title={cutAxis !== 'z' ? 'Coming soon for non-Z axes' : undefined}
@@ -496,7 +496,7 @@ export function CutPlaneOverlay({
                 >Place on cut</label>
                 <Checkbox
                   checked={flipLower}
-                  onCheckedChange={(c) => setFlipLower(c as boolean)}
+                  onChange={(e) => setFlipLower(e.target.checked)}
                   id="flip-lower"
                   disabled
                   title="Coming soon"
@@ -509,7 +509,7 @@ export function CutPlaneOverlay({
               <div className="flex items-center gap-2">
                 <Checkbox
                   checked={cutToParts}
-                  onCheckedChange={(c) => setCutToParts(c as boolean)}
+                  onChange={(e) => setCutToParts(e.target.checked)}
                   id="cut-parts"
                   disabled
                   title="Coming soon"

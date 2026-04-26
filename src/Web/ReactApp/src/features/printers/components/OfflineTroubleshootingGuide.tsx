@@ -137,12 +137,12 @@ export function OfflineTroubleshootingGuide({
           type="button"
           variant="unstyled"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-1 text-xs text-pf-warning hover:text-pf-text-primary transition-colors whitespace-nowrap"
+          className="inline-flex flex-row flex-nowrap items-center gap-1 text-xs leading-none text-pf-warning hover:text-pf-text-primary transition-colors whitespace-nowrap"
           aria-expanded={isExpanded}
           aria-label="Toggle offline troubleshooting guide"
         >
           <HelpCircleIcon className="h-3.5 w-3.5 shrink-0" />
-          <span>Troubleshoot</span>
+          <span className="inline-block shrink-0 whitespace-nowrap">Troubleshoot</span>
           {isExpanded ? <ChevronUpIcon className="h-3 w-3 shrink-0" /> : <ChevronDownIcon className="h-3 w-3 shrink-0" />}
         </Button>
         {isExpanded && (

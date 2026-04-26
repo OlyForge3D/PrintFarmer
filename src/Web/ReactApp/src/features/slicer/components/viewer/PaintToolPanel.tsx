@@ -215,7 +215,7 @@ export function PaintToolPanel({
                   onClick={() => onBrushToolTypeChange(type)}
                   title={BRUSH_TOOL_LABELS[type]}
                   aria-pressed={isActive}
-                  className="flex-1 flex items-center justify-center !px-1"
+                  className="flex-1 flex items-center justify-center px-1"
                 >
                   <Icon active={isActive} />
                 </Button>

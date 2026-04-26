@@ -129,16 +129,16 @@ COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
 # Create startup script to fix mounted volume permissions for appuser (UID 1001)
 # This handles the case where mounted volumes from host preserve host UID/GID
 # Run as root initially to fix permissions, then drop to appuser to run the app
-RUN cat > /app/entrypoint.sh << 'EOF'
-#!/bin/bash
-set -e
-# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
-# The appuser may not own these directories if they're bind mounts from the host
-mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
-chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
-# Drop to appuser and run application
-exec gosu appuser dotnet Farm.Web.Api.dll
-EOF
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    'set -e' \
+    '# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them' \
+    '# The appuser may not own these directories if they are bind mounts from the host' \
+    'mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    'chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    '# Drop to appuser and run application' \
+    'exec gosu appuser dotnet Farm.Web.Api.dll' \
+    > /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Install gosu for privilege dropping (used by many Docker images)
