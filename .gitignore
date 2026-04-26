@@ -116,6 +116,7 @@ tools/installer/dist/
 .dolt/
 .beads-credential-key
 *.png
+!src/Web/ReactApp/public/assets/orcaslicer/**/*.png
 
 # C# devkit generated cache files
 *.lscache 
