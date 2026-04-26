@@ -82,7 +82,9 @@ const LazyNewSliceJobPage = lazy(() =>
 const LazySliceJobsPage = lazy(() =>
   import('@/features/slicer/pages/SliceJobsPage').then(mod => ({ default: mod.SliceJobsPage }))
 );
-
+const LazySlicerProfilesPage = lazy(() =>
+  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
+);
 
 function RouteLoader() {
   return (
@@ -212,7 +214,7 @@ function AuthenticatedAppRoutes() {
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<Navigate to="/profiles/import" replace />} />
+          <Route path="slicer-profiles" element={<Navigate to="/slicer-profiles" replace />} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="bed-types" element={<BedTypeAdminPage />} />
           <Route path="custom-fields" element={<CustomFieldsAdminPage />} />
@@ -225,6 +227,7 @@ function AuthenticatedAppRoutes() {
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<FeatureGate feature="slicing"><RouteSuspense><LazySliceJobsPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slicer-profiles" element={<FeatureGate feature="slicing"><RouteSuspense><LazySlicerProfilesPage /></RouteSuspense></FeatureGate>} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>

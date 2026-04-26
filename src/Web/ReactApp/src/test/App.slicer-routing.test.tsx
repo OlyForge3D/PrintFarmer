@@ -109,14 +109,13 @@ describe('App slicer route consolidation', () => {
     vi.clearAllMocks();
   });
 
-  it('redirects the old admin slicer profiles route to the shared import wizard', async () => {
+  it('redirects the old admin slicer profiles route to the slicer profiles page', async () => {
     window.history.pushState({}, '', '/admin/slicer-profiles');
 
     render(<App />);
 
-    expect(await screen.findByText('ProfileImportWizardMock')).toBeInTheDocument();
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/profiles/import');
+      expect(window.location.pathname).toBe('/slicer-profiles');
     });
   });
 
