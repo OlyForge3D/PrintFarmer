@@ -75,13 +75,13 @@ describe('Navigation Section Headers', () => {
     );
   };
 
-  describe('Slicer profile consolidation', () => {
-    it('keeps slice entry points while removing the admin slicer profiles link', () => {
+  describe('Slicer profile browsing', () => {
+    it('shows slice entry points including slicer profiles in the nav', () => {
       renderLayout();
 
       expect(screen.getByRole('link', { name: /^slice$/i })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: /slice jobs/i })).toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: /slicer profiles/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /slicer profiles/i })).toBeInTheDocument();
     });
   });
 
