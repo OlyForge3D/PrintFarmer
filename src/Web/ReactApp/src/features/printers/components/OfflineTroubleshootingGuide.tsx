@@ -141,9 +141,11 @@ export function OfflineTroubleshootingGuide({
           aria-expanded={isExpanded}
           aria-label="Toggle offline troubleshooting guide"
         >
-          <HelpCircleIcon className="h-3.5 w-3.5 shrink-0" />
-          <span className="inline-block shrink-0 whitespace-nowrap">Troubleshoot</span>
-          {isExpanded ? <ChevronUpIcon className="h-3 w-3 shrink-0" /> : <ChevronDownIcon className="h-3 w-3 shrink-0" />}
+          <span className="inline-flex flex-row flex-nowrap items-center gap-1 whitespace-nowrap">
+            <HelpCircleIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="inline-block shrink-0 whitespace-nowrap">Troubleshoot</span>
+            {isExpanded ? <ChevronUpIcon className="h-3 w-3 shrink-0" /> : <ChevronDownIcon className="h-3 w-3 shrink-0" />}
+          </span>
         </Button>
         {isExpanded && (
           <div className="mt-2 p-3 rounded-lg bg-pf-warning/10 border border-pf-warning/30">
