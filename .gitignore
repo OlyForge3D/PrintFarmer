@@ -119,6 +119,7 @@ tools/installer/dist/
 # C# Language Server cache
 *.csproj.lscache
 *.png
+!src/Web/ReactApp/public/assets/orcaslicer/**/*.png
 
 # C# devkit generated cache files
 *.lscache 
