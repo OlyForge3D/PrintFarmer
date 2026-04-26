@@ -11,6 +11,7 @@ import { Label } from '@/common/components/ui/Label';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
+import { Select } from '@/common/components/ui/Select';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
@@ -273,28 +274,11 @@ export function WorkerManagementPage() {
       title="Worker Management"
       subtitle="Monitor and manage your Slicer workers"
       icon={WrenchIcon}
-      actions={
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={loadWorkers}
-          iconCenter={<RefreshIcon className="h-4 w-4" />}
-        >
-        </Button>
-      }
     >
       {/* Tab buttons */}
       <div className="mb-4 flex items-center gap-2">
         <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('workers')}>Workers</Button>
         <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
-      </div>
-
-      {/* Connection status */}
-      <div className="mb-4 flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
-        <span className="text-sm text-pf-text-secondary">
-          {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
-        </span>
       </div>
 
       {error && (
@@ -303,29 +287,44 @@ export function WorkerManagementPage() {
         </Alert>
       )}
 
-      {/* Filter tabs */}
-      <div className="mb-4 flex gap-2 flex-wrap">
-        <Button
-          variant={filter === 'all' ? 'primary' : 'secondary'}
-          size="sm"
-          onClick={() => setFilter('all')}
-        >
-          All ({workers.length})
-        </Button>
-        {Object.values(WorkerStatus).map(status => (
-          <Button
-            key={status}
-            variant={filter === status ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setFilter(status as WorkerStatus)}
-          >
-            {status} ({workers.filter(w => w.status === status).length})
-          </Button>
-        ))}
-      </div>
-
-      {/* Workers table (shown on Workers tab) */}
+      {/* Workers tab content */}
       {activeTab === 'workers' && (
+        <>
+        {/* Worker-specific controls */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <Select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
+            containerClassName="w-52"
+            aria-label="Filter by worker status"
+          >
+            <option value="all">All Workers ({workers.length})</option>
+            {Object.values(WorkerStatus).map(status => (
+              <option key={status} value={status}>
+                {status} ({workers.filter(w => w.status === status).length})
+              </option>
+            ))}
+          </Select>
+
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
+            <span className="text-sm text-pf-text-secondary">
+              {isConnected ? 'Real-time updates active' : 'Polling mode'}
+            </span>
+          </div>
+
+          <div className="ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={loadWorkers}
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+              aria-label="Refresh workers"
+            />
+          </div>
+        </div>
+
+        {/* Workers table */}
         <div className="bg-pf-bg-1 rounded-sm border border-pf-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
@@ -515,11 +514,10 @@ export function WorkerManagementPage() {
           </div>
         )}
         </div>
+      </>
       )}
       {activeTab === 'jobs' && (
-        <div className="mt-4">
-          <SliceJobsPanel />
-        </div>
+        <SliceJobsPanel />
       )}
 
       {/* Disable Worker Dialog */}

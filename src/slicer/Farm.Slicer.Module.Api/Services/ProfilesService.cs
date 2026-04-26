@@ -445,9 +445,8 @@ public class ProfilesService(
     {
         string? manufacturerFilter = string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer.Trim();
 
-        // Phase 3: Only return custom profiles (IsSystem=false) from database
-        // System profiles are fetched directly from OrcaSlicer worker on-demand
-        IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
+        // Return all profiles (system + custom) from database for browsing
+        IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
 
         MachineProfile? selectedMachine = null;
         if (machineProfileId.HasValue)
@@ -488,8 +487,8 @@ public class ProfilesService(
             .ThenBy(m => m.Name)
             .ToList();
 
-        // Phase 3: Only return custom profiles (IsSystem=false)
-        IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
+        // Return all profiles (system + custom) from database for browsing
+        IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         IEnumerable<ProcessProfile> processProfilesFiltered = processProfilesAll;
 
         // If a specific machine profile is selected, filter by CompatiblePrinters field
@@ -514,8 +513,8 @@ public class ProfilesService(
 
         List<ProcessProfile> processProfiles = processProfilesFiltered.OrderBy(p => p.Name).ToList();
 
-        // Phase 3: Only return custom profiles (IsSystem=false)
-        IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
+        // Return all profiles (system + custom) from database for browsing
+        IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         IEnumerable<FilamentProfile> filamentProfilesFiltered = filamentProfilesAll;
 
         // Filter filaments by CompatiblePrinters if a specific machine is selected
