@@ -844,8 +844,6 @@ public class ProfilesController(
 
             IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForCatalogModelAsync(
                 httpClient,
-                model.ManufacturerName ?? string.Empty,
-                model.Name,
                 orcaAliases,
                 ct);
             return Ok(profiles);

@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.UnitOfWork;
@@ -143,7 +142,7 @@ public class ProfilesServiceTests
     }
 
     [Fact]
-    public async Task GetMachineProfilesForCatalogModelAsync_AliasReturnsEmpty_FallsBackToManufacturerModel()
+    public async Task GetMachineProfilesForCatalogModelAsync_AliasReturnsEmpty_DoesNotFallbackToManufacturerModel()
     {
         Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
         Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Strict);
@@ -165,22 +164,6 @@ public class ProfilesServiceTests
         {
             requestedPaths.Add(request.RequestUri!.AbsolutePath);
 
-            if (request.RequestUri.AbsolutePath.Contains("/api/profiles/machine/Prusa/Prusa%20CORE%20One", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(JsonSerializer.Serialize(new List<MachineProfileDto>
-                    {
-                        new()
-                        {
-                            Name = "Prusa CORE One 0.4 nozzle",
-                            Manufacturer = "Prusa",
-                            PrinterModel = "Prusa CORE One"
-                        }
-                    }))
-                };
-            }
-
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("[]")
@@ -191,15 +174,12 @@ public class ProfilesServiceTests
 
         IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
             httpClient,
-            "Prusa",
-            "Prusa CORE One",
             ["Wrong Alias"],
             CancellationToken.None);
 
-        Assert.Single(result);
-        Assert.Equal("Prusa CORE One 0.4 nozzle", result[0].Name);
+        Assert.Empty(result);
         Assert.Contains(requestedPaths, path => path.Contains("/api/profiles/machine/Wrong%20Alias", StringComparison.Ordinal));
-        Assert.Contains(requestedPaths, path => path.Contains("/api/profiles/machine/Prusa/Prusa%20CORE%20One", StringComparison.Ordinal));
+        Assert.DoesNotContain(requestedPaths, path => path.Contains("/api/profiles/machine/Prusa/Prusa%20CORE%20One", StringComparison.Ordinal));
     }
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> send) : HttpMessageHandler
