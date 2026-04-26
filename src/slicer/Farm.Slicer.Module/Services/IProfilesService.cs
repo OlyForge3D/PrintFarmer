@@ -81,6 +81,19 @@ public interface IProfilesService
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(HttpClient httpClient, string printerModel, CancellationToken ct);
 
+    /// <summary>Fetches machine profiles for a catalog model by trying aliases, then manufacturer/model fallback.</summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="manufacturer">Catalog manufacturer name.</param>
+    /// <param name="model">Catalog model name.</param>
+    /// <param name="orcaAliases">OrcaSlicer aliases configured for the catalog model.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
+        HttpClient httpClient,
+        string manufacturer,
+        string model,
+        IEnumerable<string> orcaAliases,
+        CancellationToken ct);
+
     /// <summary>Fetches process profiles compatible with specific machines from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="machineNames">Machine profile names to find compatible processes for.</param>

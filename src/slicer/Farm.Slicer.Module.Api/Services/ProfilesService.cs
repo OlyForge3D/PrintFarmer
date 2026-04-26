@@ -1782,6 +1782,47 @@ public class ProfilesService(
     }
 
     /// <summary>
+    /// Fetches machine profiles for a catalog model by trying exact OrcaSlicer aliases first,
+    /// then falling back to the worker's manufacturer/model lookup.
+    /// </summary>
+    public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
+        HttpClient httpClient,
+        string manufacturer,
+        string model,
+        IEnumerable<string> orcaAliases,
+        CancellationToken ct)
+    {
+        List<string> aliases = orcaAliases
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (string alias in aliases)
+        {
+            IReadOnlyList<MachineProfileDto> profiles = await GetMachineProfilesByAliasAsync(httpClient, alias, ct);
+            if (profiles.Count > 0)
+            {
+                return profiles;
+            }
+
+            _logger.LogWarning("No machine profiles found for OrcaSlicer alias '{Alias}'", alias);
+        }
+
+        if (string.IsNullOrWhiteSpace(manufacturer) || string.IsNullOrWhiteSpace(model))
+        {
+            return [];
+        }
+
+        _logger.LogInformation(
+            "Retrying machine profile lookup using manufacturer/model fallback: {Manufacturer}/{Model}",
+            manufacturer,
+            model);
+
+        return await GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct);
+    }
+
+    /// <summary>
     /// Fetches process profiles compatible with specific machines from the OrcaSlicer worker.
     /// </summary>
     public async Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(

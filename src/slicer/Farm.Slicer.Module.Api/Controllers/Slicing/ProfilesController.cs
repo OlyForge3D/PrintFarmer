@@ -824,19 +824,30 @@ public class ProfilesController(
             }
 
             IReadOnlyList<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
-            SlicerModelAliasDto? orcaAlias = aliases.FirstOrDefault(a => a.SlicerType == "OrcaSlicer");
+            List<string> orcaAliases = aliases
+                .Where(a => string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase))
+                .Select(a => a.SlicerModelName)
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()!;
 
-            if (orcaAlias == null || string.IsNullOrWhiteSpace(orcaAlias.SlicerModelName))
+            if (orcaAliases.Count == 0)
             {
                 _logger.LogWarning("No OrcaSlicer alias configured for model {ModelName}", model.Name);
                 return NotFound($"No OrcaSlicer alias configured for model {model.Name}");
             }
 
-            string printerModel = orcaAlias.SlicerModelName;
-            _logger.LogInformation("Fetching machine profiles for model {ModelName} using OrcaSlicer alias: {Alias}", model.Name, printerModel);
+            _logger.LogInformation(
+                "Fetching machine profiles for model {ModelName} using {AliasCount} OrcaSlicer aliases",
+                model.Name,
+                orcaAliases.Count);
 
-            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesByAliasAsync(
-                httpClient, printerModel, ct);
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForCatalogModelAsync(
+                httpClient,
+                model.ManufacturerName ?? string.Empty,
+                model.Name,
+                orcaAliases,
+                ct);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
