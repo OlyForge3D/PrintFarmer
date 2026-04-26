@@ -962,8 +962,44 @@ public class ProfilesService(
 
         try
         {
+            PrinterModelDto? catalogModel = await _catalogService.GetModelByIdAsync(printerModelId, ct);
+            if (catalogModel is null)
+            {
+                result.Error = $"Printer model with ID {printerModelId} not found in catalog";
+
+                return result;
+            }
+
+            IEnumerable<SlicerModelAliasDto> modelAliases = await _catalogService.GetModelAliasesAsync(printerModelId, ct);
+            List<string> orcaAliases = modelAliases
+                .Where(a => string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase))
+                .Select(a => a.SlicerModelName)
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (orcaAliases.Count == 0)
+            {
+                result.Error = $"No OrcaSlicer aliases configured for model '{catalogModel.Name}'";
+
+                return result;
+            }
+
             // Use IHttpClientFactory if available, otherwise create new HttpClient
             using HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+            IReadOnlyList<MachineProfileDto> aliasMachines = await GetMachineProfilesForCatalogModelAsync(httpClient, orcaAliases, ct);
+            if (aliasMachines.Count == 0)
+            {
+                result.Error = $"No OrcaSlicer machine profiles found for aliases configured for model '{catalogModel.Name}'";
+
+                return result;
+            }
+
+            HashSet<string> aliasMatchedMachineNames = new(
+                aliasMachines.Select(m => m.Name).Where(name => !string.IsNullOrWhiteSpace(name)),
+                StringComparer.OrdinalIgnoreCase);
 
             // Fetch all profiles from worker
             (AllProfilesResponseDto? allProfiles, string? orcaVersion, string workerUrl) = await FetchProfilesFromWorkerAsync(httpClient, ct);
@@ -991,6 +1027,11 @@ public class ProfilesService(
             HashSet<string> selectedProcesses = new(request.SelectedProcessProfiles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> selectedFilaments = new(request.SelectedFilamentProfiles, StringComparer.OrdinalIgnoreCase);
 
+            static bool IsCompatibleWithAliasMatchedMachine(IEnumerable<string> compatiblePrinters, HashSet<string> aliasMatchedMachineNames)
+            {
+                return compatiblePrinters.Any(aliasMatchedMachineNames.Contains);
+            }
+
             // Iterate through all models to find matching profiles
             foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
             {
@@ -1008,6 +1049,14 @@ public class ProfilesService(
                     {
                         if (!selectedMachines.Contains(machineProfile.Name ?? string.Empty))
                         {
+                            continue;
+                        }
+
+                        if (!aliasMatchedMachineNames.Contains(machineProfile.Name ?? string.Empty))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected machine profile '{MachineProfileName}' because it does not match a configured OrcaSlicer alias", machineProfile.Name);
+                            result.Skipped++;
+
                             continue;
                         }
 
@@ -1044,6 +1093,14 @@ public class ProfilesService(
                             continue;
                         }
 
+                        if (!IsCompatibleWithAliasMatchedMachine(filamentProfile.CompatiblePrinters, aliasMatchedMachineNames))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected filament profile '{FilamentProfileName}' because it is not compatible with an alias-matched machine", filamentProfile.Name);
+                            result.Skipped++;
+
+                            continue;
+                        }
+
                         try
                         {
                             bool imported = await PersistFilamentProfileAsync(
@@ -1074,6 +1131,14 @@ public class ProfilesService(
                     {
                         if (!selectedProcesses.Contains(processProfile.Name ?? string.Empty))
                         {
+                            continue;
+                        }
+
+                        if (!IsCompatibleWithAliasMatchedMachine(processProfile.CompatiblePrinters, aliasMatchedMachineNames))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected process profile '{ProcessProfileName}' because it is not compatible with an alias-matched machine", processProfile.Name);
+                            result.Skipped++;
+
                             continue;
                         }
 
@@ -1108,13 +1173,13 @@ public class ProfilesService(
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "[ImportSelectedProfilesForModel] Worker communication failed");
-            result.Error = $"Failed to communicate with OrcaSlicer worker: {ex.Message}";
+            result.Error = "Failed to communicate with OrcaSlicer worker";
             return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ImportSelectedProfilesForModel] Import failed");
-            result.Error = $"Import failed: {ex.Message}";
+            result.Error = "Import failed";
             return result;
         }
     }
@@ -1978,29 +2043,33 @@ public class ProfilesService(
 
         _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found printer: {PrinterName} (ModelId: {ModelId})", printer.Name, printer.ModelId);
 
-        // Resolve the OrcaSlicer alias for this printer's model
+        // Resolve the OrcaSlicer aliases for this printer's model. Catalog aliases are the source of truth.
         IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(printer.ModelId, ct);
-        SlicerModelAliasDto? orcaAlias = aliases.FirstOrDefault(a =>
-            string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase));
+        List<string> orcaAliases = aliases
+            .Where(a => string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.SlicerModelName)
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        if (orcaAlias is null || string.IsNullOrWhiteSpace(orcaAlias.SlicerModelName))
+        if (orcaAliases.Count == 0)
         {
-            _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No OrcaSlicer alias for model {ModelId}, falling back to system profiles", printer.ModelId);
-            return await ListSystemOrcaProfilesAsync(ct);
+            _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No OrcaSlicer aliases for model {ModelId}", printer.ModelId);
+            return [];
         }
 
-        string alias = orcaAlias.SlicerModelName;
-        _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Using OrcaSlicer alias '{Alias}' for printer {PrinterName}", alias, printer.Name);
+        _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Using {AliasCount} OrcaSlicer aliases for printer {PrinterName}", orcaAliases.Count, printer.Name);
 
         try
         {
             using HttpClient httpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-            // Get machine profiles matching this printer's alias from the worker
-            IReadOnlyList<MachineProfileDto> machines = await GetMachineProfilesByAliasAsync(httpClient, alias, ct);
+            // Get machine profiles matching this printer's aliases from the worker
+            IReadOnlyList<MachineProfileDto> machines = await GetMachineProfilesForCatalogModelAsync(httpClient, orcaAliases, ct);
             if (machines.Count == 0)
             {
-                _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No machine profiles found for alias '{Alias}'", alias);
+                _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No machine profiles found for OrcaSlicer aliases {Aliases}", string.Join(", ", orcaAliases));
                 return [];
             }
 
@@ -2026,8 +2095,8 @@ public class ProfilesService(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "[GetAvailableProfilesForPrinterAsync] Worker unavailable, falling back to system profiles");
-            return await ListSystemOrcaProfilesAsync(ct);
+            _logger.LogWarning(ex, "[GetAvailableProfilesForPrinterAsync] Worker unavailable, returning no printer-scoped profiles");
+            return [];
         }
     }
 

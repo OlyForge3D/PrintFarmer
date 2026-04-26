@@ -182,6 +182,116 @@ public class ProfilesServiceTests
         Assert.DoesNotContain(requestedPaths, path => path.Contains("/api/profiles/machine/Prusa/Prusa%20CORE%20One", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_FirstAliasEmpty_TriesSecondAlias()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = CreateOnlineSlicerService();
+
+        List<string> requestedPaths = [];
+        using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
+        {
+            requestedPaths.Add(request.RequestUri!.AbsolutePath);
+            string responseJson = request.RequestUri.AbsolutePath.EndsWith("/Second%20Alias", StringComparison.Ordinal)
+                ? "[{\"name\":\"Second Alias 0.4 nozzle\",\"manufacturer\":\"Test\"}]"
+                : "[]";
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseJson)
+            };
+        }));
+
+        ProfilesService svc = CreateService(mockRepo.Object, NullLogger<ProfilesService>.Instance, slicersService.Object);
+
+        IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
+            httpClient,
+            ["First Alias", "Second Alias"],
+            CancellationToken.None);
+
+        Assert.Single(result);
+        Assert.Equal("Second Alias 0.4 nozzle", result[0].Name);
+        Assert.Contains(requestedPaths, path => path.EndsWith("/First%20Alias", StringComparison.Ordinal));
+        Assert.Contains(requestedPaths, path => path.EndsWith("/Second%20Alias", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_DuplicateAliases_DeduplicatesCaseInsensitively()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = CreateOnlineSlicerService();
+
+        List<string> requestedPaths = [];
+        using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
+        {
+            requestedPaths.Add(request.RequestUri!.AbsolutePath);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]")
+            };
+        }));
+
+        ProfilesService svc = CreateService(mockRepo.Object, NullLogger<ProfilesService>.Instance, slicersService.Object);
+
+        IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
+            httpClient,
+            [" Prusa CORE One ", "PRUSA CORE ONE", "prusa core one"],
+            CancellationToken.None);
+
+        Assert.Empty(result);
+        Assert.Single(requestedPaths);
+        Assert.EndsWith("/Prusa%20CORE%20One", requestedPaths[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_WhitespaceAliases_IgnoresWhitespaceAliases()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = CreateOnlineSlicerService();
+
+        List<string> requestedPaths = [];
+        using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
+        {
+            requestedPaths.Add(request.RequestUri!.AbsolutePath);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]")
+            };
+        }));
+
+        ProfilesService svc = CreateService(mockRepo.Object, NullLogger<ProfilesService>.Instance, slicersService.Object);
+
+        IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
+            httpClient,
+            [" ", "\t", "Valid Alias"],
+            CancellationToken.None);
+
+        Assert.Empty(result);
+        Assert.Single(requestedPaths);
+        Assert.EndsWith("/Valid%20Alias", requestedPaths[0], StringComparison.Ordinal);
+    }
+
+    private static Mock<Farm.Slicer.Module.Services.ISlicersService> CreateOnlineSlicerService()
+    {
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Strict);
+        _ = slicersService
+            .Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerService>
+            {
+                new()
+                {
+                    Name = "orca",
+                    SlicerType = 1,
+                    Host = "http://worker",
+                    Status = "Online"
+                }
+            });
+
+        return slicersService;
+    }
+
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

@@ -270,7 +270,13 @@ export function FacePaintOverlay({
       el.removeEventListener('pointerup', onPointerUp, true);
       el.removeEventListener('pointerleave', onPointerUp, true);
       el.removeEventListener('contextmenu', onContextMenu);
-      // Don't reset painting state during cleanup — C4 fix
+      const wasPainting = isPaintingRef.current || isErasingRef.current;
+      isPaintingRef.current = false;
+      isErasingRef.current = false;
+      flushPaint();
+      if (wasPainting) {
+        onPaintingStateChangeRef.current?.(false);
+      }
     };
   }, [active, applyPaint, flushPaint, gl.domElement, invalidate, raycastFace]);
 

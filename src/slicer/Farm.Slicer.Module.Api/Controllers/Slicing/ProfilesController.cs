@@ -634,7 +634,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error seeding system profiles");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Error seeding profiles: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error seeding profiles");
         }
     }
 
@@ -672,7 +672,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error force-reseeding system profiles");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Error reseeding profiles: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error reseeding profiles");
         }
     }
 
@@ -693,7 +693,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting system profiles");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Error deleting profiles: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error deleting profiles");
         }
     }
 
@@ -731,7 +731,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching profiles from OrcaSlicer worker: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -761,7 +761,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -795,7 +795,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching machine profiles for {Manufacturer}/{Model}: {Message}", manufacturer, model, ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -856,7 +856,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching machine profiles for model {ModelId}: {Message}", modelId, ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -888,7 +888,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching process profiles for machines: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -920,7 +920,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching filament profiles for machines: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -950,7 +950,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching filament templates: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching templates from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching templates from worker");
         }
     }
 
@@ -972,7 +972,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error getting imported profile names: {Message}", ex.Message);
-            return StatusCode(500, $"Error getting imported profile names: {ex.Message}");
+            return StatusCode(500, "Error getting imported profile names");
         }
     }
 
@@ -1149,7 +1149,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Clone failed");
-            return BadRequest($"Clone failed: {ex.Message}");
+            return BadRequest("Clone failed");
         }
     }
 
