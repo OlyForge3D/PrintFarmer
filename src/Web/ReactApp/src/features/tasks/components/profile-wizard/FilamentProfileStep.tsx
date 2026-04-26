@@ -199,7 +199,7 @@ export const FilamentProfileStep: React.FC<FilamentProfileStepProps> = ({
         </div>
       ) : (
         /* OrcaSlicer-style 4-column layout */
-        <div className="grid grid-cols-4 gap-3 h-[450px]">
+        <div className="grid grid-cols-4 gap-3 h-112">
           {/* Column 1: Printer */}
           <FilterColumn
             title="Printer"

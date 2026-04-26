@@ -60,6 +60,8 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({
 
   return (
     <select
+      aria-label="Process Profile"
+      title="Process Profile"
       value={selectedProfileId}
       onChange={e => onChange(e.target.value)}
       disabled={disabled}

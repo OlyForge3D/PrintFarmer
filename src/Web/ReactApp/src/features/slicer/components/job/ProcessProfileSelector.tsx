@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Select } from '@/common/components/ui';
+import Dropdown from '@/common/components/ui/Select';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import type { ProcessProfileListItem, HierarchicalProfilesResponse } from './types';
 
@@ -63,9 +63,13 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Process Profile</label>
+      <label htmlFor="process-profile-selector" className="block text-sm font-semibold text-pf-text-primary mb-2">Process Profile</label>
       {hasFilteredProfiles ? (
-        <Select
+        <Dropdown
+          id="process-profile-selector"
+          label="Process Profile"
+          aria-label="Process Profile"
+          title="Process Profile"
           value={selectedProcessPresetId}
           onChange={e => onProcessProfileChange(e.target.value)}
           className="w-full"
@@ -81,7 +85,7 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
               {filteredGroups.system.map(renderProfileOption)}
             </optgroup>
           )}
-        </Select>
+        </Dropdown>
       ) : hierarchyProfiles ? (
         <ProfileSelector
           hierarchyData={hierarchyProfiles}
@@ -89,7 +93,11 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
           onChange={onProcessProfileChange}
         />
       ) : (
-        <Select
+        <Dropdown
+          id="process-profile-selector"
+          label="Process Profile"
+          aria-label="Process Profile"
+          title="Process Profile"
           value={selectedProcessPresetId}
           onChange={e => onProcessProfileChange(e.target.value)}
           className="w-full"
@@ -109,7 +117,7 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
               ))}
             </optgroup>
           )}
-        </Select>
+        </Dropdown>
       )}
     </div>
   );

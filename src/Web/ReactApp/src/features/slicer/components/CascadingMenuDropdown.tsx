@@ -77,6 +77,13 @@ export function FilamentProfileDropdown({
     if (isOpen) updatePosition();
   }, [isOpen, updatePosition]);
 
+  useEffect(() => {
+    if (!menuRef.current) return;
+    menuRef.current.style.top = `${menuPos.top}px`;
+    menuRef.current.style.left = `${menuPos.left}px`;
+    menuRef.current.style.width = `${menuPos.width}px`;
+  }, [menuPos.left, menuPos.top, menuPos.width]);
+
   // Close on click outside
   useEffect(() => {
     if (!isOpen) return;
@@ -233,7 +240,6 @@ export function FilamentProfileDropdown({
         <div
           ref={menuRef}
           className="fixed z-9999 rounded-md border border-[#3a3f48] shadow-xl overflow-hidden bg-[#2a3038] max-h-100"
-          style={{ top: menuPos.top, left: menuPos.left, width: menuPos.width }}
         >
           {/* Header: search + filter toggle */}
           <div className="sticky top-0 bg-[#2a3038] border-b border-[#3a3f48] p-2 flex gap-1.5">

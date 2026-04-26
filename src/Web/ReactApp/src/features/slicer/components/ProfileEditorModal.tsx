@@ -219,7 +219,7 @@ export function ProfileEditorModal({
       )}
       
       {/* Profile Editor Content — metadata-driven, all profile types */}
-      <div className="flex flex-col" style={{ height: 'calc(95vh - 200px)' }}>
+      <div className="flex flex-col h-[calc(95vh-200px)]">
         <MetadataProfileEditor
           profileType={profileType}
           settings={settings}
