@@ -482,7 +482,6 @@ public class ProfilesService(
         }
 
         List<MachineProfile> machineProfiles = machineProfilesFiltered
-            .Where(m => m.PrinterModelId.HasValue)
             .OrderBy(m => m.Manufacturer)
             .ThenBy(m => m.Name)
             .ToList();
@@ -507,8 +506,11 @@ public class ProfilesService(
         }
         else if (machineProfiles.Count > 0)
         {
-            HashSet<Guid> modelIds = machineProfiles.Select(m => m.PrinterModelId!.Value).ToHashSet();
-            processProfilesFiltered = processProfilesFiltered.Where(p => p.PrinterModelId == null || (p.PrinterModelId.HasValue && modelIds.Contains(p.PrinterModelId.Value)));
+            HashSet<Guid> modelIds = machineProfiles.Where(m => m.PrinterModelId.HasValue).Select(m => m.PrinterModelId!.Value).ToHashSet();
+            if (modelIds.Count > 0)
+            {
+                processProfilesFiltered = processProfilesFiltered.Where(p => p.PrinterModelId == null || (p.PrinterModelId.HasValue && modelIds.Contains(p.PrinterModelId.Value)));
+            }
         }
 
         List<ProcessProfile> processProfiles = processProfilesFiltered.OrderBy(p => p.Name).ToList();
@@ -564,7 +566,7 @@ public class ProfilesService(
             }
             else
             {
-                HashSet<Guid> neededModelIds = machineProfiles.Select(m => m.PrinterModelId!.Value).ToHashSet();
+                HashSet<Guid> neededModelIds = machineProfiles.Where(m => m.PrinterModelId.HasValue).Select(m => m.PrinterModelId!.Value).ToHashSet();
                 foreach (Guid modelId in neededModelIds)
                 {
                     PrinterModelDto? model = await _catalogService.GetModelByIdAsync(modelId, ct);
@@ -624,6 +626,7 @@ public class ProfilesService(
         }).ToList();
 
         Dictionary<Guid, List<MachineProfileListItemDto>> machinesByModelId = new();
+        HashSet<Guid> linkedProfileIds = new();
         foreach (MachineProfileListItemDto m in machineDtos)
         {
             MachineProfile? entity = machineProfiles.FirstOrDefault(x => x.Id == m.Id);
@@ -631,6 +634,8 @@ public class ProfilesService(
             {
                 continue;
             }
+
+            linkedProfileIds.Add(m.Id);
 
             if (!machinesByModelId.TryGetValue(pmid, out List<MachineProfileListItemDto>? list))
             {
@@ -690,6 +695,43 @@ public class ProfilesService(
                 ProcessProfiles = modelProcesses,
                 FilamentProfiles = modelFilaments
             };
+        }
+
+        // Second pass: profiles WITHOUT PrinterModelId, grouped by Manufacturer string
+        List<MachineProfileListItemDto> unlinkedDtos = machineDtos.Where(m => !linkedProfileIds.Contains(m.Id)).ToList();
+        foreach (IGrouping<string, MachineProfileListItemDto> mfgGroup in unlinkedDtos.GroupBy(m => m.Manufacturer ?? string.Empty))
+        {
+            string manufacturerName = string.IsNullOrWhiteSpace(mfgGroup.Key) ? "Unknown" : mfgGroup.Key;
+
+            if (!response.ByHierarchy.TryGetValue(manufacturerName, out HierarchicalManufacturerProfilesDto? mfgDto))
+            {
+                mfgDto = new HierarchicalManufacturerProfilesDto
+                {
+                    Name = manufacturerName,
+                    Models = new Dictionary<string, HierarchicalPrinterModelProfilesDto>()
+                };
+                response.ByHierarchy[manufacturerName] = mfgDto;
+            }
+
+            // Each unlinked profile becomes its own model entry keyed by profile ID
+            foreach (MachineProfileListItemDto mp in mfgGroup)
+            {
+                string profileKey = mp.Id.ToString();
+                mfgDto.Models[profileKey] = new HierarchicalPrinterModelProfilesDto
+                {
+                    Name = mp.Name,
+                    ModelId = profileKey,
+                    MachineProfiles = [mp],
+                    ProcessProfiles = processDtos
+                        .Where(p =>
+                        {
+                            ProcessProfile? ent = processProfiles.FirstOrDefault(x => x.Id == p.Id);
+                            return ent?.PrinterModelId is null;
+                        })
+                        .ToList(),
+                    FilamentProfiles = filamentDtos
+                };
+            }
         }
 
         foreach (IGrouping<string, MachineProfileListItemDto> g in machineDtos.GroupBy(m => m.Manufacturer ?? string.Empty))
