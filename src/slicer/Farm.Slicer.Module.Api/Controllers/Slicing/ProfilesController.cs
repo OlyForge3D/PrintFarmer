@@ -766,6 +766,37 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Get the profile hierarchy from OrcaSlicer worker filtered to only include
+    /// manufacturers present in the PrintFarmer catalog.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("catalog-hierarchy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetCatalogFilteredWorkerHierarchyAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            AllProfilesResponseDto? profiles = await _profilesService.GetCatalogFilteredWorkerHierarchyAsync(httpClient, ct);
+            return Ok(profiles ?? new AllProfilesResponseDto());
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error fetching catalog-filtered profiles from OrcaSlicer worker: {Message}", ex.Message);
+            return StatusCode(500, "Error fetching profiles from worker");
+        }
+    }
+
+    /// <summary>
     /// Get machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
     /// </summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
