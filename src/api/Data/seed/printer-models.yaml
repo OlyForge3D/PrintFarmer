@@ -1422,7 +1422,7 @@
     - name: Primary
       toolhead: X-Plus 4 Toolhead
   aliases:
-    - slicerModelName: QIDI X-Plus 4
+    - slicerModelName: Qidi X-Plus 4
       slicerType: OrcaSlicer
     - slicerModelName: X-Plus 4
       slicerType: PrusaSlicer
@@ -1709,6 +1709,8 @@
       toolhead: Nextruder
   aliases:
     - slicerModelName: Prusa CORE One L
+      slicerType: OrcaSlicer
+    - slicerModelName: Prusa CORE One
       slicerType: OrcaSlicer
     - slicerModelName: COREONEL
       slicerType: PrusaSlicer
