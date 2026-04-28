@@ -456,6 +456,17 @@ export const slicerProfilesService = {
   },
 
   /**
+   * Fetch the profile hierarchy from OrcaSlicer worker filtered to only include
+   * manufacturers present in the PrintFarmer catalog.
+   * Used by the Slicer Profiles management page for parity with the Slicer page.
+   * @returns Worker hierarchy filtered to catalog manufacturers
+   */
+  async getCatalogFilteredHierarchy(): Promise<WorkerHierarchyResponse> {
+    const res = await apiClient.get<WorkerHierarchyResponse>('/slicer/profiles/catalog-hierarchy');
+    return res.data;
+  },
+
+  /**
    * Delete all system profiles (IsSystem=true) from the database.
    * Phase 3 cleanup: After calling this, system profiles are only served from OrcaSlicer worker.
    * Requires admin authorization.

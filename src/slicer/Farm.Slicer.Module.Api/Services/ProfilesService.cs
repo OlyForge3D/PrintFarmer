@@ -1827,6 +1827,73 @@ public class ProfilesService(
         return JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
+    /// <inheritdoc />
+    public async Task<AllProfilesResponseDto?> GetCatalogFilteredWorkerHierarchyAsync(HttpClient httpClient, CancellationToken ct)
+    {
+        AllProfilesResponseDto? workerHierarchy = await GetWorkerProfilesHierarchyAsync(httpClient, ct);
+        if (workerHierarchy is null)
+        {
+            return null;
+        }
+
+        // Build a set of catalog manufacturer names (case-insensitive) for fast lookup
+        (IReadOnlyList<ManufacturerDto> catalogManufacturers, _) = await _catalogService.GetManufacturersAsync(ct);
+        HashSet<string> catalogManufacturerNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ManufacturerDto m in catalogManufacturers)
+        {
+            catalogManufacturerNames.Add(m.Name);
+        }
+
+        // Filter ByHierarchy to only include manufacturers in the catalog
+        AllProfilesResponseDto filtered = new();
+
+        foreach ((string manufacturerKey, ManufacturerProfilesDto mfgProfiles) in workerHierarchy.ByHierarchy)
+        {
+            if (!catalogManufacturerNames.Contains(manufacturerKey) && !catalogManufacturerNames.Contains(mfgProfiles.Name))
+            {
+                continue;
+            }
+
+            filtered.ByHierarchy[manufacturerKey] = mfgProfiles;
+        }
+
+        // Filter flat profile dictionaries the same way
+        foreach ((string key, IList<MachineProfileDto> profiles) in workerHierarchy.MachineProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.MachineProfiles[key] = profiles;
+            }
+        }
+
+        foreach ((string key, IList<FilamentProfileDto> profiles) in workerHierarchy.FilamentProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.FilamentProfiles[key] = profiles;
+            }
+        }
+
+        foreach ((string key, IList<ProcessProfileDto> profiles) in workerHierarchy.ProcessProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.ProcessProfiles[key] = profiles;
+            }
+        }
+
+        // Also include MachineModelProfiles that match catalog manufacturers
+        foreach ((string key, IList<MachineModelProfileDto> profiles) in workerHierarchy.MachineModelProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.MachineModelProfiles[key] = profiles;
+            }
+        }
+
+        return filtered;
+    }
+
     /// <summary>
     /// Fetches machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
     /// </summary>
