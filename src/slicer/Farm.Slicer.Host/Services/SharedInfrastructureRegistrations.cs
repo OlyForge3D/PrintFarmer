@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Settings;
@@ -131,7 +132,7 @@ public static class SharedInfrastructureRegistrations
     private static void AddCatalogServices(IServiceCollection services)
     {
         services.AddScoped<INormalizationEventLogger, NormalizationEventLogger>();
-        services.AddSingleton<ICatalogCacheProvider, NullCatalogCacheProvider>();
+        services.AddSingleton<ICatalogCacheProvider, PassThroughCatalogCacheProvider>();
         services.AddScoped<ICatalogService, CatalogService>();
     }
 
@@ -155,17 +156,62 @@ public static class SharedInfrastructureRegistrations
     }
 
     /// <summary>
-    /// No-op cache provider for catalog data in the slicer-host.
-    /// The slicer-host queries the database directly and doesn't need
-    /// the full caching layer that the API uses.
+    /// Pass-through cache provider for catalog data in the slicer-host.
+    /// Queries AppDbContext directly on every call (no caching layer).
     /// </summary>
-    private sealed class NullCatalogCacheProvider : ICatalogCacheProvider
+    private sealed class PassThroughCatalogCacheProvider(IServiceScopeFactory scopeFactory) : ICatalogCacheProvider
     {
-        public Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
-            => Task.FromResult<(IReadOnlyList<ManufacturerDto>, string?)>(([], null));
+        public async Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
+        {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IDbContextFactory<AppDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using AppDbContext db = dbFactory.CreateDbContext();
+            List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
+                .Select(m => new ManufacturerDto(m.Id, m.Name, m.Url, m.Description)).ToListAsync(ct);
+            return (list, null);
+        }
 
-        public Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
-            => Task.FromResult<(IReadOnlyList<PrinterModelDto>, string?)>(([], null));
+        public async Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+        {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IDbContextFactory<AppDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using AppDbContext db = dbFactory.CreateDbContext();
+
+            IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking()
+                .Include(m => m.SupportedFilamentTypes)
+                .Include(m => m.Toolheads).ThenInclude(t => t.HotendModel)
+                .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
+                .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
+                .Include(m => m.Toolheads).ThenInclude(t => t.NozzleModel)
+                .AsSplitQuery();
+            if (manufacturerId is Guid mid)
+            {
+                q = q.Where(m => m.ManufacturerId == mid);
+            }
+
+            List<PrinterModelDto> list = await q.OrderBy(m => m.Name)
+                .Select(m => new PrinterModelDto(
+                    m.Id, m.Name, m.ManufacturerId,
+                    m.MotionType.HasValue ? (MotionType)m.MotionType.Value : null,
+                    m.MaxX, m.MaxY, m.MaxZ,
+                    m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : null,
+                    m.SupportedFilamentTypes.Select(ft => ft.Name).ToArray(),
+                    m.HasHeatedBed, m.HasEnclosure, m.MultiMaterial, m.SupportsAutoLeveling,
+                    m.MaxBedTemp, m.MaxPrintSpeed, m.DefaultWattage, m.DefaultHourlyRate,
+                    m.DefaultAutoDispatchState, m.DefaultStartBehavior,
+                    m.Toolheads.OrderBy(t => t.Index).Select(t => new PrinterModelToolheadDto(
+                        t.Id, t.Name, t.Index,
+                        t.HotendModelId, t.HotendModel != null ? t.HotendModel.Name : null,
+                        t.ExtruderModelId, t.ExtruderModel != null ? t.ExtruderModel.Name : null,
+                        t.ToolheadModelDefId, t.ToolheadModelDef != null ? t.ToolheadModelDef.Name : null,
+                        t.NozzleModelId, t.NozzleModel != null ? t.NozzleModel.Name : null,
+                        t.NozzleModel != null ? t.NozzleModel.Diameter : null,
+                        t.NozzleModel != null ? t.NozzleModel.NozzleType : null,
+                        t.HotendModel != null ? t.HotendModel.MaxFlowRate : null,
+                        t.HotendModel != null ? t.HotendModel.MaxTemp : null,
+                        t.SupportedMaterials, t.IsPrimary)).ToArray())).ToListAsync(ct);
+            return (list, null);
+        }
 
         public void InvalidateManufacturers()
         {

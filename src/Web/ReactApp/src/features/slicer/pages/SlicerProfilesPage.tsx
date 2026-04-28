@@ -21,11 +21,7 @@ import {
   UploadProfileRequest,
   CustomProfile,
   CustomProfilesListResponse,
-  UpdateCustomProfileRequest,
-  WorkerHierarchyResponse,
-  OrcaMachineProfile,
-  OrcaFilamentProfile,
-  OrcaProcessProfile,
+  UpdateCustomProfileRequest
 } from '@/services/slicerProfilesService';
 import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
@@ -39,87 +35,6 @@ import { Select } from '@/common/components/ui/Select';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Modal } from '@/common/components/modals/Modal';
-
-/**
- * Converts a WorkerHierarchyResponse (from OrcaSlicer worker) into the HierarchicalProfilesResponse
- * format the page already renders. This lets us switch data source without rewriting the page.
- */
-function workerToHierarchical(worker: WorkerHierarchyResponse): HierarchicalProfilesResponse {
-  const toMachineListItem = (p: OrcaMachineProfile, manufacturer: string): MachineProfileListItem => ({
-    id: `worker:${manufacturer}:${p.name}`,
-    name: p.name,
-    slicerType: 'OrcaSlicer',
-    manufacturer,
-    isDefault: false,
-    isSystem: true,
-    isPublic: true,
-    hash: '',
-  });
-
-  const toFilamentListItem = (p: OrcaFilamentProfile): FilamentProfileListItem => ({
-    id: `worker:${p.manufacturer ?? 'Unknown'}:${p.name}`,
-    name: p.name,
-    slicerType: 'OrcaSlicer',
-    material: p.material ?? '',
-    nozzleTemperature: p.nozzleTemperature ?? undefined,
-    bedTemperature: p.bedTemperature ?? undefined,
-    printSpeed: p.printSpeed ?? 0,
-    isDefault: false,
-    isSystem: true,
-    isPublic: true,
-    hash: '',
-  });
-
-  const toProcessListItem = (p: OrcaProcessProfile): ProcessProfileListItem => ({
-    id: `worker:${p.name}`,
-    name: p.name,
-    slicerType: 'OrcaSlicer',
-    quality: p.quality ?? '',
-    layerHeight: p.layerHeight ?? 0,
-    infillPercentage: p.infillPercentage ?? 0,
-    isDefault: false,
-    isSystem: true,
-    isPublic: true,
-    hash: '',
-  });
-
-  const byHierarchy: Record<string, { name: string; models: Record<string, PrinterModelProfilesDto> }> = {};
-  const machineProfiles: Record<string, MachineProfileListItem[]> = {};
-  const filamentProfiles: Record<string, FilamentProfileListItem[]> = {};
-  const processProfiles: Record<string, ProcessProfileListItem[]> = {};
-
-  for (const [mfgKey, mfgData] of Object.entries(worker.byHierarchy ?? {})) {
-    const mfgName = mfgData.name || mfgKey;
-    const models: Record<string, PrinterModelProfilesDto> = {};
-    const mfgMachines: MachineProfileListItem[] = [];
-    const mfgFilaments: FilamentProfileListItem[] = [];
-    const mfgProcesses: ProcessProfileListItem[] = [];
-
-    for (const [modelKey, modelData] of Object.entries(mfgData.models ?? {})) {
-      const machineItems = (modelData.machineProfiles ?? []).map(p => toMachineListItem(p, mfgName));
-      const filamentItems = (modelData.filamentProfiles ?? []).map(toFilamentListItem);
-      const processItems = (modelData.processProfiles ?? []).map(toProcessListItem);
-
-      models[modelKey] = {
-        name: modelData.name || modelKey,
-        machineProfiles: machineItems,
-        filamentProfiles: filamentItems,
-        processProfiles: processItems,
-      };
-
-      mfgMachines.push(...machineItems);
-      mfgFilaments.push(...filamentItems);
-      mfgProcesses.push(...processItems);
-    }
-
-    byHierarchy[mfgKey] = { name: mfgName, models };
-    if (mfgMachines.length > 0) machineProfiles[mfgName] = mfgMachines;
-    if (mfgFilaments.length > 0) filamentProfiles[mfgName] = mfgFilaments;
-    if (mfgProcesses.length > 0) processProfiles[mfgName] = mfgProcesses;
-  }
-
-  return { byHierarchy, machineProfiles, filamentProfiles, processProfiles };
-}
 
 export const SlicerProfilesPage: React.FC = () => {
   const qc = useQueryClient();
@@ -202,18 +117,14 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   }, [slicerNames, slicerType]);
 
-  // Main hierarchy query - loads profiles from OrcaSlicer worker filtered to catalog manufacturers
+  // Main hierarchy query - loads all profiles for browsing
   const { data: profilesData, isLoading, error } = useQuery<HierarchicalProfilesResponse, Error>({
-    queryKey: ['slicerProfilesCatalogHierarchy'],
-    queryFn: async () => {
-      const workerData = await slicerProfilesService.getCatalogFilteredHierarchy();
-      return workerToHierarchical(workerData);
-    },
-    staleTime: 30_000
+    queryKey: ['slicerProfilesHierarchy'],
+    queryFn: async () => slicerProfilesService.listHierarchical(),
+    staleTime: 10_000
   });
 
   // Filtered query - loads profiles filtered by selected machine (for CompatiblePrinters filtering)
-  // Still uses DB hierarchy for CompatiblePrinters-based filtering
   const { data: filteredProfilesData } = useQuery<HierarchicalProfilesResponse, Error>({
     queryKey: ['slicerProfilesHierarchyFiltered', selectedMachineProfileId],
     queryFn: async () => slicerProfilesService.listHierarchical(selectedMachineProfileId),
@@ -335,7 +246,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setDescription('');
       setAllowSystemOverride(false);
       setSetDefault(false);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => {
@@ -347,7 +258,7 @@ export const SlicerProfilesPage: React.FC = () => {
     mutationFn: async (id) => slicerProfilesService.setDefault(id),
     onSuccess: () => {
       setMessage('Default profile updated.');
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
@@ -358,7 +269,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: (result) => {
       setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
       setSelectedProfileIds(new Set());
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -370,7 +281,7 @@ export const SlicerProfilesPage: React.FC = () => {
     mutationFn: async (request) => slicerProfilesService.cloneProfile(request),
     onSuccess: (result) => {
       setMessage(`Created custom profile: ${result.name}`);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -386,7 +297,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setUploadName('');
       setUploadError(null);
       setIsUploadModalOpen(false);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -401,7 +312,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setIsEditModalOpen(false);
       setEditingProfile(null);
       setEditError(null);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -413,7 +324,7 @@ export const SlicerProfilesPage: React.FC = () => {
     mutationFn: async (id) => slicerProfilesService.deleteCustomProfile(id),
     onSuccess: () => {
       setMessage('Profile deleted');
-      qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -921,7 +832,7 @@ export const SlicerProfilesPage: React.FC = () => {
           setReseedStatus('success');
           setReseedMessage(`✅ ${data.imported} profiles imported, ${data.skipped} skipped, ${data.deleted} deleted`);
           // Refresh the profiles list
-          qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
           qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
         }
       });
@@ -1126,7 +1037,7 @@ export const SlicerProfilesPage: React.FC = () => {
                     <option value="100">100</option>
                   </Select>
                 </div>
-                <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesCatalogHierarchy'] })}>Refresh</Button>
+                <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] })}>Refresh</Button>
               </div>
               {(searchQuery || filterManufacturer !== 'all' || filterEngine !== 'all' || filterSource !== 'all' || selectedMachineProfileId || selectedFilamentProfileId || selectedProcessProfileId) && (
                 <Button
