@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
 using Microsoft.AspNetCore.SignalR;
@@ -22,7 +23,11 @@ public class ProfilesServiceTests
     private static ProfilesService CreateService(
         IProfilesRepository repo,
         ILogger<ProfilesService> logger,
-        Farm.Slicer.Module.Services.ISlicersService? slicersServiceOverride = null)
+        Farm.Slicer.Module.Services.ISlicersService? slicersServiceOverride = null,
+        IProcessProfileRepository? processRepoOverride = null,
+        IMachineProfileRepository? machineRepoOverride = null,
+        IFilamentProfileRepository? filamentRepoOverride = null,
+        IPrinterModelAliasService? aliasServiceOverride = null)
     {
         Mock<IProcessProfileRepository> processProfileRepo = new(MockBehavior.Loose);
         Mock<IMachineProfileRepository> machineProfileRepo = new(MockBehavior.Loose);
@@ -32,18 +37,20 @@ public class ProfilesServiceTests
         Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
         Mock<IHubContext<SlicerHub>> hubContext = new(MockBehavior.Loose);
         Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Loose);
+        Mock<IPrinterModelAliasService> aliasService = new(MockBehavior.Loose);
 
         return new ProfilesService(
             repo,
             logger,
-            processProfileRepo.Object,
-            machineProfileRepo.Object,
-            filamentProfileRepo.Object,
+            processRepoOverride ?? processProfileRepo.Object,
+            machineRepoOverride ?? machineProfileRepo.Object,
+            filamentRepoOverride ?? filamentProfileRepo.Object,
             unitOfWork.Object,
             catalogService.Object,
             parsingService.Object,
             hubContext.Object,
-            slicersServiceOverride ?? slicersService.Object);
+            slicersServiceOverride ?? slicersService.Object,
+            aliasServiceOverride ?? aliasService.Object);
     }
 
     // NOTE: Tests using non-existent CreateSlicerProfileDto DTO have been removed.

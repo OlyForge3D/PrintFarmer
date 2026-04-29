@@ -51,6 +51,20 @@ public class CloneSingleProfileRequestDto
     /// Name for the new custom profile. If not provided, uses original name with "(Custom)" suffix.
     /// </summary>
     public string? Name { get; set; }
+
+    /// <summary>
+    /// Optional override of the catalog PrinterModel association for the cloned profile.
+    /// When null, the cloned profile inherits the source profile's PrinterModelId
+    /// (only relevant for machine and process profiles; filament profiles ignore this field).
+    /// </summary>
+    public Guid? PrinterModelId { get; set; }
+
+    /// <summary>
+    /// Optional override of the compatible-printers list for cloned filament profiles.
+    /// When null, the cloned profile inherits the source's CompatiblePrinters string.
+    /// Ignored for machine and process profiles.
+    /// </summary>
+    public IReadOnlyList<string>? CompatiblePrinters { get; set; }
 }
 
 /// <summary>
@@ -98,6 +112,22 @@ public class UploadProfileRequestDto
     /// Name for the custom profile. If not provided, extracted from JSON if possible.
     /// </summary>
     public string? Name { get; set; }
+
+    /// <summary>
+    /// Optional explicit catalog PrinterModel association for the uploaded profile.
+    /// When null, the service attempts to resolve the association from the raw JSON
+    /// (printer_model / compatible_printers) via the printer-model alias service.
+    /// Filament profiles ignore this field.
+    /// </summary>
+    public Guid? PrinterModelId { get; set; }
+
+    /// <summary>
+    /// Optional list of compatible machine variant names (e.g. "Prusa CORE One 0.4 nozzle")
+    /// for filament profiles. When null/empty on a filament upload, the service attempts
+    /// to extract the values from the <c>compatible_printers</c> array in the raw JSON.
+    /// Ignored for machine and process profiles (those use PrinterModelId / their own JSON).
+    /// </summary>
+    public IReadOnlyList<string>? CompatiblePrinters { get; set; }
 }
 
 /// <summary>
@@ -144,6 +174,18 @@ public class CustomProfileDto
     /// The raw JSON content of the profile.
     /// </summary>
     public string? RawJson { get; set; }
+
+    /// <summary>
+    /// Catalog PrinterModel association for this profile (machine and process only;
+    /// always null for filament profiles which use CompatiblePrinters strings instead).
+    /// </summary>
+    public Guid? PrinterModelId { get; set; }
+
+    /// <summary>
+    /// List of compatible machine variant names (filament profiles only). Always null
+    /// for machine and process profiles — those use <see cref="PrinterModelId" /> instead.
+    /// </summary>
+    public IReadOnlyList<string>? CompatiblePrinters { get; set; }
 }
 
 /// <summary>
@@ -165,6 +207,35 @@ public class UpdateCustomProfileRequestDto
     /// Updated description.
     /// </summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Updated catalog PrinterModel association for the profile (machine/process only).
+    /// When null, the existing association is left unchanged. To explicitly clear an
+    /// existing association, set <see cref="ClearPrinterModelId" /> to true.
+    /// Filament profiles ignore this field.
+    /// </summary>
+    public Guid? PrinterModelId { get; set; }
+
+    /// <summary>
+    /// When true, clears the profile's PrinterModelId (sets it to null). Takes precedence
+    /// over <see cref="PrinterModelId" /> when both are supplied. Filament profiles ignore
+    /// this field.
+    /// </summary>
+    public bool? ClearPrinterModelId { get; set; }
+
+    /// <summary>
+    /// Updated list of compatible machine variant names for filament profiles. When null,
+    /// the existing list is left unchanged. To explicitly clear it, set
+    /// <see cref="ClearCompatiblePrinters" /> to true. Ignored for machine/process profiles.
+    /// </summary>
+    public IReadOnlyList<string>? CompatiblePrinters { get; set; }
+
+    /// <summary>
+    /// When true, clears the filament profile's CompatiblePrinters list. Takes precedence
+    /// over <see cref="CompatiblePrinters" /> when both are supplied. Ignored for
+    /// machine and process profiles.
+    /// </summary>
+    public bool? ClearCompatiblePrinters { get; set; }
 }
 
 /// <summary>

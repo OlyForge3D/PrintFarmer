@@ -12,6 +12,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -57,6 +58,7 @@ namespace Farm.Slicer.Module.Api.Services;
 /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
 /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
 /// <param name="slicersService">Service for querying registered slicer workers</param>
+/// <param name="aliasService">Service for resolving slicer profile model names to catalog PrinterModel IDs via aliases</param>
 /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
 public class ProfilesService(
     IProfilesRepository repo,
@@ -68,7 +70,8 @@ public class ProfilesService(
     ICatalogService catalogService,
     IProfileParsingService parsingService,
     IHubContext<SlicerHub> slicerHubContext,
-    ISlicersService slicersService) : IProfilesService
+    ISlicersService slicersService,
+    IPrinterModelAliasService aliasService) : IProfilesService
 {
     private readonly IProfilesRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly ILogger<ProfilesService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -81,6 +84,7 @@ public class ProfilesService(
     private readonly ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
     private readonly ISlicersService _slicersService = slicersService ?? throw new ArgumentNullException(nameof(slicersService));
     private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
+    private readonly IPrinterModelAliasService _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
 
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -2925,7 +2929,7 @@ public class ProfilesService(
             SettingsJson = source.SettingsJson,
             Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
             CompatiblePrinters = source.CompatiblePrinters,
-            PrinterModelId = source.PrinterModelId,
+            PrinterModelId = request.PrinterModelId ?? source.PrinterModelId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -2970,7 +2974,7 @@ public class ProfilesService(
             RawJson = source.RawJson,
             SettingsJson = source.SettingsJson,
             Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
-            CompatiblePrinters = source.CompatiblePrinters,
+            CompatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters) ?? source.CompatiblePrinters,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -3011,7 +3015,7 @@ public class ProfilesService(
             RawJson = source.RawJson,
             SettingsJson = source.SettingsJson,
             Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
-            PrinterModelId = source.PrinterModelId,
+            PrinterModelId = request.PrinterModelId ?? source.PrinterModelId,
             MachineModelProfileId = source.MachineModelProfileId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -3067,6 +3071,12 @@ public class ProfilesService(
             throw new ArgumentException($"Invalid JSON: {ex.Message}");
         }
 
+        // Caller may explicitly set the printer-model association; otherwise attempt to
+        // resolve it from the raw JSON via the alias service so uploaded profiles land
+        // in the correct printer-model bucket instead of as orphans.
+        Guid? printerModelId = request.PrinterModelId
+            ?? await ResolvePrinterModelIdFromRawJsonAsync(request.RawJson, "process");
+
         ProcessProfile profile = new()
         {
             Id = Guid.NewGuid(),
@@ -3077,12 +3087,13 @@ public class ProfilesService(
             CreatedByUserId = userId,
             RawJson = request.RawJson,
             Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            PrinterModelId = printerModelId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _processProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId}", name, userId);
+        _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", name, userId, profile.PrinterModelId);
 
         return new CustomProfileDto
         {
@@ -3092,7 +3103,8 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
     }
 
@@ -3112,6 +3124,12 @@ public class ProfilesService(
             throw new ArgumentException($"Invalid JSON: {ex.Message}");
         }
 
+        // Caller may explicitly supply CompatiblePrinters; otherwise attempt to extract
+        // them from the raw JSON's compatible_printers array so uploaded filaments are
+        // discoverable by the per-machine filtering logic instead of orphaned.
+        string? compatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters)
+            ?? ExtractCompatiblePrintersFromRawJson(request.RawJson);
+
         FilamentProfile profile = new()
         {
             Id = Guid.NewGuid(),
@@ -3122,13 +3140,16 @@ public class ProfilesService(
             CreatedByUserId = userId,
             RawJson = request.RawJson,
             Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            CompatiblePrinters = compatiblePrinters,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _filamentProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId}", name, userId);
+        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", name, userId, profile.CompatiblePrinters ?? "<none>");
 
+        // Filament profiles do not carry a PrinterModelId column; they are matched to
+        // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
         return new CustomProfileDto
         {
             Id = profile.Id,
@@ -3137,7 +3158,9 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = null,
+            CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
         };
     }
 
@@ -3157,6 +3180,11 @@ public class ProfilesService(
             throw new ArgumentException($"Invalid JSON: {ex.Message}");
         }
 
+        // Caller may explicitly set the printer-model association; otherwise attempt to
+        // resolve it from the raw JSON via the alias service.
+        Guid? printerModelId = request.PrinterModelId
+            ?? await ResolvePrinterModelIdFromRawJsonAsync(request.RawJson, "machine");
+
         MachineProfile profile = new()
         {
             Id = Guid.NewGuid(),
@@ -3167,12 +3195,13 @@ public class ProfilesService(
             CreatedByUserId = userId,
             RawJson = request.RawJson,
             Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            PrinterModelId = printerModelId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _machineProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId}", name, userId);
+        _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", name, userId, profile.PrinterModelId);
 
         return new CustomProfileDto
         {
@@ -3182,7 +3211,8 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
     }
 
@@ -3203,7 +3233,8 @@ public class ProfilesService(
                 IsSystem = false,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
-                RawJson = p.RawJson
+                RawJson = p.RawJson,
+                PrinterModelId = p.PrinterModelId
             });
         }
 
@@ -3219,7 +3250,9 @@ public class ProfilesService(
                 IsSystem = false,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
-                RawJson = p.RawJson
+                RawJson = p.RawJson,
+                PrinterModelId = null,
+                CompatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters)
             });
         }
 
@@ -3235,7 +3268,8 @@ public class ProfilesService(
                 IsSystem = false,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
-                RawJson = p.RawJson
+                RawJson = p.RawJson,
+                PrinterModelId = p.PrinterModelId
             });
         }
 
@@ -3297,6 +3331,18 @@ public class ProfilesService(
             profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
         }
 
+        // Apply printer-model association change requested by the user.
+        // ClearPrinterModelId takes precedence over PrinterModelId so the UI can detach
+        // an existing association without sending a sentinel Guid.
+        if (request.ClearPrinterModelId == true)
+        {
+            profile.PrinterModelId = null;
+        }
+        else if (request.PrinterModelId.HasValue)
+        {
+            profile.PrinterModelId = request.PrinterModelId.Value;
+        }
+
         profile.UpdatedAt = DateTime.UtcNow;
         await _processProfileRepo.UpdateAsync(profile, ct);
         _logger.LogInformation("Updated process profile '{ProfileName}' for user {UserId}", profile.Name, userId);
@@ -3309,7 +3355,8 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
     }
 
@@ -3336,10 +3383,23 @@ public class ProfilesService(
             profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
         }
 
+        // Apply CompatiblePrinters change. ClearCompatiblePrinters takes precedence so the
+        // UI can detach the list without sending a sentinel empty array.
+        if (request.ClearCompatiblePrinters == true)
+        {
+            profile.CompatiblePrinters = null;
+        }
+        else if (request.CompatiblePrinters is not null)
+        {
+            profile.CompatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters);
+        }
+
         profile.UpdatedAt = DateTime.UtcNow;
         await _filamentProfileRepo.UpdateAsync(profile, ct);
         _logger.LogInformation("Updated filament profile '{ProfileName}' for user {UserId}", profile.Name, userId);
 
+        // Filament profiles do not have a PrinterModelId column; ignore any printer-model
+        // fields on the request and always emit null in the response.
         return new CustomProfileDto
         {
             Id = profile.Id,
@@ -3348,7 +3408,9 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = null,
+            CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
         };
     }
 
@@ -3375,6 +3437,16 @@ public class ProfilesService(
             profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
         }
 
+        // Apply printer-model association change requested by the user.
+        if (request.ClearPrinterModelId == true)
+        {
+            profile.PrinterModelId = null;
+        }
+        else if (request.PrinterModelId.HasValue)
+        {
+            profile.PrinterModelId = request.PrinterModelId.Value;
+        }
+
         profile.UpdatedAt = DateTime.UtcNow;
         await _machineProfileRepo.UpdateAsync(profile, ct);
         _logger.LogInformation("Updated machine profile '{ProfileName}' for user {UserId}", profile.Name, userId);
@@ -3387,7 +3459,206 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
+    }
+
+    /// <summary>
+    /// Best-effort resolution of a catalog PrinterModel ID from a raw OrcaSlicer profile JSON.
+    /// </summary>
+    /// <remarks>
+    /// Used by upload paths so that user-uploaded machine and process profiles land in the
+    /// correct printer-model bucket without requiring the caller to specify it manually.
+    ///
+    /// Resolution rules:
+    /// <list type="bullet">
+    ///   <item>Machine profiles: read <c>printer_model</c> (fallback to <c>name</c> / <c>inherits</c>) and resolve via the alias service.</item>
+    ///   <item>Process profiles: read the <c>compatible_printers</c> array and return the first machine name that resolves.</item>
+    ///   <item>Filament profiles: not supported (no PrinterModelId column); always returns null.</item>
+    ///   <item>Malformed JSON or unrecognised types: returns null and the caller falls back to leaving the association unset.</item>
+    /// </list>
+    /// </remarks>
+    private async Task<Guid?> ResolvePrinterModelIdFromRawJsonAsync(string rawJson, string profileType)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            JsonElement root = doc.RootElement;
+
+            switch (profileType)
+            {
+                case "machine":
+                    {
+                        // Prefer the explicit printer_model field; fall back to name / inherits when absent.
+                        string? candidate = TryGetString(root, "printer_model")
+                            ?? TryGetString(root, "name")
+                            ?? TryGetString(root, "inherits");
+                        if (string.IsNullOrWhiteSpace(candidate))
+                        {
+                            return null;
+                        }
+
+                        return await _aliasService.ResolveModelAliasAsync(candidate, "OrcaSlicer");
+                    }
+
+                case "process":
+                    {
+                        // Process profiles reference compatible printers (machine variant names).
+                        // Return the first one that resolves to a known catalog model.
+                        if (!root.TryGetProperty("compatible_printers", out JsonElement compatibleElem)
+                            || compatibleElem.ValueKind != JsonValueKind.Array)
+                        {
+                            return null;
+                        }
+
+                        foreach (JsonElement entry in compatibleElem.EnumerateArray())
+                        {
+                            if (entry.ValueKind != JsonValueKind.String)
+                            {
+                                continue;
+                            }
+
+                            string? name = entry.GetString();
+                            if (string.IsNullOrWhiteSpace(name))
+                            {
+                                continue;
+                            }
+
+                            Guid? resolved = await _aliasService.ResolveModelAliasAsync(name, "OrcaSlicer");
+                            if (resolved.HasValue)
+                            {
+                                return resolved;
+                            }
+                        }
+
+                        return null;
+                    }
+
+                default:
+                    // Filament and unknown types do not carry a PrinterModelId association.
+                    return null;
+            }
+        }
+        catch (JsonException ex)
+        {
+            // The caller already validates JSON for upload, but log defensively for diagnostics.
+            _logger.LogDebug(ex, "Failed to parse raw profile JSON while resolving PrinterModelId for {ProfileType}", profileType);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Swallow unexpected resolver errors so that an upload still succeeds with no
+            // association rather than failing outright. Cancellation must always propagate.
+            _logger.LogWarning(ex, "Unexpected error resolving PrinterModelId from raw JSON for {ProfileType}", profileType);
+            return null;
+        }
+    }
+
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out JsonElement prop))
+        {
+            return null;
+        }
+
+        return prop.ValueKind == JsonValueKind.String ? prop.GetString() : null;
+    }
+
+    /// <summary>
+    /// Normalises a caller-supplied list of compatible printer names into the
+    /// comma-separated storage format. Trims whitespace, drops empties, and dedupes
+    /// while preserving order. Returns null when the list is null or contains no
+    /// usable entries (so callers can use the null-coalesce fallback chain).
+    /// </summary>
+    private static string? NormalizeCompatiblePrintersList(IReadOnlyList<string>? entries)
+    {
+        if (entries is null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        List<string> cleaned = new(entries.Count);
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (string entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            string trimmed = entry.Trim();
+            if (seen.Add(trimmed))
+            {
+                cleaned.Add(trimmed);
+            }
+        }
+
+        return cleaned.Count == 0 ? null : string.Join(',', cleaned);
+    }
+
+    /// <summary>
+    /// Best-effort extraction of the <c>compatible_printers</c> JSON array from a raw
+    /// filament profile. Returns the comma-separated storage format or null when no
+    /// usable values are found. Malformed JSON yields null without throwing because
+    /// the caller has already validated structure for upload.
+    /// </summary>
+    private static string? ExtractCompatiblePrintersFromRawJson(string rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            if (!doc.RootElement.TryGetProperty("compatible_printers", out JsonElement arr) || arr.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            List<string> values = [];
+            foreach (JsonElement entry in arr.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string? value = entry.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    values.Add(value.Trim());
+                }
+            }
+
+            return NormalizeCompatiblePrintersList(values);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Splits the comma-separated CompatiblePrinters storage column into a clean list
+    /// for response DTOs. Returns null when the column is null or empty so callers can
+    /// distinguish "no association" from "explicit empty list".
+    /// </summary>
+    private static string[]? SplitCompatiblePrinters(string? compatiblePrinters)
+    {
+        if (string.IsNullOrWhiteSpace(compatiblePrinters))
+        {
+            return null;
+        }
+
+        string[] parts = compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts;
     }
 }
