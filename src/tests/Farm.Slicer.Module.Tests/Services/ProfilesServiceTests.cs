@@ -216,6 +216,74 @@ public class ProfilesServiceTests
     }
 
     [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_MultipleAliasesReturnProfiles_AggregatesAllProfiles()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = CreateOnlineSlicerService();
+
+        List<string> requestedPaths = [];
+        using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
+        {
+            requestedPaths.Add(request.RequestUri!.AbsolutePath);
+            string responseJson = request.RequestUri.AbsolutePath.EndsWith("/Prusa%20MK4S%20HF", StringComparison.Ordinal)
+                ? "[{\"name\":\"Prusa MK4S HF0.4 nozzle\",\"manufacturer\":\"Prusa\"},{\"name\":\"Prusa MK4S HF0.6 nozzle\",\"manufacturer\":\"Prusa\"}]"
+                : "[{\"name\":\"Prusa MK4S 0.4 nozzle\",\"manufacturer\":\"Prusa\"},{\"name\":\"Prusa MK4S 0.6 nozzle\",\"manufacturer\":\"Prusa\"}]";
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseJson)
+            };
+        }));
+
+        ProfilesService svc = CreateService(mockRepo.Object, NullLogger<ProfilesService>.Instance, slicersService.Object);
+
+        IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
+            httpClient,
+            ["Prusa MK4S", "Prusa MK4S HF"],
+            CancellationToken.None);
+
+        Assert.Equal(4, result.Count);
+        Assert.Contains(result, p => p.Name == "Prusa MK4S 0.4 nozzle");
+        Assert.Contains(result, p => p.Name == "Prusa MK4S HF0.4 nozzle");
+        Assert.Contains(requestedPaths, path => path.EndsWith("/Prusa%20MK4S", StringComparison.Ordinal));
+        Assert.Contains(requestedPaths, path => path.EndsWith("/Prusa%20MK4S%20HF", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_OverlappingProfilesAcrossAliases_DeduplicatesProfiles()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = CreateOnlineSlicerService();
+
+        List<string> requestedPaths = [];
+        using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
+        {
+            requestedPaths.Add(request.RequestUri!.AbsolutePath);
+            string responseJson = request.RequestUri.AbsolutePath.EndsWith("/Prusa%20MK4S%20HF", StringComparison.Ordinal)
+                ? "[{\"name\":\"Prusa MK4S 0.4 nozzle\",\"manufacturer\":\"Prusa\"},{\"name\":\"Prusa MK4S HF0.4 nozzle\",\"manufacturer\":\"Prusa\"}]"
+                : "[{\"name\":\"Prusa MK4S 0.4 nozzle\",\"manufacturer\":\"Prusa\"}]";
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseJson)
+            };
+        }));
+
+        ProfilesService svc = CreateService(mockRepo.Object, NullLogger<ProfilesService>.Instance, slicersService.Object);
+
+        IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
+            httpClient,
+            ["Prusa MK4S", "Prusa MK4S HF"],
+            CancellationToken.None);
+
+        Assert.Equal(2, result.Count);
+        Assert.Single(result, p => p.Name == "Prusa MK4S 0.4 nozzle");
+        Assert.Contains(result, p => p.Name == "Prusa MK4S HF0.4 nozzle");
+        Assert.Contains(requestedPaths, path => path.EndsWith("/Prusa%20MK4S", StringComparison.Ordinal));
+        Assert.Contains(requestedPaths, path => path.EndsWith("/Prusa%20MK4S%20HF", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task GetMachineProfilesForCatalogModelAsync_DuplicateAliases_DeduplicatesCaseInsensitively()
     {
         Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);

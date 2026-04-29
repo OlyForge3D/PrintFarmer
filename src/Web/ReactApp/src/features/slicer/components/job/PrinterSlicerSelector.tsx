@@ -27,6 +27,8 @@ interface PrinterSlicerSelectorProps {
   selectedPrinterId: string;
   /** Callback when printer changes */
   onPrinterChange: (printerId: string, printer: PrinterForSlicing | undefined) => void;
+  /** Optional compact control rendered beside the selected printer card */
+  accessory?: React.ReactNode;
   /** Optional CSS class name */
   className?: string;
 }
@@ -56,6 +58,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
   isLoading,
   selectedPrinterId,
   onPrinterChange,
+  accessory,
   className
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -98,61 +101,68 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
         </div>
       ) : (
         <>
-          {/* Clickable printer card that opens modal */}
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setIsModalOpen(true)}
-            className="w-full !justify-start !p-3 !rounded-lg"
-          >
-            {selectedPrinter ? (
-              <div className="flex items-start gap-3 w-full text-left">
-                {/* Printer cover image from manufacturer/model or fallback based on motion type */}
-                <div className="shrink-0 w-12 h-12 bg-pf-bg-1 rounded-sm flex items-center justify-center overflow-hidden">
-                  <PrinterImage
-                    manufacturerName={selectedPrinter.manufacturerName}
-                    modelName={selectedPrinter.modelName}
-                    motionType={selectedPrinter.motionType}
-                    alt={selectedPrinter.name}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                
-                {/* Printer info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-pf-text-primary truncate">
-                      {selectedPrinter.name}
-                    </span>
-                    {selectedPrinter.isOnline !== undefined && (
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${
-                        selectedPrinter.isOnline ? 'bg-pf-success' : 'bg-pf-disabled'
-                      }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
-                    )}
+          <div className="flex items-stretch gap-2">
+            {/* Clickable printer card that opens modal */}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsModalOpen(true)}
+              className="min-w-0 flex-1 justify-start! p-3! rounded-lg!"
+            >
+              {selectedPrinter ? (
+                <div className="flex items-start gap-3 w-full text-left">
+                  {/* Printer cover image from manufacturer/model or fallback based on motion type */}
+                  <div className="shrink-0 w-12 h-12 bg-pf-bg-1 rounded-sm flex items-center justify-center overflow-hidden">
+                    <PrinterImage
+                      manufacturerName={selectedPrinter.manufacturerName}
+                      modelName={selectedPrinter.modelName}
+                      motionType={selectedPrinter.motionType}
+                      alt={selectedPrinter.name}
+                      className="w-full h-full object-cover"
+                    />
                   </div>
-                  <div className="text-sm text-pf-text-muted flex items-center gap-1 mt-0.5">
-                    {selectedPrinter.modelName && (
-                      <span>{selectedPrinter.modelName}</span>
-                    )}
-                    {selectedPrinter.modelName && getPrimaryNozzleDiameter(selectedPrinter) && (
-                      <span className="text-pf-text-muted">•</span>
-                    )}
-                    {getPrimaryNozzleDiameter(selectedPrinter) && (
-                      <span>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</span>
-                    )}
+
+                  {/* Printer info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-pf-text-primary truncate">
+                        {selectedPrinter.name}
+                      </span>
+                      {selectedPrinter.isOnline !== undefined && (
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${
+                          selectedPrinter.isOnline ? 'bg-pf-success' : 'bg-pf-disabled'
+                        }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
+                      )}
+                    </div>
+                    <div className="text-sm text-pf-text-muted flex items-center gap-1 mt-0.5">
+                      {selectedPrinter.modelName && (
+                        <span>{selectedPrinter.modelName}</span>
+                      )}
+                      {selectedPrinter.modelName && getPrimaryNozzleDiameter(selectedPrinter) && (
+                        <span className="text-pf-text-muted">•</span>
+                      )}
+                      {getPrimaryNozzleDiameter(selectedPrinter) && (
+                        <span>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Change indicator */}
+                  <span className="text-pf-text-muted text-sm">Change</span>
                 </div>
-                
-                {/* Change indicator */}
-                <span className="text-pf-text-muted text-sm">Change</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 text-pf-text-muted">
-                <span className="text-xl">🖨️</span>
-                <span>Click to select a printer...</span>
+              ) : (
+                <div className="flex items-center gap-3 text-pf-text-muted">
+                  <span className="text-xl">🖨️</span>
+                  <span>Click to select a printer...</span>
+                </div>
+              )}
+            </Button>
+            {accessory && (
+              <div className="w-28 shrink-0">
+                {accessory}
               </div>
             )}
-          </Button>
+          </div>
           
           {/* Printer selector modal */}
           <PrinterSelectorModal
