@@ -1465,6 +1465,8 @@
   aliases:
     - slicerModelName: Prusa MINI
       slicerType: OrcaSlicer
+    - slicerModelName: Prusa MINI IS
+      slicerType: OrcaSlicer
     - slicerModelName: MINIIS
       slicerType: PrusaSlicer
 
@@ -1628,6 +1630,8 @@
   aliases:
     - slicerModelName: Prusa MK4S
       slicerType: OrcaSlicer
+    - slicerModelName: Prusa MK4S HF
+      slicerType: OrcaSlicer
     - slicerModelName: MK4S
       slicerType: PrusaSlicer
 
@@ -1668,6 +1672,8 @@
       toolhead: Nextruder
   aliases:
     - slicerModelName: Prusa CORE One
+      slicerType: OrcaSlicer
+    - slicerModelName: Prusa CORE One HF
       slicerType: OrcaSlicer
     - slicerModelName: COREONE
       slicerType: PrusaSlicer
@@ -1710,7 +1716,7 @@
   aliases:
     - slicerModelName: Prusa CORE One L
       slicerType: OrcaSlicer
-    - slicerModelName: Prusa CORE One
+    - slicerModelName: Prusa CORE One L HF
       slicerType: OrcaSlicer
     - slicerModelName: COREONEL
       slicerType: PrusaSlicer
