@@ -1955,7 +1955,7 @@ public class ProfilesService(
     }
 
     /// <summary>
-    /// Fetches machine profiles for a catalog model by trying only configured OrcaSlicer aliases.
+    /// Fetches machine profiles for a catalog model by aggregating configured OrcaSlicer aliases.
     /// </summary>
     public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
         HttpClient httpClient,
@@ -1968,18 +1968,25 @@ public class ProfilesService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        Dictionary<string, MachineProfileDto> profilesByKey = new(StringComparer.OrdinalIgnoreCase);
+
         foreach (string alias in aliases)
         {
             IReadOnlyList<MachineProfileDto> profiles = await GetMachineProfilesByAliasAsync(httpClient, alias, ct);
-            if (profiles.Count > 0)
+            if (profiles.Count == 0)
             {
-                return profiles;
+                _logger.LogDebug("No machine profiles found for OrcaSlicer alias '{Alias}'", alias);
+                continue;
             }
 
-            _logger.LogWarning("No machine profiles found for OrcaSlicer alias '{Alias}'", alias);
+            foreach (MachineProfileDto profile in profiles)
+            {
+                string key = $"{profile.Manufacturer}|{profile.Name}";
+                profilesByKey.TryAdd(key, profile);
+            }
         }
 
-        return [];
+        return profilesByKey.Values.ToList();
     }
 
     /// <summary>

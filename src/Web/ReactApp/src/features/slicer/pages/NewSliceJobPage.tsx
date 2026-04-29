@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import { 
   slicerProfilesService,
+  type CustomProfile,
   type OrcaMachineProfile,
   type OrcaFilamentProfile,
   type OrcaProcessProfile
@@ -33,6 +34,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Input, Select } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { NozzleTypeLabels, NozzleTypeStringLabels } from '@/types/api';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
@@ -41,6 +43,15 @@ import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
+
+const NOZZLE_MATCH_TOLERANCE = 0.01;
+const NOZZLE_VALUE_DECIMALS = 3;
+
+interface NozzleOption {
+  value: string;
+  diameter: number;
+  label: string;
+}
 
 /**
  * Helper function to convert OrcaProcessProfile to OrcaProcessSettings
@@ -60,6 +71,85 @@ function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undef
     // Spread any additional parsed settings from profile.settings
     ...profileSettings,
   } as OrcaProcessSettings;
+}
+
+function formatNozzleDiameter(diameter: number): string {
+  return Number(diameter.toFixed(NOZZLE_VALUE_DECIMALS)).toString();
+}
+
+function parseNozzleDiameter(value: unknown): number | undefined {
+  if (Array.isArray(value)) {
+    return parseNozzleDiameter(value[0]);
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function getCustomProfileNozzleDiameter(profile: CustomProfile): number | undefined {
+  if (!profile.rawJson) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(profile.rawJson) as Record<string, unknown>;
+    const settings = parsed.settings as Record<string, unknown> | undefined;
+    return parseNozzleDiameter(parsed.nozzle_diameter)
+      ?? parseNozzleDiameter(parsed.nozzleDiameter)
+      ?? parseNozzleDiameter(settings?.nozzle_diameter)
+      ?? parseNozzleDiameter(settings?.nozzleDiameter);
+  } catch {
+    return undefined;
+  }
+}
+
+function getMachineProfileNozzleDiameter(profile: OrcaMachineProfile | CustomProfile): number | undefined {
+  if ('nozzleDiameter' in profile) {
+    return parseNozzleDiameter(profile.nozzleDiameter);
+  }
+
+  return getCustomProfileNozzleDiameter(profile);
+}
+
+function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile, selectedDiameter: number | undefined): boolean {
+  if (selectedDiameter === undefined) {
+    return true;
+  }
+
+  const profileNozzleDiameter = getMachineProfileNozzleDiameter(profile);
+  if (profileNozzleDiameter === undefined) {
+    return true;
+  }
+
+  return Math.abs(profileNozzleDiameter - selectedDiameter) < NOZZLE_MATCH_TOLERANCE;
+}
+
+function getPrimaryNozzleTypeLabel(printer: PrinterForSlicing | undefined): string | undefined {
+  const toolhead = printer?.toolheads?.find((candidate) => candidate.isPrimary) ?? printer?.toolheads?.[0];
+  const nozzleType = toolhead?.nozzleType;
+
+  if (typeof nozzleType === 'number') {
+    return NozzleTypeLabels[nozzleType as keyof typeof NozzleTypeLabels];
+  }
+
+  if (typeof nozzleType !== 'string' || !nozzleType) {
+    return undefined;
+  }
+
+  const normalizedNozzleType = nozzleType.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const matchingKey = Object.keys(NozzleTypeStringLabels).find((key) => {
+    return key.replace(/[^a-z0-9]/gi, '').toLowerCase() === normalizedNozzleType;
+  });
+
+  return matchingKey ? NozzleTypeStringLabels[matchingKey] : nozzleType;
 }
 
 export const NewSliceJobPage: React.FC = () => {
@@ -98,6 +188,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
   const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('');
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
+  const [selectedNozzleFilter, setSelectedNozzleFilter] = useState<string>('');
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
 
   // Filament filter config (persisted in localStorage)
@@ -650,7 +741,7 @@ export const NewSliceJobPage: React.FC = () => {
   // === CUSTOM PROFILES (Hybrid Architecture) ===
   // Fetch user's custom profiles to merge with system profiles
   // NOTE: Declared before selectedMachineProfile so custom machine profiles can be resolved
-  const { data: customProfilesData } = useQuery({
+  const { data: customProfilesData, isLoading: isCustomProfilesLoading } = useQuery({
     queryKey: ['customProfiles'],
     queryFn: () => slicerProfilesService.listCustomProfiles(),
     staleTime: 30_000
@@ -782,10 +873,42 @@ export const NewSliceJobPage: React.FC = () => {
   // Machine profiles are loaded when printer is selected (via modelId query)
   // Filament/Process profiles are loaded when machine profile is selected
 
-  // Machine profiles for the selected printer (from incremental query)
+  const nozzleOptions = useMemo<NozzleOption[]>(() => {
+    const nozzlesByValue = new Map<string, number>();
+    const profiles = [...machineProfilesData, ...customMachineProfiles];
+
+    profiles.forEach((profile) => {
+      const nozzleDiameter = getMachineProfileNozzleDiameter(profile);
+      if (nozzleDiameter === undefined || nozzleDiameter <= 0) {
+        return;
+      }
+
+      nozzlesByValue.set(formatNozzleDiameter(nozzleDiameter), nozzleDiameter);
+    });
+
+    return Array.from(nozzlesByValue.entries())
+      .sort(([, firstDiameter], [, secondDiameter]) => firstDiameter - secondDiameter)
+      .map(([value, diameter]) => ({
+        value,
+        diameter,
+        label: `${formatNozzleDiameter(diameter)} mm`,
+      }));
+  }, [machineProfilesData, customMachineProfiles]);
+
+  const selectedNozzleDiameter = useMemo(() => {
+    return parseNozzleDiameter(selectedNozzleFilter);
+  }, [selectedNozzleFilter]);
+
+  const filteredCustomMachineProfiles = useMemo(() => {
+    return customMachineProfiles.filter((profile) => machineProfileMatchesNozzle(profile, selectedNozzleDiameter));
+  }, [customMachineProfiles, selectedNozzleDiameter]);
+
+  // Machine profiles for the selected printer (from incremental query), filtered by nozzle when selected.
   const availableMachineProfiles = useMemo(() => {
-    return machineProfilesData ?? [];
-  }, [machineProfilesData]);
+    return (machineProfilesData ?? []).filter((profile) => machineProfileMatchesNozzle(profile, selectedNozzleDiameter));
+  }, [machineProfilesData, selectedNozzleDiameter]);
+
+  const hasVisibleMachineProfiles = availableMachineProfiles.length > 0 || filteredCustomMachineProfiles.length > 0;
 
   // Process profiles for the selected machine (from incremental query)
   const availableProcessProfiles = useMemo(() => {
@@ -810,11 +933,45 @@ export const NewSliceJobPage: React.FC = () => {
     return { user, system };
   }, [processProfilesData]);
 
+  useEffect(() => {
+    const optionValues = nozzleOptions.map((option) => option.value);
+
+    if (!selectedPrinterId) {
+      if (selectedNozzleFilter) {
+        setSelectedNozzleFilter('');
+      }
+      return;
+    }
+
+    if (!selectedPrinterForSlicing) {
+      return;
+    }
+
+    if (optionValues.length === 0) {
+      if (selectedNozzleFilter) {
+        setSelectedNozzleFilter('');
+      }
+      return;
+    }
+
+    if (selectedNozzleFilter && optionValues.includes(selectedNozzleFilter)) {
+      return;
+    }
+
+    const primaryNozzleDiameter = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
+    const primaryNozzleValue = primaryNozzleDiameter ? formatNozzleDiameter(primaryNozzleDiameter) : '';
+    const nextNozzleValue = primaryNozzleValue && optionValues.includes(primaryNozzleValue)
+      ? primaryNozzleValue
+      : optionValues[0];
+
+    setSelectedNozzleFilter(nextNozzleValue);
+  }, [nozzleOptions, selectedNozzleFilter, selectedPrinterForSlicing, selectedPrinterId]);
+
   // Auto-select machine profile when printer is selected and machine profiles are loaded
   // Keep the current selection if it is still valid (restored from previous session).
-  // This effect uses nozzle diameter matching when available
+  // This effect uses the selected nozzle filter when available.
   useEffect(() => {
-    if (!selectedPrinterForSlicing || !machineProfilesData?.length) return;
+    if (!selectedPrinterForSlicing) return;
 
     // Defer all setState calls to avoid synchronous updates in effect body
     queueMicrotask(() => {
@@ -824,40 +981,30 @@ export const NewSliceJobPage: React.FC = () => {
       setSelectedManufacturer(mfgName || '');
       setSelectedPrinterModel(modelName || '');
 
+      if ((selectedPrinterModelId && isMachineProfilesLoading) || isCustomProfilesLoading) {
+        return;
+      }
+
       // Keep current selection if valid — check both system and custom profiles
       const hasCurrent = !!selectedMachineProfileId && (
-        machineProfilesData.some((p) => p.name === selectedMachineProfileId) ||
-        customMachineProfiles.some((p) => p.name === selectedMachineProfileId)
+        availableMachineProfiles.some((profile) => profile.name === selectedMachineProfileId) ||
+        filteredCustomMachineProfiles.some((profile) => profile.name === selectedMachineProfileId)
       );
       if (hasCurrent) {
         return;
       }
-      
-      // Get nozzle diameter from printer's primary toolhead
-      const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
-      
-      if (!nozzle) {
-        // No nozzle info, select first available machine profile
-        if (machineProfilesData[0]) {
-          setSelectedMachineProfileId(machineProfilesData[0].name);
-        }
+
+      const nextProfile = availableMachineProfiles[0] ?? filteredCustomMachineProfiles[0];
+      if (nextProfile) {
+        setSelectedMachineProfileId(nextProfile.name);
         return;
       }
-      
-      // Find profile with matching nozzle diameter (within tolerance)
-      const nozzleTolerance = 0.01;
-      const matchedProfile = machineProfilesData.find((p: OrcaMachineProfile) =>
-        p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
-      );
-      
-      if (matchedProfile) {
-        setSelectedMachineProfileId(matchedProfile.name);
-      } else if (machineProfilesData[0]) {
-        // Default to first profile if no nozzle match
-        setSelectedMachineProfileId(machineProfilesData[0].name);
+
+      if (selectedMachineProfileId) {
+        setSelectedMachineProfileId('');
       }
     });
-  }, [selectedPrinterForSlicing, machineProfilesData, selectedMachineProfileId, customMachineProfiles]);
+  }, [selectedPrinterForSlicing, selectedMachineProfileId, selectedPrinterModelId, isMachineProfilesLoading, isCustomProfilesLoading, availableMachineProfiles, filteredCustomMachineProfiles]);
 
   // When machine profile changes, keep compatible selections and clear invalid ones.
   // This lets us restore last-used filament/process values on re-entry.
@@ -922,12 +1069,16 @@ export const NewSliceJobPage: React.FC = () => {
     if (!selectedPrinterModelId) return false;
     // Don't suggest while machine profiles are still loading
     if (isMachineProfilesLoading) return false;
+    // Don't suggest while custom profiles are still loading
+    if (isCustomProfilesLoading) return false;
+    // Don't suggest if any system or custom machine profile is currently selectable
+    if (hasVisibleMachineProfiles) return false;
     // Suggest if machine profiles query completed but returned empty
     // (meaning OrcaSlicer has no profiles for this printer model)
     if (machineProfilesData.length === 0 && !isMachineProfilesLoading) return true;
     // Don't suggest if we have machine profiles (process profiles will load after machine selection)
     return false;
-  }, [selectedPrinterId, selectedPrinterModelId, machineProfilesData.length, isMachineProfilesLoading, cloneProfilesDismissed]);
+  }, [selectedPrinterId, selectedPrinterModelId, machineProfilesData.length, isMachineProfilesLoading, isCustomProfilesLoading, hasVisibleMachineProfiles, cloneProfilesDismissed]);
 
   // Auto-open clone profiles modal if printer selected but has no profiles
   // Only opens once per printer selection - user dismissal is respected
@@ -1452,6 +1603,41 @@ export const NewSliceJobPage: React.FC = () => {
     );
   }
 
+  const selectedNozzleTypeLabel = getPrimaryNozzleTypeLabel(selectedPrinterForSlicing);
+  const nozzleFilterControl = selectedPrinterId && nozzleOptions.length > 0 ? (
+    <div className="flex h-full min-h-19 flex-col justify-center rounded-md border border-pf-border bg-pf-bg-0 px-2 py-2">
+      <label
+        htmlFor="slicer-nozzle-filter"
+        className="text-center text-xs font-semibold leading-tight text-pf-text-primary"
+      >
+        Nozzle
+      </label>
+      <Select
+        id="slicer-nozzle-filter"
+        value={selectedNozzleFilter}
+        onChange={(event) => {
+          setSelectedNozzleFilter(event.target.value);
+          setSelectedMachineProfileId('');
+        }}
+        disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
+        containerClassName="mt-1"
+        className="h-8 rounded-sm py-1 pl-2 pr-6 text-center text-sm font-semibold"
+      >
+        {nozzleOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
+      <span
+        className="mt-1 truncate text-center text-[11px] leading-tight text-pf-text-muted"
+        title={selectedNozzleTypeLabel ?? undefined}
+      >
+        {selectedNozzleTypeLabel ?? 'Machine profiles'}
+      </span>
+    </div>
+  ) : undefined;
+
   return (
     <div className="overflow-hidden p-2 bg-pf-bg-2">
       <form onSubmit={onSubmit} className="relative flex lg:flex-row gap-2 h-[calc(100dvh-72px)] overflow-hidden">
@@ -1472,10 +1658,12 @@ export const NewSliceJobPage: React.FC = () => {
             printers={printers}
             isLoading={isPrintersLoading}
             selectedPrinterId={selectedPrinterId}
+            accessory={nozzleFilterControl}
             onPrinterChange={(printerId) => {
               setSelectedPrinterId(printerId);
               // Cascade reset: printer change resets all profile selections
               setSelectedMachineProfileId('');
+              setSelectedNozzleFilter('');
               setSelectedFilamentProfileId('');
               setSelectedFilamentMaterial('');
               setSelectedProcessPresetId('');
@@ -1573,17 +1761,18 @@ export const NewSliceJobPage: React.FC = () => {
 
             {/* Machine Profile Selection (nozzle variants) - Custom profiles first, then system presets */}
             <Select
+              label="Machine profile"
               value={selectedMachineProfileId}
               onChange={e => setSelectedMachineProfileId(e.target.value)}
-              disabled={!selectedPrinterId || (availableMachineProfiles.length === 0 && customMachineProfiles.length === 0) || isMachineProfilesLoading}
+              disabled={!selectedPrinterId || (availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
               className={`w-full ${!selectedPrinterId || isMachineProfilesLoading ? 'opacity-50' : ''}`}
             >
               <option value="">{isMachineProfilesLoading ? '-- Loading... --' : '-- Select Machine Profile --'}</option>
               {/* Custom profiles first with ★ indicator */}
-              {customMachineProfiles.length > 0 && (
+              {filteredCustomMachineProfiles.length > 0 && (
                 <option disabled className="text-pf-text-muted">── My Profiles ──</option>
               )}
-              {customMachineProfiles.map(profile => (
+              {filteredCustomMachineProfiles.map(profile => (
                 <option key={`custom-${profile.id}`} value={profile.name}>
                   ★ {profile.name}
                 </option>
@@ -1600,7 +1789,10 @@ export const NewSliceJobPage: React.FC = () => {
                 </option>
               ))}
             </Select>
-            {selectedPrinterId && availableMachineProfiles.length === 0 && selectedManufacturer && selectedPrinterModel && (
+            {selectedPrinterId && machineProfilesData.length > 0 && !hasVisibleMachineProfiles && selectedNozzleDiameter !== undefined && (
+              <p className="text-xs text-pf-warning mt-1">No machine profiles available for the selected nozzle</p>
+            )}
+            {selectedPrinterId && machineProfilesData.length === 0 && !hasVisibleMachineProfiles && selectedManufacturer && selectedPrinterModel && (
               <p className="text-xs text-pf-warning mt-1">No machine profiles available for this printer model</p>
             )}
             {selectedPrinterId && !selectedManufacturer && (
