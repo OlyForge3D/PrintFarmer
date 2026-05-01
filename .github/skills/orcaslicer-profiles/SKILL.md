@@ -128,7 +128,7 @@ condition1 or condition2                          # Logical OR
 ! condition                                       # Negation
 ```
 
-The worker's expression parser has 98.2% coverage (641/654 profiles).
+Against OrcaSlicer 2.3.x reference data, the worker's expression parser has 98.2% coverage (641/654 profiles).
 
 ---
 
@@ -219,7 +219,18 @@ result = (await _profileService.ListAvailableMachineProfilesAsync(ct))
 
 ## 6. Debugging Empty Profiles
 
-When a printer returns no profiles, follow this diagnostic path:
+When a printer returns no profiles, run the steps below as independent checks. Each step has one goal and one outcome — don't chain them mentally. Use this table to jump straight to the relevant step:
+
+| Symptom | Jump to |
+|---------|---------|
+| Don't know where to start | Step 1 (endpoint response) |
+| Step 1 returned 404 | Step 2 (verify alias exists) |
+| Step 1 returned `200` + `[]` | Step 3 (verify alias matches OrcaSlicer's `printer_model`) |
+| Want to bypass the API and test the worker | Step 4 (worker endpoint) |
+| Worker returns empty too | Step 5 (inspect worker cache) |
+| Need confirmation of what the worker received | Step 6 (worker logs) |
+
+Each step is standalone: run only the commands in that step, evaluate its outcome, then stop. Do NOT pre-emptively run later steps.
 
 ### Step 1: Check the endpoint response
 
@@ -243,30 +254,26 @@ Confirm:
 
 ### Step 3: Check what `printer_model` OrcaSlicer actually uses
 
-```bash
-python3 -c "
-import json, glob
-for f in glob.glob('/path/to/OrcaSlicer/profiles/*/machine/*.json'):
-    with open(f) as fh:
-        d = json.load(fh)
-    pm = d.get('printer_model', '')
-    if 'core one l' in pm.lower():
-        print(f'{pm:40s} ← {f.split(\"/\")[-1]}')
-"
-```
+Set `ORCA_PROFILES_DIR` to the profile root you want to inspect, such as the macOS app resources or `/opt/orcaslicer/resources/profiles` inside the worker container.
 
-On macOS with installed OrcaSlicer:
 ```bash
-python3 -c "
-import json, glob
-base = '/Users/$USER/Library/Application Support/OrcaSlicer/system'
-for f in glob.glob(f'{base}/*/machine/*.json'):
-    with open(f) as fh:
-        d = json.load(fh)
-    pm = d.get('printer_model', '')
-    if pm:  # only profiles with printer_model set
-        print(f'{pm:40s} ← {f.split(\"/\")[-1]}')
-" | sort | head -30
+export ORCA_PROFILES_DIR="/Applications/OrcaSlicer.app/Contents/Resources/profiles"
+export ORCA_MODEL_QUERY="core one l"
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+base = Path(os.environ["ORCA_PROFILES_DIR"])
+query = os.environ.get("ORCA_MODEL_QUERY", "").lower()
+
+for path in sorted(base.glob("*/machine/*.json")):
+  with path.open() as fh:
+    profile = json.load(fh)
+  printer_model = profile.get("printer_model", "")
+  if query in printer_model.lower():
+    print(f"{printer_model:40s} <- {path.name}")
+PY
 ```
 
 ### Step 4: Test the worker endpoint directly
@@ -323,7 +330,7 @@ If `Count=0`, the `NormalizedModel` doesn't match.
 | Machine profiles (nozzle variants) | ~600 |
 | Filament profiles | ~2,000 |
 | Process profiles | ~2,200 |
-| Expression coverage | 98.2% (641/654) |
+| Expression coverage (2.3.x reference data) | 98.2% (641/654) |
 
 ---
 
