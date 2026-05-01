@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -101,6 +101,86 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
         profile.FirstLayerPrintSpeed.Should().Be(75);
     }
 
+    [Fact]
+    public async Task ListAvailableProcessProfilesAsync_CompatibleConditionMatchesArrayPrinterNotes()
+    {
+        WriteManufacturerBundle(
+            "Prusa",
+            machineEntries: [("Prusa CORE One L HF 0.4 nozzle", "machine/core-one-l-hf-04.json")],
+            processEntries: [("0.20mm SPEED @CORE One L HF 0.4", "process/core-one-l-hf-speed-04.json")]);
+        WriteMachineProfile(
+            "Prusa",
+            "machine/core-one-l-hf-04.json",
+            """
+            {
+              "name": "Prusa CORE One L HF 0.4 nozzle",
+              "instantiation": "true",
+              "printer_model": "Prusa CORE One L HF",
+              "nozzle_diameter": ["0.4"],
+              "printer_notes": ["PRINTER_MODEL_COREONE_L\nHF_NOZZLE\nPG"]
+            }
+            """);
+        WriteProcessProfile(
+            "Prusa",
+            "process/core-one-l-hf-speed-04.json",
+            """
+            {
+              "name": "0.20mm SPEED @CORE One L HF 0.4",
+              "instantiation": "true",
+              "layer_height": "0.20",
+              "compatible_printers_condition": "printer_notes=~/.*PRINTER_MODEL_COREONE_L[^_a-zA-Z0-9].*/ and nozzle_diameter[0]==0.4 and printer_notes=~/.*HF_NOZZLE.*/"
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+
+        var profiles = await service.ListAvailableProcessProfilesAsync();
+        var profile = profiles.Single();
+
+        profile.CompatiblePrinters.Should().ContainSingle()
+            .Which.Should().Be("Prusa CORE One L HF 0.4 nozzle");
+    }
+
+    [Fact]
+    public async Task ListAvailableProcessProfilesAsync_CompatibleConditionSupportsNegatedRegex()
+    {
+        WriteManufacturerBundle(
+            "Prusa",
+            machineEntries: [("Prusa CORE One L 0.4 nozzle", "machine/core-one-l-04.json")],
+            processEntries: [("0.20mm SPEED @CORE One L 0.4", "process/core-one-l-speed-04.json")]);
+        WriteMachineProfile(
+            "Prusa",
+            "machine/core-one-l-04.json",
+            """
+            {
+              "name": "Prusa CORE One L 0.4 nozzle",
+              "instantiation": "true",
+              "printer_model": "Prusa CORE One L",
+              "nozzle_diameter": ["0.4"],
+              "printer_notes": "PRINTER_MODEL_COREONE_L\nPG"
+            }
+            """);
+        WriteProcessProfile(
+            "Prusa",
+            "process/core-one-l-speed-04.json",
+            """
+            {
+              "name": "0.20mm SPEED @CORE One L 0.4",
+              "instantiation": "true",
+              "layer_height": "0.20",
+              "compatible_printers_condition": "printer_notes=~/.*PRINTER_MODEL_COREONE_L[^_a-zA-Z0-9].*/ and nozzle_diameter[0]==0.4 and printer_notes!~/.*HF_NOZZLE.*/"
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+
+        var profiles = await service.ListAvailableProcessProfilesAsync();
+        var profile = profiles.Single();
+
+        profile.CompatiblePrinters.Should().ContainSingle()
+            .Which.Should().Be("Prusa CORE One L 0.4 nozzle");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_profilesRoot))
@@ -111,9 +191,24 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
 
     private void WriteManufacturerBundle(string manufacturer, string processName, string processSubPath)
     {
+        WriteManufacturerBundle(
+            manufacturer,
+            machineEntries: [],
+            processEntries: [(processName, processSubPath)]);
+    }
+
+    private void WriteManufacturerBundle(
+        string manufacturer,
+        (string name, string subPath)[] machineEntries,
+        (string name, string subPath)[] processEntries)
+    {
         string manufacturerDir = Path.Combine(_profilesRoot, manufacturer);
         Directory.CreateDirectory(manufacturerDir);
+        Directory.CreateDirectory(Path.Combine(manufacturerDir, "machine"));
         Directory.CreateDirectory(Path.Combine(manufacturerDir, "process"));
+
+        string machineJson = FormatBundleEntries(machineEntries);
+        string processJson = FormatBundleEntries(processEntries);
 
         string bundlePath = Path.Combine(_profilesRoot, manufacturer + ".json");
         File.WriteAllText(
@@ -124,16 +219,24 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
               "version": "1.0",
               "description": "test",
               "machine_model_list": [],
-              "machine_list": [],
+              "machine_list": [{{machineJson}}],
               "filament_list": [],
-              "process_list": [
-                {
-                  "name": "{{processName}}",
-                  "sub_path": "{{processSubPath}}"
-                }
-              ]
+              "process_list": [{{processJson}}]
             }
             """);
+    }
+
+    private static string FormatBundleEntries((string name, string subPath)[] entries)
+    {
+        return string.Join(",", entries.Select(entry =>
+            $$"""{"name":"{{entry.name}}","sub_path":"{{entry.subPath}}"}"""));
+    }
+
+    private void WriteMachineProfile(string manufacturer, string subPath, string content)
+    {
+        string profilePath = Path.Combine(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
+        File.WriteAllText(profilePath, content);
     }
 
     private void WriteProcessProfile(string manufacturer, string subPath, string content)
