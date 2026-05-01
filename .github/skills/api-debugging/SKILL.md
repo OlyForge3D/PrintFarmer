@@ -7,6 +7,24 @@ description: Debug PrintFarmer API errors by authenticating against endpoints, q
 
 Use this skill when debugging API errors (500s, 401s, connection failures) in either local development or Docker deployment.
 
+Start by collecting evidence. Do not diagnose until all four facts are recorded.
+
+- **Backend owner**: identify whether the route belongs to `printfarmer-api` (port 5245) or `printfarmer-slicer-host` (port 5246) using "Architecture Overview".
+- **Backend logs**: capture the last 50 log lines for the owning container using "Step 2: Check Container Logs".
+- **Direct backend result**: bypass nginx and record the direct backend HTTP status using "Step 3: Hit the Endpoint Directly".
+- **Unauthenticated status**: send one unauthenticated request to the endpoint being debugged and record the HTTP status.
+
+After collecting evidence, use this table to choose the next section.
+
+| Evidence | Next section |
+|---|---|
+| Direct request returns 401 or 403 | Use "Step 4: Authenticate", retry the same endpoint once, then verify user role/permissions if 403 remains. |
+| Direct request returns 500 or logs show an exception | Use "Step 5: Check the Database", then "Step 6: Check Environment and DI Issues". |
+| Direct request returns HTTP 000 or cannot connect | Use "Step 6: Check Environment and DI Issues" to verify ports and container environment. |
+| Nginx returns 500 but direct backend succeeds | Use "Nginx Config Location" to inspect proxy routing. |
+| Main API returns `SLICER_DISABLED` for a slicer route | Use "Nginx Config Location" to inspect proxy routing. |
+| Direct request returns 200 or an expected 404 | The backend path is reachable; continue with endpoint-specific logs or request data. |
+
 ## Architecture Overview
 
 PrintFarmer runs two API processes in microservices mode:

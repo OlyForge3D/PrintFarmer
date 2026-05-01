@@ -2,27 +2,34 @@
 name: orcaslicer-upgrade
 description: >-
   Full OrcaSlicer version upgrade across the PrintFarmer stack. Use when
-  upgrading OrcaSlicer binary, profiles, printer assets, OR setting metadata.
-  Covers Dockerfiles, runtime deps, AppImage download, metadata extraction,
-  SVG icon sync, profile editor verification, and end-to-end validation.
+  upgrading the OrcaSlicer binary, profiles, printer assets, or setting
+  metadata. The workflow is split into independent checkpoints (pre-flight,
+  version bumps, metadata extraction, icon sync, asset refresh, validation),
+  each grouped by priority: (P0) version bumps and binary, (P1) metadata and
+  icons, (P2) printer assets and frontend validation. Verify each
+  checkpoint's outputs (syntax errors, runtime errors, data consistency)
+  before starting the next.
 ---
 
 # OrcaSlicer Version Upgrade Skill
 
-Use this skill when upgrading OrcaSlicer to a new version. Every upgrade touches multiple layers — binary, dependencies, profiles, metadata, icons, and frontend assets. Missing any layer causes subtle failures (blank profile editors, broken icons, slice jobs rejected by the CLI).
+Use this skill when upgrading OrcaSlicer to a new version. Every upgrade must update all of the following layers: binary, dependencies, profiles, metadata, icons, and frontend assets. Skipping any layer causes subtle failures (blank profile editors, broken icons, slice jobs rejected by the CLI).
 
 This skill consolidates the binary upgrade and the metadata synchronization into a single workflow. There is no separate metadata-sync skill — everything lives here.
 
 ## Quick Upgrade (experienced users)
 
-Condensed command sequence. Each line must succeed before continuing.
+Condensed command sequence. Each line must succeed before continuing. If a step fails: stop immediately, do NOT run later steps, inspect `git diff`, then resolve the underlying issue or manually undo only confirmed changes from the current numbered section before retrying that section from its first command.
 
 ```bash
 # ── 0. Set variables ──────────────────────────────────────────────────────
 OLD=2.3.2                # current version
 NEW=2.4.0                # target version
-ORCA_SRC=~/s/Orca/orcaslicer   # local OrcaSlicer source checkout
-PFARM=~/s/PFarm1                # repo root
+PFARM_ROOT="<PrintFarmer repo root>"
+ORCA_SRC="<OrcaSlicer source checkout>"
+DEPLOY_HOST="<user@host>"
+DEPLOY_ROOT="<deployed PrintFarmer root>"
+DEPLOY_API_URL="<http://host:5245>"
 
 # ── 1. Pre-flight ─────────────────────────────────────────────────────────
 # Confirm stable release exists on GitHub
@@ -31,7 +38,7 @@ open "https://github.com/SoftFever/OrcaSlicer/releases/tag/v${NEW}"
 cd "$ORCA_SRC" && git fetch --tags && git checkout "v${NEW}"
 
 # ── 2. Version bumps (all locations) ─────────────────────────────────────
-cd "$PFARM"
+cd "$PFARM_ROOT"
 sed -i '' "s/ORCASLICER_VERSION=${OLD}/ORCASLICER_VERSION=${NEW}/" \
   scripts/docker/dockerfiles/Dockerfile.multistage \
   scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries \
@@ -71,7 +78,7 @@ cd src && dotnet test ./tests/Farm.OrcaSlicer.Worker.Tests/ \
 # Start dev servers, open each profile editor, confirm rendering + icons
 
 # ── 10. Deploy & end-to-end slice test ───────────────────────────────────
-ssh pi@10.0.0.20 "cd /home/pi/pfarm && \
+ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && \
   sed -i 's/ORCASLICER_VERSION=${OLD}/ORCASLICER_VERSION=${NEW}/' .env && \
   docker compose --env-file .env build orcaslicer-worker && \
   docker compose --env-file .env up -d orcaslicer-worker"
@@ -80,9 +87,19 @@ ssh pi@10.0.0.20 "cd /home/pi/pfarm && \
 ## Prerequisites
 
 - **macOS**: OrcaSlicer.app installed at `/Applications/OrcaSlicer.app` — download the target version from [OrcaSlicer releases](https://github.com/SoftFever/OrcaSlicer/releases)
-- **OrcaSlicer source** checked out locally (e.g., `~/s/Orca/orcaslicer`) — must be checked out to the target version tag
+- **OrcaSlicer source** checked out locally (`ORCA_SRC=<OrcaSlicer source checkout>`) — must be checked out to the target version tag
 - **Python 3.8+** with standard library (no extra packages)
-- **Server**: SSH access to deployment server (pi@10.0.0.20)
+- **Server**: SSH access via `DEPLOY_HOST`, the deployed PrintFarmer root in `DEPLOY_ROOT`, and the API base URL in `DEPLOY_API_URL`
+
+Set these variables before running checklist commands:
+
+```bash
+PFARM_ROOT="<PrintFarmer repo root>"
+ORCA_SRC="<OrcaSlicer source checkout>"
+DEPLOY_HOST="<user@host>"
+DEPLOY_ROOT="<deployed PrintFarmer root>"
+DEPLOY_API_URL="<http://host:5245>"
+```
 
 ---
 
@@ -95,7 +112,7 @@ Before starting, confirm:
 1. **Stable release**: The target version is a stable release (not beta/rc). Check [OrcaSlicer releases](https://github.com/SoftFever/OrcaSlicer/releases).
 2. **Source checkout matches**: The local OrcaSlicer source is checked out to the matching tag:
    ```bash
-   cd /path/to/orcaslicer
+  cd "$ORCA_SRC"
    git fetch --tags
    git checkout v2.X.Y   # Must match the version you're upgrading to
    ```
@@ -123,7 +140,7 @@ cp scripts/docker/dockerfiles/Dockerfile.multistage dockerfiles/Dockerfile.multi
 
 Also update the server `.env` (during deploy, or ahead of time):
 ```bash
-ssh pi@10.0.0.20 "cd /home/pi/pfarm && sed -i 's/ORCASLICER_VERSION=OLD/ORCASLICER_VERSION=NEW/' .env"
+ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && sed -i 's/ORCASLICER_VERSION=OLD/ORCASLICER_VERSION=NEW/' .env"
 ```
 
 ### Step 3: Check for New Shared Library Dependencies
@@ -181,10 +198,10 @@ The extraction tool parses two source files:
 - `src/slic3r/GUI/Tab.cpp` — UI tab/section layout for all three editors
 
 ```bash
-cd /path/to/PFarm1
+cd "$PFARM_ROOT"
 
 python3 tools/extract-orca-metadata.py \
-  /path/to/orcaslicer/src \
+  "$ORCA_SRC/src" \
   --output src/Web/ReactApp/src/features/slicer/generated/orcaSettingsMetadata.json
 ```
 
@@ -244,7 +261,7 @@ print(f\"Icons: {len(d['icons'])} section icons\")
 OrcaSlicer uses SVG icons for setting sections. Copy any new ones from the source tree:
 
 ```bash
-ORCA_SRC="/path/to/orcaslicer"
+cd "$PFARM_ROOT"
 DEST="src/Web/ReactApp/public/icons/orca"
 
 # Parameter tab icons (e.g., speed, infill, support)
@@ -282,7 +299,7 @@ Assets are extracted from the local OrcaSlicer.app installation to the React pub
 
 **Run the extraction script:**
 ```bash
-cd /path/to/PFarm1
+cd "$PFARM_ROOT"
 ./scripts/restore-orcaslicer-assets.js
 ```
 
@@ -316,7 +333,7 @@ OrcaSlicer's filament type list lives in `src/libslic3r/MaterialType.cpp`. If th
 
 ```bash
 # Extract material types from OrcaSlicer source
-grep -oP '"[A-Z][A-Z0-9-]+"' /path/to/orcaslicer/src/libslic3r/MaterialType.cpp | sort -u
+rg -o '"[A-Z][A-Z0-9-]+"' "$ORCA_SRC/src/libslic3r/MaterialType.cpp" | sort -u
 ```
 
 Compare with `ORCA_FILAMENT_TYPES` in:
@@ -375,26 +392,26 @@ No manual work required here, but verify the count after deploy (Step 13).
 
 ```bash
 # 1. Build the worker image on the server
-ssh pi@10.0.0.20 "cd /home/pi/pfarm && docker compose --env-file .env build orcaslicer-worker"
+ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && docker compose --env-file .env build orcaslicer-worker"
 
 # 2. Deploy
-ssh pi@10.0.0.20 "cd /home/pi/pfarm && docker compose --env-file .env up -d orcaslicer-worker"
+ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && docker compose --env-file .env up -d orcaslicer-worker"
 
 # 3. Verify version
-ssh pi@10.0.0.20 "docker exec printfarmer-orcaslicer-worker-1 \
+ssh "$DEPLOY_HOST" "docker exec printfarmer-orcaslicer-worker-1 \
   /opt/orcaslicer/bin/orca-slicer --help 2>&1 | head -1"
 # Should show: OrcaSlicer-X.Y.Z:
 
 # 4. Verify all shared libs resolve
-ssh pi@10.0.0.20 "docker exec printfarmer-orcaslicer-worker-1 bash -c \
+ssh "$DEPLOY_HOST" "docker exec printfarmer-orcaslicer-worker-1 bash -c \
   'ldd /opt/orcaslicer/bin/orca-slicer 2>&1 | grep not.found || echo OK'"
 
 # 5. Verify profiles loaded
-ssh pi@10.0.0.20 "docker exec printfarmer-orcaslicer-worker-1 bash -c \
+ssh "$DEPLOY_HOST" "docker exec printfarmer-orcaslicer-worker-1 bash -c \
   'find /opt/orcaslicer/resources/profiles -name \"*.json\" | wc -l'"
 
 # 6. Verify worker registered with correct version
-curl -s http://10.0.0.20:5245/api/slicer/workers | python3 -m json.tool
+curl -s "$DEPLOY_API_URL/api/slicer/workers" | python3 -m json.tool
 # Should show the worker with version=X.Y.Z and supportedFormats including "3mf"
 
 # 7. End-to-end slice test — submit a job via UI or API and confirm G-code output
@@ -524,7 +541,7 @@ OrcaSlicer.app (macOS)           ──►  src/Web/ReactApp/public/assets/orcas
 | Compose template (common) | `scripts/docker/compose-templates/docker-compose.common.yml` |
 | Dockerfile copy (root) | `Dockerfile.multistage` |
 | Dockerfile copy (dockerfiles/) | `dockerfiles/Dockerfile.multistage` |
-| Server env | `/home/pi/pfarm/.env` |
+| Server env | `$DEPLOY_ROOT/.env` |
 | **Metadata & icons** | |
 | Metadata extraction tool | `tools/extract-orca-metadata.py` |
 | Generated metadata JSON | `src/Web/ReactApp/src/features/slicer/generated/orcaSettingsMetadata.json` |
