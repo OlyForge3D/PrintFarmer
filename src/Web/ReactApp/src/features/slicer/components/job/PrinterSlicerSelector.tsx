@@ -147,8 +147,8 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                     </div>
                   </div>
 
-                  {/* Change indicator */}
-                  <span className="text-pf-text-muted text-sm">Change</span>
+                  {/* Chevron indicator */}
+                  <svg className="w-4 h-4 text-pf-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                 </div>
               ) : (
                 <div className="flex items-center gap-3 text-pf-text-muted">

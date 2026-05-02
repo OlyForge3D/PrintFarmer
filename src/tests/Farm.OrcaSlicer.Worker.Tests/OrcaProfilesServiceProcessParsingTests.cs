@@ -181,6 +181,80 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
             .Which.Should().Be("Prusa CORE One L 0.4 nozzle");
     }
 
+    [Fact]
+    public async Task ListAvailableProcessProfilesAsync_CompatibleConditionWorksWithDeepInheritanceChain()
+    {
+        // Simulates the real Prusa CORE One L profile chain:
+        // process_common_mk4s (non-instantiatable base) →
+        //   0.20mm SPEED @MK4S 0.4 (inherits condition for MK4S) →
+        //     0.20mm SPEED @CORE One L 0.4 (overrides condition for CORE One L)
+        WriteManufacturerBundle(
+            "Prusa",
+            machineEntries: [("Prusa CORE One L 0.4 nozzle", "machine/Prusa CORE One L 0.4 nozzle.json")],
+            processEntries: [("0.20mm SPEED @CORE One L 0.4", "process/0.20mm SPEED @CORE One L 0.4.json")]);
+        WriteMachineProfile(
+            "Prusa",
+            "machine/Prusa CORE One L 0.4 nozzle.json",
+            """
+            {
+              "name": "Prusa CORE One L 0.4 nozzle",
+              "instantiation": "true",
+              "printer_model": "Prusa CORE One L",
+              "nozzle_diameter": ["0.4"],
+              "printer_notes": "Don't remove the following keywords!\nPRINTER_MODEL_COREONE_L\nPG\nNO_TEMPLATES"
+            }
+            """);
+        // Base process profile (non-instantiatable)
+        WriteProcessProfile(
+            "Prusa",
+            "process/process_common_mk4s.json",
+            """
+            {
+              "name": "process_common_mk4s",
+              "instantiation": "false",
+              "print_speed": "200",
+              "compatible_printers_condition": "printer_notes=~/.*MK4S.*/"
+            }
+            """);
+        // Mid-level profile (inherits from base, non-instantiatable in practice but marked true for MK4S)
+        WriteProcessProfile(
+            "Prusa",
+            "process/0.20mm SPEED @MK4S 0.4.json",
+            """
+            {
+              "name": "0.20mm SPEED @MK4S 0.4",
+              "instantiation": "true",
+              "inherits": "process_common_mk4s",
+              "layer_height": "0.20",
+              "compatible_printers_condition": "printer_notes=~/.*MK4S.*/ and nozzle_diameter[0]==0.4 and printer_notes!~/.*HF_NOZZLE.*/"
+            }
+            """);
+        // Child profile for CORE One L (overrides condition)
+        WriteProcessProfile(
+            "Prusa",
+            "process/0.20mm SPEED @CORE One L 0.4.json",
+            """
+            {
+              "name": "0.20mm SPEED @CORE One L 0.4",
+              "instantiation": "true",
+              "inherits": "0.20mm SPEED @MK4S 0.4",
+              "layer_height": "0.20",
+              "compatible_printers_condition": "printer_notes=~/.*PRINTER_MODEL_COREONE_L[^_a-zA-Z0-9].*/ and nozzle_diameter[0]==0.4 and printer_notes!~/.*HF_NOZZLE.*/"
+            }
+            """);
+
+        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
+
+        var profiles = await service.ListAvailableProcessProfilesAsync();
+
+        // Should have 2 instantiatable profiles (MK4S 0.4 and CORE One L 0.4)
+        // but only CORE One L 0.4 should match our machine
+        var coreOneProfile = profiles.FirstOrDefault(p => p.Name == "0.20mm SPEED @CORE One L 0.4");
+        coreOneProfile.Should().NotBeNull("CORE One L process profile should be loaded");
+        coreOneProfile!.CompatiblePrinters.Should().Contain("Prusa CORE One L 0.4 nozzle",
+            "condition should resolve against the machine's printer_notes");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_profilesRoot))
