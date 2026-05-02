@@ -1677,7 +1677,7 @@ export const NewSliceJobPage: React.FC = () => {
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-sm font-semibold text-pf-text-primary">
-                Machine Profile
+                Machine
                 {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
               </label>
               <div className="relative" ref={machineMenuRef}>
@@ -1808,7 +1808,7 @@ export const NewSliceJobPage: React.FC = () => {
             <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2" data-testid="multi-extruder-filament-section">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-semibold text-pf-text-primary">
-                  Filament Profiles ({physicalToolheads.length} extruders)
+                  Filament ({physicalToolheads.length} extruders)
                 </label>
                 <div className="relative" ref={filamentMenuRef}>
                   <Button
@@ -1918,7 +1918,7 @@ export const NewSliceJobPage: React.FC = () => {
           ) : (
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2" data-testid="single-filament-section">
             <div className="flex items-center justify-between">
-              <label className="block text-sm font-semibold text-pf-text-primary">Filament Profile</label>
+              <label className="block text-sm font-semibold text-pf-text-primary">Filament</label>
               <div className="relative" ref={filamentMenuRef}>
                 <Button
                   type="button"
@@ -2028,7 +2028,7 @@ export const NewSliceJobPage: React.FC = () => {
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
             {/* Header: label + ⋮ options menu */}
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-semibold text-pf-text-primary">Process Profile</label>
+              <label className="block text-sm font-semibold text-pf-text-primary">Process</label>
               <div className="relative" ref={profileMenuRef}>
                 <Button
                   type="button"
