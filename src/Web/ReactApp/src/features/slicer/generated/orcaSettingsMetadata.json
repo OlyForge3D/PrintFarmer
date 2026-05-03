@@ -3,7 +3,7 @@
     "source": "OrcaSlicer PrintConfig.cpp + Tab.cpp",
     "generator": "tools/extract-orca-metadata.py",
     "totalSettings": 793,
-    "filamentSettings": 108,
+    "filamentSettings": 93,
     "machineSettings": 105,
     "processSettings": 344
   },
@@ -79,11 +79,13 @@
               },
               {
                 "key": "nozzle_temperature_range_low",
-                "compound": true
+                "compound": true,
+                "compound_label": "Recommended nozzle temperature"
               },
               {
                 "key": "nozzle_temperature_range_high",
-                "compound": true
+                "compound": true,
+                "compound_label": "Recommended nozzle temperature"
               }
             ]
           },
@@ -346,6 +348,28 @@
             "name": "Ironing",
             "icon": "param_ironing",
             "fields": []
+          },
+          {
+            "name": "Ironing",
+            "icon": "param_ironing",
+            "fields": [
+              {
+                "key": "filament_ironing_flow",
+                "compound": false
+              },
+              {
+                "key": "filament_ironing_spacing",
+                "compound": false
+              },
+              {
+                "key": "filament_ironing_inset",
+                "compound": false
+              },
+              {
+                "key": "filament_ironing_speed",
+                "compound": false
+              }
+            ]
           }
         ]
       },
@@ -806,23 +830,6 @@
         "mode": "advanced",
         "default": "10"
       },
-      "filament_colour": {
-        "key": "filament_colour",
-        "type": "string",
-        "coType": "coStrings",
-        "label": "Color",
-        "tooltip": "Only used as a visual help on UI.",
-        "mode": "advanced",
-        "default": "#F2754E",
-        "gui_type": "color"
-      },
-      "filament_colour_type": {
-        "key": "filament_colour_type",
-        "type": "string",
-        "coType": "coStrings",
-        "default": "1",
-        "label": "filament_colour_type"
-      },
       "filament_cooling_final_speed": {
         "key": "filament_cooling_final_speed",
         "type": "float",
@@ -895,21 +902,6 @@
         "tooltip": "End G-code when finishing the printing of this filament.",
         "mode": "advanced"
       },
-      "filament_extruder_id": {
-        "key": "filament_extruder_id",
-        "type": "int",
-        "coType": "coInt",
-        "label": "Filament extruder ID",
-        "tooltip": "The current extruder ID. The same as current_extruder."
-      },
-      "filament_extruder_variant": {
-        "key": "filament_extruder_variant",
-        "type": "string",
-        "coType": "coStrings",
-        "label": "Filament's extruder variant",
-        "tooltip": "Filament's extruder variant.",
-        "default": "Direct Drive Standard"
-      },
       "filament_flow_ratio": {
         "key": "filament_flow_ratio",
         "type": "float",
@@ -919,35 +911,6 @@
         "max": 2,
         "mode": "advanced",
         "default": "1"
-      },
-      "filament_flush_temp": {
-        "key": "filament_flush_temp",
-        "type": "int",
-        "coType": "coInts",
-        "label": "Flush temperature",
-        "tooltip": "Temperature when flushing filament. 0 indicates the upper bound of the recommended nozzle temperature range.",
-        "unit": "℃",
-        "min": 0,
-        "mode": "advanced",
-        "default": "0"
-      },
-      "filament_flush_volumetric_speed": {
-        "key": "filament_flush_volumetric_speed",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Flush volumetric speed",
-        "tooltip": "Volumetric speed when flushing filament. 0 indicates the max volumetric speed.",
-        "unit": "mm³/s",
-        "min": 0,
-        "max": 200,
-        "mode": "advanced",
-        "default": "0"
-      },
-      "filament_ids": {
-        "key": "filament_ids",
-        "type": "string",
-        "coType": "coStrings",
-        "label": "filament_ids"
       },
       "filament_ironing_flow": {
         "key": "filament_ironing_flow",
@@ -1027,23 +990,6 @@
         "mode": "advanced",
         "default": "3"
       },
-      "filament_map": {
-        "key": "filament_map",
-        "type": "int",
-        "coType": "coInts",
-        "label": "Filament map to extruder",
-        "tooltip": "Filament map to extruder.",
-        "mode": "developer",
-        "default": "1"
-      },
-      "filament_map_mode": {
-        "key": "filament_map_mode",
-        "type": "enum",
-        "coType": "coEnum",
-        "label": "filament mapping mode",
-        "tooltip": "Filament mapping mode used as plate param.",
-        "mode": "advanced"
-      },
       "filament_max_volumetric_speed": {
         "key": "filament_max_volumetric_speed",
         "type": "float",
@@ -1065,12 +1011,6 @@
         "min": 0,
         "mode": "advanced",
         "default": "15"
-      },
-      "filament_multi_colour": {
-        "key": "filament_multi_colour",
-        "type": "string",
-        "coType": "coStrings",
-        "label": "filament_multi_colour"
       },
       "filament_multitool_ramming": {
         "key": "filament_multitool_ramming",
@@ -1110,45 +1050,6 @@
         "label": "Filament notes",
         "tooltip": "You can put your notes regarding the filament here.",
         "mode": "advanced"
-      },
-      "filament_preset": {
-        "key": "filament_preset",
-        "type": "string",
-        "coType": "coString",
-        "label": "Filament preset name",
-        "tooltip": "Names of the filament presets used for slicing. The variable is a vector containing one name for each extruder."
-      },
-      "filament_printable": {
-        "key": "filament_printable",
-        "type": "int",
-        "coType": "coInts",
-        "label": "Filament printable",
-        "tooltip": "The filament is printable in extruder.",
-        "mode": "developer",
-        "default": "3"
-      },
-      "filament_ramming_parameters": {
-        "key": "filament_ramming_parameters",
-        "type": "string",
-        "coType": "coStrings",
-        "label": "Ramming parameters",
-        "tooltip": "This string is edited by RammingDialog and contains ramming specific parameters.",
-        "mode": "advanced",
-        "default": "120 100 6.6 6.8 7.2 7.6 7.9 8.2 8.7 9.4 9.9 10.0|\"\n       \" 0.05 6.6 0.45 6.8 0.95 7.8 1.45 8.3 1.95 9.7 2.45 10 2.95 7.6 3.45 7.6 3.95 7.6 4.45 7.6 4.95 7.6"
-      },
-      "filament_self_index": {
-        "key": "filament_self_index",
-        "type": "int",
-        "coType": "coInts",
-        "label": "Filament self index",
-        "tooltip": "Filament self index.",
-        "default": "1"
-      },
-      "filament_settings_id": {
-        "key": "filament_settings_id",
-        "type": "string",
-        "coType": "coStrings",
-        "label": "filament_settings_id"
       },
       "filament_shrink": {
         "key": "filament_shrink",
@@ -2178,11 +2079,13 @@
               },
               {
                 "key": "min_resonance_avoidance_speed",
-                "compound": true
+                "compound": true,
+                "compound_label": "Resonance Avoidance Speed"
               },
               {
                 "key": "max_resonance_avoidance_speed",
-                "compound": true
+                "compound": true,
+                "compound_label": "Resonance Avoidance Speed"
               }
             ]
           },
@@ -4083,19 +3986,23 @@
               },
               {
                 "key": "overhang_1_4_speed",
-                "compound": true
+                "compound": true,
+                "compound_label": "Overhang speed"
               },
               {
                 "key": "overhang_2_4_speed",
-                "compound": true
+                "compound": true,
+                "compound_label": "Overhang speed"
               },
               {
                 "key": "overhang_3_4_speed",
-                "compound": true
+                "compound": true,
+                "compound_label": "Overhang speed"
               },
               {
                 "key": "overhang_4_4_speed",
-                "compound": true
+                "compound": true,
+                "compound_label": "Overhang speed"
               },
               {
                 "key": "bridge_speed",

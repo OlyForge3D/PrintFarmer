@@ -484,6 +484,7 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
     tabs = []
     current_tab = None
     current_section = None
+    current_compound_label = None  # tracks Line { L("label"), ... } for compound fields
 
     for line in lines:
         stripped = line.strip()
@@ -491,6 +492,12 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
         # Skip comments
         if stripped.startswith('//'):
             continue
+
+        # Compound line label: Line line = { L("label"), L("tooltip") }
+        m_line = re.search(r'Line\s+\w+\s*=?\s*\{\s*L\(\s*"([^"]+)"', stripped)
+        if m_line:
+            current_compound_label = m_line.group(1)
+            # Don't continue — same line might have other patterns
 
         # Tab page: add_options_page(L("name"), "icon_id")
         m = re.search(r'add_options_page\(\s*L\(\s*"([^"]+)"\s*\)\s*,\s*"([^"]*)"', stripped)
@@ -542,23 +549,30 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
                 'key': m.group(1),
                 'compound': False,
             })
+            current_compound_label = None
             continue
 
         # Compound line field: get_option("field_name", ...) or Option{"field_name", ...}
         m = re.search(r'get_option\(\s*"([^"]+)"', stripped)
         if m and current_section:
-            current_section['fields'].append({
+            entry = {
                 'key': m.group(1),
                 'compound': True,
-            })
+            }
+            if current_compound_label:
+                entry['compound_label'] = current_compound_label
+            current_section['fields'].append(entry)
             continue
 
         m = re.search(r'Option\s*\{\s*"([^"]+)"', stripped)
         if m and current_section:
-            current_section['fields'].append({
+            entry = {
                 'key': m.group(1),
                 'compound': True,
-            })
+            }
+            if current_compound_label:
+                entry['compound_label'] = current_compound_label
+            current_section['fields'].append(entry)
             continue
 
         # append_option_line(optgroup, "field_name", ...) — used in kinematics page
@@ -570,9 +584,10 @@ def parse_tab_layout(filepath: str, method_name: str = 'TabFilament::build') -> 
             })
             continue
 
-        # append_line variant
+        # append_line variant — ends a compound group
         m = re.search(r'append_line\(\s*(\w+)\s*\)', stripped)
         if m:
+            current_compound_label = None
             continue
 
     return tabs
@@ -734,6 +749,34 @@ def _patch_missing_fields(machine_tabs: list, process_tabs: list, filament_tabs:
             # are in the preceding "Setup" optgroup)
             mm_tab['sections'].append(wipe_section)
 
+    # Filament-level ironing fields from TabFilament::add_filament_overrides_page
+    # These use a custom append_ironing_option() helper that the regex parser can't detect
+    filament_tab_keys = set()
+    for tab in filament_tabs:
+        for section in tab['sections']:
+            for field in section['fields']:
+                filament_tab_keys.add(field['key'])
+
+    filament_ironing_fields = [
+        'filament_ironing_flow', 'filament_ironing_spacing',
+        'filament_ironing_inset', 'filament_ironing_speed',
+    ]
+    missing_ironing = [k for k in filament_ironing_fields if k not in filament_tab_keys]
+    if missing_ironing:
+        # Find Setting Overrides tab
+        overrides_tab = None
+        for tab in filament_tabs:
+            if 'override' in tab['name'].lower() or 'setting' in tab['name'].lower():
+                overrides_tab = tab
+                break
+        if overrides_tab is not None:
+            ironing_section = {
+                'name': 'Ironing',
+                'icon': 'param_ironing',
+                'fields': [{'key': k, 'compound': False} for k in missing_ironing],
+            }
+            overrides_tab['sections'].append(ironing_section)
+
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
@@ -787,8 +830,21 @@ def main():
             for field in section['fields']:
                 filament_keys.add(field['key'])
 
+    # Fields commented out in OrcaSlicer Tab.cpp — should not appear in filament metadata
+    # Also exclude internal/system fields that are never shown in the filament editor UI
+    commented_out_filament_keys = {
+        'filament_colour', 'filament_colour_type', 'filament_multi_colour',
+        'filament_settings_id', 'filament_ids', 'filament_preset',
+        'filament_self_index', 'filament_map', 'filament_map_mode',
+        'filament_extruder_id', 'filament_extruder_variant', 'filament_printable',
+        'filament_flush_temp', 'filament_flush_volumetric_speed',
+        'filament_ramming_parameters',
+    }
+
     # Also include known filament prefixed settings not in tabs
     for key in all_settings:
+        if key in commented_out_filament_keys:
+            continue
         if key.startswith('filament_') or key.startswith('nozzle_temperature') or key.startswith('hot_plate') or key.startswith('cool_plate') or key.startswith('eng_plate') or key.startswith('textured_') or key.startswith('supertack_'):
             filament_keys.add(key)
 
