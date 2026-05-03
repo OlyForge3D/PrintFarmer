@@ -12,9 +12,10 @@ export interface SlotPopoverProps {
   toolhead: ToolheadDto;
   printerId: string;
   onClose: () => void;
+  align?: 'center' | 'start' | 'end';
 }
 
-export function SlotPopover({ toolhead, printerId, onClose }: SlotPopoverProps) {
+export function SlotPopover({ toolhead, printerId, onClose, align = 'center' }: SlotPopoverProps) {
   const [showPicker, setShowPicker] = useState(false);
   const queryClient = useQueryClient();
 
@@ -56,7 +57,10 @@ export function SlotPopover({ toolhead, printerId, onClose }: SlotPopoverProps) 
   return (
     <div
       className={clsx(
-        'absolute z-50 top-full left-1/2 -translate-x-1/2 mt-2',
+        'absolute z-50 top-full mt-2',
+        align === 'start' && 'left-0',
+        align === 'center' && 'left-1/2 -translate-x-1/2',
+        align === 'end' && 'right-0',
         'bg-pf-surface-elevated border border-pf-border rounded-lg shadow-lg',
         showPicker ? 'w-64' : 'w-52',
         'animate-in fade-in-0 zoom-in-95 duration-150',
@@ -65,7 +69,14 @@ export function SlotPopover({ toolhead, printerId, onClose }: SlotPopoverProps) 
       aria-label={`Slot ${toolhead.index} actions`}
     >
       {/* Arrow */}
-      <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-pf-surface-elevated border-l border-t border-pf-border" />
+      <div
+        className={clsx(
+          'absolute -top-1.5 w-3 h-3 rotate-45 bg-pf-surface-elevated border-l border-t border-pf-border',
+          align === 'start' && 'left-4',
+          align === 'center' && 'left-1/2 -translate-x-1/2',
+          align === 'end' && 'right-4',
+        )}
+      />
 
       <div className="relative p-3 space-y-2">
         {/* Current spool info */}
