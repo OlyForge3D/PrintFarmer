@@ -124,16 +124,38 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
-        _ = app.MapGet("/version", async (IOrcaBinaryDetector detector) =>
+        // Version endpoint handler shared by /version and /api/version
+        async Task<IResult> GetVersionInfoAsync(IOrcaBinaryDetector detector)
         {
             string? orcaVersion = await detector.GetVersionAsync();
+            var asm = System.Reflection.Assembly.GetEntryAssembly();
+            string? infoVersion = (asm is not null
+                ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+                    as System.Reflection.AssemblyInformationalVersionAttribute
+                : null)?.InformationalVersion;
+            string workerVersion = "1.0.0";
+            string? commit = null;
+            if (infoVersion != null)
+            {
+                string[] parts = infoVersion.Split('+', 2);
+                workerVersion = parts[0];
+                commit = parts.Length > 1 ? parts[1] : null;
+            }
+
             return Results.Ok(new
             {
+                service = "orcaslicer-worker",
+                version = workerVersion,
+                commit,
                 orcaslicerVersion = orcaVersion,
-                workerVersion = "1.0.0",
-                timestamp = DateTime.UtcNow
+                environment = app.Environment.EnvironmentName,
+                runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                timestamp = DateTime.UtcNow,
             });
-        });
+        }
+
+        _ = app.MapGet("/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+        _ = app.MapGet("/api/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
 
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
         if (!orcaDetector.IsRealBinaryPresent())
