@@ -524,6 +524,19 @@ public class OrcaProfilesService : ISlicerProfilesService
                                         {
                                             profile.CompatiblePrinters = matchedMachines;
                                         }
+                                        else
+                                        {
+                                            _logger.LogDebug(
+                                                "Expression evaluation returned no matches for process profile '{ProfileName}' (condition: '{Condition}', evaluated against {MachineCount} machines from '{FolderName}')",
+                                                profile.Name, profile.CompatiblePrintersCondition, manufacturerMachines.Count, folderName);
+                                        }
+                                    }
+                                    else if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
+                                             !string.IsNullOrEmpty(profile.CompatiblePrintersCondition))
+                                    {
+                                        _logger.LogWarning(
+                                            "Process profile '{ProfileName}' has compatible_printers_condition but no machines available for manufacturer '{FolderName}' to evaluate against",
+                                            profile.Name, folderName);
                                     }
 
                                     profiles.Add(profile);

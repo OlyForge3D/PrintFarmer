@@ -13,7 +13,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// </summary>
 public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDisposable
 {
-    private const string CacheCompatibilityVersion = "2";
+    private const string CacheCompatibilityVersion = "3";
 
     private readonly OrcaProfilesService _innerService;
     private readonly ProfileCacheDb _cacheDb;
