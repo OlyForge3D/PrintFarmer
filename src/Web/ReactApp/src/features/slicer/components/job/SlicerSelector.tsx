@@ -1,6 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
+import { GearIcon } from '@/common/components/icons/MdiIcons';
 import { getSlicerIconSrc } from '@/common/utils/slicerEngineIcon';
 import type { SlicerEngineOption } from './types';
 
@@ -36,8 +37,8 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
   className,
 }) => {
   return (
-    <div className={clsx('bg-pf-panel border border-pf-border rounded-lg p-4', className)}>
-      <label className="block text-sm font-semibold text-pf-text-primary mb-3">Slicer Engine</label>
+    <div className={clsx('bg-pf-panel border border-pf-border rounded-lg p-3', className)}>
+      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Slicer Engine</label>
       <div className="flex flex-col gap-3">
         {engineOptions.map(opt => {
           const isSelected = opt.value === selectedSlicerId;
@@ -67,8 +68,8 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
                     className="h-8 w-8 shrink-0 rounded-lg object-contain"
                   />
                 ) : (
-                  <span className="h-8 w-8 shrink-0 flex items-center justify-center text-lg" role="img" aria-hidden="true">
-                    🔪
+                  <span className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg bg-pf-bg-2" aria-hidden="true">
+                    <GearIcon className="w-5 h-5 text-pf-text-muted" />
                   </span>
                 )}
                 <span className="min-w-0">

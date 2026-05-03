@@ -1767,7 +1767,7 @@ export const NewSliceJobPage: React.FC = () => {
               disabled={!selectedPrinterId || (availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
               className={`w-full ${!selectedPrinterId || isMachineProfilesLoading ? 'opacity-50' : ''}`}
             >
-              <option value="">{isMachineProfilesLoading ? '-- Loading... --' : '-- Select Machine Profile --'}</option>
+              <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
               {/* Custom profiles first with ★ indicator */}
               {filteredCustomMachineProfiles.length > 0 && (
                 <option disabled className="text-pf-text-muted">── My Profiles ──</option>
@@ -1907,11 +1907,11 @@ export const NewSliceJobPage: React.FC = () => {
                   })}
                 </div>
               ) : (
-                <div className="text-sm text-pf-text-muted italic">
-                  {isMachineProfilesLoading ? 'Loading machine profiles...' : 
-                   selectedMachineProfileId && isFilamentProfilesLoading ? 'Loading filament profiles...' :
+                <div className="text-sm text-pf-text-muted p-2">
+                  {isMachineProfilesLoading ? <span className="italic">Loading...</span> : 
+                   selectedMachineProfileId && isFilamentProfilesLoading ? <span className="italic">Loading...</span> :
                    !selectedMachineProfileId ? 'Select a machine profile to see filament options' :
-                   'No filament profiles available'}
+                   <span className="italic">No filament profiles available</span>}
                 </div>
               )}
             </div>
@@ -2014,18 +2014,18 @@ export const NewSliceJobPage: React.FC = () => {
                 )}
               </>
             ) : (
-              <div className="text-sm text-pf-text-muted italic">
-                {isMachineProfilesLoading ? 'Loading machine profiles...' : 
-                 selectedMachineProfileId && isFilamentProfilesLoading ? 'Loading filament profiles...' :
+              <div className="text-sm text-pf-text-muted p-2">
+                {isMachineProfilesLoading ? <span className="italic">Loading...</span> : 
+                 selectedMachineProfileId && isFilamentProfilesLoading ? <span className="italic">Loading...</span> :
                  !selectedMachineProfileId ? 'Select a machine profile to see filament options' :
-                 'No filament profiles available'}
+                 <span className="italic">No filament profiles available</span>}
               </div>
             )}
           </div>
           )}
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             {/* Header: label + ⋮ options menu */}
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-semibold text-pf-text-primary">Process</label>
@@ -2116,7 +2116,7 @@ export const NewSliceJobPage: React.FC = () => {
                     onChange={e => setSelectedProcessPresetId(e.target.value)}
                     className="flex-1 min-w-0"
                   >
-                    <option value="">-- Select Process Profile --</option>
+                    <option value="">Select process...</option>
                     {/* Custom profiles first with ★ indicator */}
                     {customProcessProfiles.length > 0 && (
                       <optgroup label="★ My Profiles">
@@ -2197,11 +2197,11 @@ export const NewSliceJobPage: React.FC = () => {
                 )}
               </>
             ) : (
-              <div className="text-sm text-pf-text-muted italic">
-                {isMachineProfilesLoading ? 'Loading machine profiles...' :
-                 selectedMachineProfileId && isProcessProfilesLoading ? 'Loading process profiles...' :
+              <div className="text-sm text-pf-text-muted p-2">
+                {isMachineProfilesLoading ? <span className="italic">Loading...</span> :
+                 selectedMachineProfileId && isProcessProfilesLoading ? <span className="italic">Loading...</span> :
                  !selectedMachineProfileId ? 'Select a machine profile to see process options' :
-                 'No process profiles available'}
+                 <span className="italic">No process profiles available</span>}
               </div>
             )}
           </div>
