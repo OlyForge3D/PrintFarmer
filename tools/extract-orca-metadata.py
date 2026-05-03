@@ -584,7 +584,19 @@ def parse_filament_tabs(filepath: str) -> list:
     overrides = parse_tab_layout(filepath, 'TabFilament::add_filament_overrides_page')
     if overrides:
         tabs.extend(overrides)
-    return tabs
+
+    # Reorder tabs to match OrcaSlicer UI order
+    tab_order = ['Filament', 'Cooling', 'Setting Overrides', 'Advanced', 'Multimaterial', 'Dependencies', 'Notes']
+    tabs_by_name = {tab['name']: tab for tab in tabs}
+    ordered_tabs = []
+    for name in tab_order:
+        if name in tabs_by_name:
+            ordered_tabs.append(tabs_by_name[name])
+    for tab in tabs:
+        if tab not in ordered_tabs:
+            ordered_tabs.append(tab)
+
+    return ordered_tabs
 
 
 def parse_process_tabs(filepath: str) -> list:
@@ -685,6 +697,44 @@ def find_icon_files(orca_root: str) -> dict:
     return icons
 
 
+# ── Post-parse patches ─────────────────────────────────────────────────────
+
+def _patch_missing_fields(machine_tabs: list, process_tabs: list, filament_tabs: list) -> None:
+    """Inject fields that the regex parser provably missed from Tab.cpp.
+
+    Only adds fields to tabs where OrcaSlicer's source places them.
+    Machine-level wipe tower fields: wipe_tower_type, purge_in_prime_tower,
+    enable_filament_ramming (TabPrinter::build_unregular_pages, Multimaterial > Wipe tower).
+    """
+    # Build lookup of existing machine tab keys
+    machine_tab_keys = set()
+    for tab in machine_tabs:
+        for section in tab['sections']:
+            for field in section['fields']:
+                machine_tab_keys.add(field['key'])
+
+    # Machine-level wipe tower fields from TabPrinter::build_unregular_pages
+    machine_wipe_tower_fields = ['wipe_tower_type', 'purge_in_prime_tower', 'enable_filament_ramming']
+    missing_machine_wipe = [k for k in machine_wipe_tower_fields if k not in machine_tab_keys]
+
+    if missing_machine_wipe:
+        # Find the Multimaterial tab and inject a "Wipe tower" section
+        mm_tab = None
+        for tab in machine_tabs:
+            if tab['name'] == 'Multimaterial':
+                mm_tab = tab
+                break
+        if mm_tab is not None:
+            wipe_section = {
+                'name': 'Wipe tower',
+                'icon': 'param_tower',
+                'fields': [{'key': k} for k in missing_machine_wipe],
+            }
+            # Insert after existing sections (manual_filament_change / bed_temperature_formula
+            # are in the preceding "Setup" optgroup)
+            mm_tab['sections'].append(wipe_section)
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -727,6 +777,9 @@ def main():
     icons = find_icon_files(src_path)
     print(f"  Found {len(icons)} icon SVGs", file=sys.stderr)
 
+    # Patch fields the regex parser missed from Tab.cpp
+    _patch_missing_fields(machine_tabs, process_tabs, filament_tabs)
+
     # Collect filament-related settings (those appearing in filament tabs)
     filament_keys = set()
     for tab in filament_tabs:
@@ -753,8 +806,28 @@ def main():
         for section in tab['sections']:
             for field in section['fields']:
                 machine_keys.add(field['key'])
+    # Collect keys that are placed in process or filament tabs so we don't
+    # accidentally pull them into machine metadata via prefix matching.
+    process_tab_keys = set()
+    for tab in process_tabs:
+        for section in tab['sections']:
+            for field in section['fields']:
+                process_tab_keys.add(field['key'])
+    filament_tab_keys = set()
+    for tab in filament_tabs:
+        for section in tab['sections']:
+            for field in section['fields']:
+                filament_tab_keys.add(field['key'])
+    non_machine_keys = process_tab_keys | filament_tab_keys
+
+    # Fields commented out in Tab.cpp that should not appear in machine metadata
+    commented_out_keys = {'machine_min_extruding_rate', 'machine_min_travel_rate'}
+    non_machine_keys |= commented_out_keys
+
     for key in all_settings:
-        if key.startswith('machine_') or key.startswith('retraction_') or key.startswith('retract_') or key.startswith('wipe'):
+        if key in non_machine_keys:
+            continue
+        if key.startswith('machine_') or key.startswith('retraction_') or key.startswith('retract_'):
             machine_keys.add(key)
 
     machine_metadata = {}
