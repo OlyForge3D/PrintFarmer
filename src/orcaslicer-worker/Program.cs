@@ -157,6 +157,44 @@ public static class Program
         _ = app.MapGet("/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
         _ = app.MapGet("/api/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
 
+        // Diagnostic endpoint: check process profile expression evaluation results
+        _ = app.MapGet("/api/debug/process-eval/{manufacturer}", async (string manufacturer, ISlicerProfilesService profilesService) =>
+        {
+            IList<ProcessProfileDto> allProfiles = await profilesService.ListAvailableProcessProfilesAsync();
+
+            // Filter by name containing manufacturer (process profiles don't have a Manufacturer field)
+            var mfgProfiles = allProfiles.Where(p =>
+                (p.Name ?? string.Empty).Contains(manufacturer, StringComparison.OrdinalIgnoreCase) ||
+                (p.CompatiblePrinters?.Any(cp => cp.Contains(manufacturer, StringComparison.OrdinalIgnoreCase)) ?? false)).ToList();
+
+            var withCp = mfgProfiles.Where(p => p.CompatiblePrinters?.Count > 0).ToList();
+            var withoutCp = mfgProfiles.Where(p => p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0).ToList();
+
+            // Also show overall stats
+            var allWithCp = allProfiles.Count(p => p.CompatiblePrinters?.Count > 0);
+
+            return Results.Ok(new
+            {
+                manufacturer,
+                totalAllProfiles = allProfiles.Count,
+                allWithCompatiblePrinters = allWithCp,
+                allWithoutCompatiblePrinters = allProfiles.Count - allWithCp,
+                matchingProfiles = mfgProfiles.Count,
+                withCompatiblePrinters = withCp.Count,
+                withoutCompatiblePrinters = withoutCp.Count,
+                sampleWithCp = withCp.Take(5).Select(p => new
+                {
+                    p.Name,
+                    compatiblePrinters = p.CompatiblePrinters
+                }),
+                sampleWithoutCp = withoutCp.Take(10).Select(p => new
+                {
+                    p.Name,
+                    condition = p.CompatiblePrintersCondition ?? string.Empty
+                }),
+            });
+        });
+
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
         if (!orcaDetector.IsRealBinaryPresent())
         {

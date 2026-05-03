@@ -39,13 +39,29 @@ public static class PrinterExpressionParser
         try
         {
             List<string> matchingMachines = [];
+            List<string> errors = [];
 
             foreach (MachineProfileDto machine in availableMachines)
             {
-                if (EvaluateExpression(condition, machine))
+                try
                 {
-                    matchingMachines.Add(machine.Name ?? string.Empty);
+                    if (EvaluateExpression(condition, machine))
+                    {
+                        matchingMachines.Add(machine.Name ?? string.Empty);
+                    }
                 }
+                catch (Exception ex)
+                {
+                    errors.Add($"Machine '{machine.Name}': {ex.Message}");
+                }
+            }
+
+            // Log errors at trace level for debugging
+            if (errors.Count > 0 && matchingMachines.Count == 0)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "Expression evaluation failed for all {0} machines. Condition: '{1}'. First error: {2}",
+                    availableMachines.Count, condition, errors[0]);
             }
 
             return matchingMachines.Count > 0 ? matchingMachines : null;
