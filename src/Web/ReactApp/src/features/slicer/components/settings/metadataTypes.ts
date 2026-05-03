@@ -28,6 +28,7 @@ export interface SettingMetadata {
 export interface FieldRef {
   key: string;
   compound: boolean;
+  compound_label?: string;
 }
 
 export interface SectionLayout {
