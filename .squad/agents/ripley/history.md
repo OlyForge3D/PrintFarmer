@@ -690,3 +690,31 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - Online status dot in PrinterSlicerSelector is very small (`w-2 h-2`); adding `ring-1 ring-{color}/30` provides a subtle glow that increases visibility without changing size.
 - Process section card was missing `space-y-2` that all other sections had — easy to miss in a 2400-line file.
 - Select placeholder patterns were inconsistent (`-- Select X --` vs short form). Standardized to `Select x...` / `Loading...`.
+
+---
+
+## Spoolman Filter Options Endpoint (2026-05-03)
+
+**Status:** ✅ DELIVERED
+
+**Summary:**
+Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions from Spoolman, enabling dynamic filter option population in SpoolsTab instead of relying on hardcoded values.
+
+**Backend Changes:**
+- Endpoint: `GET /api/spoolman/filter-options` → `IEnumerable<FilterOptionDto>`
+- Response DTO: `FilterOptionDto { Id: string, Name: string }`
+- Serialization: `JsonPropertyName` for camelCase naming
+- Integrated with Spoolman service layer
+
+**Frontend Changes:**
+- Hook: `useSpoolFilterOptions()` with TanStack Query caching
+- Integration: SpoolsTab loads options on mount via `useEffect`
+- Error handling: Toast notifications for API failures
+- Type safety: Full TypeScript coverage
+
+**Validation:**
+- Backend: All tests passing
+- Frontend: 1734/1734 tests passed, 12 skipped
+- Linting: No new warnings
+- Serialization: camelCase validated
+
