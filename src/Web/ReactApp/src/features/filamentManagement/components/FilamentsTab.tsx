@@ -74,12 +74,7 @@ export function FilamentsTab() {
     sortDir: urlSortDir,
     page: urlPage,
     setSearch,
-    setMaterial,
-    setVendor,
-    setColor,
-    setSortField: urlSetSortField,
-    setSortDir: urlSetSortDir,
-    setPage: urlSetPage,
+    setMany,
     resetAll,
     hasActiveFilters: urlHasActiveFilters,
   } = useUrlFilterState({
@@ -98,26 +93,9 @@ export function FilamentsTab() {
     color: urlColor,
     search: urlSearch,
   };
-  const setFilters = useCallback((updater: FilterState | ((prev: FilterState) => FilterState)) => {
-    const newVal = typeof updater === 'function' ? updater(filters) : updater;
-    setSearch(newVal.search);
-    setMaterial(newVal.material);
-    setVendor(newVal.vendor);
-    setColor(newVal.color);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlSearch, urlMaterial, urlVendor, urlColor, setSearch, setMaterial, setVendor, setColor]);
   const sortField = urlSortField as SortField;
-  const setSortField = useCallback((v: SortField) => urlSetSortField(v), [urlSetSortField]);
   const sortDir = urlSortDir as 'asc' | 'desc';
-  const setSortDir = useCallback((v: 'asc' | 'desc' | ((prev: 'asc' | 'desc') => 'asc' | 'desc')) => {
-    const newVal = typeof v === 'function' ? v(sortDir) : v;
-    urlSetSortDir(newVal);
-  }, [urlSetSortDir, sortDir]);
   const page = urlPage as number;
-  const setPage = useCallback((v: number | ((prev: number) => number)) => {
-    const newVal = typeof v === 'function' ? v(page) : v;
-    urlSetPage(newVal);
-  }, [urlSetPage, page]);
   const [pageSize, setPageSize] = useState<number>(() => {
     const saved = localStorage.getItem('filaments-page-size');
     return saved ? Number(saved) : 50;
@@ -347,9 +325,9 @@ export function FilamentsTab() {
   useEffect(() => {
     if (prevFilterKey.current !== filterKey) {
       prevFilterKey.current = filterKey;
-      setPage(1);
+      setMany({ page: 1 });
     }
-  }, [filterKey, setPage]);
+  }, [filterKey, setMany]);
 
   // Persist page size preference
   useEffect(() => { localStorage.setItem('filaments-page-size', String(pageSize)); }, [pageSize]);
@@ -626,7 +604,7 @@ export function FilamentsTab() {
                 id="filament-search"
                 type="search"
                 value={filters.search}
-                onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                onChange={e => setSearch(e.target.value)}
                 placeholder="Name, vendor, material..."
                 className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
                 aria-label="Search filaments"
@@ -637,7 +615,7 @@ export function FilamentsTab() {
               <Select
                 aria-label="Filter by material"
                 value={filters.material}
-                onChange={e => setFilters(prev => ({ ...prev, material: e.target.value }))}
+                onChange={e => setMany({ material: e.target.value, page: 1 })}
                 className="w-40"
               >
                 <option value="">All Materials</option>
@@ -651,7 +629,7 @@ export function FilamentsTab() {
               <Select
                 aria-label="Filter by vendor"
                 value={filters.vendor}
-                onChange={e => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
+                onChange={e => setMany({ vendor: e.target.value, page: 1 })}
                 className="w-40"
               >
                 <option value="">All Vendors</option>
@@ -664,7 +642,7 @@ export function FilamentsTab() {
               <label className="text-xs text-pf-text-secondary">Color</label>
               <ColorFamilySelect
                 value={filters.color}
-                onChange={val => setFilters(prev => ({ ...prev, color: val }))}
+                onChange={val => setMany({ color: val, page: 1 })}
                 options={colorFamilyOptions}
                 placeholder="All Colors"
               />
@@ -677,7 +655,7 @@ export function FilamentsTab() {
                     id="filament-sort"
                     aria-label="Sort field"
                     value={sortField}
-                    onChange={e => setSortField(e.target.value as SortField)}
+                    onChange={e => setMany({ sortField: e.target.value })}
                     className="w-40"
                   >
                     <option value="name">Name</option>
@@ -693,7 +671,7 @@ export function FilamentsTab() {
                     size="sm"
                     variant="subtle"
                     aria-label="Toggle sort direction"
-                    onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    onClick={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })}
                     iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
                   />
                 </div>
@@ -706,7 +684,7 @@ export function FilamentsTab() {
                   id="filament-page-size"
                   aria-label="Page size"
                   value={String(pageSize)}
-                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setPage(1); }}
+                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
                   className="w-20"
                 >
                   <option value="10">10</option>
@@ -789,7 +767,7 @@ export function FilamentsTab() {
           tableColumns={tableColumns}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
-          onSort={(field, dir) => { setSortField(field as SortField); setSortDir(dir); }}
+          onSort={(field, dir) => setMany({ sortField: field, sortDir: dir })}
           onEdit={f => setEditingFilament(f)}
           onClone={f => setCloningFilament(f)}
           onDelete={f => setDeleteConfirm({ type: 'single', filament: f })}
@@ -803,7 +781,7 @@ export function FilamentsTab() {
             variant="secondary"
             size="sm"
             disabled={page <= 1}
-            onClick={() => setPage(p => Math.max(1, p - 1))}
+            onClick={() => setMany({ page: Math.max(1, page - 1) })}
             aria-label="Previous page"
           >
             ← Prev
@@ -815,7 +793,7 @@ export function FilamentsTab() {
             variant="secondary"
             size="sm"
             disabled={page >= totalPages}
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            onClick={() => setMany({ page: Math.min(totalPages, page + 1) })}
             aria-label="Next page"
           >
             Next →

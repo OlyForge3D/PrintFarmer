@@ -27,6 +27,8 @@ type UseUrlFilterStateReturn<C extends ParamConfig> = FilterValues<C> &
   FilterSetters<C> & {
     resetAll: () => void;
     hasActiveFilters: boolean;
+    /** Batch-update multiple params in a single URL navigation (avoids React Router stale-closure issue with multiple setSearchParams calls). */
+    setMany: (updates: Partial<FilterValues<C>>) => void;
   };
 
 function parseParam(raw: string | null, type: ParamType, defaultValue: string | number | boolean): string | number | boolean {
@@ -133,6 +135,28 @@ export function useUrlFilterState<C extends ParamConfig>(config: C): UseUrlFilte
     }, { replace: true });
   }, [setSearchParams, configEntries]);
 
+  const setMany = useCallback((updates: Partial<FilterValues<C>>) => {
+    for (const name of Object.keys(updates)) {
+      if (debounceTimers.current[name]) {
+        clearTimeout(debounceTimers.current[name]);
+      }
+    }
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      for (const [name, def] of configEntries) {
+        if (!(name in (updates as Record<string, unknown>))) continue;
+        const value = (updates as Record<string, string | number | boolean>)[name];
+        const serialized = serializeParam(value, def.type, def.defaultValue);
+        if (serialized === undefined) {
+          next.delete(def.key);
+        } else {
+          next.set(def.key, serialized);
+        }
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams, configEntries]);
+
   const hasActiveFilters = useMemo(() => {
     for (const [name, def] of configEntries) {
       if (def.filterable === false) continue;
@@ -141,5 +165,5 @@ export function useUrlFilterState<C extends ParamConfig>(config: C): UseUrlFilte
     return false;
   }, [values, configEntries]);
 
-  return { ...values, ...setters, resetAll, hasActiveFilters } as UseUrlFilterStateReturn<C>;
+  return { ...values, ...setters, setMany, resetAll, hasActiveFilters } as UseUrlFilterStateReturn<C>;
 }
