@@ -145,6 +145,34 @@ app.MapSlicerHubs();
 app.MapHealthChecks("/healthz");
 app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "running" }));
 
+// Build version endpoint
+app.MapGet("/api/version", () =>
+{
+    var asm = System.Reflection.Assembly.GetEntryAssembly();
+    string? infoVersion = (asm is not null
+        ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+            as System.Reflection.AssemblyInformationalVersionAttribute
+        : null)?.InformationalVersion;
+    string version = "0.0.0";
+    string? commit = null;
+    if (infoVersion != null)
+    {
+        string[] parts = infoVersion.Split('+', 2);
+        version = parts[0];
+        commit = parts.Length > 1 ? parts[1] : null;
+    }
+
+    return Results.Ok(new
+    {
+        service = "Farm.Slicer.Host",
+        version,
+        commit,
+        environment = app.Environment.EnvironmentName,
+        runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+        timestamp = DateTime.UtcNow,
+    });
+});
+
 await app.RunAsync();
 
 /// <summary>Marker type so integration tests can reference the host assembly.</summary>

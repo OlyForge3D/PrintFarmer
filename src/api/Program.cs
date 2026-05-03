@@ -553,6 +553,34 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
+// Build version endpoint
+app.MapGet("/api/version", () =>
+{
+    var asm = System.Reflection.Assembly.GetEntryAssembly();
+    string? infoVersion = (asm is not null
+        ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+            as System.Reflection.AssemblyInformationalVersionAttribute
+        : null)?.InformationalVersion;
+    string version = "0.0.0";
+    string? commit = null;
+    if (infoVersion != null)
+    {
+        string[] parts = infoVersion.Split('+', 2);
+        version = parts[0];
+        commit = parts.Length > 1 ? parts[1] : null;
+    }
+
+    return Results.Ok(new
+    {
+        service = "Farm.Web.Api",
+        version,
+        commit,
+        environment = app.Environment.EnvironmentName,
+        runtime = RuntimeInformation.FrameworkDescription,
+        timestamp = DateTime.UtcNow,
+    });
+});
+
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
 
 // Final log just before entering host run loop (diagnostic)
