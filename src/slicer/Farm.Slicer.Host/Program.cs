@@ -146,7 +146,7 @@ app.MapHealthChecks("/healthz");
 app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "running" }));
 
 // Build version endpoint
-app.MapGet("/api/version", () =>
+app.MapGet("/api/system/version", () =>
 {
     var asm = System.Reflection.Assembly.GetEntryAssembly();
     string? infoVersion = (asm is not null

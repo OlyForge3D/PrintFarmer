@@ -124,7 +124,7 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
-        // Version endpoint handler shared by /version and /api/version
+        // Version endpoint handler shared by /version and /api/system/version
         async Task<IResult> GetVersionInfoAsync(IOrcaBinaryDetector detector)
         {
             string? orcaVersion = await detector.GetVersionAsync();
@@ -155,7 +155,7 @@ public static class Program
         }
 
         _ = app.MapGet("/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
-        _ = app.MapGet("/api/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+        _ = app.MapGet("/api/system/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
 
         // Diagnostic endpoint: check process profile expression evaluation results
         _ = app.MapGet("/api/debug/process-eval/{manufacturer}", async (string manufacturer, ISlicerProfilesService profilesService) =>
