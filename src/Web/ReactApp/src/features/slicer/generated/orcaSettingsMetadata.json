@@ -2,10 +2,10 @@
   "_meta": {
     "source": "OrcaSlicer PrintConfig.cpp + Tab.cpp",
     "generator": "tools/extract-orca-metadata.py",
-    "totalSettings": 798,
-    "filamentSettings": 110,
-    "machineSettings": 125,
-    "processSettings": 347
+    "totalSettings": 793,
+    "filamentSettings": 108,
+    "machineSettings": 105,
+    "processSettings": 344
   },
   "filament": {
     "tabs": [
@@ -43,10 +43,6 @@
               },
               {
                 "key": "default_filament_colour",
-                "compound": false
-              },
-              {
-                "key": "filament_colour",
                 "compound": false
               },
               {
@@ -326,15 +322,7 @@
                 "compound": false
               },
               {
-                "key": "activate_air_filtration_during_print",
-                "compound": true
-              },
-              {
                 "key": "during_print_exhaust_fan_speed",
-                "compound": true
-              },
-              {
-                "key": "activate_air_filtration_on_completion",
                 "compound": true
               },
               {
@@ -342,6 +330,22 @@
                 "compound": true
               }
             ]
+          }
+        ]
+      },
+      {
+        "name": "Setting Overrides",
+        "icon": "custom-gcode_setting_override",
+        "sections": [
+          {
+            "name": "Retraction",
+            "icon": "param_retraction",
+            "fields": []
+          },
+          {
+            "name": "Ironing",
+            "icon": "param_ironing",
+            "fields": []
           }
         ]
       },
@@ -526,39 +530,6 @@
             ]
           }
         ]
-      },
-      {
-        "name": "Setting Overrides",
-        "icon": "custom-gcode_setting_override",
-        "sections": [
-          {
-            "name": "Retraction",
-            "icon": "param_retraction",
-            "fields": []
-          },
-          {
-            "name": "Ironing",
-            "icon": "param_ironing",
-            "fields": [
-              {
-                "key": "filament_ironing_flow",
-                "compound": false
-              },
-              {
-                "key": "filament_ironing_spacing",
-                "compound": false
-              },
-              {
-                "key": "filament_ironing_speed",
-                "compound": false
-              },
-              {
-                "key": "filament_ironing_inset",
-                "compound": false
-              }
-            ]
-          }
-        ]
       }
     ],
     "settings": {
@@ -570,24 +541,6 @@
         "tooltip": "Activate for better air filtration. G-code command: M106 P3 S(0-255)",
         "mode": "simple",
         "default": "false"
-      },
-      "activate_air_filtration_during_print": {
-        "key": "activate_air_filtration_during_print",
-        "type": "bool",
-        "coType": "coBools",
-        "label": "During print",
-        "tooltip": "Enable this to override the fan speed set in custom G-code during print.",
-        "mode": "simple",
-        "default": "true"
-      },
-      "activate_air_filtration_on_completion": {
-        "key": "activate_air_filtration_on_completion",
-        "type": "bool",
-        "coType": "coBools",
-        "label": "On completion",
-        "tooltip": "Enable this to override the fan speed set in custom G-code after print completion.",
-        "mode": "simple",
-        "default": "true"
       },
       "activate_chamber_temp_control": {
         "key": "activate_chamber_temp_control",
@@ -2815,7 +2768,7 @@
         "tooltip": "Maximum junction deviation (M205 J, only apply if JD > 0 for Marlin Firmware\\nIf your Marlin 2 printer uses Classic Jerk set this value to 0.)",
         "unit": "mm",
         "min": 0.0,
-        "max": 0.3,
+        "max": 0.5,
         "mode": "advanced",
         "category": "Machine limits",
         "default": "0.01"
@@ -2867,30 +2820,6 @@
         "mode": "simple",
         "category": "Machine limits",
         "default": "12., 12"
-      },
-      "machine_min_extruding_rate": {
-        "key": "machine_min_extruding_rate",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Minimum speed for extruding",
-        "tooltip": "Minimum speed for extruding (M205 S)",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "developer",
-        "category": "Machine limits",
-        "default": "0., 0"
-      },
-      "machine_min_travel_rate": {
-        "key": "machine_min_travel_rate",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Minimum travel speed",
-        "tooltip": "Minimum travel speed (M205 T)",
-        "unit": "mm/s",
-        "min": 0,
-        "mode": "developer",
-        "category": "Machine limits",
-        "default": "0., 0"
       },
       "machine_pause_gcode": {
         "key": "machine_pause_gcode",
@@ -3200,17 +3129,6 @@
         "mode": "developer",
         "default": "18"
       },
-      "retraction_distances_when_ec": {
-        "key": "retraction_distances_when_ec",
-        "type": "float",
-        "coType": "coFloats",
-        "label": "Retraction distance when extruder change",
-        "unit": "mm",
-        "min": 0,
-        "max": 10,
-        "mode": "advanced",
-        "default": "10"
-      },
       "retraction_length": {
         "key": "retraction_length",
         "type": "float",
@@ -3360,16 +3278,6 @@
         "mode": "advanced",
         "default": "false"
       },
-      "wipe_before_external_loop": {
-        "key": "wipe_before_external_loop",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Wipe before external loop",
-        "tooltip": "To minimize visibility of potential overextrusion at the start of an external perimeter when printing with Outer/Inner or Inner/Outer/Inner wall print order, the de-retraction is performed slightly on the inside from the start of the external perimeter. That way any potential over extrusion is hidden from the outside surface.\\n\\nThis is useful when printing with Outer/Inner or Inner/Outer/Inner wall print order as in these modes it is more likely an external perimeter is printed immediately after a de-retraction move.",
-        "mode": "advanced",
-        "category": "Quality",
-        "default": "false"
-      },
       "wipe_distance": {
         "key": "wipe_distance",
         "type": "float",
@@ -3381,147 +3289,6 @@
         "mode": "advanced",
         "default": "1"
       },
-      "wipe_on_loops": {
-        "key": "wipe_on_loops",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Wipe on loops",
-        "tooltip": "To minimize the visibility of the seam in a closed loop extrusion, a small inward movement is executed before the extruder leaves the loop.",
-        "mode": "advanced",
-        "category": "Quality",
-        "default": "false"
-      },
-      "wipe_speed": {
-        "key": "wipe_speed",
-        "type": "float_or_percent",
-        "coType": "coFloatOrPercent",
-        "label": "Wipe speed",
-        "tooltip": "The wipe speed is determined by the speed setting specified in this configuration. If the value is expressed as a percentage (e.g. 80%), it will be calculated based on the travel speed setting above. The default value for this parameter is 80%.",
-        "unit": "mm/s or %",
-        "min": 0,
-        "mode": "advanced",
-        "category": "Speed",
-        "default": "80,true"
-      },
-      "wipe_tower_bridging": {
-        "key": "wipe_tower_bridging",
-        "type": "float",
-        "coType": "coFloat",
-        "label": "Maximal bridging distance",
-        "tooltip": "Maximal distance between supports on sparse infill sections.",
-        "unit": "mm",
-        "mode": "advanced",
-        "default": "10"
-      },
-      "wipe_tower_cone_angle": {
-        "key": "wipe_tower_cone_angle",
-        "type": "float",
-        "coType": "coFloat",
-        "label": "Stabilization cone apex angle",
-        "tooltip": "Angle at the apex of the cone that is used to stabilize the wipe tower. Larger angle means wider base.",
-        "unit": "°",
-        "min": 0.0,
-        "max": 90.0,
-        "mode": "advanced",
-        "default": "30.0"
-      },
-      "wipe_tower_extra_flow": {
-        "key": "wipe_tower_extra_flow",
-        "type": "percent",
-        "coType": "coPercent",
-        "label": "Extra flow for purging",
-        "tooltip": "Extra flow used for the purging lines on the wipe tower. This makes the purging lines thicker or narrower than they normally would be. The spacing is adjusted automatically.",
-        "unit": "%",
-        "min": 100.0,
-        "max": 300.0,
-        "mode": "advanced",
-        "default": "100"
-      },
-      "wipe_tower_extra_rib_length": {
-        "key": "wipe_tower_extra_rib_length",
-        "type": "float",
-        "coType": "coFloat",
-        "label": "Extra rib length",
-        "tooltip": "Positive values can increase the size of the rib wall, while negative values can reduce the size. However, the size of the rib wall can not be smaller than that determined by the cleaning volume.",
-        "unit": "mm",
-        "max": 300,
-        "mode": "advanced",
-        "default": "0"
-      },
-      "wipe_tower_extra_spacing": {
-        "key": "wipe_tower_extra_spacing",
-        "type": "percent",
-        "coType": "coPercent",
-        "label": "Wipe tower purge lines spacing",
-        "tooltip": "Spacing of purge lines on the wipe tower.",
-        "unit": "%",
-        "min": 100.0,
-        "max": 300.0,
-        "mode": "advanced",
-        "default": "100"
-      },
-      "wipe_tower_filament": {
-        "key": "wipe_tower_filament",
-        "type": "int",
-        "coType": "coInt",
-        "label": "Wipe tower",
-        "tooltip": "The extruder to use when printing perimeter of the wipe tower. Set to 0 to use the one that is available (non-soluble would be preferred).",
-        "min": 0,
-        "mode": "advanced",
-        "category": "Extruders",
-        "default": "0"
-      },
-      "wipe_tower_fillet_wall": {
-        "key": "wipe_tower_fillet_wall",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Fillet wall",
-        "tooltip": "The wall of prime tower will fillet.",
-        "mode": "advanced",
-        "default": "true"
-      },
-      "wipe_tower_max_purge_speed": {
-        "key": "wipe_tower_max_purge_speed",
-        "type": "float",
-        "coType": "coFloat",
-        "label": "Maximum wipe tower print speed",
-        "tooltip": "The maximum print speed when purging in the wipe tower and printing the wipe tower sparse layers. When purging, if the sparse infill speed or calculated speed from the filament max volumetric speed is lower, the lowest will be used instead.\\n\\nWhen printing the sparse layers, if the internal perimeter speed or calculated speed from the filament max volumetric speed is lower, the lowest will be used instead.\\n\\nIncreasing this speed may affect the tower's stability as well as increase the force with which the nozzle collides with any blobs that may have formed on the wipe tower.\\n\\nBefore increasing this parameter beyond the default of 90 mm/s, make sure your printer can reliably bridge at the increased speeds and that ooze when tool changing is well controlled.\\n\\nFor the wipe tower external perimeters the internal perimeter speed is used regardless of this setting.",
-        "unit": "mm/s",
-        "min": 10,
-        "mode": "advanced",
-        "default": "90"
-      },
-      "wipe_tower_no_sparse_layers": {
-        "key": "wipe_tower_no_sparse_layers",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "No sparse layers (beta)",
-        "tooltip": "If enabled, the wipe tower will not be printed on layers with no tool changes. On layers with a tool change, extruder will travel downward to print the wipe tower. User is responsible for ensuring there is no collision with the print.",
-        "mode": "advanced",
-        "default": "false"
-      },
-      "wipe_tower_rib_width": {
-        "key": "wipe_tower_rib_width",
-        "type": "float",
-        "coType": "coFloat",
-        "label": "Rib width",
-        "tooltip": "Rib width is always less than half the prime tower side length.",
-        "unit": "mm",
-        "min": 0,
-        "max": 300,
-        "mode": "advanced",
-        "default": "8"
-      },
-      "wipe_tower_rotation_angle": {
-        "key": "wipe_tower_rotation_angle",
-        "type": "float",
-        "coType": "coFloat",
-        "label": "Wipe tower rotation angle",
-        "tooltip": "Wipe tower rotation angle with respect to X axis.",
-        "unit": "°",
-        "mode": "advanced",
-        "default": "0"
-      },
       "wipe_tower_type": {
         "key": "wipe_tower_type",
         "type": "enum",
@@ -3529,30 +3296,6 @@
         "label": "Wipe tower type",
         "tooltip": "Choose the wipe tower implementation for multi-material prints. Type 1 is recommended for Bambu and Qidi printers with a filament cutter. Type 2 offers better compatibility with multi-tool and MMU printers and provide overall better compatibility.",
         "mode": "advanced"
-      },
-      "wipe_tower_wall_type": {
-        "key": "wipe_tower_wall_type",
-        "type": "enum",
-        "coType": "coEnum",
-        "label": "Wall type",
-        "tooltip": "Wipe tower outer wall type.\\n1. Rectangle: The default wall type, a rectangle with fixed width and height.\\n2. Cone: A cone with a fillet at the bottom to help stabilize the wipe tower.\\n3. Rib: Adds four ribs to the tower wall for enhanced stability.",
-        "mode": "advanced"
-      },
-      "wipe_tower_x": {
-        "key": "wipe_tower_x",
-        "type": "float",
-        "coType": "coFloats",
-        "mode": "developer",
-        "default": "15",
-        "label": "wipe_tower_x"
-      },
-      "wipe_tower_y": {
-        "key": "wipe_tower_y",
-        "type": "float",
-        "coType": "coFloats",
-        "mode": "developer",
-        "default": "220",
-        "label": "wipe_tower_y"
       },
       "wrapping_detection_gcode": {
         "key": "wrapping_detection_gcode",
@@ -3929,15 +3672,15 @@
                 "compound": false
               },
               {
-                "key": "only_one_wall_first_layer",
-                "compound": false
-              },
-              {
                 "key": "only_one_wall_top",
                 "compound": false
               },
               {
                 "key": "min_width_top_surface",
+                "compound": false
+              },
+              {
+                "key": "only_one_wall_first_layer",
                 "compound": false
               },
               {
@@ -4407,10 +4150,6 @@
                 "compound": false
               },
               {
-                "key": "initial_layer_travel_acceleration",
-                "compound": false
-              },
-              {
                 "key": "top_surface_acceleration",
                 "compound": false
               },
@@ -4458,10 +4197,6 @@
               },
               {
                 "key": "initial_layer_jerk",
-                "compound": false
-              },
-              {
-                "key": "initial_layer_travel_jerk",
                 "compound": false
               },
               {
@@ -4991,10 +4726,6 @@
                 "compound": false
               },
               {
-                "key": "combine_brims",
-                "compound": false
-              },
-              {
                 "key": "brim_ears_max_angle",
                 "compound": false
               },
@@ -5393,16 +5124,6 @@
         "category": "Support",
         "default": "0"
       },
-      "combine_brims": {
-        "key": "combine_brims",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Combine brims",
-        "tooltip": "Combine multiple brims into one when they are close to each other. This can improve brim adhesion.",
-        "mode": "advanced",
-        "category": "Support",
-        "default": "false"
-      },
       "counterbore_hole_bridging": {
         "key": "counterbore_hole_bridging",
         "type": "enum",
@@ -5444,7 +5165,7 @@
         "tooltip": "Marlin Firmware Junction Deviation (replaces the traditional XY Jerk setting).",
         "unit": "mm",
         "min": 0.0,
-        "max": 0.3,
+        "max": 0.5,
         "mode": "advanced",
         "category": "Speed",
         "default": "0.f"
@@ -6109,28 +5830,6 @@
         "min": 1,
         "mode": "advanced",
         "default": "30"
-      },
-      "initial_layer_travel_acceleration": {
-        "key": "initial_layer_travel_acceleration",
-        "type": "float_or_percent",
-        "coType": "coFloatOrPercent",
-        "label": "First layer travel",
-        "tooltip": "Travel acceleration of first layer.\\nThe percentage value is relative to Travel Acceleration.",
-        "unit": "mm/s² or %",
-        "min": 0,
-        "mode": "advanced",
-        "default": "100, true"
-      },
-      "initial_layer_travel_jerk": {
-        "key": "initial_layer_travel_jerk",
-        "type": "float_or_percent",
-        "coType": "coFloatOrPercent",
-        "label": "First layer travel",
-        "tooltip": "Travel jerk of first layer.\\nThe percentage value is relative to Travel Jerk.",
-        "unit": "mm/s or %",
-        "min": 0,
-        "mode": "advanced",
-        "default": "100, true"
       },
       "initial_layer_travel_speed": {
         "key": "initial_layer_travel_speed",
@@ -8661,7 +8360,7 @@
         "type": "enum",
         "coType": "coEnum",
         "label": "Wall loop direction",
-        "tooltip": "The direction which the contour wall loops are extruded when looking down from the top.\\nHoles are printed in the opposite direction to the contour to maintain alignment with layers whose contour polygons are incomplete and change direction, also partially forming the contour of a hole.\\n\\nThis option will be disabled if spiral vase mode is enabled.",
+        "tooltip": "The direction which the wall loops are extruded when looking down from the top.\\n\\nBy default all walls are extruded in counter-clockwise, unless Reverse on even is enabled. Set this to any option other than Auto will force the wall direction regardless of the Reverse on even.\\n\\nThis option will be disabled if spiral vase mode is enabled.",
         "mode": "advanced",
         "category": "Quality"
       },
@@ -8936,5 +8635,121 @@
       }
     }
   },
-  "icons": {}
+  "icons": {
+    "custom-gcode_advanced": "custom-gcode_advanced.svg",
+    "custom-gcode_cooling_fan": "custom-gcode_cooling_fan.svg",
+    "custom-gcode_extruder": "custom-gcode_extruder.svg",
+    "custom-gcode_filament": "custom-gcode_filament.svg",
+    "custom-gcode_gcode": "custom-gcode_gcode.svg",
+    "custom-gcode_measure": "custom-gcode_measure.svg",
+    "custom-gcode_motion": "custom-gcode_motion.svg",
+    "custom-gcode_multi_material": "custom-gcode_multi_material.svg",
+    "custom-gcode_note": "custom-gcode_note.svg",
+    "custom-gcode_object-info": "custom-gcode_object-info.svg",
+    "custom-gcode_other": "custom-gcode_other.svg",
+    "custom-gcode_quality": "custom-gcode_quality.svg",
+    "custom-gcode_setting_override": "custom-gcode_setting_override.svg",
+    "custom-gcode_single": "custom-gcode_single.svg",
+    "custom-gcode_slicing-state": "custom-gcode_slicing-state.svg",
+    "custom-gcode_slicing-state_global": "custom-gcode_slicing-state_global.svg",
+    "custom-gcode_speed": "custom-gcode_speed.svg",
+    "custom-gcode_stats": "custom-gcode_stats.svg",
+    "custom-gcode_strength": "custom-gcode_strength.svg",
+    "custom-gcode_support": "custom-gcode_support.svg",
+    "custom-gcode_temperature": "custom-gcode_temperature.svg",
+    "custom-gcode_time": "custom-gcode_time.svg",
+    "custom-gcode_vector-index": "custom-gcode_vector-index.svg",
+    "custom-gcode_vector": "custom-gcode_vector.svg",
+    "param_3dhoneycomb": "param_3dhoneycomb.svg",
+    "param_acceleration": "param_acceleration.svg",
+    "param_accessory": "param_accessory.svg",
+    "param_adaptive_mesh": "param_adaptive_mesh.svg",
+    "param_adaptivecubic": "param_adaptivecubic.svg",
+    "param_adhension": "param_adhension.svg",
+    "param_advanced": "param_advanced.svg",
+    "param_alignedrectilinear": "param_alignedrectilinear.svg",
+    "param_archimedeanchords": "param_archimedeanchords.svg",
+    "param_bed_temp": "param_bed_temp.svg",
+    "param_bridge": "param_bridge.svg",
+    "param_chamber_temp": "param_chamber_temp.svg",
+    "param_concentric": "param_concentric.svg",
+    "param_cooling": "param_cooling.svg",
+    "param_cooling_aux_fan": "param_cooling_aux_fan.svg",
+    "param_cooling_exhaust": "param_cooling_exhaust.svg",
+    "param_cooling_fan": "param_cooling_fan.svg",
+    "param_cooling_part_fan": "param_cooling_part_fan.svg",
+    "param_cooling_specific_layer": "param_cooling_specific_layer.svg",
+    "param_crosshatch": "param_crosshatch.svg",
+    "param_crosszag": "param_crosszag.svg",
+    "param_cubic": "param_cubic.svg",
+    "param_dependencies_presets": "param_dependencies_presets.svg",
+    "param_dependencies_printers": "param_dependencies_printers.svg",
+    "param_extruder_clearance": "param_extruder_clearance.svg",
+    "param_extruder_lift_enforcement": "param_extruder_lift_enforcement.svg",
+    "param_extruder_size": "param_extruder_size.svg",
+    "param_extruder_temp": "param_extruder_temp.svg",
+    "param_filament_for_features": "param_filament_for_features.svg",
+    "param_flow_ratio_and_pressure_advance": "param_flow_ratio_and_pressure_advance.svg",
+    "param_flush": "param_flush.svg",
+    "param_gcode": "param_gcode.svg",
+    "param_grid": "param_grid.svg",
+    "param_gyroid": "param_gyroid.svg",
+    "param_hilbertcurve": "param_hilbertcurve.svg",
+    "param_hollow": "param_hollow.svg",
+    "param_honeycomb": "param_honeycomb.svg",
+    "param_infill": "param_infill.svg",
+    "param_information": "param_information.svg",
+    "param_ironing": "param_ironing.svg",
+    "param_jerk": "param_jerk.svg",
+    "param_lateral-honeycomb": "param_lateral-honeycomb.svg",
+    "param_lateral-lattice": "param_lateral-lattice.svg",
+    "param_layer_height": "param_layer_height.svg",
+    "param_lightning": "param_lightning.svg",
+    "param_line": "param_line.svg",
+    "param_line_width": "param_line_width.svg",
+    "param_lockedzag": "param_lockedzag.svg",
+    "param_monotonic": "param_monotonic.svg",
+    "param_monotonicline": "param_monotonicline.svg",
+    "param_multi_material": "param_multi_material.svg",
+    "param_octagramspiral": "param_octagramspiral.svg",
+    "param_ooze_prevention": "param_ooze_prevention.svg",
+    "param_overhang": "param_overhang.svg",
+    "param_overhang_speed": "param_overhang_speed.svg",
+    "param_position": "param_position.svg",
+    "param_precision": "param_precision.svg",
+    "param_printable_space": "param_printable_space.svg",
+    "param_quartercubic": "param_quartercubic.svg",
+    "param_raft": "param_raft.svg",
+    "param_rectilinear-grid": "param_rectilinear-grid.svg",
+    "param_rectilinear": "param_rectilinear.svg",
+    "param_rectilinear_interlaced": "param_rectilinear_interlaced.svg",
+    "param_resonance_avoidance": "param_resonance_avoidance.svg",
+    "param_retraction": "param_retraction.svg",
+    "param_retraction_material_change": "param_retraction_material_change.svg",
+    "param_seam": "param_seam.svg",
+    "param_settings": "param_settings.svg",
+    "param_shell": "param_shell.svg",
+    "param_skirt": "param_skirt.svg",
+    "param_special": "param_special.svg",
+    "param_speed": "param_speed.svg",
+    "param_speed_first": "param_speed_first.svg",
+    "param_support": "param_support.svg",
+    "param_support_filament": "param_support_filament.svg",
+    "param_support_tree": "param_support_tree.svg",
+    "param_supportcubic": "param_supportcubic.svg",
+    "param_temperature": "param_temperature.svg",
+    "param_toolchange": "param_toolchange.svg",
+    "param_toolchange_multi_extruder": "param_toolchange_multi_extruder.svg",
+    "param_tower": "param_tower.svg",
+    "param_tpmsd": "param_tpmsd.svg",
+    "param_tpmsfk": "param_tpmsfk.svg",
+    "param_travel_speed": "param_travel_speed.svg",
+    "param_tri-hexagon": "param_tri-hexagon.svg",
+    "param_triangles": "param_triangles.svg",
+    "param_volumetric_speed": "param_volumetric_speed.svg",
+    "param_wall": "param_wall.svg",
+    "param_wall_generator": "param_wall_generator.svg",
+    "param_wall_surface": "param_wall_surface.svg",
+    "param_zigzag": "param_zigzag.svg"
+  }
 }
