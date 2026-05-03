@@ -82,6 +82,7 @@ import {
   GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
+  SpoolFilterOptions,
   SpoolmanFilament,
   SpoolmanVendor,
   SpoolmanMaterial,
@@ -2932,6 +2933,15 @@ export class ApiClient {
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
     return { items, totalCount: items.length };
+  }
+
+  /**
+   * Get distinct material, vendor, and location values across all spools.
+   * Used to populate filter dropdowns without relying on paginated data.
+   */
+  async getSpoolFilterOptions(): Promise<SpoolFilterOptions> {
+    const response = await this.client.get<SpoolFilterOptions>('/spoolman/filter-options');
+    return response.data;
   }
 
   /**

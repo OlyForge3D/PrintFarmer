@@ -151,6 +151,17 @@ public class SpoolmanController(
     }
 
     /// <summary>
+    /// Returns distinct material, vendor, and location values across all spools.
+    /// Used to populate filter dropdowns without relying on paginated data.
+    /// </summary>
+    [HttpGet("filter-options")]
+    [ProducesResponseType(typeof(SpoolFilterOptionsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SpoolFilterOptionsDto>> GetFilterOptionsAsync(CancellationToken ct)
+    {
+        return Ok(await spoolman.GetFilterOptionsAsync(ct));
+    }
+
+    /// <summary>
     /// Creates a new spool in Spoolman.
     /// </summary>
     /// <param name="request">Spool data</param>
