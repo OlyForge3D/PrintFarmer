@@ -553,8 +553,8 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
-// Build version endpoint
-app.MapGet("/api/version", () =>
+// Build version endpoint (uses /api/system/version to avoid conflict with OctoPrint-compat /api/version)
+app.MapGet("/api/system/version", () =>
 {
     var asm = System.Reflection.Assembly.GetEntryAssembly();
     string? infoVersion = (asm is not null
