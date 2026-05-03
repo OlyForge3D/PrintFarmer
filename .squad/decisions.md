@@ -3742,7 +3742,8 @@ Returns printer-level recent print sessions with chronological event lists per s
 
 ---
 
-## 14. User Directive: Consistent Date Range Filters (2026-03-26T15:20)
+
+## 19. User Directive: Catalog Alias-Only Profile Selection (2026-04-26)
 
 **Author:** Jeff Papiez (via Copilot)  
 **Status:** CAPTURED — For team memory  
@@ -3750,43 +3751,27 @@ Returns printer-level recent print sessions with chronological event lists per s
 
 ### Directive
 
-Date range filters must be consistent across all statistics/analytics/cost pages. Use a standard set of options (7 days, 30 days, 90 days, 1 year, All Time) wherever date range filters appear.
+Catalog model machine profile selection must only match slicer aliases defined in the catalog; do not fall back to manufacturer/model lookup for catalog selections.
 
 ### Rationale
 
-User request — consistency improves discoverability and UX across the application.
+User clarified that profile selection source of truth is the catalog's configured slicer alias.
 
 ---
 
-## 15. User Directive: Quarterly Date Ranges & Custom Picker (2026-03-26T15:22)
+## 20. Core One L Process Compatibility Parser Fix (2026-05-01)
 
-**Author:** Jeff Papiez (via Copilot)  
-**Status:** CAPTURED — For team memory  
-**Urgency:** Medium
-
-### Directive
-
-Date range filters should include quarterly options and support custom date ranges. Standard presets: 7 days, 30 days, 90 days (quarterly), 1 year, All Time, plus a custom date range picker.
-
-### Rationale
-
-User request — business reporting often uses quarterly periods. Custom ranges give flexibility for ad-hoc analysis.
-
----
-
-## 16. User Directive: Expose CostTrackingSettings in Admin UI (2026-03-26T15:24)
-
-**Author:** Jeff Papiez (via Copilot)  
-**Status:** CAPTURED — For team memory  
+**Author:** Lambert (Backend Dev)  
+**Status:** ANALYZED  
 **Urgency:** High
 
 ### Directive
 
-CostTrackingSettings (electricity rate, printer wattage, machine hourly rate, etc.) must be exposed in the admin Settings UI so users can configure them.
+OrcaSlicer worker process compatibility must be resolved from `compatible_printers_condition` with normalized `printer_notes` values, whitespace-tolerant logical operators, and `!~` negated regex support.
 
 ### Rationale
 
-User request — these values drive all cost calculations and vary by location/setup. Currently only configurable via appsettings.json. Need UI accessibility.
+OrcaSlicer 2.3.2 Prusa CORE One L/HF profiles use condition-only compatibility. HF machine profiles can store `printer_notes` as arrays, and non-HF profiles use `printer_notes!~/.*HF_NOZZLE.*/`; without parser support, process `CompatiblePrinters` is empty and New Slice Job shows no process profiles even after machine lookup succeeds.
 
 ---
 
