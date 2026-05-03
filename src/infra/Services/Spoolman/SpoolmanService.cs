@@ -764,6 +764,57 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             .AsReadOnly();
     }
 
+    /// <inheritdoc />
+    public async Task<SpoolFilterOptionsDto> GetFilterOptionsAsync(CancellationToken ct)
+    {
+        // Fetch all spools (up to 10 000) to extract distinct filter values
+        const int pageSize = 500;
+        List<SpoolmanSpoolDto> allSpools = new();
+        int offset = 0;
+        int totalCount;
+
+        do
+        {
+            SpoolmanPagedResult<SpoolmanSpoolDto> page = await ListSpoolsAsync(
+                new SpoolmanSpoolQueryParams { Limit = pageSize, Offset = offset, AllowArchived = true }, ct);
+
+            allSpools.AddRange(page.Items);
+            totalCount = page.TotalCount;
+            offset += pageSize;
+        }
+        while (offset < totalCount && allSpools.Count < totalCount);
+
+        var materials = allSpools
+            .Where(s => !string.IsNullOrWhiteSpace(s.Material))
+            .Select(s => s.Material)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+
+        var vendors = allSpools
+            .Where(s => !string.IsNullOrWhiteSpace(s.Vendor))
+            .Select(s => s.Vendor!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+
+        var locations = allSpools
+            .Where(s => !string.IsNullOrWhiteSpace(s.Location))
+            .Select(s => s.Location!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+
+        logger.LogDebug(
+            "Computed filter options from {Count} spools: {Materials} materials, {Vendors} vendors, {Locations} locations",
+            allSpools.Count, materials.Count, vendors.Count, locations.Count);
+
+        return new SpoolFilterOptionsDto(materials, vendors, locations);
+    }
+
     private async Task<MaterialPageFetchResult> FetchAllMaterialPagesAsync(string initialUrl, CancellationToken ct)
     {
         List<SpoolmanMaterialDto> collected = new();

@@ -2873,6 +2873,13 @@ export interface SpoolmanSpool {
   comment?: string | null;
 }
 
+/** Distinct material, vendor, and location values across all spools. */
+export interface SpoolFilterOptions {
+  materials: string[];
+  vendors: string[];
+  locations: string[];
+}
+
 /**
  * Spoolman filament type/product definition (matches backend SpoolmanFilamentDto).
  * Represents the filament product class (e.g., "PolyTerra PLA Charcoal Black"),

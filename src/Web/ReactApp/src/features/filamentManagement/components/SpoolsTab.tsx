@@ -121,10 +121,27 @@ export function SpoolsTab() {
     return 'cards';
   });
 
-  // Filter dropdown options — accumulated from loaded data
+  // Filter dropdown options — loaded once from dedicated endpoint, supplemented by page data
   const [materialOptions, setMaterialOptions] = useState<string[]>([]);
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
+  const filterOptionsLoaded = useRef(false);
+
+  // Load filter dropdown options from the server once on mount
+  useEffect(() => {
+    if (filterOptionsLoaded.current) return;
+    filterOptionsLoaded.current = true;
+    (async () => {
+      try {
+        const opts = await apiClient.getSpoolFilterOptions();
+        setMaterialOptions(opts.materials ?? []);
+        setVendorOptions(opts.vendors ?? []);
+        setLocationOptions(opts.locations ?? []);
+      } catch {
+        // Endpoint unavailable — fallback accumulation in loadSpools will fill them
+      }
+    })();
+  }, []);
 
   // Persist view mode preference
   useEffect(() => {
