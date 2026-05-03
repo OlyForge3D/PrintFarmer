@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/common/components/ui';
+import { PrinterIcon } from '@/common/components/icons/MdiIcons';
 import { PrinterImage } from '@/common/components/PrinterImage';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import type { ToolheadDto, MotionType } from '@/types/api';
@@ -130,7 +131,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                       </span>
                       {selectedPrinter.isOnline !== undefined && (
                         <span className={`w-2 h-2 rounded-full shrink-0 ${
-                          selectedPrinter.isOnline ? 'bg-pf-success' : 'bg-pf-disabled'
+                          selectedPrinter.isOnline ? 'bg-pf-success ring-1 ring-pf-success/30' : 'bg-pf-disabled ring-1 ring-pf-disabled/30'
                         }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
                       )}
                     </div>
@@ -152,7 +153,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                 </div>
               ) : (
                 <div className="flex items-center gap-3 text-pf-text-muted">
-                  <span className="text-xl">🖨️</span>
+                  <PrinterIcon className="w-5 h-5" />
                   <span>Click to select a printer...</span>
                 </div>
               )}

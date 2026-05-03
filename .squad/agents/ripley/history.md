@@ -678,3 +678,15 @@ Metadata extraction from OrcaSlicer likely failed to extract Extruder tab struct
 - The cut tool already handles disjoint cap loops correctly: `orderCapEdges` returns `THREE.Vector3[][]` and the consumer iterates each loop through `earClipTriangulate`. Only nested loops (true holes — e.g. the inner ring of a hollow tube cross-section) remain a v1 limitation.
 - AABB containment in the cap's 2D projection plane is a cheap, no-import heuristic for detecting nested loops without point-in-polygon tests.
 - Full hole bridging would require either constrained Delaunay triangulation or ear-clipping with bridge edges connecting outer/inner loops — a much larger change deferred from this v1 fix.
+
+---
+
+## Slicer page UI cohesion polish (2026-07-21)
+
+**Learnings:**
+- SlicerSelector used `p-4 mb-3` while all other section cards use `p-3 mb-2`. Standardized.
+- Emoji fallbacks (🔪, 🖨️) replaced with SVG MDI icons (`GearIcon`, `PrinterIcon`) for consistency and rendering reliability.
+- Empty/loading states in NewSliceJobPage had `italic` on instructional text ("Select a machine profile…") which should only apply to loading/no-data messages.
+- Online status dot in PrinterSlicerSelector is very small (`w-2 h-2`); adding `ring-1 ring-{color}/30` provides a subtle glow that increases visibility without changing size.
+- Process section card was missing `space-y-2` that all other sections had — easy to miss in a 2400-line file.
+- Select placeholder patterns were inconsistent (`-- Select X --` vs short form). Standardized to `Select x...` / `Loading...`.
