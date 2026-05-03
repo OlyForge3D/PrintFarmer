@@ -126,6 +126,7 @@ function SlotTooltipContent({ toolhead }: { toolhead: ToolheadDto }) {
 interface SlotProps {
   toolhead: ToolheadDto;
   slotNumber: number;
+  slotCount: number;
   compact?: boolean;
   isPopoverOpen?: boolean;
   onSlotClick?: () => void;
@@ -133,12 +134,13 @@ interface SlotProps {
   printerId?: string;
 }
 
-function Slot({ toolhead, slotNumber, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: SlotProps) {
+function Slot({ toolhead, slotNumber, slotCount, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: SlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const interactive = !!printerId;
   const hasFilament = toolhead.currentFilamentColor != null || toolhead.currentMaterial != null;
   const color = toolhead.currentFilamentColor;
   const needsBorder = color ? isLightColor(color) : false;
+  const popoverAlign = slotNumber === 1 ? 'start' : slotNumber === slotCount ? 'end' : 'center';
 
   useClickOutside(containerRef, !!isPopoverOpen, onPopoverClose);
 
@@ -222,7 +224,12 @@ function Slot({ toolhead, slotNumber, compact, isPopoverOpen, onSlotClick, onPop
     <div ref={containerRef} className="relative">
       {wrapped}
       {isPopoverOpen && printerId && (
-        <SlotPopover toolhead={toolhead} printerId={printerId} onClose={onPopoverClose ?? (() => {})} />
+        <SlotPopover
+          toolhead={toolhead}
+          printerId={printerId}
+          onClose={onPopoverClose ?? (() => {})}
+          align={popoverAlign}
+        />
       )}
     </div>
   );
@@ -230,6 +237,7 @@ function Slot({ toolhead, slotNumber, compact, isPopoverOpen, onSlotClick, onPop
 
 interface NozzleIndicatorProps {
   toolhead: ToolheadDto;
+  popoverAlign?: 'center' | 'start' | 'end';
   compact?: boolean;
   isPopoverOpen?: boolean;
   onSlotClick?: () => void;
@@ -237,7 +245,7 @@ interface NozzleIndicatorProps {
   printerId?: string;
 }
 
-function NozzleIndicator({ toolhead, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: NozzleIndicatorProps) {
+function NozzleIndicator({ toolhead, popoverAlign = 'center', compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: NozzleIndicatorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const interactive = !!printerId;
   const hasFilament = toolhead.currentFilamentColor != null || toolhead.currentMaterial != null;
@@ -330,7 +338,12 @@ function NozzleIndicator({ toolhead, compact, isPopoverOpen, onSlotClick, onPopo
     <div ref={containerRef} className="relative">
       {wrapped}
       {isPopoverOpen && printerId && (
-        <SlotPopover toolhead={toolhead} printerId={printerId} onClose={onPopoverClose ?? (() => {})} />
+        <SlotPopover
+          toolhead={toolhead}
+          printerId={printerId}
+          onClose={onPopoverClose ?? (() => {})}
+          align={popoverAlign}
+        />
       )}
     </div>
   );
@@ -371,10 +384,11 @@ export function AmsSlotVisualization({ toolheads, compact = false, printerId }: 
       {/* Physical toolhead indicators (only when no MMU gates) */}
       {topPhysicalHeads.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          {topPhysicalHeads.map((toolhead) => (
+          {topPhysicalHeads.map((toolhead, idx) => (
             <NozzleIndicator
               key={toolhead.id ?? `phys-${toolhead.index}`}
               toolhead={toolhead}
+              popoverAlign={idx === 0 ? 'start' : idx === topPhysicalHeads.length - 1 ? 'end' : 'center'}
               compact={compact}
               printerId={printerId}
               isPopoverOpen={activeSlotIndex === toolhead.index}
@@ -407,6 +421,7 @@ export function AmsSlotVisualization({ toolheads, compact = false, printerId }: 
                 key={slot.id ?? `mmu-${slot.index}`}
                 toolhead={slot}
                 slotNumber={slotIdx + 1}
+                slotCount={unit.slots.length}
                 compact={compact}
                 printerId={printerId}
                 isPopoverOpen={activeSlotIndex === slot.index}
@@ -426,10 +441,11 @@ export function AmsSlotVisualization({ toolheads, compact = false, printerId }: 
             <div className="flex-1 border-b border-pf-border" />
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {externalSpools.map((toolhead) => (
+            {externalSpools.map((toolhead, idx) => (
               <NozzleIndicator
                 key={toolhead.id ?? `ext-${toolhead.index}`}
                 toolhead={toolhead}
+                popoverAlign={idx === 0 ? 'start' : idx === externalSpools.length - 1 ? 'end' : 'center'}
                 compact={compact}
                 printerId={printerId}
                 isPopoverOpen={activeSlotIndex === toolhead.index}
