@@ -897,8 +897,34 @@ def main():
         for section in tab['sections']:
             for field in section['fields']:
                 process_keys.add(field['key'])
+
+    # Fields commented out or SLA-only in Tab.cpp — not shown in the FFF process editor
+    commented_out_process_keys = {
+        # SLA support fields (all commented out in Tab.cpp lines 7447-7481)
+        'support_base_diameter', 'support_base_height', 'support_base_safety_distance',
+        'support_buildplate_only', 'support_critical_angle',
+        'support_head_front_diameter', 'support_head_penetration', 'support_head_width',
+        'support_max_bridge_length', 'support_max_bridges_on_pillar',
+        'support_max_pillar_link_distance', 'support_object_elevation',
+        'support_pillar_connection_mode', 'support_pillar_diameter',
+        'support_pillar_widening_factor', 'support_points_density_relative',
+        'support_points_minimal_distance', 'support_small_pillar_diameter_percent',
+        # Commented out FFF process field
+        'support_interface_loop_pattern',
+        # Machine-only fields (in TabPrinter, not TabPrint)
+        'support_air_filtration', 'support_chamber_temp_control', 'support_multi_bed_types',
+        # Filament-only field (in TabFilament, not TabPrint)
+        'support_material_interface_fan_speed',
+        # Not displayed in any OrcaSlicer tab
+        'brim_ears', 'tree_support_with_infill', 'support_object_skip_flush',
+    }
+
     # Also include known process-prefixed settings not in tabs
     for key in all_settings:
+        if key in commented_out_process_keys:
+            continue
+        if key in non_machine_keys:
+            continue
         if key.startswith('support_') or key.startswith('tree_support_') or key.startswith('brim_') or key.startswith('skirt_'):
             process_keys.add(key)
 

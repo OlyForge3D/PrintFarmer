@@ -5,7 +5,7 @@
     "totalSettings": 793,
     "filamentSettings": 93,
     "machineSettings": 105,
-    "processSettings": 344
+    "processSettings": 318
   },
   "filament": {
     "tabs": [
@@ -4951,16 +4951,6 @@
         "category": "Speed",
         "default": "25"
       },
-      "brim_ears": {
-        "key": "brim_ears",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Brim ears",
-        "tooltip": "Only draw brim over the sharp edges of the model.",
-        "mode": "advanced",
-        "category": "Support",
-        "default": "false"
-      },
       "brim_ears_detection_length": {
         "key": "brim_ears_detection_length",
         "type": "float",
@@ -7319,15 +7309,6 @@
         "mode": "advanced",
         "default": "-5"
       },
-      "support_air_filtration": {
-        "key": "support_air_filtration",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Support air filtration",
-        "tooltip": "Enable this if printer support air filtration\\nG-code command: M106 P3 S(0-255)",
-        "mode": "developer",
-        "default": "true"
-      },
       "support_angle": {
         "key": "support_angle",
         "type": "float",
@@ -7340,25 +7321,6 @@
         "mode": "advanced",
         "category": "Support",
         "default": "0"
-      },
-      "support_base_diameter": {
-        "key": "support_base_diameter",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 30,
-        "mode": "advanced",
-        "default": "4.0",
-        "label": "support_base_diameter"
-      },
-      "support_base_height": {
-        "key": "support_base_height",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "mode": "advanced",
-        "default": "1.0",
-        "label": "support_base_height"
       },
       "support_base_pattern": {
         "key": "support_base_pattern",
@@ -7380,16 +7342,6 @@
         "mode": "advanced",
         "category": "Support",
         "default": "2.5"
-      },
-      "support_base_safety_distance": {
-        "key": "support_base_safety_distance",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 10,
-        "mode": "advanced",
-        "default": "1",
-        "label": "support_base_safety_distance"
       },
       "support_bottom_interface_spacing": {
         "key": "support_bottom_interface_spacing",
@@ -7414,33 +7366,6 @@
         "mode": "advanced",
         "category": "Support",
         "default": "0.2"
-      },
-      "support_buildplate_only": {
-        "key": "support_buildplate_only",
-        "type": "bool",
-        "coType": "coBool",
-        "mode": "simple",
-        "default": "false",
-        "label": "support_buildplate_only"
-      },
-      "support_chamber_temp_control": {
-        "key": "support_chamber_temp_control",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Support control chamber temperature",
-        "tooltip": "This option is enabled if machine support controlling chamber temperature\\nG-code command: M141 S(0-255)",
-        "mode": "developer",
-        "default": "true"
-      },
-      "support_critical_angle": {
-        "key": "support_critical_angle",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 90,
-        "mode": "advanced",
-        "default": "45",
-        "label": "support_critical_angle"
       },
       "support_critical_regions_only": {
         "key": "support_critical_regions_only",
@@ -7486,34 +7411,6 @@
         "category": "Advanced",
         "default": "1"
       },
-      "support_head_front_diameter": {
-        "key": "support_head_front_diameter",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "mode": "advanced",
-        "default": "0.4",
-        "label": "support_head_front_diameter"
-      },
-      "support_head_penetration": {
-        "key": "support_head_penetration",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "mode": "advanced",
-        "default": "0.2",
-        "label": "support_head_penetration"
-      },
-      "support_head_width": {
-        "key": "support_head_width",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 20,
-        "mode": "advanced",
-        "default": "1.0",
-        "label": "support_head_width"
-      },
       "support_interface_bottom_layers": {
         "key": "support_interface_bottom_layers",
         "type": "int",
@@ -7548,16 +7445,6 @@
         "mode": "advanced",
         "category": "Advanced",
         "default": "1"
-      },
-      "support_interface_loop_pattern": {
-        "key": "support_interface_loop_pattern",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Interface use loop pattern",
-        "tooltip": "Cover the top contact layer of the supports with loops. Disabled by default.",
-        "mode": "advanced",
-        "category": "Support",
-        "default": "false"
       },
       "support_interface_not_for_body": {
         "key": "support_interface_not_for_body",
@@ -7672,65 +7559,6 @@
         "category": "Quality",
         "default": "0., false"
       },
-      "support_material_interface_fan_speed": {
-        "key": "support_material_interface_fan_speed",
-        "type": "int",
-        "coType": "coInts",
-        "label": "Support interface fan speed",
-        "tooltip": "This part cooling fan speed is applied when printing support interfaces. Setting this parameter to a higher than regular speed reduces the layer binding strength between supports and the supported part, making them easier to separate.\\nSet to -1 to disable it.\\nThis setting is overridden by disable_fan_first_layers.",
-        "unit": "%",
-        "min": -1,
-        "max": 100,
-        "mode": "advanced",
-        "default": "-1"
-      },
-      "support_max_bridge_length": {
-        "key": "support_max_bridge_length",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "mode": "advanced",
-        "default": "15.0",
-        "label": "support_max_bridge_length"
-      },
-      "support_max_bridges_on_pillar": {
-        "key": "support_max_bridges_on_pillar",
-        "type": "int",
-        "coType": "coInt",
-        "min": 0,
-        "max": 50,
-        "mode": "advanced",
-        "default": "3",
-        "label": "support_max_bridges_on_pillar"
-      },
-      "support_max_pillar_link_distance": {
-        "key": "support_max_pillar_link_distance",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "mode": "advanced",
-        "default": "10.0",
-        "label": "support_max_pillar_link_distance"
-      },
-      "support_multi_bed_types": {
-        "key": "support_multi_bed_types",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Support multi bed types",
-        "tooltip": "Enable this option if you want to use multiple bed types.",
-        "mode": "simple",
-        "default": "false"
-      },
-      "support_object_elevation": {
-        "key": "support_object_elevation",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 150,
-        "mode": "advanced",
-        "default": "5.0",
-        "label": "support_object_elevation"
-      },
       "support_object_first_layer_gap": {
         "key": "support_object_first_layer_gap",
         "type": "float",
@@ -7743,13 +7571,6 @@
         "mode": "advanced",
         "category": "Support",
         "default": "0.2"
-      },
-      "support_object_skip_flush": {
-        "key": "support_object_skip_flush",
-        "type": "bool",
-        "coType": "coBool",
-        "default": "false",
-        "label": "support_object_skip_flush"
       },
       "support_object_xy_distance": {
         "key": "support_object_xy_distance",
@@ -7774,50 +7595,6 @@
         "category": "Support",
         "default": "false"
       },
-      "support_pillar_connection_mode": {
-        "key": "support_pillar_connection_mode",
-        "type": "enum",
-        "coType": "coEnum",
-        "mode": "advanced",
-        "label": "support_pillar_connection_mode"
-      },
-      "support_pillar_diameter": {
-        "key": "support_pillar_diameter",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 15,
-        "mode": "simple",
-        "default": "1.0",
-        "label": "support_pillar_diameter"
-      },
-      "support_pillar_widening_factor": {
-        "key": "support_pillar_widening_factor",
-        "type": "float",
-        "coType": "coFloat",
-        "min": 0,
-        "max": 1,
-        "mode": "advanced",
-        "default": "0.0",
-        "label": "support_pillar_widening_factor"
-      },
-      "support_points_density_relative": {
-        "key": "support_points_density_relative",
-        "type": "int",
-        "coType": "coInt",
-        "min": 0,
-        "default": "100",
-        "label": "support_points_density_relative"
-      },
-      "support_points_minimal_distance": {
-        "key": "support_points_minimal_distance",
-        "type": "float",
-        "coType": "coFloat",
-        "unit": "mm",
-        "min": 0,
-        "default": "1",
-        "label": "support_points_minimal_distance"
-      },
       "support_remove_small_overhang": {
         "key": "support_remove_small_overhang",
         "type": "bool",
@@ -7827,16 +7604,6 @@
         "mode": "advanced",
         "category": "Support",
         "default": "true"
-      },
-      "support_small_pillar_diameter_percent": {
-        "key": "support_small_pillar_diameter_percent",
-        "type": "percent",
-        "coType": "coPercent",
-        "min": 1,
-        "max": 100,
-        "mode": "advanced",
-        "default": "50",
-        "label": "support_small_pillar_diameter_percent"
       },
       "support_speed": {
         "key": "support_speed",
@@ -8251,16 +8018,6 @@
         "mode": "advanced",
         "category": "Support",
         "default": "0"
-      },
-      "tree_support_with_infill": {
-        "key": "tree_support_with_infill",
-        "type": "bool",
-        "coType": "coBool",
-        "label": "Tree support with infill",
-        "tooltip": "This setting specifies whether to add infill inside large hollows of tree support.",
-        "mode": "advanced",
-        "category": "Support",
-        "default": "false"
       },
       "wall_direction": {
         "key": "wall_direction",
