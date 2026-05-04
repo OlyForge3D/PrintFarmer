@@ -152,6 +152,24 @@ function getPrimaryNozzleTypeLabel(printer: PrinterForSlicing | undefined): stri
   return matchingKey ? NozzleTypeStringLabels[matchingKey] : nozzleType;
 }
 
+function profileMentionsHighFlow(text: string): boolean {
+  return /\bhf\b/i.test(text);
+}
+
+function getProcessLayerHeight(profile: OrcaProcessProfile): number {
+  if (Number.isFinite(profile.layerHeight)) {
+    return profile.layerHeight;
+  }
+
+  const match = profile.name.match(/([0-9]+(?:\.[0-9]+)?)\s*mm/i);
+  if (!match) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const parsed = Number.parseFloat(match[1]);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
 export const NewSliceJobPage: React.FC = () => {
   const STORAGE_KEYS = {
     printerId: 'sliceJob.selectedPrinterId',
@@ -913,13 +931,46 @@ export const NewSliceJobPage: React.FC = () => {
     return processProfilesData ?? [];
   }, [processProfilesData]);
 
-  // Split process profiles into User presets (first) and System presets (second),
-  // matching OrcaSlicer's grouping. Within each group, preserve the server-provided order.
+  // Split process profiles into User presets (first) and System presets (second).
+  // Apply machine compatibility guards and sort each group by layer height (smallest -> largest).
   const processProfilesBySource = useMemo(() => {
     const profiles = processProfilesData ?? [];
+    const selectedMachineName = selectedMachineProfile?.name ?? '';
+    const selectedMachineLower = selectedMachineName.toLowerCase();
+    const selectedIsHighFlow = profileMentionsHighFlow(selectedMachineName);
+
+    const filtered = profiles.filter((profile) => {
+      // Guard 1: Compatible printer names must include the selected machine when provided.
+      if (selectedMachineName && Array.isArray(profile.compatiblePrinters) && profile.compatiblePrinters.length > 0) {
+        const compatible = profile.compatiblePrinters.some((printerName) => printerName === selectedMachineName);
+        if (!compatible) {
+          return false;
+        }
+      }
+
+      // Guard 2: Avoid mixing HF and non-HF variants for the same machine family.
+      // Use both profile name and compatible-printer text for variant detection.
+      const candidateText = `${profile.name} ${(profile.compatiblePrinters ?? []).join(' ')}`.toLowerCase();
+      const candidateIsHighFlow = profileMentionsHighFlow(candidateText);
+
+      // Apply this guard only when this is the same machine family (CORE One) and
+      // the machine selection explicitly indicates HF/non-HF variant intent.
+      if (selectedMachineLower.includes('core one')) {
+        if (selectedIsHighFlow && !candidateIsHighFlow) {
+          return false;
+        }
+
+        if (!selectedIsHighFlow && candidateIsHighFlow) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
     const user: typeof profiles = [];
     const system: typeof profiles = [];
-    for (const profile of profiles) {
+    for (const profile of filtered) {
       // isSystem is the canonical flag from the slicer worker; treat missing as system
       // so bundle profiles never accidentally land in the user group.
       if ((profile as { isSystem?: boolean }).isSystem === false) {
@@ -928,8 +979,20 @@ export const NewSliceJobPage: React.FC = () => {
         system.push(profile);
       }
     }
+
+    const byLayerHeightThenName = (a: OrcaProcessProfile, b: OrcaProcessProfile) => {
+      const layerDelta = getProcessLayerHeight(a) - getProcessLayerHeight(b);
+      if (Math.abs(layerDelta) > 0.0001) {
+        return layerDelta;
+      }
+      return a.name.localeCompare(b.name);
+    };
+
+    user.sort(byLayerHeightThenName);
+    system.sort(byLayerHeightThenName);
+
     return { user, system };
-  }, [processProfilesData]);
+  }, [processProfilesData, selectedMachineProfile]);
 
   useEffect(() => {
     const optionValues = nozzleOptions.map((option) => option.value);
@@ -1734,7 +1797,9 @@ export const NewSliceJobPage: React.FC = () => {
             {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
               <p className="text-xs text-pf-text-muted mb-2">
                 Profiles for {selectedPrinterForSlicing.manufacturerName} {selectedPrinterForSlicing.modelName}
-                {selectedPrinterForSlicing.nozzleDiameter && ` • ${selectedPrinterForSlicing.nozzleDiameter}mm nozzle`}
+                {selectedPrinterForSlicing.nozzleDiameter && (
+                  <span className="text-[11px]"> • {selectedPrinterForSlicing.nozzleDiameter}mm nozzle</span>
+                )}
               </p>
             ) : (
               <p className="text-xs text-pf-warning mb-2">
