@@ -441,6 +441,7 @@ export const TEXTAREA_KEYS = new Set([
   'filament_start_gcode', 'filament_end_gcode',
   'adaptive_pressure_advance_model',
   'filament_notes', 'printer_notes',
+  'filename_format', 'notes',
   'compatible_printers_condition', 'compatible_prints_condition',
 ]);
 

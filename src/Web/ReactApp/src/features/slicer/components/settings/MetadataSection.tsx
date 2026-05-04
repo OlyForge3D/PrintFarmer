@@ -212,6 +212,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
                'printing_by_object_gcode', 'wrapping_detection_gcode',
                'change_extrusion_role_gcode', 'filament_start_gcode', 'filament_end_gcode',
                'adaptive_pressure_advance_model', 'filament_notes', 'printer_notes',
+               'filename_format', 'notes',
                'compatible_printers_condition', 'compatible_prints_condition',
               ].includes(meta.key)
             );
