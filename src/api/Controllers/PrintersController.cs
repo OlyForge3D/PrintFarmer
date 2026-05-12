@@ -924,7 +924,9 @@ public class PrintersController(
             p.ZOffsetMm,
             p.LastZOffsetCalibrationAt,
             p.UseModelDispatchDefaults,
-            p.BuddyCameraIp);
+            p.BuddyCameraIp,
+            p.NozzleDiameter,
+            p.HasMmu);
     }
 
     /// <summary>

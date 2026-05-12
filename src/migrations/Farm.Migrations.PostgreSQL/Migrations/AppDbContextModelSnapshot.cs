@@ -304,6 +304,50 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Cameras", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CameraId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CameraId");
+
+                    b.HasIndex("CapturedAt");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("CameraSnapshots");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.CatalogVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3139,6 +3183,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("HasHeatedBed")
                         .HasColumnType("boolean");
 
+                    b.Property<bool?>("HasMmu")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("InMaintenance")
                         .HasColumnType("boolean");
 
@@ -3188,6 +3235,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("Notes")
                         .HasColumnType("text");
+
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("double precision");
 
                     b.Property<bool>("ObicoEnabled")
                         .HasColumnType("boolean");
@@ -4684,6 +4734,32 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .WithMany("Cameras")
                         .HasForeignKey("PrinterId")
                         .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraSnapshot", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", "Camera")
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Camera");
+
+                    b.Navigation("PrintJob");
 
                     b.Navigation("Printer");
                 });

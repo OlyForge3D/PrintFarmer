@@ -195,6 +195,18 @@ public class Printer
 
     public bool HasEnclosure { get; set; }
 
+    /// <summary>
+    /// Nozzle diameter in millimeters (e.g. 0.4). Populated from PrusaLink printer info.
+    /// Nullable because non-Prusa backends don't report this.
+    /// </summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>
+    /// Whether a Multi-Material Unit is connected. Populated from PrusaLink printer info.
+    /// Nullable because non-Prusa backends don't report this.
+    /// </summary>
+    public bool? HasMmu { get; set; }
+
     public bool MultiMaterial { get; set; }
 
     public bool SupportsAutoLeveling { get; set; }

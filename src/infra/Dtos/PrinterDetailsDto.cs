@@ -39,4 +39,6 @@ public record PrinterDetailsDto(
     decimal? ZOffsetMm = null,
     DateTime? LastZOffsetCalibrationAt = null,
     bool UseModelDispatchDefaults = true,
-    string? BuddyCameraIp = null);
+    string? BuddyCameraIp = null,
+    double? NozzleDiameter = null,
+    bool? HasMmu = null);
