@@ -122,4 +122,8 @@ tools/installer/dist/
 !src/Web/ReactApp/public/assets/orcaslicer/**/*.png
 
 # C# devkit generated cache files
-*.lscache 
+*.lscache
+
+# Local camera snapshot storage (runtime output)
+src/api/snapshots/
+snapshots/ 
