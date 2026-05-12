@@ -148,6 +148,7 @@ OPTIONS:
     --include-registry      Include local registry
     --include-discovery     Include printer discovery service
     --include-obico-ml      Include Obico ML API for AI print failure detection
+    --include-go2rtc        Include go2rtc RTSP-to-WebRTC bridge sidecar
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
     --enable-pgadmin            Enable pgAdmin web UI (PostgreSQL only)
 
@@ -219,6 +220,7 @@ parse_args() {
     INCLUDE_DISCOVERY="false"
     INCLUDE_SPOOLMAN="false"
     INCLUDE_OBICO_ML="false"
+    INCLUDE_GO2RTC="false"
     ENABLE_ORCA_WORKER=""
     ENABLE_PGADMIN="false"
     API_PORT=""
@@ -255,6 +257,8 @@ parse_args() {
                 INCLUDE_SPOOLMAN="true"; shift ;;
             --include-obico-ml|--enable-obico-ml)
                 INCLUDE_OBICO_ML="true"; shift ;;
+            --include-go2rtc)
+                INCLUDE_GO2RTC="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
             --enable-pgadmin)
@@ -791,6 +795,16 @@ generate_compose() {
             addons_merged=true
         else
             log_warning "Failed to merge Obico ML API service, continuing without it"
+        fi
+    fi
+    
+    # Conditionally merge go2rtc RTSP-to-WebRTC bridge if enabled
+    if [[ "$INCLUDE_GO2RTC" == "true" ]]; then
+        if merge_addon_services "$compose_file" "go2rtc"; then
+            log_info "Merged go2rtc RTSP-to-WebRTC bridge service"
+            addons_merged=true
+        else
+            log_warning "Failed to merge go2rtc service, continuing without it"
         fi
     fi
     

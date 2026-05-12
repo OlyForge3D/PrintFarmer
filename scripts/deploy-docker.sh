@@ -857,6 +857,11 @@ generate_deployment_config() {
         generator_args+=("--include-spoolman")
     fi
     
+    # Add go2rtc sidecar if user chose to deploy it
+    if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
+        generator_args+=("--include-go2rtc")
+    fi
+    
     # Add worker configuration
     if [ -n "${ENABLE_ORCA_WORKER:-}" ]; then
         generator_args+=("--enable-orca-worker" "$ENABLE_ORCA_WORKER")
@@ -2327,6 +2332,7 @@ COMPOSE GENERATOR OPTIONS:
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
         --include-discovery Include network printer discovery service
+        --include-go2rtc    Include go2rtc RTSP-to-WebRTC bridge for camera streams
         --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
@@ -2762,6 +2768,20 @@ PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
 EOF
     else
         echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no\nDEPLOY_SPOOLMAN_CONTAINER=no" >> "$CONFIG_FILE"
+    fi
+
+    # go2rtc config
+    if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# go2rtc Camera Streaming
+DEPLOY_GO2RTC=yes
+GO2RTC_PORT=${GO2RTC_PORT:-1984}
+GO2RTC_RTSP_PORT=${GO2RTC_RTSP_PORT:-8554}
+GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:latest}
+EOF
+    else
+        echo -e "\n# go2rtc Camera Streaming\nDEPLOY_GO2RTC=no" >> "$CONFIG_FILE"
     fi
 
     # Save external storage configuration (P0 Data Persistence)
@@ -3759,6 +3779,22 @@ configure_additional() {
             SPOOLMAN_PORT=""
             ;;
     esac
+
+    # go2rtc RTSP-to-WebRTC bridge
+    echo
+    echo -e "${BLUE}go2rtc Camera Streaming${NC}"
+    echo "go2rtc provides RTSP-to-WebRTC bridging for low-latency camera streams."
+    if [ "${CLI_INCLUDE_GO2RTC:-}" = "true" ]; then
+        print_info "go2rtc enabled via CLI flag"
+        DEPLOY_GO2RTC=yes
+    else
+        prompt_yes_no "Deploy go2rtc sidecar for camera streaming?" "no" "DEPLOY_GO2RTC_ANSWER"
+        if [ "$DEPLOY_GO2RTC_ANSWER" = "yes" ]; then
+            DEPLOY_GO2RTC=yes
+        else
+            DEPLOY_GO2RTC=no
+        fi
+    fi
 }
 
 # Generate and manage slicer worker API keys
@@ -4080,6 +4116,12 @@ DEPLOY_SPOOLMAN_CONTAINER=${DEPLOY_SPOOLMAN_CONTAINER:-no}
 SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
 SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
 SPOOLMAN_IMAGE=${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}
+
+# go2rtc Camera Streaming
+DEPLOY_GO2RTC=${DEPLOY_GO2RTC:-no}
+GO2RTC_PORT=${GO2RTC_PORT:-1984}
+GO2RTC_RTSP_PORT=${GO2RTC_RTSP_PORT:-8554}
+GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:latest}
 
 # Application Settings - PFARM Configuration
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}
@@ -6818,6 +6860,11 @@ while [ $# -gt 0 ]; do
             ;;
         --include-registry)
             CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --include-go2rtc)
+            CLI_INCLUDE_GO2RTC=true
+            DEPLOY_GO2RTC=yes
             shift
             ;;
         --use-registry)
