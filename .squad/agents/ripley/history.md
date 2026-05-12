@@ -718,3 +718,18 @@ Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions f
 - Linting: No new warnings
 - Serialization: camelCase validated
 
+### Session: Buddy Camera IP frontend field (PFarm1-873d)
+
+**Task:** Add `buddyCameraIp` field to the printer edit UI for PrusaLink printers.
+
+**Changes:**
+- `types/api.ts`: Added `buddyCameraIp?: string` to `UpdatePrinterDto` and `PrinterDetails`
+- `EditPrinterModal.tsx`: Added field to form initialization, dirty tracking, and Camera Configuration section
+- Field is conditional on `formData.backend === PrinterBackend.PrusaLink`
+- Shows derived RTSP URL preview (`rtsp://{ip}:554/live/`) when an IP is entered
+
+**Decisions:**
+- Not added to `CreatePrinterDto` or `AddPrinterModal` — backend `CreatePrinterFromDiscoveryDto` doesn't have the field; set via edit after creation
+- Used `handleInputChange` pattern consistent with existing camera URL fields
+- Placed inside the Camera Configuration section, after the snapshot URL field
+
