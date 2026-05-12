@@ -179,3 +179,21 @@ The frontend's `OrcaImportWizard` had a 4-step flow (upload → preview → revi
 - ✅ go2rtc stream initialization verified
 
 **Outcome:** go2rtc sidecar ready for RTSP-to-WebRTC transcoding. Bridge between Buddy/Prusa camera streams and frontend WebRTC viewers.
+
+## SpeedMultiplier SignalR Propagation (PFarm1-00u1)
+
+**Task**: Wire `SpeedMultiplier` from `SimplePrinterStatus` through the Prusa backend pipeline to `PrinterStatusDto` and out via SignalR.
+
+**Changes**:
+- Added `int? SpeedMultiplier = null` to `PrusaCompositeStatus` record
+- Added `int? SpeedMultiplier = null` to `PrinterStatusDto` record
+- Updated `PrusaLinkClient.GetCompositeStatusAsync()` to pass `status.Printer.Speed` through
+- Updated `PrusaLinkPollingService` SignalR broadcast mapping
+- Updated `PrusaLinkStatusClient` on-demand status mapping
+- Added `speedMultiplier?: number` to frontend `PrinterJobInfo` TypeScript interface
+
+**Data flow**: PrusaLink API `Printer.Speed` → `SimplePrinterStatus.SpeedMultiplier` → `PrusaCompositeStatus.SpeedMultiplier` → `PrinterStatusDto.SpeedMultiplier` → SignalR `printerupdated` → frontend `speedMultiplier`
+
+**Key learnings**:
+- Positional records with default `null` parameters are backward-compatible additions
+- Other backends (Moonraker, OctoPrint, FlashForge, SDCP) don't currently expose speed multiplier through their status pipelines — field will be null for those
