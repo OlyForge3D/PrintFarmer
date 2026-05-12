@@ -221,6 +221,8 @@ export interface PrinterJobInfo {
   fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
+  /** Speed multiplier percentage (0-999, 100 = normal speed). PrusaLink only. */
+  speedMultiplier?: number;
   /** Active spool identifier persisted in the PrintFarmer database */
   currentSpoolId?: number;
   /** Active spool/filament information */

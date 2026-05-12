@@ -58,6 +58,11 @@ public sealed class PrusaLinkPollingService(
         public DateTime LastPollTime { get; set; }
 
         public int ConsecutiveFailures { get; set; }
+
+        /// <summary>
+        /// Whether printer info (NozzleDiameter, HasMmu) has been synced to the entity on this polling session.
+        /// </summary>
+        public bool HasSyncedPrinterInfo { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -224,6 +229,13 @@ public sealed class PrusaLinkPollingService(
                     state.LastKnownJobName = status.JobName;
                     state.ConsecutiveFailures = 0;
 
+                    // One-time sync of PrusaLink printer info (NozzleDiameter, HasMmu) to the entity
+                    if (!state.HasSyncedPrinterInfo)
+                    {
+                        await SyncPrinterInfoAsync(printer, ct);
+                        state.HasSyncedPrinterInfo = true;
+                    }
+
                     // Check for print completion/failure transitions
                     if (stateChanged && previousState != null)
                     {
@@ -251,7 +263,8 @@ public sealed class PrusaLinkPollingService(
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         SpoolInfo: spoolInfo,
-                        PrintTimeLeftSeconds: status.TimeRemainingSeconds);
+                        PrintTimeLeftSeconds: status.TimeRemainingSeconds,
+                        SpeedMultiplier: status.SpeedMultiplier);
 
                     // Update cache before broadcasting to clients
                     _statusCacheWriter.UpdateStatus(update);
@@ -373,6 +386,58 @@ public sealed class PrusaLinkPollingService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[PrusaLinkPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
+        }
+    }
+
+    /// <summary>
+    /// Fetches PrusaLink printer info and syncs NozzleDiameter and HasMmu to the Printer entity.
+    /// </summary>
+    private async Task SyncPrinterInfoAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            using IServiceScope scope = _scopeFactory.CreateScope();
+            IPrusaLinkClient prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
+
+            PrinterInformation? info = await prusaLinkClient.GetPrinterInformationAsync(printer.ServerUrl, printer.Credential, ct);
+            if (info is null)
+            {
+                return;
+            }
+
+            bool changed = false;
+            if (printer.NozzleDiameter != info.NozzleDiameter)
+            {
+                printer.NozzleDiameter = info.NozzleDiameter;
+                changed = true;
+            }
+
+            if (printer.HasMmu != info.HasMmu)
+            {
+                printer.HasMmu = info.HasMmu;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+                // Re-load the entity in this scope's context so EF tracks changes
+                Printer? tracked = await unitOfWork.Printers.FindByIdAsync(printer.Id, ct);
+                if (tracked is not null)
+                {
+                    tracked.NozzleDiameter = printer.NozzleDiameter;
+                    tracked.HasMmu = printer.HasMmu;
+                    await unitOfWork.SaveChangesAsync(ct);
+                    _logger.LogInformation(
+                        "[PrusaLinkPollingService] Synced printer info for {PrinterId}: NozzleDiameter={NozzleDiameter}, HasMmu={HasMmu}",
+                        printer.Id, info.NozzleDiameter, info.HasMmu);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PrusaLinkPollingService] Failed to sync printer info for {PrinterId}", printer.Id);
         }
     }
 }
