@@ -923,7 +923,8 @@ public class PrintersController(
             p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
             p.ZOffsetMm,
             p.LastZOffsetCalibrationAt,
-            p.UseModelDispatchDefaults);
+            p.UseModelDispatchDefaults,
+            p.BuddyCameraIp);
     }
 
     /// <summary>
@@ -1757,6 +1758,12 @@ public class PrintersController(
         {
             PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
             modelName = mod?.Name;
+        }
+
+        // Auto-create/update/remove Buddy camera when BuddyCameraIp changes
+        if (dto.BuddyCameraIp != null)
+        {
+            await _printersService.SyncBuddyCameraAsync(p, dto.BuddyCameraIp, ct);
         }
 
         // Save all changes (printer + toolhead updates) with concurrency retry.

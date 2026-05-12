@@ -4079,6 +4079,66 @@ public class PrintersService(
         _ => CameraSource.Standalone,
     };
 
+    /// <inheritdoc/>
+    public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)
+    {
+        string trimmedIp = buddyCameraIp.Trim();
+
+        // Find existing Buddy camera (PrusaLink source with RTSP stream URL)
+        Domain.Camera? existing = printer.Cameras?.FirstOrDefault(c => c.Source == CameraSource.PrusaLink
+            && !string.IsNullOrEmpty(c.StreamUrl) && c.StreamUrl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrEmpty(trimmedIp))
+        {
+            // Clear: remove BuddyCameraIp and delete the camera entity
+            printer.BuddyCameraIp = null;
+            if (existing != null)
+            {
+                _unitOfWork.Cameras.Remove(existing);
+                _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+            }
+
+            return;
+        }
+
+        string rtspUrl = $"rtsp://{trimmedIp}:554/live/";
+        printer.BuddyCameraIp = trimmedIp;
+
+        if (existing != null)
+        {
+            // Update existing camera's stream URL if IP changed
+            if (existing.StreamUrl != rtspUrl)
+            {
+                existing.StreamUrl = rtspUrl;
+                existing.HealthStatus = CameraHealthStatus.Unknown;
+                existing.ConsecutiveFailures = 0;
+                existing.HealthMessage = null;
+                _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, rtspUrl);
+            }
+        }
+        else
+        {
+            // Create new Buddy camera
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"{printer.Name} Buddy Camera",
+                StreamUrl = rtspUrl,
+                SnapshotUrl = null,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = CameraSource.PrusaLink,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Unknown,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _unitOfWork.Cameras.Add(camera);
+            _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, printer.Name, rtspUrl);
+        }
+    }
+
     /// <summary>
     /// Resolves camera URLs from the Cameras table for a given printer.
     /// Returns the first enabled camera ordered by SortOrder, preferring General type.

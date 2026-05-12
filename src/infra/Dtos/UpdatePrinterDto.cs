@@ -26,6 +26,7 @@ public record UpdatePrinterDto(
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,
+    string? BuddyCameraIp = null,
 
     // Printer capabilities
     double? NozzleDiameter = null,

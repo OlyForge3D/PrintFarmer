@@ -147,6 +147,12 @@ public class Printer
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
+    /// IP address of a Prusa Buddy-board camera (separate device from the printer).
+    /// When set, a Camera entity is auto-created/updated with RTSP stream URL rtsp://{ip}:554/live/.
+    /// </summary>
+    public string? BuddyCameraIp { get; set; }
+
+    /// <summary>
     /// Cameras attached to this printer.
     /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
     /// </summary>

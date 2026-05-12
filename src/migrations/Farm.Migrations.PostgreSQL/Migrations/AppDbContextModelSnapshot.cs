@@ -17,7 +17,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.7")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -3117,6 +3117,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<Guid?>("BedTypeId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("BuddyCameraIp")
+                        .HasColumnType("text");
 
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("text");

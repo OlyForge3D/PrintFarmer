@@ -498,6 +498,14 @@ public interface IPrintersService
     void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4);
 
     /// <summary>
+    /// Synchronizes the Buddy camera entity when BuddyCameraIp is set, changed, or cleared.
+    /// Creates a new Camera when an IP is set for the first time, updates the StreamUrl when
+    /// the IP changes, or removes the Camera entity when the IP is cleared (empty string).
+    /// Does NOT save changes — caller must call SaveChangesAsync.
+    /// </summary>
+    Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct);
+
+    /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.
     /// </summary>
     /// <param name="id">The printer ID</param>

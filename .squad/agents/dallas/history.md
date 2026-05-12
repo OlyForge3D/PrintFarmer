@@ -57,3 +57,37 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 ### Session Artifacts
 - Orchestration Log: `.squad/orchestration-log/2026-05-12T18-18-17Z-dallas.md`
 - Session Log: `.squad/log/2026-05-12T18-18-17Z-prusa-camera-research.md`
+
+---
+
+## Session: PFarm1-873d Buddy Camera Architecture (2026-05-12)
+
+**Role:** Lead/Architect
+**Status:** Architecture decision written, pending team review
+
+### Work Completed
+- Explored full camera + printer infrastructure (entities, DTOs, services, controllers, frontend)
+- Designed `BuddyCameraHost` field placement on Printer entity with auto-derived Camera entity lifecycle
+- Added new `CameraSource.BuddyCamera` enum value to distinguish from PrusaLink-discovered cameras
+- Defined API contract changes (UpdatePrinterDto, CreatePrinterFromDiscoveryDto, PrinterDto response)
+- Scoped frontend integration points (EditPrinterModal, conditional visibility for PrusaLink printers)
+- Estimated ~9h implementation effort
+
+### Key Architecture Decisions
+- **BuddyCameraHost on Printer entity** — user provides IP/hostname, system derives RTSP URL and upserts Camera entity
+- **New CameraSource.BuddyCamera** — separate from PrusaLink (different discovery source, different health probe path)
+- **Camera upsert/delete in PrinterService** — setting host creates camera, clearing host deletes it
+- **SnapshotUrl stays null** until go2rtc sidecar (PFarm1-lzf0) is deployed
+- **Conditional UI** — Buddy Camera field shown only for PrusaLink backend printers
+
+### Decision Record
+- **File:** `.squad/decisions/inbox/dallas-buddy-camera-architecture.md`
+
+## Learnings
+
+- Printer entity already has `CameraStreamUrl`/`CameraSnapshotUrl` fields + `ICollection<Camera> Cameras` nav property — two parallel camera tracks exist
+- `EditPrinterModal.tsx` already has a Camera Configuration section with Auto-Detect button (lines ~1040-1070)
+- `CameraService` has `CreateForPrinterAsync(printerId, dto)` — can be reused for Buddy camera creation
+- Camera health monitoring runs on 5-minute intervals via `CameraHealthMonitorService` — RTSP probe (PFarm1-3sbh) will extend this
+- `UpdatePrinterDto` and `CreatePrinterFromDiscoveryDto` already carry `CameraStreamUrl`/`CameraSnapshotUrl` — `BuddyCameraHost` follows same pattern
+- Key file paths: `src/infra/Domain/Printer.cs`, `src/infra/Domain/Camera.cs`, `src/infra/Domain/Enums/CameraEnums.cs`, `src/infra/Services/Cameras/CameraService.cs`, `src/api/Controllers/CamerasController.cs`, `src/Web/ReactApp/src/features/printers/components/EditPrinterModal.tsx`
