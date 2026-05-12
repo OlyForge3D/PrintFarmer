@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -34,6 +35,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IJobCostCalculationService? _jobCostCalculationService;
     private readonly IAutoTagService? _autoTagService;
     private readonly ICameraSnapshotService? _cameraSnapshotService;
+    private readonly IServiceScopeFactory? _serviceScopeFactory;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -96,7 +98,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IDiagnosticChannelService? diagnostics = null,
         IJobCostCalculationService? jobCostCalculationService = null,
         IAutoTagService? autoTagService = null,
-        ICameraSnapshotService? cameraSnapshotService = null)
+        ICameraSnapshotService? cameraSnapshotService = null,
+        IServiceScopeFactory? serviceScopeFactory = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -111,6 +114,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _jobCostCalculationService = jobCostCalculationService;
         _autoTagService = autoTagService;
         _cameraSnapshotService = cameraSnapshotService;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     /// <summary>
@@ -242,17 +246,24 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
-        // Capture camera snapshots (fire-and-forget — never blocks completion)
-        if (_cameraSnapshotService is not null)
+        // Capture camera snapshots (true fire-and-forget — never blocks completion)
+        if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
         {
-            try
+            Guid captureForPrinter = printerId;
+            Guid captureForJob = primaryJob.Id;
+            _ = Task.Run(async () =>
             {
-                await _cameraSnapshotService.CaptureSnapshotAsync(printerId, "PrintCompleted", primaryJob.Id, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to capture completion snapshot for printer {PrinterId}", printerId);
-            }
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                    await svc.CaptureSnapshotAsync(captureForPrinter, "PrintCompleted", captureForJob, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background snapshot capture failed for printer {PrinterId}", captureForPrinter);
+                }
+            });
         }
 
         // Send notification if configured
@@ -354,17 +365,24 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
-        // Capture camera snapshots on failure (fire-and-forget)
-        if (_cameraSnapshotService is not null)
+        // Capture camera snapshots on failure (true fire-and-forget)
+        if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
         {
-            try
+            Guid captureForPrinter = printerId;
+            Guid captureForJob = primaryJob.Id;
+            _ = Task.Run(async () =>
             {
-                await _cameraSnapshotService.CaptureSnapshotAsync(printerId, "PrintFailed", primaryJob.Id, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to capture failure snapshot for printer {PrinterId}", printerId);
-            }
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                    await svc.CaptureSnapshotAsync(captureForPrinter, "PrintFailed", captureForJob, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background snapshot capture failed for printer {PrinterId}", captureForPrinter);
+                }
+            });
         }
 
         return true;

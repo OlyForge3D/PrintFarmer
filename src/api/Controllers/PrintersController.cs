@@ -1765,7 +1765,22 @@ public class PrintersController(
         // Auto-create/update/remove Buddy camera when BuddyCameraIp changes
         if (dto.BuddyCameraIp != null)
         {
-            await _printersService.SyncBuddyCameraAsync(p, dto.BuddyCameraIp, ct);
+            // Validate: must be a plain hostname or IP with no embedded separators or control chars
+            string ip = dto.BuddyCameraIp.Trim();
+            bool hasInvalidChar = ip.Any(c =>
+                c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
+                || char.IsControl(c) || char.IsWhiteSpace(c));
+
+            bool isValidHost = !hasInvalidChar &&
+                (IPAddress.TryParse(ip, out _) ||
+                 Uri.CheckHostName(ip) == UriHostNameType.Dns);
+
+            if (!isValidHost)
+            {
+                return BadRequest($"Invalid BuddyCameraIp value: '{dto.BuddyCameraIp}'.");
+            }
+
+            await _printersService.SyncBuddyCameraAsync(p, ip, ct);
         }
 
         // Save all changes (printer + toolhead updates) with concurrency retry.

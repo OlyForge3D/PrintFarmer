@@ -232,8 +232,7 @@ public sealed class PrusaLinkPollingService(
                     // One-time sync of PrusaLink printer info (NozzleDiameter, HasMmu) to the entity
                     if (!state.HasSyncedPrinterInfo)
                     {
-                        await SyncPrinterInfoAsync(printer, ct);
-                        state.HasSyncedPrinterInfo = true;
+                        state.HasSyncedPrinterInfo = await SyncPrinterInfoAsync(printer, ct);
                     }
 
                     // Check for print completion/failure transitions
@@ -392,7 +391,7 @@ public sealed class PrusaLinkPollingService(
     /// <summary>
     /// Fetches PrusaLink printer info and syncs NozzleDiameter and HasMmu to the Printer entity.
     /// </summary>
-    private async Task SyncPrinterInfoAsync(Printer printer, CancellationToken ct)
+    private async Task<bool> SyncPrinterInfoAsync(Printer printer, CancellationToken ct)
     {
         try
         {
@@ -402,7 +401,7 @@ public sealed class PrusaLinkPollingService(
             PrinterInformation? info = await prusaLinkClient.GetPrinterInformationAsync(printer.ServerUrl, printer.Credential, ct);
             if (info is null)
             {
-                return;
+                return false;
             }
 
             bool changed = false;
@@ -434,10 +433,13 @@ public sealed class PrusaLinkPollingService(
                         printer.Id, info.NozzleDiameter, info.HasMmu);
                 }
             }
+
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[PrusaLinkPollingService] Failed to sync printer info for {PrinterId}", printer.Id);
+            return false;
         }
     }
 }
