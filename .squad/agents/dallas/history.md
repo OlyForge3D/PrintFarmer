@@ -91,3 +91,23 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 - Camera health monitoring runs on 5-minute intervals via `CameraHealthMonitorService` — RTSP probe (PFarm1-3sbh) will extend this
 - `UpdatePrinterDto` and `CreatePrinterFromDiscoveryDto` already carry `CameraStreamUrl`/`CameraSnapshotUrl` — `BuddyCameraHost` follows same pattern
 - Key file paths: `src/infra/Domain/Printer.cs`, `src/infra/Domain/Camera.cs`, `src/infra/Domain/Enums/CameraEnums.cs`, `src/infra/Services/Cameras/CameraService.cs`, `src/api/Controllers/CamerasController.cs`, `src/Web/ReactApp/src/features/printers/components/EditPrinterModal.tsx`
+
+## 2026-05-12 Session Wrap-Up
+
+**Outcome:** PFarm1-873d architecture decision merged into decisions.md  
+**Scope:** Buddy Camera auto-discovery field architecture, schema, API contract, implementation roadmap  
+**Status:** Ready for Lambert's implementation (completed ✅)
+
+### Key Decisions Documented
+
+- Buddy camera as Printer entity field (not standalone) for UX coherence
+- Auto-upsert Camera entity on printer save/update/delete lifecycle
+- CameraSource.BuddyCamera enum distinguishes from backend-discovered cameras
+- Frontend conditional visibility (PrusaLink only)
+- URL auto-derivation: rtsp://{buddyCameraHost}:554/live/
+
+### Downstream Dependencies Identified
+
+- PFarm1-3sbh (RTSP health probe) ✅ Implemented by Lambert
+- PFarm1-y3n1 (Event snapshots) — Feature-ready when Lambert completes
+- PFarm1-lzf0 (go2rtc sidecar) — Snapshot URL integration available post-go2rtc

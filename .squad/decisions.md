@@ -4096,3 +4096,243 @@ Four slicer-area frontend bugs fixed in a single session:
 **By:** Jeff Papiez (via Copilot)
 **What:** Catalog model machine profile selection must only match slicer aliases defined in the catalog; do not fall back to manufacturer/model lookup for catalog selections.
 **Why:** User clarified that profile selection source of truth is the catalog's configured slicer alias.
+# PFarm1-873d: Buddy Camera Auto-Discovery Setup Field — Architecture
+
+**Author:** Dallas (Lead / Architect)
+**Date:** 2026-05-12
+**Status:** PROPOSED
+**Bead:** PFarm1-873d (P3)
+**Impact:** Medium (foundational for all Buddy camera beads)
+
+---
+
+## Problem
+
+Users with Prusa Buddy 3D Cameras need a way to associate them with printers during setup. The Buddy camera is a **standalone network device** — it has its own IP, streams RTSP at `rtsp://{ip}:554/live/`, and is NOT accessible through PrusaLink's API. Today, users would have to manually create a Camera entity via the Cameras page with the correct URLs. That's clunky and error-prone.
+
+## Decision
+
+**Add a `BuddyCameraHost` nullable string field to the Printer entity.** On printer save, auto-derive RTSP/snapshot URLs and upsert a linked Camera entity.
+
+### Why on Printer, not standalone Camera-only
+
+1. **UX coherence.** The Buddy camera physically sits on the printer. Users think "my printer has a camera," not "I have a standalone camera that happens to point at a printer." Putting the field in the printer edit modal matches that mental model.
+2. **Existing pattern.** Printer already has `CameraStreamUrl` and `CameraSnapshotUrl` fields, plus an "Auto-Detect" button in `EditPrinterModal`. Adding `BuddyCameraHost` follows this pattern.
+3. **Camera entity still created.** The field is just the input. The output is a proper `Camera` entity linked to the printer — which gives us health monitoring, multi-camera support, and the Cameras page view for free.
+
+### Why a separate field instead of reusing CameraStreamUrl
+
+`CameraStreamUrl` is a generic URL field populated by backend discovery (Moonraker, PrusaLink). The Buddy camera is a separate device that needs its own IP/hostname stored so we can:
+- Re-derive URLs if the URL format changes
+- Probe the device independently for health
+- Distinguish Buddy-managed cameras from backend-discovered cameras
+
+---
+
+## Schema Changes
+
+### Printer Entity
+
+```csharp
+// src/infra/Domain/Printer.cs — new nullable field
+[MaxLength(253)]
+public string? BuddyCameraHost { get; set; }
+```
+
+**253 chars** = max FQDN length per RFC 1035. Accepts IP address or hostname.
+
+### CameraSource Enum
+
+```csharp
+// src/infra/Domain/Enums/CameraEnums.cs — new value
+public enum CameraSource
+{
+    Standalone,
+    Moonraker,
+    PrusaLink,
+    OctoPrint,
+    SDCP,
+    FlashForge,
+    BuddyCamera  // <-- new
+}
+```
+
+**Why not reuse `PrusaLink`?** Because `PrusaLink` means "discovered via the PrusaLink API." The Buddy camera is discovered via user-provided IP — different source, different health probe path, different lifecycle.
+
+### DB Migration Required
+
+Yes — `BuddyCameraHost` on Printer table. Both PostgreSQL and SQL Server migrations needed.
+
+```bash
+cd src
+DB_PROVIDER=postgres dotnet ef migrations add AddBuddyCameraHostToPrinter \
+  --project ./migrations/Farm.Migrations.PostgreSQL \
+  --startup-project ./migrations/Farm.Migrations.PostgreSQL \
+  --context AppDbContext
+
+DB_PROVIDER=sqlserver dotnet ef migrations add AddBuddyCameraHostToPrinter \
+  --project ./migrations/Farm.Migrations.SqlServer \
+  --startup-project ./migrations/Farm.Migrations.SqlServer \
+  --context AppDbContext
+```
+
+No new Camera columns needed — the Camera entity already has everything we need (`StreamUrl`, `SnapshotUrl`, `Source`, `PrinterId`, `CameraType`).
+
+---
+
+## URL Auto-Derivation
+
+When `BuddyCameraHost` is set on a printer save:
+
+```
+RTSP URL:     rtsp://{buddyCameraHost}:554/live/
+Snapshot URL: null (requires go2rtc sidecar — PFarm1-lzf0)
+```
+
+Snapshot URL stays null until the go2rtc sidecar is deployed. Once go2rtc is available, it becomes `http://go2rtc:1984/api/frame.jpeg?src={streamName}`. This is a future concern — the Camera entity can be updated later without changing the Printer schema.
+
+---
+
+## Camera Entity Lifecycle
+
+### On Printer Create/Update with BuddyCameraHost set
+
+1. Look for existing Camera with `PrinterId = printer.Id` AND `Source = BuddyCamera`
+2. **If found:** Update `StreamUrl` to new derived URL. Update `Name` if printer name changed.
+3. **If not found:** Create new Camera:
+   ```
+   Name:        "{PrinterName} Buddy Camera"
+   StreamUrl:   rtsp://{buddyCameraHost}:554/live/
+   SnapshotUrl: null
+   Source:      CameraSource.BuddyCamera
+   CameraType:  CameraType.Wide
+   PrinterId:   printer.Id
+   IsEnabled:   true
+   ```
+
+### On Printer Update with BuddyCameraHost cleared (set to null/empty)
+
+1. Find Camera with `PrinterId = printer.Id` AND `Source = BuddyCamera`
+2. **Delete it.** The user is saying "this printer no longer has a Buddy camera."
+3. This is safe because the camera was auto-created, not user-configured with custom settings.
+
+### On Printer Delete
+
+Existing cascade behavior handles this — Cameras with `PrinterId` FK are deleted.
+
+---
+
+## API Contract Changes
+
+### UpdatePrinterDto
+
+```csharp
+// src/infra/Dtos/UpdatePrinterDto.cs — new field
+[MaxLength(253)]
+public string? BuddyCameraHost { get; set; }
+```
+
+### CreatePrinterFromDiscoveryDto
+
+```csharp
+// src/infra/Dtos/Discovery/CreatePrinterFromDiscoveryDto.cs — new field
+[MaxLength(253)]
+public string? BuddyCameraHost { get; set; }
+```
+
+### PrinterDto (response)
+
+```csharp
+// Ensure BuddyCameraHost is included in the printer response DTO
+public string? BuddyCameraHost { get; set; }
+```
+
+### No changes to Camera API
+
+The Camera CRUD API stays untouched. Buddy cameras are managed through the Printer API — they appear in Camera endpoints like any other camera.
+
+---
+
+## Backend Implementation Points
+
+### Where the upsert logic lives
+
+**`PrinterService`** (or wherever printer create/update is handled in `src/infra/`). After the printer entity is saved:
+
+```
+if BuddyCameraHost is set → upsert BuddyCamera Camera entity
+if BuddyCameraHost is cleared → delete BuddyCamera Camera entity
+```
+
+This should call `CameraService.CreateForPrinterAsync()` or a new dedicated method. Keep it simple — no new service class.
+
+### Validation
+
+- `BuddyCameraHost` must be a valid IP address or hostname (no scheme, no port, no path)
+- Reject values like `rtsp://192.168.1.50:554/live/` — we derive the full URL
+- Regex: `^[a-zA-Z0-9._-]+$` or use `IPAddress.TryParse` + hostname validation
+
+---
+
+## Frontend Integration Points
+
+### EditPrinterModal (`src/Web/ReactApp/src/features/printers/components/EditPrinterModal.tsx`)
+
+Add a new field in the Camera Configuration section:
+
+```
+[Buddy Camera IP/Hostname] _______________
+[Camera Stream URL]        rtsp://192.168.1.50:554/live/  (read-only, derived)
+[Camera Snapshot URL]      (not available)                  (read-only, derived)
+[Auto-Detect]              (existing button for PrusaLink cameras)
+```
+
+The `BuddyCameraHost` input is editable. The derived URLs update reactively as the user types (client-side preview, server-side is authoritative).
+
+### TypeScript Types (`src/Web/ReactApp/src/types/api.ts`)
+
+```typescript
+// Add to Printer/PrinterBase interface
+buddyCameraHost?: string;
+
+// Add to UpdatePrinterDto
+buddyCameraHost?: string;
+```
+
+### Conditional Visibility
+
+Show the Buddy Camera field only when `printer.backend === 'PrusaLink'` (backend enum value 2). Other backends have their own camera discovery mechanisms. This keeps the UI clean for Moonraker/OctoPrint users who don't need this field.
+
+---
+
+## What This Enables for Downstream Beads
+
+| Bead | How This Helps |
+|------|---------------|
+| **PFarm1-3sbh** (RTSP health probe) | Camera entity has `StreamUrl` with `rtsp://` scheme → health monitor can dispatch RTSP probe |
+| **PFarm1-y3n1** (Event snapshots) | Camera entity linked to printer → snapshot service knows which cameras to capture |
+| **PFarm1-lzf0** (go2rtc sidecar) | Camera entity has RTSP URL → go2rtc config can be generated from camera registry |
+
+---
+
+## Out of Scope
+
+- **RTSP playback in browser** — That's PFarm1-lzf0 (go2rtc sidecar)
+- **RTSP health probing** — That's PFarm1-3sbh
+- **Snapshot capture** — That's PFarm1-y3n1
+- **Network discovery/scanning** — Manual IP entry is the right MVP; mDNS scanning is a future enhancement
+- **go2rtc integration** — Snapshot URL will be null until go2rtc is deployed
+
+---
+
+## Implementation Estimate
+
+| Task | Effort |
+|------|--------|
+| Schema: Add `BuddyCameraHost` to Printer + migrations | 1h |
+| Backend: Camera upsert/delete logic in PrinterService | 2h |
+| Backend: Validation + DTO changes | 1h |
+| Frontend: EditPrinterModal field + type updates | 2h |
+| Tests: Backend upsert/delete + validation | 2h |
+| Tests: Frontend field rendering + save | 1h |
+| **Total** | **~9h** |
