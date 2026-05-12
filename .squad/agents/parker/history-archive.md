@@ -179,3 +179,5 @@ User redeployed API + frontend after commit `826e98ae` (slicer upload/retrieval 
 - **Path construction must return absolute paths** when downstream code uses `File.Exists()` — relative paths depend on CWD which varies between dev and container environments.
 
 
+
+**[Older entries archived on 2026-05-12 — see history.md for recent updates]**

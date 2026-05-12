@@ -29,6 +29,137 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 **Printer Metadata:** AddPrinterModal, EditPrinterModal, and PrinterModelsCatalog integrated with Wattage (W) and Machine Hourly Rate ($) for cost tracking. Backend `PrinterDetailsDto` returns wattage/machineHourlyRate.
 
 
+# Ripley History
+
+## Core Context
+
+Ripley is the frontend architect and API integration specialist. Key retained context:
+- Owns printer-card UX, BedClearBanner behavior, and frontend cache/signal updates for auto-dispatch state.
+- Prefers centralizing transport compatibility in `src/Web/ReactApp/src/services/` wrappers so product language can stay clean in hooks/components.
+- Uses focused React integration tests to protect compact-card, banner, and SignalR merge seams where stale partial payloads can hide operator actions.
+- Consolidates repeated status affordances into a single predictable surface when duplicate UI adds cognitive load.
+
+Early detailed entries were summarized on 2026-03-25 for maintainability. See decisions and orchestration logs for source detail.
+
+### Summarized history
+
+**2026-03-25:** Finalized icon-only failure-detection badge behavior, removed redundant camera overlays, and documented the header-badge-as-single-source pattern.
+
+**2026-03-25 to 2026-03-27:** Landed PendingReady compact-card fallback + live merge protections. Fixed BedClearBanner handling so failed bed-clear gates stay visible across stale bulk snapshots. Protected the live-update seam by preserving prior optional ready-gate detail when partial SignalR payloads omit it. Completed frontend transport alignment toward canonical auto-dispatch naming while preserving a safe adapter strategy. Failure detection is live monitoring, not historical audit—modal is the right interaction depth.
+
+**2026-04-04:** Implemented P3 Send to Printer Modal and P5 Onboarding Profile Detection. Send to Printer: modal-based UX for printer selection and gcode delivery, integrated on completed jobs in SliceJobsPage. Onboarding: full-page banner pattern detecting empty profile state via `listExtended()`, routed to `/slicer/import-official` for profile import.
+
+**2026-04-04:** Completed major frontend features: P3 Send to Printer Modal (8 tests passing), P5 Onboarding Detection (4 tests passing). Both features include proper TypeScript strict mode, accessibility WCAG 2.2 Level AA, and lint/build cleanup.
+
+**Failure Detection Pattern:** Real-time monitoring state machine. Badge + modal for operators (badge shows compact state at-rest, modal shows richer session context during printing). No timeline view. Modal displays coverage source, snapshot URL, last scan, last outcome, auto-pause action, next step.
+
+**Failed-Validation Model Download:** Added `GetByIdUnfilteredAsync()` pattern to `IModel3DFileRepository`. File/thumbnail downloads work for all models regardless of IsValid status. UI listings use filtered query.
+
+**Cost & Analytics:** `TimePeriodFilterValue` is discriminated union for preset (7d/30d/90d/1yr/All) or custom date range. Cost hooks accept `(days?, startDate?, endDate?)`. Settings page is metadata-driven via backend `[AppSetting]` attributes.
+
+**Printer Metadata:** AddPrinterModal, EditPrinterModal, and PrinterModelsCatalog integrated with Wattage (W) and Machine Hourly Rate ($) for cost tracking. Backend `PrinterDetailsDto` returns wattage/machineHourlyRate.
+
+
+- ✅ Build: 0 errors (10.98s)
+- ✅ Lint: 0 errors, 4 warnings (all pre-existing)
+- ✅ Tests: 1710/1710 passing (11.26s)
+
+**Files Changed:**
+- `src/Web/ReactApp/package.json` — added fflate dependency
+- `src/Web/ReactApp/src/features/slicer/orca/utils/orcaBundleExtractor.ts` — new utility
+- `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx` — updated file handling
+
+**Learnings:**
+- OrcaSlicer bundle files are standard ZIP archives — no custom format
+- Preset type detection is reliable via discriminator fields in JSON
+- Client-side extraction keeps backend simple and stateless
+- `extractOrcaBundle()` returns same JSON format as direct upload — perfect API compatibility
+- `isZipFile()` byte check prevents false positives from renamed files
+- Error handling: ZIP extraction failures show user-friendly toast, malformed presets within ZIP are skipped with console.warn but don't break entire import
+- `fflate.unzipSync()` is synchronous but fast enough for typical bundle sizes (11 files = instant)
+- Backend never sees ZIP — frontend normalizes to the same `bundleJson` string format
+
+### Session: Fix profile import for ZIP bundles on NewSliceJobPage
+- `NewSliceJobPage.tsx` line ~1273 file input `accept` must include `.orca_printer,.orca_filament` alongside `.json`
+- `handleProfileFileImport` must branch on file extension: ZIP bundles go through `extractOrcaBundle()`, plain JSON keeps existing `text()→JSON.parse()` path
+- Extracted bundles contain `{ process: [...] }` — each entry is uploaded individually via `slicerProfilesService.uploadProfile()`
+- Always reset `e.target.value = ''` after reading file so re-importing the same file triggers `onChange`
+- Reuse `isZipFile()` + `extractOrcaBundle()` from `@/features/slicer/orca/utils/orcaBundleExtractor` — never re-implement ZIP handling
+
+
+---
+
+## Learnings
+
+### Cut Model, Paint Supports, Paint Seam Toolbar Features (2026-04-22)
+
+**Files Created:**
+- `src/Web/ReactApp/src/features/slicer/components/CutPlaneOverlay.tsx` — 3D plane visualization overlay for cut model tool
+  - Props: `isActive`, `position`, `orientation`, `onChange`, `onDeactivate`
+  - Renders plane geometry + position slider + orientation selector
+  - Integrated with SlicerBedVisualization via OverlayStack pattern
+
+- `src/Web/ReactApp/src/features/slicer/components/FacePaintOverlay.tsx` — Face selection UI for paint supports/seam
+  - Props: `isActive`, `toolMode` (supports|seam), `selectedFaces`, `onFaceSelect`, `onDeactivate`
+  - Renders 3D mesh with face highlighting (cyan for supports, magenta for seam)
+  - Dropdown for support type/seam alignment + density/strength sliders
+  - Handles multi-face selection via Shift+Click
+
+**Files Modified:**
+- `src/Web/ReactApp/src/features/slicer/components/SlicerBedVisualization.tsx` — Added overlay rendering logic
+  - OverlayStack pattern manages multiple overlays (cut plane + face paint) simultaneously
+  - Each overlay is conditionally rendered based on toolbar state
+
+- `src/Web/ReactApp/src/features/slicer/components/SlicerToolbar.tsx` — Added toolbar buttons for 3 new tools
+  - Cut Model button toggles CutPlaneOverlay active state
+  - Paint Supports button toggles FacePaintOverlay with mode=supports
+  - Paint Seam button toggles FacePaintOverlay with mode=seam
+  - Icons: cube-cut (cut), palette-advanced (supports), pen (seam)
+
+- `src/Web/ReactApp/src/features/slicer/components/SlicerWorkspace.tsx` — Wired toolbar state to overlay components
+  - Context provider manages toolbar tool state (which tool is active)
+  - Passes state to SlicerBedVisualization which renders appropriate overlay
+
+**Key Implementation Patterns:**
+
+1. **Overlay State Management:**
+   - Single `activeToolMode` in context tracks which tool is selected (null | cut | supports | seam)
+   - Overlays check `activeToolMode` to determine if they should render
+   - Toggling same tool twice deactivates it (toggle semantics)
+
+2. **3D Interaction Model:**
+   - Cut Model: Numeric slider for position, dropdown for plane orientation (XY/XZ/YZ)
+   - Paint Supports/Seam: Click faces on 3D model to select, visual highlight feedback
+   - All interactions debounced to avoid excessive re-renders
+
+3. **Accessibility Considerations:**
+   - All overlays keyboard-navigable (Tab moves between controls)
+   - Slider controls have keyboard increment (arrow keys: ±0.1mm)
+   - Face selection provides ARIA labels for screen readers
+   - Visual focus indicators on all interactive elements
+
+4. **Integration Points:**
+   - SlicerToolbar dispatches tool state changes to SlicerWorkspace context
+   - SlicerWorkspace passes active tool mode to SlicerBedVisualization as prop
+   - SlicerBedVisualization renders CutPlaneOverlay or FacePaintOverlay based on mode
+   - No API calls in overlays (UI-only preview features; actual operations handled separately)
+
+**Testing Strategy:**
+- Unit tests for overlay component state transitions (active/inactive)
+- Integration tests for toolbar button clicks to overlay appearance
+- Visual regression tests for overlay rendering on different bed geometries
+- Accessibility tests for keyboard navigation and screen reader announcements
+
+**Quality Metrics:**
+- 888 lines added across 5 files
+- 1734/1734 tests passing (no regressions)
+- ESLint 0 errors, 0 new warnings
+- TypeScript strict mode: 0 errors
+- Accessibility: WCAG 2.2 Level AA verified (skip links, focus indicators, contrast)
+
+**Known Limitations & Future Work:**
+- Overlays render as separate 2D canvases (may need 3D mesh integration for production)
+- Paint Supports/Seam doesn't validate against actual printer capabilities yet
 - No persistence of cut planes or face selections between sessions
 - Linked beads for follow-up:
   - PFarm1-eh3a: Profile reset bug (discovered during feature testing)
@@ -229,3 +360,5 @@ Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions f
 - ✅ No new warnings
 
 **Outcome:** BuddyCameraIp field ready for integration with backend camera auto-discovery service.
+
+**[Older entries archived on 2026-05-12 — see history.md for recent updates]**

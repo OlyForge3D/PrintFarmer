@@ -29,6 +29,56 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - 2026-03-26: `/api/failure-detection/status` already exposes the operator-facing monitoring reason/source/target/outcome contract. For richer PrintFarmer-owned UX, the safest backend addition is optional `jobName`/`fileName` on `FailureDetectionPrinterStatusDto` and SignalR `FailureDetectionDto`, sourced from `IPrinterStatusCacheReader` with queued-job fallback in `PrintFailureMonitorService`.
 - 2026-03-26: Persisted failure-detection history is a narrow incident slice, not a generic audit system: `FailureDetectionIncident` stores only detected failures, `PrintFailureMonitorService` records them through scoped `IFailureDetectionIncidentHistoryService`, and `GET /api/failure-detection/history?printerId=&take=` returns newest-first `FailureDetectionDto` rows with optional persisted `id`.
 
+- 6 tests for standard (monolith) mode
+- 3 tests for microservices mode ensuring correct capability reporting
+- Validates no side effects on other capabilities
+
+### Files Changed
+- `src/api/Program.cs` — SystemCapabilitiesController capability detection logic
+- `src/tests/Farm.Web.Api.Tests/Integration/SystemCapabilitiesIntegrationTests.cs` — New regression test file
+
+### Validation
+- `/api/system/capabilities` now returns `slicingEnabled=true` in microservices mode
+- Slicer-host routing verified via nginx
+- All other capabilities reporting correctly
+
+### Impact
+Unblocked slicer UI visibility in Docker microservices deployments. Production deployment now shows slicer module to users.
+
+
+## 2026-04-05: 3D Models Page Missing STLs — Spawn as Backend Lead
+
+**Role:** Backend Architect
+**Status:** 🔍 Investigation spawned
+
+User reported STL uploads appear successful but files don't show on 3D Models page. Spawned Lambert for investigation of:
+
+1. Upload endpoint persistence (`POST /api/models/upload`)
+2. File persistence to disk/storage
+3. Database entries creation
+4. List endpoint contract (`GET /api/models`)
+5. Server logging and silent failures
+
+Working parallel with Ripley (frontend) and Kane (QA).
+
+**Key files to review:**
+- `src/api/Controllers/ModelsController.cs`
+- `src/infra/Services/ModelService.cs`
+- `src/infra/Data/Repository/ModelRepository.cs`
+- Upload logging and exception handling
+
+## 2026-04-04: Fixed 3D Models Not Appearing After Upload
+
+### Problem
+Users reported uploading .stl files successfully, but the 3D Models page showed no files.
+
+### Investigation
+- Traced data flow from upload endpoint (`/api/3d-models/upload` in `Model3DFilesController`) to listing endpoint (`/api/3d-models` GET)
+- Discovered the slicer module uses a **separate database context** (`SlicerDbContext`) with its own schema
+- Found that `SlicerDbContext` was never being initialized during application startup
+- `Models3D` table was never created, so uploads failed silently
+
+### Root Cause
 The main `AppDbContext` has initialization logic in `DatabaseInitializationExtensions.cs` that calls `EnsureCreated()` for SQLite, but `SlicerDbContext` had no initialization. The slicer module was loaded, controllers registered, but the database schema was missing.
 
 ### Fix
@@ -179,3 +229,5 @@ The frontend's `OrcaImportWizard` had a 4-step flow (upload → preview → revi
 - ✅ go2rtc stream initialization verified
 
 **Outcome:** go2rtc sidecar ready for RTSP-to-WebRTC transcoding. Bridge between Buddy/Prusa camera streams and frontend WebRTC viewers.
+
+**[Older entries archived on 2026-05-12 — see history.md for recent updates]**
