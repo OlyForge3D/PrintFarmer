@@ -540,6 +540,13 @@ public static class ServiceCollectionExtensions
         // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IGo2RtcService, Farm.Infrastructure.Services.Cameras.Go2RtcService>();
 
+        // Register camera snapshot service - captures snapshots on print events
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraSnapshotService, Farm.Infrastructure.Services.Cameras.CameraSnapshotService>();
+        _ = services.AddHttpClient("CameraSnapshot", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService, Farm.Infrastructure.Services.FailureDetection.FailureDetectionIncidentHistoryService>();
