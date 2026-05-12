@@ -341,6 +341,7 @@ internal static class ProgramHelpers
                 ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
                 settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
                 settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+                settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
                 app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
             }
             catch (Exception innerEx)

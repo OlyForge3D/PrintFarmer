@@ -213,6 +213,7 @@ public static class DatabaseInitializationExtensions
                 ISettingsInitializationService settingsInit = settingsScope.ServiceProvider.GetRequiredService<ISettingsInitializationService>();
                 settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
                 settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+                settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
                 logger.LogInformation("[Startup]   ✓ Settings initialized from environment");
             }
             catch (Exception ex)

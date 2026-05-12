@@ -537,6 +537,9 @@ public static class ServiceCollectionExtensions
         // Register CameraService from Infrastructure layer - standalone camera management service
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
 
+        // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IGo2RtcService, Farm.Infrastructure.Services.Cameras.Go2RtcService>();
+
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService, Farm.Infrastructure.Services.FailureDetection.FailureDetectionIncidentHistoryService>();

@@ -77,6 +77,8 @@ services:
       - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
+      - PFARM__Go2Rtc__Enabled=${PFARM__Go2Rtc__Enabled:-false}
+      - PFARM__Go2Rtc__BaseUrl=${PFARM__Go2Rtc__BaseUrl:-http://go2rtc:1984}
       # Required JWT signing key (32+ chars) for auth configuration
       - Jwt__Key=${Jwt__Key:-dev-super-secret-key-change-this-please-1234567890}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
