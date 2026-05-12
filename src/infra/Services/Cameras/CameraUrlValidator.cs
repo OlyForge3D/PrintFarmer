@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 
 namespace Farm.Infrastructure.Services.Cameras;
 
@@ -40,16 +41,66 @@ internal static class CameraUrlValidator
 
         if (IPAddress.TryParse(host, out IPAddress? ip))
         {
+            // Unwrap IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1) and
+            // treat them as plain IPv4 so the loopback/link-local checks below apply.
+            if (ip.IsIPv4MappedToIPv6)
+            {
+                ip = ip.MapToIPv4();
+            }
+
+            if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                // Loopback (::1)
+                if (IPAddress.IsLoopback(ip))
+                {
+                    return false;
+                }
+
+                // Link-local (fe80::/10)
+                if (ip.IsIPv6LinkLocal)
+                {
+                    return false;
+                }
+
+                // Site-local (fec0::/10, deprecated but still must be blocked)
+                if (ip.IsIPv6SiteLocal)
+                {
+                    return false;
+                }
+
+                // Multicast (ff00::/8)
+                if (ip.IsIPv6Multicast)
+                {
+                    return false;
+                }
+
+                // Unspecified (::)
+                if (ip.Equals(IPAddress.IPv6Any))
+                {
+                    return false;
+                }
+
+                // Unique-local (fc00::/7 — covers fc00::/8 and fd00::/8)
+                byte firstByte = ip.GetAddressBytes()[0];
+                if (firstByte == 0xfc || firstByte == 0xfd)
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            // IPv4 checks
             byte[] bytes = ip.GetAddressBytes();
 
             // Block IPv4 loopback range (127.0.0.0/8)
-            if (bytes.Length == 4 && bytes[0] == 127)
+            if (bytes[0] == 127)
             {
                 return false;
             }
 
             // Block link-local (169.254.x.x — cloud metadata endpoint range)
-            if (bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254)
+            if (bytes[0] == 169 && bytes[1] == 254)
             {
                 return false;
             }

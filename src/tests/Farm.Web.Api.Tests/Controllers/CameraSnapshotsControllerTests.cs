@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -321,10 +322,15 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         response.Content.Headers.ContentType?.MediaType.Should().Be("image/jpeg");
     }
 
-    // --- Future tests (require Lambert's path traversal fix) ---
-    // Once GetImageAsync validates that the resolved path stays within the snapshot root,
-    // add a test that seeds a CameraSnapshot with FilePath = "../../etc/passwd" and verifies
-    // the endpoint returns 400 Bad Request rather than serving the traversed file.
+    [Fact]
+    public async Task GetImage_WhenFilePathTraversesOutsideRoot_ReturnsBadRequest()
+    {
+        CameraSnapshot snapshot = await SeedSnapshotAsync(filePath: "../../etc/passwd");
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/snapshots/{snapshot.Id}/image");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
 
     #endregion
 
@@ -384,10 +390,15 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         File.Exists(fullPath).Should().BeFalse();
     }
 
-    // --- Future tests (require Lambert's path traversal fix) ---
-    // Once DeleteAsync validates that the resolved path stays within the snapshot root,
-    // add a test that seeds a CameraSnapshot with FilePath = "../../etc/passwd" and verifies
-    // the endpoint returns 400 Bad Request rather than attempting deletion.
+    [Fact]
+    public async Task Delete_WhenFilePathTraversesOutsideRoot_ReturnsBadRequest()
+    {
+        CameraSnapshot snapshot = await SeedSnapshotAsync(filePath: "../../etc/passwd");
+
+        HttpResponseMessage response = await _client!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
 
     #endregion
 }

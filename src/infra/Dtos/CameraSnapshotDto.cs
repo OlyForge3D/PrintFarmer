@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+namespace Farm.Infrastructure.Dtos;
 
 /// <summary>
 /// DTO for camera snapshot metadata (excludes file path for security).

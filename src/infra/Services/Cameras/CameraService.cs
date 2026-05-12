@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Cameras;
@@ -16,19 +18,23 @@ namespace Farm.Infrastructure.Services.Cameras;
 public class CameraService : ICameraService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly AppDbContext _db;
     private readonly ILogger<CameraService> _logger;
     private readonly IPrintersService _printersService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
+        AppDbContext db,
         ILogger<CameraService> logger,
         IPrintersService printersService)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
+        ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(printersService);
 
         _unitOfWork = unitOfWork;
+        _db = db;
         _logger = logger;
         _printersService = printersService;
     }
@@ -311,6 +317,20 @@ public class CameraService : ICameraService
             if (camera == null)
             {
                 return false;
+            }
+
+            // Pre-delete snapshot rows before removing the camera entity.
+            // The Camera→CameraSnapshot FK is Restrict, so EF Core will throw a FK
+            // violation if any snapshot rows still reference this camera when it is removed.
+            List<Domain.CameraSnapshot> snapshots = await _db.CameraSnapshots
+                .Where(s => s.CameraId == id)
+                .ToListAsync(ct);
+            if (snapshots.Count > 0)
+            {
+                _db.CameraSnapshots.RemoveRange(snapshots);
+                _logger.LogInformation(
+                    "Removing {Count} orphaned snapshot records for camera {CameraId}",
+                    snapshots.Count, id);
             }
 
             _unitOfWork.Cameras.Remove(camera);
