@@ -2778,7 +2778,7 @@ EOF
 DEPLOY_GO2RTC=yes
 GO2RTC_PORT=${GO2RTC_PORT:-1984}
 GO2RTC_RTSP_PORT=${GO2RTC_RTSP_PORT:-8554}
-GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:latest}
+GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
 EOF
     else
         echo -e "\n# go2rtc Camera Streaming\nDEPLOY_GO2RTC=no" >> "$CONFIG_FILE"
@@ -4121,7 +4121,7 @@ SPOOLMAN_IMAGE=${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}
 DEPLOY_GO2RTC=${DEPLOY_GO2RTC:-no}
 GO2RTC_PORT=${GO2RTC_PORT:-1984}
 GO2RTC_RTSP_PORT=${GO2RTC_RTSP_PORT:-8554}
-GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:latest}
+GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
 
 # Application Settings - PFARM Configuration
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}
@@ -4159,6 +4159,17 @@ PFARM__Platform__ThumbnailGenerationEnabled=false
 PFARM__Platform__Architecture=${SYSTEM_ARCH}
 EOF
         print_info "ARM platform overrides written to .env"
+    fi
+
+    # Append go2rtc API integration settings when the sidecar is enabled
+    if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
+        cat >> "$ENV_FILE" << EOF
+
+# go2rtc API Integration
+PFARM__Go2Rtc__Enabled=true
+PFARM__Go2Rtc__BaseUrl=http://go2rtc:1984
+EOF
+        print_info "go2rtc API integration settings written to .env"
     fi
 
     # Small summary for generated environment file: show which sensitive values were included

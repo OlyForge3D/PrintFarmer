@@ -9,7 +9,6 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -44,7 +43,7 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = _factory.CreateClient();
+        _client = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -53,23 +52,84 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
-    private async Task<CameraSnapshot> SeedSnapshotAsync(
-        Guid? printerId = null,
-        Guid? printJobId = null,
-        string eventType = "PrintStarted",
-        string? filePath = null)
+    private async Task<(Guid PrinterId, Guid CameraId)> SeedPrinterAndCameraAsync()
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = $"Test Mfr {uniqueSuffix}" };
+        db.Manufacturers.Add(manufacturer);
+        await db.SaveChangesAsync();
+
+        var model = new PrinterModel { Id = Guid.NewGuid(), Name = $"Test Model {uniqueSuffix}", ManufacturerId = manufacturer.Id };
+        db.PrinterModels.Add(model);
+        await db.SaveChangesAsync();
+
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = $"printer-{Guid.NewGuid():N}",
+            ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
+            ManufacturerId = manufacturer.Id,
+            ModelId = model.Id,
+        };
+        db.Printers.Add(printer);
+        await db.SaveChangesAsync();
+
+        var camera = new Camera
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Camera",
+            PrinterId = printer.Id,
+            IsEnabled = true,
+        };
+        db.Cameras.Add(camera);
+        await db.SaveChangesAsync();
+
+        return (printer.Id, camera.Id);
+    }
+
+    private async Task<CameraSnapshot> SeedSnapshotAsync(
+        Guid? printerId = null,
+        Guid? cameraId = null,
+        Guid? printJobId = null,
+        string eventType = "PrintStarted",
+        string? filePath = null)
+    {
+        if (printerId is null || cameraId is null)
+        {
+            var (pid, cid) = await SeedPrinterAndCameraAsync();
+            printerId ??= pid;
+            cameraId ??= cid;
+        }
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        if (printJobId.HasValue)
+        {
+            bool jobExists = await db.Set<PrintJob>().AnyAsync(j => j.Id == printJobId.Value);
+            if (!jobExists)
+            {
+                db.Set<PrintJob>().Add(new PrintJob
+                {
+                    Id = printJobId.Value,
+                    Name = "Test Job",
+                    Status = PrintJobStatus.Queued,
+                });
+                await db.SaveChangesAsync();
+            }
+        }
+
         var snapshot = new CameraSnapshot
         {
             Id = Guid.NewGuid(),
-            PrinterId = printerId ?? Guid.NewGuid(),
-            CameraId = Guid.NewGuid(),
+            PrinterId = printerId.Value,
+            CameraId = cameraId.Value,
             PrintJobId = printJobId,
             EventType = eventType,
-            FilePath = filePath ?? $"printer-id/{Guid.NewGuid()}/snapshot.jpg",
+            FilePath = filePath ?? $"{printerId}/{Guid.NewGuid():N}/snapshot.jpg",
             CapturedAt = DateTime.UtcNow,
             FileSizeBytes = 1024,
         };
@@ -85,8 +145,9 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     public async Task GetByPrintJob_WithMatchingSnapshots_ReturnsOkWithSnapshots()
     {
         var printJobId = Guid.NewGuid();
-        await SeedSnapshotAsync(printJobId: printJobId, eventType: "PrintStarted");
-        await SeedSnapshotAsync(printJobId: printJobId, eventType: "PrintCompleted");
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
+        await SeedSnapshotAsync(printerId: printerId, cameraId: cameraId, printJobId: printJobId, eventType: "PrintStarted");
+        await SeedSnapshotAsync(printerId: printerId, cameraId: cameraId, printJobId: printJobId, eventType: "PrintCompleted");
         await SeedSnapshotAsync(); // different job — should not appear
 
         HttpResponseMessage response = await _client!.GetAsync($"/api/snapshots/by-job/{printJobId}");
@@ -124,20 +185,24 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     public async Task GetByPrintJob_SnapshotsOrderedByAscendingCapturedAt()
     {
         var printJobId = Guid.NewGuid();
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        db.Set<PrintJob>().Add(new PrintJob { Id = printJobId, Name = "Test Job", Status = PrintJobStatus.Queued });
+        await db.SaveChangesAsync();
+
         var first = new CameraSnapshot
         {
-            Id = Guid.NewGuid(), PrinterId = Guid.NewGuid(), CameraId = Guid.NewGuid(),
+            Id = Guid.NewGuid(), PrinterId = printerId, CameraId = cameraId,
             PrintJobId = printJobId, EventType = "PrintStarted",
-            FilePath = "a/b/c.jpg", CapturedAt = DateTime.UtcNow.AddMinutes(-5),
+            FilePath = $"{printerId}/c.jpg", CapturedAt = DateTime.UtcNow.AddMinutes(-5),
         };
         var second = new CameraSnapshot
         {
-            Id = Guid.NewGuid(), PrinterId = Guid.NewGuid(), CameraId = Guid.NewGuid(),
+            Id = Guid.NewGuid(), PrinterId = printerId, CameraId = cameraId,
             PrintJobId = printJobId, EventType = "PrintCompleted",
-            FilePath = "a/b/d.jpg", CapturedAt = DateTime.UtcNow,
+            FilePath = $"{printerId}/d.jpg", CapturedAt = DateTime.UtcNow,
         };
         db.CameraSnapshots.AddRange(second, first); // inserted out of order intentionally
         await db.SaveChangesAsync();
@@ -156,9 +221,9 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetByPrinter_WithMatchingSnapshots_ReturnsOkWithSnapshots()
     {
-        var printerId = Guid.NewGuid();
-        await SeedSnapshotAsync(printerId: printerId);
-        await SeedSnapshotAsync(printerId: printerId);
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
+        await SeedSnapshotAsync(printerId: printerId, cameraId: cameraId);
+        await SeedSnapshotAsync(printerId: printerId, cameraId: cameraId);
         await SeedSnapshotAsync(); // different printer
 
         HttpResponseMessage response = await _client!.GetAsync($"/api/snapshots/by-printer/{printerId}");
@@ -173,10 +238,10 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetByPrinter_RespectsLimitQueryParameter()
     {
-        var printerId = Guid.NewGuid();
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
         for (int i = 0; i < 5; i++)
         {
-            await SeedSnapshotAsync(printerId: printerId);
+            await SeedSnapshotAsync(printerId: printerId, cameraId: cameraId);
         }
 
         HttpResponseMessage response = await _client!.GetAsync($"/api/snapshots/by-printer/{printerId}?limit=2");
@@ -189,10 +254,10 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetByPrinter_RespectsOffsetQueryParameter()
     {
-        var printerId = Guid.NewGuid();
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
         for (int i = 0; i < 3; i++)
         {
-            await SeedSnapshotAsync(printerId: printerId);
+            await SeedSnapshotAsync(printerId: printerId, cameraId: cameraId);
         }
 
         HttpResponseMessage response = await _client!.GetAsync($"/api/snapshots/by-printer/{printerId}?limit=10&offset=2");
@@ -227,12 +292,13 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetImage_WhenFileExists_ReturnsJpegContent()
     {
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var storagePath = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
 
         string snapshotRoot = storagePath.GetSnapshotStorageDirectory();
-        string relativePath = Path.Combine("test-printer", "snapshot.jpg");
+        string relativePath = Path.Combine($"{printerId}", "snapshot.jpg");
         string fullPath = Path.Combine(snapshotRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllBytesAsync(fullPath, [0xFF, 0xD8, 0xFF, 0xE0]); // JPEG magic bytes
@@ -240,8 +306,8 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         var snapshot = new CameraSnapshot
         {
             Id = Guid.NewGuid(),
-            PrinterId = Guid.NewGuid(),
-            CameraId = Guid.NewGuid(),
+            PrinterId = printerId,
+            CameraId = cameraId,
             EventType = "PrintStarted",
             FilePath = relativePath,
             CapturedAt = DateTime.UtcNow,
@@ -290,12 +356,13 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WhenFileExistsOnDisk_DeletesFile()
     {
+        var (printerId, cameraId) = await SeedPrinterAndCameraAsync();
         await using AsyncServiceScope setupScope = _factory.Services.CreateAsyncScope();
         var db = setupScope.ServiceProvider.GetRequiredService<AppDbContext>();
         var storagePath = setupScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
 
         string snapshotRoot = storagePath.GetSnapshotStorageDirectory();
-        string relativePath = Path.Combine("to-delete", "snapshot.jpg");
+        string relativePath = Path.Combine($"{printerId}", "snapshot.jpg");
         string fullPath = Path.Combine(snapshotRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllBytesAsync(fullPath, [0xFF, 0xD8]);
@@ -303,8 +370,8 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         var snapshot = new CameraSnapshot
         {
             Id = Guid.NewGuid(),
-            PrinterId = Guid.NewGuid(),
-            CameraId = Guid.NewGuid(),
+            PrinterId = printerId,
+            CameraId = cameraId,
             EventType = "PrintStarted",
             FilePath = relativePath,
             CapturedAt = DateTime.UtcNow,

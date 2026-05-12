@@ -8,11 +8,11 @@
 # Environment Variables:
 #   GO2RTC_PORT       - Host port for go2rtc API/WebRTC (default: 1984)
 #   GO2RTC_RTSP_PORT  - Host port for RTSP relay (default: 8554)
-#   GO2RTC_IMAGE      - Container image (default: alexxit/go2rtc:latest)
+#   GO2RTC_IMAGE      - Container image (default: alexxit/go2rtc:1.9.8)
 
 services:
   go2rtc:
-    image: ${GO2RTC_IMAGE:-alexxit/go2rtc:latest}
+    image: ${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
     container_name: printfarmer-go2rtc
     restart: unless-stopped
     ports:
