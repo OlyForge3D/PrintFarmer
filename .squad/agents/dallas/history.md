@@ -111,3 +111,20 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 - PFarm1-3sbh (RTSP health probe) ✅ Implemented by Lambert
 - PFarm1-y3n1 (Event snapshots) — Feature-ready when Lambert completes
 - PFarm1-lzf0 (go2rtc sidecar) — Snapshot URL integration available post-go2rtc
+
+## Session: go2rtc Deployment Integration Analysis (2026-05-12)
+
+**Role:** Lead/Architect  
+**Status:** Analysis complete, decision written
+
+### Key Findings
+
+- `docker-compose.go2rtc.yml` template exists but is **not wired** into either `deploy-docker.sh` or `compose-generator.sh`
+- Neither script references go2rtc — the template is inert without code changes
+- Compose assembly uses `INCLUDE_*` booleans + `merge_addon_services()` for opt-in services (Spoolman, Obico ML pattern)
+- Recommended approach: `--include-go2rtc` opt-in flag in both scripts, matching existing addon pattern
+- ~30 min implementation effort; no architectural changes needed
+
+### Decision Record
+
+- **File:** `.squad/decisions/inbox/dallas-go2rtc-deployment.md`
