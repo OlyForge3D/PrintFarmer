@@ -52,6 +52,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Initializes a new instance of the PrintersService with all required dependencies.
 /// </remarks>
 /// <param name="unitOfWork">Unit of Work for database operations</param>
+/// <param name="db">Application DbContext used for snapshot pre-deletion</param>
 /// <param name="backendFactory">Factory for creating backend clients</param>
 /// <param name="capabilityFactory">Factory for checking backend capabilities</param>
 /// <param name="catalogService">Service for manufacturer/model lookups</param>
@@ -68,6 +69,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
+    AppDbContext db,
     IBackendClientFactory backendFactory,
     IBackendCapabilityFactory capabilityFactory,
     Catalog.ICatalogService catalogService,
@@ -83,6 +85,7 @@ public class PrintersService(
     Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
     private readonly IBackendClientFactory _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
@@ -4098,6 +4101,21 @@ public class PrintersService(
             if (existing != null)
             {
                 await _go2RtcService.RemoveStreamAsync(existing.Id, ct);
+
+                // Pre-delete snapshot rows before removing the camera entity.
+                // Camera→CameraSnapshot FK is Restrict, so SaveChanges would throw
+                // if any snapshot rows still reference this camera when it is removed.
+                List<Domain.CameraSnapshot> snapshots = await _db.CameraSnapshots
+                    .Where(s => s.CameraId == existing.Id)
+                    .ToListAsync(ct);
+                if (snapshots.Count > 0)
+                {
+                    _db.CameraSnapshots.RemoveRange(snapshots);
+                    _logger.LogInformation(
+                        "[BuddyCamera] Removing {Count} snapshot records for camera {CameraId} before deletion",
+                        snapshots.Count, existing.Id);
+                }
+
                 _unitOfWork.Cameras.Remove(existing);
                 _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
             }
