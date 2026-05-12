@@ -21,7 +21,7 @@ public class CameraSnapshotConfiguration : IEntityTypeConfiguration<CameraSnapsh
         _ = builder.HasOne(s => s.Camera)
             .WithMany()
             .HasForeignKey(s => s.CameraId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Restrict);
 
         _ = builder.HasOne(s => s.PrintJob)
             .WithMany()

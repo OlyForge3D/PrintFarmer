@@ -14,6 +14,7 @@ using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Api.Services.PrintQueue;
 
@@ -33,7 +34,8 @@ public class PrintJobManagementService(
     IRetryService? retryService = null,
     IPrinterStatusRefreshService? printerStatusRefreshService = null,
     IJobCostCalculationService? jobCostCalculationService = null,
-    ICameraSnapshotService? cameraSnapshotService = null) : IPrintJobManagementService
+    ICameraSnapshotService? cameraSnapshotService = null,
+    IServiceScopeFactory? serviceScopeFactory = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -47,6 +49,7 @@ public class PrintJobManagementService(
     private readonly IPrinterStatusRefreshService? _printerStatusRefreshService = printerStatusRefreshService;
     private readonly IJobCostCalculationService? _jobCostCalculationService = jobCostCalculationService;
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
+    private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
 
     // ============= QUERY OPERATIONS =============
 
@@ -749,21 +752,27 @@ public class PrintJobManagementService(
             {
                 await SendJobStartNotificationAsync(job, cancellationToken);
 
-                // Capture camera snapshot on print start (fire-and-forget)
-                if (_cameraSnapshotService is not null && job.AssignedPrinterId.HasValue)
+                // Capture camera snapshot on print start (true fire-and-forget in background scope)
+                if (_cameraSnapshotService is not null && _serviceScopeFactory is not null && job.AssignedPrinterId.HasValue)
                 {
-                    try
+                    Guid captureForPrinter = job.AssignedPrinterId.Value;
+                    Guid captureForJob = job.Id;
+                    _ = Task.Run(async () =>
                     {
-                        await _cameraSnapshotService.CaptureSnapshotAsync(
-                            job.AssignedPrinterId.Value, "PrintStarted", job.Id, cancellationToken);
-                    }
-                    catch (Exception snapEx)
-                    {
-                    _logger.LogWarning(
-                        snapEx,
-                        "[PrintJobManagementService] Failed to capture start snapshot for printer {PrinterId}",
-                        job.AssignedPrinterId.Value);
-                    }
+                        try
+                        {
+                            using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                            ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                            await svc.CaptureSnapshotAsync(captureForPrinter, "PrintStarted", captureForJob, CancellationToken.None);
+                        }
+                        catch (Exception snapEx)
+                        {
+                            _logger.LogWarning(
+                                snapEx,
+                                "[PrintJobManagementService] Background snapshot capture failed for printer {PrinterId}",
+                                captureForPrinter);
+                        }
+                    });
                 }
 
                 // Fire-and-forget: query Moonraker for fresh state and broadcast via SignalR.

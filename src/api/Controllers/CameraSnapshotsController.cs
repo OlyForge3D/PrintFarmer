@@ -1,3 +1,4 @@
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -57,6 +58,8 @@ public class CameraSnapshotsController(
         [FromQuery] int offset = 0,
         CancellationToken ct = default)
     {
+        limit = Math.Clamp(limit, 1, 200);
+        offset = Math.Max(offset, 0);
         List<CameraSnapshotDto> snapshots = await _db.CameraSnapshots
             .Where(s => s.PrinterId == printerId)
             .OrderByDescending(s => s.CapturedAt)
@@ -92,6 +95,16 @@ public class CameraSnapshotsController(
         string snapshotRoot = _storagePathService.GetSnapshotStorageDirectory();
         string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
 
+        // Prevent path traversal: canonicalize and verify containment
+        string canonicalRoot = Path.GetFullPath(snapshotRoot);
+        string canonicalFull = Path.GetFullPath(fullPath);
+        if (!canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !canonicalFull.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("[CameraSnapshots] Path traversal attempt blocked for snapshot {SnapshotId}", snapshotId);
+            return BadRequest("Invalid snapshot path.");
+        }
+
         if (!System.IO.File.Exists(fullPath))
         {
             _logger.LogWarning("[CameraSnapshots] Snapshot file not found on disk: {Path}", fullPath);
@@ -117,6 +130,17 @@ public class CameraSnapshotsController(
         // Delete file from disk
         string snapshotRoot = _storagePathService.GetSnapshotStorageDirectory();
         string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
+
+        // Prevent path traversal: canonicalize and verify containment
+        string canonicalRoot = Path.GetFullPath(snapshotRoot);
+        string canonicalFull = Path.GetFullPath(fullPath);
+        if (!canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !canonicalFull.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("[CameraSnapshots] Path traversal attempt blocked for snapshot {SnapshotId}", snapshotId);
+            return BadRequest("Invalid snapshot path.");
+        }
+
         if (System.IO.File.Exists(fullPath))
         {
             System.IO.File.Delete(fullPath);
@@ -127,24 +151,4 @@ public class CameraSnapshotsController(
 
         return NoContent();
     }
-}
-
-/// <summary>
-/// DTO for camera snapshot metadata (excludes file path for security).
-/// </summary>
-public class CameraSnapshotDto
-{
-    public Guid Id { get; set; }
-
-    public Guid PrinterId { get; set; }
-
-    public Guid CameraId { get; set; }
-
-    public Guid? PrintJobId { get; set; }
-
-    public string EventType { get; set; } = string.Empty;
-
-    public DateTime CapturedAt { get; set; }
-
-    public long? FileSizeBytes { get; set; }
 }

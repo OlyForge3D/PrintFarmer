@@ -63,13 +63,18 @@ public class CameraSnapshotService : ICameraSnapshotService
 
         using HttpClient httpClient = _httpClientFactory.CreateClient("CameraSnapshot");
 
+        var captured = new List<CameraSnapshot>();
         foreach (Camera camera in snapshotCameras)
         {
             try
             {
-                await CaptureFromCameraAsync(
+                CameraSnapshot? snapshot = await CaptureFromCameraAsync(
                     httpClient, camera, printerId, printJobId, eventType,
                     snapshotRoot, timestamp, ct);
+                if (snapshot is not null)
+                {
+                    captured.Add(snapshot);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -79,9 +84,15 @@ public class CameraSnapshotService : ICameraSnapshotService
                     camera.Id, camera.Name, printerId, eventType);
             }
         }
+
+        if (captured.Count > 0)
+        {
+            _db.CameraSnapshots.AddRange(captured);
+            await _db.SaveChangesAsync(ct);
+        }
     }
 
-    private async Task CaptureFromCameraAsync(
+    private async Task<CameraSnapshot?> CaptureFromCameraAsync(
         HttpClient httpClient,
         Camera camera,
         Guid printerId,
@@ -94,6 +105,15 @@ public class CameraSnapshotService : ICameraSnapshotService
         _logger.LogDebug(
             "[CameraSnapshot] Capturing snapshot from camera {CameraId} ({CameraName}) on event {EventType}",
             camera.Id, camera.Name, eventType);
+
+        // Reject unsafe URLs before making any outbound request (SSRF prevention)
+        if (string.IsNullOrWhiteSpace(camera.SnapshotUrl) || !CameraUrlValidator.IsUrlSafeForProbing(camera.SnapshotUrl))
+        {
+            _logger.LogWarning(
+                "[CameraSnapshot] Blocked unsafe or empty snapshot URL for camera {CameraId}: {Url}",
+                camera.Id, camera.SnapshotUrl);
+            return null;
+        }
 
         // Build the storage path: snapshots/{printerId}/{jobId}/{timestamp}_{eventType}_{cameraId}.jpg
         string printerDir = printerId.ToString();
@@ -118,8 +138,11 @@ public class CameraSnapshotService : ICameraSnapshotService
         await response.Content.CopyToAsync(fileStream, ct);
         long fileSize = fileStream.Length;
 
-        // Create tracking record
-        var snapshot = new CameraSnapshot
+        _logger.LogInformation(
+            "[CameraSnapshot] Captured snapshot from camera {CameraName} for printer {PrinterId} on {EventType} ({FileSize} bytes). Path: {FilePath}",
+            camera.Name, printerId, eventType, fileSize, relativePath);
+
+        return new CameraSnapshot
         {
             Id = Guid.NewGuid(),
             PrinterId = printerId,
@@ -130,12 +153,5 @@ public class CameraSnapshotService : ICameraSnapshotService
             CapturedAt = DateTime.UtcNow,
             FileSizeBytes = fileSize,
         };
-
-        _db.CameraSnapshots.Add(snapshot);
-        await _db.SaveChangesAsync(ct);
-
-        _logger.LogInformation(
-            "[CameraSnapshot] Captured snapshot from camera {CameraName} for printer {PrinterId} on {EventType} ({FileSize} bytes). Path: {FilePath}",
-            camera.Name, printerId, eventType, fileSize, relativePath);
     }
 }
