@@ -4,6 +4,7 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
@@ -31,7 +32,8 @@ public class PrintJobManagementService(
     INotificationService? notificationService = null,
     IRetryService? retryService = null,
     IPrinterStatusRefreshService? printerStatusRefreshService = null,
-    IJobCostCalculationService? jobCostCalculationService = null) : IPrintJobManagementService
+    IJobCostCalculationService? jobCostCalculationService = null,
+    ICameraSnapshotService? cameraSnapshotService = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -44,6 +46,7 @@ public class PrintJobManagementService(
     private readonly IRetryService? _retryService = retryService;
     private readonly IPrinterStatusRefreshService? _printerStatusRefreshService = printerStatusRefreshService;
     private readonly IJobCostCalculationService? _jobCostCalculationService = jobCostCalculationService;
+    private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
 
     // ============= QUERY OPERATIONS =============
 
@@ -745,6 +748,23 @@ public class PrintJobManagementService(
             if (job.Status == PrintJobStatus.Printing)
             {
                 await SendJobStartNotificationAsync(job, cancellationToken);
+
+                // Capture camera snapshot on print start (fire-and-forget)
+                if (_cameraSnapshotService is not null && job.AssignedPrinterId.HasValue)
+                {
+                    try
+                    {
+                        await _cameraSnapshotService.CaptureSnapshotAsync(
+                            job.AssignedPrinterId.Value, "PrintStarted", job.Id, cancellationToken);
+                    }
+                    catch (Exception snapEx)
+                    {
+                    _logger.LogWarning(
+                        snapEx,
+                        "[PrintJobManagementService] Failed to capture start snapshot for printer {PrinterId}",
+                        job.AssignedPrinterId.Value);
+                    }
+                }
 
                 // Fire-and-forget: query Moonraker for fresh state and broadcast via SignalR.
                 // This eliminates the UI delay when the subscription is in HTTP polling fallback mode.

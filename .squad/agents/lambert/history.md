@@ -197,3 +197,37 @@ The frontend's `OrcaImportWizard` had a 4-step flow (upload → preview → revi
 **Key learnings**:
 - Positional records with default `null` parameters are backward-compatible additions
 - Other backends (Moonraker, OctoPrint, FlashForge, SDCP) don't currently expose speed multiplier through their status pipelines — field will be null for those
+
+---
+
+### Event-Driven Camera Snapshots (PFarm1-y3n1)
+
+**What**: Implemented event-driven camera snapshot capture on print start, complete, and fail events. Snapshots are fetched from camera SnapshotUrl, stored on filesystem, and tracked in the database with print job association.
+
+**Files created**:
+- `src/infra/Domain/CameraSnapshot.cs` — Entity with PrinterId, CameraId, PrintJobId, EventType, FilePath, CapturedAt, FileSizeBytes
+- `src/infra/Services/Cameras/ICameraSnapshotService.cs` — Interface with `CaptureSnapshotAsync(printerId, eventType, printJobId)`
+- `src/infra/Services/Cameras/CameraSnapshotService.cs` — Implementation: fetches JPEG via named "CameraSnapshot" HttpClient, stores to `{snapshotRoot}/{printerId}/{jobId}/{timestamp}_{event}_{cameraId}.jpg`
+- `src/infra/Data/Configurations/CameraSnapshotConfiguration.cs` — EF Core fluent config with indexes and FK behaviors
+- `src/api/Controllers/CameraSnapshotsController.cs` — API endpoints: `GET by-job/{id}`, `GET by-printer/{id}`, `GET {id}/image`, `DELETE {id}`
+
+**Files modified**:
+- `src/infra/Data/AppDbContext.cs` — Added `DbSet<CameraSnapshot>`
+- `src/infra/Services/StorageManagement/IStoragePathService.cs` — Added `GetSnapshotStorageDirectory()`
+- `src/infra/Services/StorageManagement/StoragePathService.cs` — Implemented snapshot dir (env: SNAPSHOT_STORAGE_PATH, config: STORAGE_PATHS:SNAPSHOTS, default: {content}/snapshots)
+- `src/infra/Services/Printers/PrintJobCompletionService.cs` — Added ICameraSnapshotService as optional dep; captures on PrintCompleted and PrintFailed
+- `src/api/Services/PrintQueue/PrintJobManagementService.cs` — Added ICameraSnapshotService as optional dep; captures on PrintStarted
+- `src/api/Infrastructure/ServiceCollectionExtensions.cs` — Registered ICameraSnapshotService + named HttpClient "CameraSnapshot" (10s timeout)
+
+**Architecture decisions**:
+- Optional nullable constructor parameter pattern (consistent with existing deps like INotificationService, IAutoTagService)
+- Fire-and-forget with try/catch — snapshot failure never blocks print status updates
+- Named HttpClient "CameraSnapshot" with 10s timeout for snapshot fetching
+- Filesystem storage path follows existing IStoragePathService pattern (env var → config → default)
+- CameraSnapshotDto excludes FilePath for security; image served via dedicated endpoint
+
+**Key learnings**:
+- AppDbContext uses `ApplyConfigurationsFromAssembly` — must create IEntityTypeConfiguration<T> for entity to get indexes/FK behaviors
+- DbSet alone creates table but without configured indexes or delete behaviors
+- Controller methods returning Task must have Async suffix (VSTHRD200 analyzer enforced as error)
+- PrintJobCompletionService has 12+ optional deps — adding one more follows established pattern cleanly

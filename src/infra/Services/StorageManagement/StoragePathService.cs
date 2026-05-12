@@ -103,6 +103,26 @@ public class StoragePathService(
         return defaultPath;
     }
 
+    public string GetSnapshotStorageDirectory()
+    {
+        // Check environment variable first (Docker/K8s deployments)
+        string? envPath = Environment.GetEnvironmentVariable("SNAPSHOT_STORAGE_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath))
+        {
+            return envPath;
+        }
+
+        // Check configuration
+        string? configPath = _configuration.GetValue<string>("STORAGE_PATHS:SNAPSHOTS");
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            return configPath;
+        }
+
+        // Default: local development path
+        return Path.Combine(_pathProvider.GetContentRootPath(), "snapshots");
+    }
+
     public async Task EnsureDirectoriesExistAsync()
     {
         try
@@ -112,7 +132,8 @@ public class StoragePathService(
                 GetGcodeStorageDirectory(),
                 GetThumbnailDirectory(),
                 GetModelUploadDirectory(),
-                GetSlicerProfilesDirectory()
+                GetSlicerProfilesDirectory(),
+                GetSnapshotStorageDirectory()
             };
 
             foreach (string? dir in directories)

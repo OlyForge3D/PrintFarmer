@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
@@ -32,6 +33,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IDiagnosticChannelService? _diagnostics;
     private readonly IJobCostCalculationService? _jobCostCalculationService;
     private readonly IAutoTagService? _autoTagService;
+    private readonly ICameraSnapshotService? _cameraSnapshotService;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -93,7 +95,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IAutoDispatchTrigger? autoDispatchTrigger = null,
         IDiagnosticChannelService? diagnostics = null,
         IJobCostCalculationService? jobCostCalculationService = null,
-        IAutoTagService? autoTagService = null)
+        IAutoTagService? autoTagService = null,
+        ICameraSnapshotService? cameraSnapshotService = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -107,6 +110,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _diagnostics = diagnostics;
         _jobCostCalculationService = jobCostCalculationService;
         _autoTagService = autoTagService;
+        _cameraSnapshotService = cameraSnapshotService;
     }
 
     /// <summary>
@@ -238,6 +242,19 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
+        // Capture camera snapshots (fire-and-forget — never blocks completion)
+        if (_cameraSnapshotService is not null)
+        {
+            try
+            {
+                await _cameraSnapshotService.CaptureSnapshotAsync(printerId, "PrintCompleted", primaryJob.Id, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to capture completion snapshot for printer {PrinterId}", printerId);
+            }
+        }
+
         // Send notification if configured
         if (_notificationService != null)
         {
@@ -336,6 +353,19 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
+
+        // Capture camera snapshots on failure (fire-and-forget)
+        if (_cameraSnapshotService is not null)
+        {
+            try
+            {
+                await _cameraSnapshotService.CaptureSnapshotAsync(printerId, "PrintFailed", primaryJob.Id, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to capture failure snapshot for printer {PrinterId}", printerId);
+            }
+        }
 
         return true;
     }
