@@ -727,6 +727,8 @@ export interface UpdatePrinterDto {
   wattage?: number;
   /** Per-printer machine hourly rate override for cost tracking. */
   machineHourlyRate?: number;
+  /** IP address or hostname of a Prusa Buddy camera. Server auto-creates/removes a Camera entity. */
+  buddyCameraIp?: string;
   // Z-offset calibration
   /** Calibrated Z-offset in mm. Negative values move the nozzle closer to the bed. */
   zOffsetMm?: number;
@@ -1254,6 +1256,8 @@ export interface PrinterDetails {
   hasCatalogUpdate?: boolean;
   /** Whether this printer inherits dispatch settings from its model. */
   useModelDispatchDefaults?: boolean;
+  /** IP address or hostname of a Prusa Buddy camera associated with this printer. */
+  buddyCameraIp?: string;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }

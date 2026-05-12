@@ -95,6 +95,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         useModelDispatchDefaults: printerDetails.useModelDispatchDefaults ?? true,
         wattage: printerDetails.wattage ?? undefined,
         machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
+        buddyCameraIp: printerDetails.buddyCameraIp ?? undefined,
       };
       
       setFormData(initialFormData);
@@ -181,7 +182,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
       'backendPort', 'frontendPort', 'obicoEnabled', 'useModelDispatchDefaults',
-      'wattage', 'machineHourlyRate'
+      'wattage', 'machineHourlyRate', 'buddyCameraIp'
     ];
     
     for (const field of fields) {
@@ -1074,6 +1075,23 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                     title="Static image snapshot URL (JPEG)"
                   />
                 </FormField>
+                {formData.backend === PrinterBackend.PrusaLink && (
+                  <FormField label="Buddy Camera IP" htmlFor="buddy-camera-ip">
+                    <Input
+                      id="buddy-camera-ip"
+                      type="text"
+                      value={formData.buddyCameraIp || ''}
+                      onChange={e => handleInputChange('buddyCameraIp', e.target.value || undefined)}
+                      placeholder="192.168.1.100"
+                      title="IP address of the Prusa Buddy board camera"
+                    />
+                    {formData.buddyCameraIp && (
+                      <p className="mt-1 text-xs text-pf-text-secondary">
+                        RTSP URL: <code className="bg-pf-surface-secondary px-1 rounded">rtsp://{formData.buddyCameraIp}:554/live/</code>
+                      </p>
+                    )}
+                  </FormField>
+                )}
               </div>
             </div>
             
