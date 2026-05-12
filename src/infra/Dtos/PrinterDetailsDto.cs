@@ -38,4 +38,5 @@ public record PrinterDetailsDto(
     bool HasCatalogUpdate = false,
     decimal? ZOffsetMm = null,
     DateTime? LastZOffsetCalibrationAt = null,
-    bool UseModelDispatchDefaults = true);
+    bool UseModelDispatchDefaults = true,
+    string? BuddyCameraIp = null);

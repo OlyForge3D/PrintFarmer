@@ -259,3 +259,5 @@
 {"id":"int-02648d62","kind":"field_change","created_at":"2026-05-03T19:38:47.24254Z","actor":"Jeff Papiez","issue_id":"PFarm1-31xj","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-9bc73ffc","kind":"field_change","created_at":"2026-05-12T18:43:19.009931Z","actor":"Jeff Papiez","issue_id":"PFarm1-3hp6","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-dfbd1034","kind":"field_change","created_at":"2026-05-12T18:46:09.280651Z","actor":"Jeff Papiez","issue_id":"PFarm1-mx5p","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Endpoint already exists in Spoolman fork and works correctly. No changes needed."}}
+{"id":"int-7ba4cc30","kind":"field_change","created_at":"2026-05-12T19:08:37.33996Z","actor":"Jeff Papiez","issue_id":"PFarm1-873d","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-f33f074d","kind":"field_change","created_at":"2026-05-12T19:08:47.699658Z","actor":"Jeff Papiez","issue_id":"PFarm1-3sbh","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
