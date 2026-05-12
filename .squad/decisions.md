@@ -96,2154 +96,248 @@ NewSliceJobPage uses cascading selectors (Printer → Machine Profile → Filame
 
 ---
 
-## 3. Obico ml_api wget Switch — Build Reliability Fix (APPROVED)
-
-**Date:** 2026-03-25  
-**Author:** Parker (DevOps)  
-**Status:** APPROVED — Implemented  
-**Urgency:** High (blocking ml_api rebuilds)
-
-### Problem
-
-The `ml_api` runtime Dockerfile was failing during model downloads with `/bin/sh: 1: curl: not found`. The runtime image extends `thespaghettidetective/ml_api_base:1.4`, which does not reliably ship `curl`.
-
-### Decision
-
-Switch model downloads in `ml_api/Dockerfile` from `curl` to `wget`.
-
-### Why
-
-- `ml_api_base` Dockerfiles (both `Dockerfile.base_amd64` and `Dockerfile.base_arm64`) explicitly install `wget`
-- `wget` is guaranteed available in the published runtime base image
-- Using `wget` removes hidden tooling assumptions and fixes rebuild failures
-- This is safer than adding a new package to the runtime Dockerfile—it aligns with the base-image contract already in use
-
-### Evidence
-
-- Local validation: `docker build ./ml_api` ✅
-- Local validation: `docker compose build ml_api` ✅
-- Image inspection: model files correctly downloaded into `/model_cache/ml_api/...` ✅
-
-### Implementation
-
-**Commit:** 6efe08e176059d57f01bf00ce9dffc16bf7cb00e  
-**Branch:** release (obico-server)  
-**Message:** fix: Switch ml_api model downloads from curl to wget
-
-**Operational Impact:** ml_api rebuilds work again without changing the published base image or runtime behavior.
-
----
-
-## 4. Failure Detection Timeline — Recommendation Against (Ready for Decision)
-
-**Date:** 2026-03-27  
-**Author:** Dallas (Lead)  
-**Status:** RECOMMENDATION — Ready for team decision  
-**Urgency:** Medium (clarifies UX scope for Ripley + Lambert)
-
-### Context
-
-Ripley (Frontend) is implementing failure-detection UX. User asked: "Can we not have a timeline view somehow?"
-
-Failure detection is **not** a historical audit log like printer job history. It's a **real-time monitoring lifecycle**: state transitions (disabled → idle → monitoring → error), outcome events (healthy scan → failure detected → auto-paused), and status explanations.
-
-### Problem Statement
-
-Timeline views imply historical scrollable event logs. Failure detection doesn't fit that model because:
-
-1. **Single-printer scope:** Failure detection is per-printer, per-job. The modal already shows "last scan", "last failure", "last auto-pause"—three anchoring points in time.
-2. **In-memory state machine:** PrintFailureMonitorService updates in-memory `FailureDetectionPrinterStatusDto` every scan cycle (30s default). No persistence layer. We don't store historical scan records.
-3. **Real-time not historical:** Operators care about "is this printer being watched NOW" and "what was the LAST outcome?" Not "show me all scans from the past 2 hours."
-4. **Modal design is sufficient:** The `FailureDetectionStatusModal` already presents:
-   - Current state + reason
-   - Coverage source (global, pooled, or none)
-   - Watching (snapshot URL)
-   - Last scan timestamp
-   - Latest outcome (failure vs. healthy)
-   - Last failure timestamp
-   - Auto-pause action (triggered or not)
-   - Operator next step
-
-### Recommendation
-
-**Do NOT implement a timeline view.** Current modal + header badge pattern is fit-for-purpose.
-
-#### Reasoning
-
-1. **No data exists to visualize.** The backend doesn't persist scan history; it tracks only the last result per printer. Building a timeline would require:
-   - Database schema change (scan history table)
-   - Service layer persistence
-   - API endpoint for historical queries
-   - Frontend pagination/filtering UI
-   - All for a use case that doesn't exist.
-
-2. **Workflow fit.** Operators interact with failure detection through:
-   - **Glance mode:** Header badge shows state at a glance (green = monitoring, amber = error, none = disabled)
-   - **Detail mode:** Click badge → modal shows why + what happened last + next step
-   - No need to scroll past events; the modal is self-contained.
-
-3. **Precedent in codebase.** Job history (print queue) HAS a timeline view because job state transitions are persistent and queryable. Failure detection is fundamentally different: it's a live monitoring pipeline, not a persistent audit log.
-
-4. **Scope containment.** This protects Ripley and Lambert from scope creep while implementing the MVP failure-detection UX.
-
-### Decision
-
-**Keep the current design:**
-- Header badge (glanceable status)
-- Click badge → modal with current state, last scan, last failure, next step
-- No timeline / historical event list
-
-**Rationale:**
-- Aligns with PrintFarmer's monitoring paradigm (live state, not audit logs)
-- Data model doesn't support persistence
-- Operator workflow doesn't require historical scrolling
-- Modal is the right interaction depth for detail seekers
-
-### Implementation Clarity for Ripley/Lambert
-
-**Ripley (Frontend):**
-- Finalize badge + modal pattern. No timeline pagination or scroll within modal.
-- Call complete when modal shows all current state fields (coverage source, snapshot URL, last scan, last outcome, last failure, auto-pause action, next step).
-
-**Lambert (Backend):**
-- Current in-memory snapshot suffices; no persistence needed.
-- If future requirement for audit logging surfaces (security/compliance), that's a separate decision and data-model change.
-
-### Files Affected
-
-- No new files needed.
-- Modal design confirmed in: `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`
-- Status DTO confirmed in: `src/infra/Services/FailureDetection/FailureDetectionMonitorStatus.cs`
-
-### Open Questions for Team
-
-- Is there a future compliance/audit requirement for failure-detection scan history? (If yes, escalate to separate decision track.)
-
----
-
-**Updated:** 2026-03-26T01:45:41Z
-
-## 0. Obico Self-Hosted UI Gap Validation (Architecture Confirmed)
-
-**Author:** Brett (Researcher) + Lambert (Backend) + Parker (DevOps)  
-**Date:** 2026-03-26  
-**Status:** VALIDATED — No action required; design is intentional
-
-### Problem Statement
-
-Obico self-hosted web UI appears empty when used with PrintFarmer (no printers, no jobs visible), while OctoPrint native clients show full device/job state in Obico UI. Assumption: PrintFarmer might be missing a required integration slice.
-
-### Investigation & Findings
-
-**Brett (Research):**
-- Analyzed OctoPrint Moonraker-Obico plugin; confirmed it sends **full printer/job/session state** to Obico server
-- Plugin responsibilities: snapshots, periodic uploads, WebRTC relay, remote tunneling, printer state reporting, auth/linking
-- PrintFarmer implements only snapshot delivery (1 of 6 responsibilities)
-
-**Lambert (Backend):**
-- Confirmed PrintFarmer's Obico integration uses **only ML/failure-detection slice**
-- Does NOT send printer/job state, device list, or session info to Obico server
-- This is an **intentional architectural choice** to avoid second source of truth
-- Snapshot delivery contract is correct and validated between runtime + admin validation
-
-**Parker (DevOps):**
-- Confirmed no compose/Dockerfile changes needed
-- Current setup correctly isolates PrintFarmer (farm controller truth source) from Obico (external ML service)
-- Docker DNS names properly used; no configuration gaps
-
-### Decision
-
-**Empty Obico UI is EXPECTED BEHAVIOR with current architecture.** Do NOT implement full printer/job sync.
-
-### Rationale
-
-- **Farm-controller vs single-printer-agent** — PrintFarmer manages multi-printer farm state; Obico's model is single-printer cloud agent
-- **Separation of concerns** — PrintFarmer is authoritative source for printer/job state; Obico serves as external ML/monitoring layer only
-- **Second source of truth risk** — Mirroring printer state into Obico would create consistency burden with no user benefit
-- **Architectural purity** — Moonraker-Obico provides WebRTC, tunneling, account linking; PrintFarmer should NOT replicate these (users have Obico client for remote access)
-
-### Scope Clarification
-
-**Current implementation (CORRECT):**
-- ✅ Snapshot delivery to Obico ML API for failure detection
-- ✅ Aligned GET-first / fallback contract between runtime and validation
-
-**Out of Scope:**
-- ❌ Mirror printer list to Obico UI (would be separate "full-sync" integration layer)
-- ❌ WebRTC streaming (Obico's responsibility; use Obico client)
-- ❌ Remote tunneling (Obico's responsibility; use Obico client)
-- ❌ Interactive auth/linking (self-hosted with manual token config is sufficient)
-
-### User Context
-
-- Jeff has forked obico-server in OlyForge3d org; if future full-sync is desired, server-side extensions become feasible
-- Current design is production-ready for failure-detection use case
-- Full-sync work would require explicit future decision and separate development cycle
-
-### Files
-
-- **Decision source:** Brett (2026-03-26), Lambert (2026-03-26), Parker (2026-03-26)
-- **Orchestration logs:** `2026-03-26T01-45-41Z-{brett,lambert,parker}.md`
-- **Team context:** Updated agent histories (brett, lambert, parker)
-
----
-
-**Updated:** 2026-03-26T01:30:47Z
-
-## 1. Obico ML Snapshot Timeout — Upstream Limitation (Final)
-
-**Author:** Parker (DevOps) + Dallas (Lead)  
-**Date:** 2026-03-26  
-**Status:** ACCEPTED — No immediate action required
-
-### Problem
-
-Self-hosted Obico's `ml_api` container hardcodes 0.1s connect timeout on snapshot fetches via `GET /p/?img=...`. Users on slow/distant networks experience intermittent failures.
-
-### Investigation
-
-Parker (DevOps) evaluated whether this timeout is configurable:
-- Upstream `ml_api/server.py` hardcodes two timeout tuples: `(0.1, 5)` for normal URLs, `(10, 30)` only for Google Cloud Storage
-- Compose templates and internal docs expose only `DEBUG`, `FLASK_APP`, and optional `ML_API_TOKEN`
-- **No runtime env/config knob exists** in the container's public interface
-
-### Decision
-
-**Treat as upstream limitation.** Choose the simplest path with lowest maintenance burden and document workaround clearly.
-
-### Operational Guidance
-
-**3-tier remediation order for users hitting ConnectTimeoutError on GET /p/?img=...**
-
-1. **Fix network path/latency** — Ensure camera is reachable from `ml_api` container within 0.1s budget (preferred; no code changes)
-2. **Custom ml_api image** — If network fix is impossible, run a custom/forked `ml_api` image with timeout constants increased
-3. **Upstream request** — Longer-term: request or contribute an upstream env/config knob for snapshot timeout
-
-### Rationale
-
-- Custom image maintenance burden (rebasing, security patches) is high relative to benefit
-- Local proxy (alternative option) adds operational complexity and diagnostic burden
-- Intermittent failures are acceptable pending upstream fix or user-initiated remediation
-- Documented escalation path empowers operators without forcing a choice now
-
-### Files Affected
-
-**Documentation:** Update deployment troubleshooting guide to include 3-tier remediation order.
-
----
-
-## 2. Moonraker-Obico Plugin Gap Analysis (Researcher Review)
-
-**Author:** Brett (Researcher)  
-**Date:** 2026-03-25  
-**Status:** RECOMMENDATION — No immediate action required
-
-### Problem Statement
-
-PrintFarmer recently switched to upstream-first Obico snapshot delivery (`GET /p/?img=...` with legacy fallback). Identify whether the implementation is complete, what gaps exist, and whether they matter.
-
-### Summary
-
-**Current Status:** PrintFarmer's snapshot delivery to ML API is ✅ **CORRECT and SUFFICIENT** for local failure detection.
-
-**Architecture Difference:**
-- **Moonraker-Obico:** Single-printer agent (cloud-first); includes WebRTC, tunneling, auth
-- **PrintFarmer:** Multi-tenant farm controller (farm-first); focuses on local failure detection only
-
-### Gaps That Matter
-
-| Gap | Effort | When to Add |
-|-----|--------|------------|
-| Snapshot upload for remote viewing | 5-7 days | Only if users request "view cameras on Obico dashboard" |
-| Printer state visibility (server-side) | 2-3 days | Later, if server-side optimization needed |
-| Failure detection webhook | 3-5 days | Later, for event-driven architecture |
-| Multi-camera tagging | 1-2 days | Later, if nozzle camera adoption grows |
-
-### Gaps That DON'T Matter (Never Add)
-
-- ❌ **WebRTC/Janus streaming** — Obico's responsibility; maintain separation of concerns
-- ❌ **Tunneling proxy** — Security risk; out of scope for farm controller
-- ❌ **Interactive auth discovery** — Self-hosted; users manually configure tokens
-
-### Recommendation
-
-**Current implementation is ACCEPTABLE.** Only add Gap 1 (snapshot upload) if users request remote viewing capability. Do NOT add streaming, tunneling, or interactive auth.
-
----
-
-## 3. Moonraker / Obico Plugin Parity Gap Review
-
-**Author:** Lambert (Backend Dev)  
-**Date:** 2026-03-25  
-**Status:** GUIDANCE — Informs future work prioritization
-
-### Finding
-
-The upstream `moonraker-obico` plugin should **NOT** be treated as the target architecture for PrintFarmer. Key differences:
-
-- **Moonraker-Obico:** Co-located agent; can rely on localhost webcam, Moonraker API-key auth, Janus/WebRTC relay
-- **PrintFarmer:** Farm controller; must handle remote printer discovery, snapshot delivery via HTTP, selective auth
-
-### Decision Implications for PrintFarmer
-
-**Required (For current ML-monitoring integration):**
-1. ✅ Snapshot delivery to Obico ML API (Direct camera URL when reachable; fallback to proxy/upload)
-2. ⚠️ Short-lived/tokenized snapshot endpoint (if external Obico servers need `GET /p/?img=...`)
-3. ✅ Align runtime fallback with validation (treat 400 as legacy signal consistently)
-4. ✅ Printer-aware reachability validation (prove Obico server can reach real camera path)
-5. ⚠️ Strengthen Moonraker auth support (use PrinterCredential in camera discovery)
-
-**Lower Priority (Follow-up workstream):**
-- Support stream-only webcams by deriving snapshots from `stream_url`
-
-**Out of Scope (Different product area):**
-- Remote relay, Obico account linking, passthru APIs, Janus streaming (Obico's responsibility)
-
-### Concrete Implementation Path
-
-1. Add first-class snapshot delivery strategy (direct URL → proxy → tokenized endpoint)
-2. Extend `ObicoServerController` fallback logic to `ObicoFailureDetectionService` for consistency
-3. Implement printer-aware reachability check before analyzing snapshot
-4. Use `PrinterCredential` in Moonraker camera URL resolution
-
----
-
-## Archived Decisions
-
-**Note:** Decisions dated before 2026-02-23 have been archived to `decisions-archive.md` to keep this file bounded and readable.  
-See `decisions-archive.md` for historical context and earlier decisions.
-
----
-
-## 5. Job Scheduling Calendar — UI Design (Approved)
-
-**Author:** Ripley (Frontend Dev)  
-**Date:** 2026-03-16  
-**Status:** APPROVED — Feature #4 complete
-
-### Problem
-Users need a calendar interface to schedule print jobs with recurrence patterns, view scheduled jobs, and manage job status (pause/resume/cancel).
-
-### Solution
-**Approach: Custom CSS Grid Calendar + React Modal**
-- Built calendar from scratch using CSS Grid (no new npm dependencies)
-- Monthly view with 7-column day grid
-- Job badges displayed inline on dates with "+N more" overflow handling
-- ScheduleModal for creating/rescheduling with recurrence config
-- DataTable for viewing all scheduled jobs with pagination/filtering
-
-### Key Design Decisions
-1. **No External Calendar Library** — CSS Grid sufficient for monthly view; avoids FullCalendar complexity
-2. **Status Color Mapping** — active=green, paused=yellow, cancelled=red, completed=gray
-3. **Browser Timezone Default** — Pre-populate selector with `Intl.DateTimeFormat().resolvedOptions().timeZone`
-4. **Recurrence Interval Conditional** — Only show interval field when recurrence type ≠ "once"
-5. **Job ID Text Input** — Users copy-paste IDs; dropdown unnecessary complexity
-6. **Query Stale Times** — 30s for scheduled jobs (frequent changes), 10min for timezones (static)
-
-### Implementation
-**Files Created:**
-- `src/features/scheduling/pages/SchedulingPage.tsx`
-- `src/features/scheduling/components/MonthCalendar.tsx`
-- `src/features/scheduling/components/ScheduleModal.tsx`
-
-**API Methods (8 total):**
-- `getScheduledJobs()`, `getJobExecutions()`, `getTimezones()`
-- `scheduleJob()`, `rescheduleJob()`, `pauseSchedule()`, `resumeSchedule()`, `cancelSchedule()`
-
-**React Query Hooks (6 total):**
-- `useScheduledJobs()`, `useJobExecutions()`, `useTimezones()`
-- Mutation hooks with automatic invalidation + toast feedback
-
-### Quality Gates
-✅ Build clean (0 errors)  
-✅ Lint clean (0 new errors)  
-✅ TypeScript strict mode passing  
-✅ All API calls through apiClient singleton  
-✅ All components use project library (Button, Badge, Modal, DataTable, FormField)  
-
-### Future Enhancements
-- Typeahead/autocomplete for job ID input based on user feedback
-- Integration with dispatch scoring (location-based scheduling)
-- Bulk job scheduling
-
----
-
-## 6. Auto-Print Ready-Gate Dashboard — UI Design (Approved)
-
-**Author:** Dallas (Lead/Frontend)  
-**Date:** 2026-03-16  
-**Status:** APPROVED — Feature #5 complete
-
-### Problem
-Operators need a dashboard to monitor auto-print ready-gate status across multiple printers, toggle auto-print globally and per-printer, and perform quick actions (mark ready, skip, cancel).
-
-### Solution
-**Approach: Polling-Based Realtime Dashboard with Card Grid UI**
-- 10s polling for real-time status updates (sufficient for operator dashboard)
-- Responsive card grid showing all printers with ready-gate checks
-- Global enable/disable toggle (top-right)
-- Per-printer toggles and contextual action buttons
-- Visual checklist display (✅/✕ icons) for ready-gate checks
-
-### Key Design Decisions
-1. **10s Polling vs SignalR** — Polling sufficient; avoids backend changes + WebSocket complexity
-2. **Card Grid UI** — Better multi-printer overview than modal-based approach
-3. **Ripley's Patterns Exactly** — Followed all existing conventions (UI lib, path aliases, apiClient, toast)
-4. **Zero Backend Changes** — Pure frontend integration with existing `/api/auto-print` endpoints
-5. **Operator-Focused UX** — Action buttons disabled based on state; ready-gate checks guide operator decisions
-
-### Implementation
-**Component Created:**
-- `src/features/auto-print/pages/AutoPrintDashboardPage.tsx`
-
-**Types Added (3 total):**
-- `ReadyGateCheck`, `AutoPrintStatus`, `AutoPrintGlobalStatus`
-
-**API Methods (7 total):**
-- `getAutoPrintStatus()`, `getAutoPrintPrinterStatus(printerId)`
-- `markPrinterReady()`, `skipAutoPrintJob()`, `cancelAutoPrint()`
-- `setAutoPrintEnabled()`, `setAutoPrintGlobalEnabled()`
-
-**React Query Hooks (6 total):**
-- `useAutoPrintStatus()`, `useAutoPrintPrinterStatus()`
-- Mutation hooks with automatic invalidation + toast feedback
-
-### Quality Gates
-✅ Build clean (0 TypeScript errors)  
-✅ Lint clean (0 new errors)  
-✅ All patterns consistent with project standards  
-✅ All API calls through apiClient singleton  
-✅ Toast feedback on all mutations  
-
-### Integration Testing Required
-- Verify backend auto-print endpoints deployed
-- Test ready-gate checks with various pass/fail states
-- Validate global toggle affects all printers
-- Monitor polling network overhead
-
-### Future Work
-- Playwright E2E tests for operator workflow
-- Documentation updates
-- Performance optimization if polling overhead detected
-
----
-
-### 20. Multi-Server Obico Architecture (Implemented)
-
-**Date:** 2026-03-16  
-**Author:** Lambert (Backend Developer) + Ripley (Frontend Developer)  
-**Status:** ✅ IMPLEMENTED — Full stack complete, all tests passing  
-**Impact:** Medium (enables multi-GPU deployments, backward compatible)  
-
-#### Context
-
-The original Obico integration used a single global `ObicoSettings.ObicoApiUrl` for all printers. This created bottlenecks when:
-- Multiple GPU machines were available for ML processing
-- Users wanted to dedicate specific ML servers to printer groups
-- Load balancing across ML servers was needed for large farms
-
-#### Decision
-
-Implement a multi-server architecture enabling:
-1. **Per-printer server assignment** via optional `Printer.ObicoServerId` FK
-2. **Server pooling** with enabled/disabled state and concurrency hints
-3. **Backward compatibility** falling back to global URL when no assignment exists
-4. **Full CRUD API** at `/api/obico-servers`
-5. **Health checking** via on-demand mutations (not cached queries)
-
-#### Implementation
-
-**Backend (Lambert):**
-- New `ObicoServer` entity (Id, Name, Url, IsEnabled, MaxConcurrentAnalyses, CreatedAt, UpdatedAt)
-- `Printer.ObicoServerId` nullable FK
-- EF Core migrations for PostgreSQL and SQL Server
-- `ObicoServerController` with CRUD + health check endpoints
-- `IObicoFailureDetectionService` extended with serverUrl parameter overloads
-- `PrintFailureMonitorService` loads enabled servers, resolves per-printer assignments
-
-**Frontend (Ripley):**
-- `ObicoServersSection.tsx` (353 lines) — Admin component for server management
-- Two-tier status badges (enabled state + health status)
-- On-demand health checks (mutation-based, not cached)
-- `EditPrinterModal` enhanced with server dropdown (enabled servers only)
-- 5 API client methods + 5 React Query hooks
-- TypeScript types for full type safety
-
-#### Backward Compatibility
-
-- Global `ObicoSettings.ObicoApiUrl` remains as fallback
-- Printers with null `ObicoServerId` use global default
-- Existing deployments work without changes
-- No breaking changes to existing APIs
-
-#### Design Decisions
-
-| Decision | Rationale | Alternative |
-|----------|-----------|-------------|
-| Per-printer assignment | Gives users explicit control, simple mental model | Round-robin load balancing (deferred to Phase 2) |
-| Health check as mutation | Fresh data every time, no stale cache | Periodic query polling (rejected) |
-| Delete validation blocks | Prevents orphaning printers | Cascade to null (too aggressive) |
-| Enabled-only dropdown | Prevents assignment to offline servers | Show all (causes user confusion) |
-
-#### Consequences
-
-**Positive:**
-- ✅ Users can distribute Obico load across multiple GPU machines
-- ✅ Backward compatible — existing deployments work unchanged
-- ✅ Simple per-printer assignment model
-- ✅ Health checks provide visibility into server availability
-- ✅ Foundation for automatic load balancing
-
-**Negative:**
-- ⚠️ New entity increases database schema complexity
-- ⚠️ Manual server assignment required (no automatic balancing yet)
-- ⚠️ `MaxConcurrentAnalyses` exists but not enforced (future work)
-
-**Neutral:**
-- Global URL fallback maintained intentionally (backward compatibility)
-- Delete requires reassignment first (safety feature)
-
-#### Test Coverage
-
-- **Backend:** 2087/2087 tests passing (+15 new Obico tests)
-- **Frontend:** 1467/1467 tests passing (+8 new UI tests)
-- **Build:** 0 errors, 134 warnings (pre-existing)
-- **Linting:** 0 errors
-
-#### Follow-Up Work (Prioritized)
-
-1. **Capacity-Aware Routing** — Use `MaxConcurrentAnalyses` to distribute load
-2. **Server Metrics** — Track actual concurrent analyses per server
-3. **Failover Logic** — Automatically retry with different server on failure
-4. **Server Groups** — Group for redundancy/specialization
-5. **Bulk Reassignment** — Move multiple printers to different server
-6. **Settings Page Integration** — Add ObicoServersSection to SettingsPage tabs
-
-#### API Endpoints
-
-```
-GET    /api/obico-servers              → ObicoServer[]
-POST   /api/obico-servers              → CreateObicoServerRequest → ObicoServer
-PUT    /api/obico-servers/{id}         → UpdateObicoServerRequest → ObicoServer
-DELETE /api/obico-servers/{id}         → 200 or 409 (with affected count)
-POST   /api/obico-servers/{id}/health  → ObicoServerHealthResponse (latency)
-```
-
-#### Files Changed
-
-**Backend:**
-- `src/api/Data/Entities/ObicoServer.cs` — **NEW**
-- `src/api/Data/Entities/Printer.cs` — FK added
-- `src/api/Data/AppDbContext.cs` — OnModelCreating updated
-- `src/api/Controllers/ObicoServerController.cs` — **NEW**
-- `src/api/Services/IObicoFailureDetectionService.cs` — Overloads added
-- `src/api/Services/ObicoFailureDetectionService.cs` — Implementation
-- `src/api/Services/PrintFailureMonitorService.cs` — Server resolution logic
-- `src/migrations/{timestamp}_AddObicoMultiServerSupport.cs` — **NEW**
-
-**Frontend:**
-- `src/types/api.ts` — 4 interfaces added
-- `src/services/api.ts` — 5 methods added
-- `src/common/hooks/useApi.ts` — 5 hooks + cache keys
-- `src/features/admin/components/ObicoServersSection.tsx` — **NEW** (353 lines)
-- `src/features/admin/components/index.ts` — Export added
-- `src/features/printers/components/EditPrinterModal.tsx` — Field added
-
-#### Validation
-
-✅ Solution builds successfully  
-✅ 0 compiler errors, 0 pre-existing warnings ignored  
-✅ All 2087 .NET tests passing  
-✅ All 1467 React tests passing  
-✅ Database migrations execute cleanly (PostgreSQL + SQL Server)  
-✅ API endpoints respond with correct status codes  
-✅ Backward compatibility verified (null assignments use global URL)  
-✅ Foreign key constraints enforced at database level  
-✅ ESLint 0 errors, 0 warnings  
-
-#### Related Decisions
-
-- Original Obico implementation (2025-01-11) — Single global server
-- Printer entity schema design — Location hierarchy integration
-
-#### Team Sync
-
-- **Parker (DevOps):** No Docker compose changes needed — server URLs are runtime config
-- **Ash (Frontend):** TypeScript types already existed, backend completed the feature
-- **Jeff (Product):** Feature enables enterprise deployments with multiple GPU machines
-
-
----
-
-### 21. Docker Compose Service Naming — `nginx-proxy` vs `nginx` (Documented)
-
-**Author:** Parker  
-**Date:** 2026-03-24  
-**Status:** DOCUMENTED — User education, no code changes
-
-#### Issue
-
-User attempted `pfdev redeploy nginx` and received error: `no such service: nginx`.
-
-**Root Cause:** The Nginx service in `docker-compose.yml` is named `nginx-proxy`, not `nginx`.
-
-#### Context
-
-The PrintFarmer Docker Compose stack defines three deployment tiers:
-- **Lite:** Single monolith (no Nginx reverse proxy)
-- **Standard:** API + Frontend + Nginx reverse proxy
-- **Full:** Standard + PostgreSQL + discovery service + monitoring stack
-
-The Nginx service is only present in Standard and Full profiles:
-- **Service name** (in Compose): `nginx-proxy`
-- **Container name** (at runtime): `printfarmer-nginx-proxy`
-- **Image:** `${NGINX_IMAGE:-nginx:alpine}`
-- **Healthcheck endpoint:** `http://nginx-proxy:80/health`
-
-#### Correct Usage
-
-**To restart Nginx via Docker Compose:**
-```bash
-docker-compose restart nginx-proxy
-```
-
-**To redeploy the full stack (including Nginx):**
-```bash
-./scripts/deploy-docker.sh --redeploy
-```
-
-**For local development (no Nginx needed):**
-```bash
-./scripts/pf-dev.sh start  # Runs native API + React, no containers
-```
-
-#### Implications
-
-1. **Compose service names must match exactly** — Documentation and wiki pages must reference `nginx-proxy`, not `nginx`
-2. **Local dev (`pf-dev.sh`) ≠ Docker deployment** — Users must understand the distinction:
-   - `pf-dev.sh`: Native .NET/React dev servers, no Docker, no reverse proxy
-   - `deploy-docker.sh`: Full Docker Compose orchestration with reverse proxy
-3. **Alias clarity** — `pfdev` is a convenience alias for `./scripts/pf-dev.sh` with 7 supported commands; Docker Compose commands require full `docker-compose` CLI
-
-#### Why Not a Bug
-
-The compose file is correct. The user was attempting syntax from a different tool (`docker-compose restart`) using a command from the local dev tool (`pf-dev.sh`) on an incorrect service name (`nginx` vs `nginx-proxy`). This is a usage/documentation issue, not a code issue.
-
-#### Documentation Updates Needed
-
-- User guides must emphasize the difference between `pf-dev.sh` and `deploy-docker.sh`
-- Docker Compose service names in examples must use `nginx-proxy`
-- Setup instructions should clarify which tool is appropriate for which use case
-- Consider adding a troubleshooting section: "Service not found" → verify service name with `docker-compose ps`
-
-#### Decision Record
-
-This decision documents the correct naming convention for the Nginx reverse proxy service and clarifies the distinction between local development workflows and containerized deployments. No code changes required — this is user education and documentation maintenance.
-## Recent Decisions from Inbox (Merged 2026-03-25)
-
----
-
-### 2026-03-17T00:51Z: User directive
-**By:** jpapiez (via Copilot)
-**What:** All API routes must use kebab-case (hyphens between words). No exceptions.
-**Why:** User request — route naming consistency across the entire API surface.
-
----
-
-### 2026-03-18T03:53:10Z: User directive
-**By:** Jeff Papiez (via Copilot)
-**What:** Agents must verify imports exist before using them. Never guess at export names — read the source file first. Specifically: before importing from a barrel export or icon library, check what's actually exported. This applies to all agents writing code.
-**Why:** User request — ObicoServersSection.tsx used `TestTubeIcon` and `PencilIcon` which don't exist in MdiIcons.tsx. This broke the production build and wasn't caught until Docker deployment failed. Verify, don't assume.
-
----
-
-### 2026-03-18T03:54:12Z: User directive — Verify before you use
-**By:** Jeff Papiez (via Copilot)
-**What:** Before referencing ANY external symbol, route, or API endpoint in code, agents MUST verify it exists:
-1. **Imports**: Before importing a symbol (icon, component, hook, type), read the source file and confirm the export exists. Never guess names.
-2. **API routes**: Before calling an API endpoint from frontend code, confirm the controller action and route attribute exist in the backend. Grep for the route pattern.
-3. **API methods**: Before using an `apiClient.method()`, confirm the method exists in `src/services/api.ts`.
-This is not optional. Unverified references cause production build failures, runtime 404s, and wasted debugging time.
-**Why:** Two bugs in this session traced to the same root cause — assuming things exist without checking. TestTubeIcon/PencilIcon broke the Docker build. /api/job-queue/{id}/rerun caused a 404 because no controller route existed.
-
----
-
-### 2026-03-18T03:59:30Z: User directive — Obico integration design
-**By:** Jeff Papiez (via Copilot)
-
-**What:**
-1. **Printer opts-in, app decides server.** Users enable Obico monitoring on a printer (simple toggle), but the APP chooses which Obico server handles that printer — not the user. Remove the Obico server dropdown from the printer edit form.
-2. **Camera required.** When enabling Obico on a printer, the app must verify the printer has a camera configured. If no camera, block enable and show an error explaining why.
-3. **Server validation on add.** When adding/enabling an Obico server in settings, the backend must validate the server is healthy AND all required APIs are accessible (not just `/p/` — verify all endpoints needed for snapshot submission and spaghetti detection). Reject the add/enable if validation fails.
-
-**Why:** User request — simplifies UX (users shouldn't pick servers), enforces prerequisites (camera), prevents misconfiguration (server health).
-
----
-
-# Directive: No Inline CSS Styles in React Components
-
-**Date:** 2026-03-18
-**Source:** User directive
-**Priority:** High
-
-## Rule
-
-When adding or modifying React UI components, **never use inline CSS styles** (`style={{ ... }}` or `style={variable}`). All styling must use **Tailwind CSS utility classes** exclusively.
-
-## Rationale
-
-- Inline styles bypass Tailwind's design token system (`pf-*` tokens), breaking visual consistency
-- Inline styles can't be overridden by Tailwind's responsive/dark-mode variants
-- Inline styles increase bundle size and reduce cacheability compared to atomic CSS classes
-- Microsoft Edge Tools and linters flag `no-inline-styles` as a warning
-
-## Exception
-
-The **only** acceptable use of inline styles is for truly dynamic values that cannot be expressed as Tailwind classes — for example, a color hex code from an API response (e.g., spool color `#FF5733`). In these cases:
-- Add a code comment explaining why inline style is necessary
-- Keep the inline style to the absolute minimum (e.g., only `backgroundColor`)
-
-## Examples
-
-```tsx
-// ❌ BAD: inline style for static layout
-<div style={{ padding: '16px', marginTop: '8px' }}>
-
-// ✅ GOOD: Tailwind utility classes
-<div className="p-4 mt-2">
-
-// ❌ BAD: inline style for a known color
-<span style={{ color: 'red' }}>Error</span>
-
-// ✅ GOOD: Tailwind token
-<span className="text-pf-error">Error</span>
-
-// ✅ ACCEPTABLE: dynamic API-driven color (with comment)
-{/* Dynamic spool color from Spoolman API — can't use Tailwind class */}
-<span style={{ backgroundColor: printer.spoolInfo.colorHex }} />
-```
-
----
-
-### 2026-03-17T14:51Z: User directive
-**By:** Jeff Papiez (via Copilot)
-**What:** The auto-print feature must be called "Auto-Dispatch" not "Auto-Print" everywhere (UI, API, code, docs). "Auto-Print" implies there is a bed clearing mechanism in place, which is misleading.
-**Why:** User request — captured for team memory
-
----
-
-# Auto-Print Scaling to 100 Printers — Architecture Assessment
-
-**Author:** Dallas (Architect)  
-**Date:** 2026-03-06  
-**Context:** Jeff asked "How do we scale auto-print to 100 printers?"  
-**Status:** Analysis complete, recommendations provided
+# Prusa Buddy Camera & Enhanced Status Integration Proposal
+
+**Author:** Dallas (Lead / Architect)
+**Date:** 2026-05-12
+**Status:** PROPOSED
+**Impact:** High (camera experience for Prusa printers; foundations for multi-source camera support)
+**Reference:** [Prusa-StatusBar](https://github.com/deimosfr/Prusa-StatusBar) — MIT-licensed macOS status bar app
 
 ---
 
 ## Executive Summary
 
-**The current auto-print architecture scales fine to 100 printers.** No breaking changes needed.
-
-**What works:**
-- Event-driven dispatch (no polling)
-- Concurrent per-printer processing
-- Database indexes cover critical queries
-- SignalR broadcasts scale with client count, not printer count
-
-**Minor optimizations recommended (Priority 1):**
-- Add `Printer.IsEnabled` index (30 seconds)
-- Document that GetAllStatusAsync pattern is correct (no change)
-
-**Future-proofing (Priority 2, defer until >200 printers):**
-- Cache FilamentType lookups in DispatchScorer
-- Use SignalR targeted groups instead of `Clients.All`
+Prusa-StatusBar demonstrates that the Prusa Buddy 3D Camera is a **standalone network device** with its own IP, exposing an RTSP stream at `rtsp://<camera-ip>:554/live/`. PrintFarmer's current camera model already supports standalone cameras (`CameraSource.Standalone`), but lacks RTSP playback, event-driven snapshots, and Buddy-specific discovery. This proposal breaks the integration into three tiers: immediately useful, architecture-needed, and skip.
 
 ---
 
-## Current Architecture
+## Current State Analysis
 
-### Auto-Print State Machine
+### What PrintFarmer Has
 
-```
-[Idle Printer] 
-  → Job completes → TransitionToPendingReadyAsync 
-  → [PendingReady] 
-  → Operator clicks "Ready" → MarkReadyAsync 
-  → [Ready] 
-  → AutoDispatchTrigger.NotifyJobQueued() 
-  → AutoDispatchBackgroundService 
-  → DispatchJobAsync 
-  → [None]
-```
-
-**Key insight:** Operator confirmation is the bottleneck, not the system. At 100 printers, humans gate the throughput.
-
-### Auto-Dispatch Background Service
-
-**Pattern:** Event-driven, no polling.
-
-```csharp
-while (!stoppingToken.IsCancellationRequested)
-{
-    DispatchTriggerEvent evt = await trigger.ReadAsync(stoppingToken);
-    _ = Task.Run(() => HandlePrinterIdleAsync(evt.PrinterId, ...));
-}
-```
-
-**Concurrency:**
-- Each printer idle event spawns a fire-and-forget Task
-- `_dispatchLock` (SemaphoreSlim) serializes dispatch decisions (prevents double-job-assignment)
-- `MaxConcurrentDispatches` setting limits in-flight operations
-
-**Critical section:** Only DB query + job assignment is locked. The rest (idle wait, scoring, SignalR broadcast) runs concurrently.
-
-### Dispatch Scorer
-
-**Query pattern:**
-```csharp
-List<Printer> printers = await db.Printers
-    .Include(p => p.Model).ThenInclude(m => m!.SupportedFilamentTypes)
-    .Include(p => p.Model).ThenInclude(m => m!.Aliases)
-    .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
-    .AsSplitQuery()
-    .AsNoTracking()
-    .Where(p => p.IsEnabled)
-    .ToListAsync(ct);
-
-Dictionary<Guid, int> queueDepths = await db.PrintJobs
-    .Where(j => j.AssignedPrinterId != null && j.Status != Completed/Failed/Cancelled)
-    .GroupBy(j => j.AssignedPrinterId!.Value)
-    .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-```
-
-**Performance:** At 100 printers, `AsSplitQuery()` generates 4 queries (~400-500 total rows). With proper indexes, this is 5-10ms.
-
-### GetAllStatusAsync
-
-**Pattern:**
-```csharp
-List<Printer> printers = await db.Printers.ToListAsync(ct);  // 100 rows
-Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printerIds, ct);  // 1 GroupBy query
-Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printerIds, ct);  // 1 GroupBy query
-```
-
-**Analysis:** This is an N+2 pattern (not N+1), but the +2 are batch queries. At 100 printers, total rows fetched: ~100 + 20 (queued counts) + 10 (current jobs) = 130 rows. Acceptable.
-
-### SignalR Broadcasts
-
-**Current pattern:**
-```csharp
-await hub.Clients.All.SendAsync("autoprintstatechanged", status, ct);
-```
-
-**Scaling:** `Clients.All` is O(connected clients), not O(printers). With 5-10 concurrent dashboard users, 100 printers changing state is fine.
-
----
-
-## Bottleneck Analysis @ 100 Printers
-
-### ✅ No Bottlenecks
-
-1. **AutoDispatchBackgroundService concurrency** — Fire-and-forget per-printer tasks. 100 printers going idle simultaneously spawn 100 concurrent Tasks (limited by thread pool, not the code). SemaphoreSlim only serializes the critical "assign job to printer" window.
-
-2. **Database query patterns** — All critical paths use batch queries or indexed lookups:
-   - `TransitionToPendingReadyAsync`: Uses composite `(AssignedPrinterId, Status)` index
-   - `GetQueuedCountsByPrinterAsync`: GroupBy with `AssignedPrinterId` index
-   - Dispatch scorer: Single `WHERE IsEnabled` query + batch queue depths
-
-3. **SignalR broadcast load** — With <20 clients, `Clients.All` is negligible overhead. Each `SendAsync` is ~1ms.
-
-4. **Database writes** — Auto-print state changes are infrequent (only on job completion + operator action). Dispatch writes are serialized. No contention.
-
-### ⚠️ Minor Inefficiencies (optimize later)
-
-1. **Missing index on `Printer.IsEnabled`** — Dispatch scorer queries `WHERE IsEnabled`. At 100 printers, table scan is fine. At 500+, need index.
-
-2. **DispatchScorer material lookups** — Each job scores ~20 candidates, each candidate checks material compatibility. That's 20 `FilamentType` queries (mitigated by EF query cache). Could pre-load all active FilamentTypes in memory.
-
-3. **SignalR `Clients.All` chatty at scale** — If 100 printers change state within 1 second, that's 100 broadcasts to all clients. Each client receives 100 messages. Could use targeted groups (`Clients.Group("dashboard")`).
-
-4. **BuildStatusDtoAsync per-call** — Each auto-print action (MarkReady, Cancel, Skip) queries queue count + current job. If rapid-fire state changes happen, this adds up. Could batch or cache for 1-2 seconds.
-
-### 🔴 Does NOT Break
-
-- **No polling loops** — Event-driven design scales linearly
-- **No global locks** — `_dispatchLock` is per-dispatch-cycle, released quickly
-- **No cascading failures** — If one printer's dispatch fails, it's isolated
-- **No CPU-bound operations** — State transitions are trivial. Scoring is I/O-bound (DB queries).
-
----
-
-## Recommended Changes
-
-### Priority 1: Small Wins (do now)
-
-**1. Add `Printer.IsEnabled` index**
-
-**File:** `src/infra/Data/Configurations/PrinterConfiguration.cs`
-
-**Change:**
-```csharp
-builder.HasIndex(p => p.IsEnabled);
-```
-
-**Effort:** 30 seconds + migration  
-**Impact:** Prevents table scan in dispatch scorer  
-**Justification:** Dispatch scorer filters `WHERE IsEnabled` on every dispatch cycle. At 100 printers, table scan is 1-2ms. At 500+, it degrades. Index now, avoid future pain.
-
----
-
-### Priority 2: Future-Proofing (defer until 200+ printers)
-
-**2. Cache FilamentType lookups in DispatchScorer**
-
-**Current:**
-```csharp
-FilamentType? requiredFilament = await db.FilamentTypes
-    .FirstOrDefaultAsync(f => EF.Functions.Like(f.Name, requiredMaterial) && f.IsActive, ct);
-```
-
-**Proposed:**
-```csharp
-// Load once per scorer instance (or use IMemoryCache with 5min TTL)
-private Dictionary<string, FilamentType> _filamentCache;
-
-// Resolve from cache
-requiredFilament = _filamentCache.TryGetValue(requiredMaterial, out var ft) ? ft : null;
-```
-
-**Effort:** 1 hour  
-**Impact:** Eliminates 20 DB queries per dispatch cycle  
-**Justification:** EF Core query cache helps, but explicit caching is cleaner. Defer until dispatch cycles slow down.
-
-**3. Use SignalR targeted groups**
-
-**Current:**
-```csharp
-await hub.Clients.All.SendAsync("autoprintstatechanged", status, ct);
-```
-
-**Proposed:**
-```csharp
-await hub.Clients.Group("auto-print-subscribers").SendAsync("autoprintstatechanged", status, ct);
-```
-
-**React client change:**
-```typescript
-useEffect(() => {
-  connection.invoke("JoinAutoPrintGroup");  // Hub method: Groups.AddToGroupAsync(Context.ConnectionId, "auto-print-subscribers")
-}, [connection]);
-```
-
-**Effort:** 2 hours  
-**Impact:** Reduces broadcast to only clients watching auto-print page  
-**Justification:** At 100 printers + 10 clients, `Clients.All` is fine. At 500 printers + 50 clients, targeted groups reduce chattiness. Defer.
-
----
-
-### Priority 3: Over-Engineering (only if >500 printers)
-
-**4. Paginate GetAllStatusAsync**
-
-**Current:** Returns all printers in one response.
-
-**Proposed:** Add `skip`/`take` parameters, return `PaginatedResult<AutoPrintStatusDto>`.
-
-**Effort:** 4 hours  
-**Justification:** GetAllStatusAsync is called infrequently (only when dashboard loads). At 100 printers, response is ~50KB. At 500 printers, ~250KB. Still acceptable. Defer.
-
-**5. Redis cache for printer status**
-
-**Pattern:** Cache `AutoPrintStatusDto` per printer in Redis with 30s TTL.
-
-**Effort:** 1 day  
-**Justification:** Premature optimization. DB queries are fast enough. Only consider if CPU-bound.
-
-**6. Distributed lock for multi-node API**
-
-**Current:** `SemaphoreSlim _dispatchLock` is in-memory, single-node only.
-
-**Problem:** If API runs 3 replicas, each has its own `SemaphoreSlim`. Race conditions possible.
-
-**Solution:** Use Redis-based distributed lock (e.g., RedLock).
-
-**Effort:** 2 days  
-**Justification:** Only needed for horizontal scaling. Current deployment is single-node. Defer until multi-replica API.
-
----
-
-## What NOT to Change
-
-1. **Don't add polling** — Event-driven dispatch is correct. Polling would degrade performance.
-2. **Don't serialize per-printer tasks** — Concurrent fire-and-forget is optimal. Serialization would bottleneck.
-3. **Don't optimize SignalR prematurely** — `Clients.All` is fine for <20 clients.
-4. **Don't change database schema** — Indexes are correct. No schema changes needed.
-5. **Don't add caching layers yet** — DB queries are fast. Cache when CPU-bound, not before.
-
----
-
-## Conclusion
-
-**100 printers: ✅ No changes needed.**
-
-The architecture is event-driven, concurrent, and well-indexed. The only action item is adding `Printer.IsEnabled` index (30 seconds).
-
-**Monitoring recommendations:**
-- Track dispatch cycle duration (target <100ms)
-- Track GetAllStatusAsync response size (target <100KB)
-- Track SignalR broadcast latency (target <10ms)
-
-**Revisit at 200 printers** to confirm assumptions hold.
-
----
-
-**Decision:** No immediate architectural changes required. Add `IsEnabled` index and monitor.
-
----
-
-# Decision: Always grep for path string references when fixing casing
-
-**Date:** 2025-07-18
-**Author:** Dallas
-**Status:** Accepted
-
-## Context
-When fixing the `src/api/data/` → `src/api/Data/` casing mismatch, the git index fix alone would have been insufficient. The `.csproj` Include globs and runtime `Path.Combine()` calls also used the old lowercase path, which would fail silently on Linux.
-
-## Decision
-When fixing directory casing mismatches, always search the entire codebase for string references to the old path (in `.csproj` files, C# source, config files, scripts, etc.) — not just the git index. A path casing fix is not complete until all references match the canonical casing.
-
-## Consequences
-- Slightly more investigation time per casing fix
-- Prevents silent failures on case-sensitive CI/Docker environments
-- Pre-commit hook (`enforce-path-casing.yml`) catches git index issues but not code-level path strings
-
----
-
-# Decision: Spaghetti Detection — Phase 1 Delivery Slice
-
-**Author:** Dallas  
-**Date:** 2025-07-14  
-**Status:** Proposed
-
-## Context
-
-Jeff asked for "backend and UI for spaghetti detection." We already have substantial infrastructure:
-
-### What Exists Today (Working)
-- **Backend monitoring loop** — `PrintFailureMonitorService` polls cameras on a configurable interval, sends snapshots to Obico ML, broadcasts `FailureDetected` via SignalR
-- **Obico ML integration** — `ObicoFailureDetectionService` submits images, parses confidence scores, compares against threshold
-- **Obico server CRUD** — Full API at `/api/obico-servers`, UI in Settings → Monitoring → `ObicoServersSection`
-- **Settings** — `ObicoSettings` with enable toggle, API URL, confidence threshold, scan interval, auto-pause flag — all rendered in the dynamic settings UI
-- **SignalR plumbing** — `FailureDetected` event wired end-to-end: backend broadcasts `FailureDetectionDto`, frontend `printer-signalr.ts` receives it, `App.tsx` shows a toast
-- **Printer card badges** — Compact and Detailed cards show "ML" badge when `obicoEnabled && isPrinting`
-- **Manual analysis endpoint** — `POST /api/failure-detection/analyze/{printerId}`
-
-### What's Missing / Broken
-1. **History endpoint is 501** — `GET /api/failure-detection/history` returns "not implemented." No persistence layer for detection events.
-2. **Auto-pause is a no-op** — `PrintFailureMonitorService.HandleFailureDetectedAsync` logs a warning but never calls the backend client's pause method. `IBackendClientFactory` exists, pause methods exist on all backends (Moonraker, PrusaLink, OctoPrint, SDCP), but the monitor doesn't inject or use it.
-3. **No dedicated spaghetti detection page** — Detection events are fire-and-forget toasts. No place to see current monitoring status, recent detections, or take action.
-4. **Status endpoint is anemic** — `GET /api/failure-detection/status` returns a static message, not actual per-printer monitoring state.
-5. **FailureDetectionDto lacks snapshot URL** — When a failure is detected, the camera snapshot that triggered it isn't preserved in the DTO or broadcast.
-
-## Phase 1 Scope — "See It, React to It"
-
-The goal is: a user can see that spaghetti detection is happening, see when it fires, and have it actually pause their print. No history persistence yet — that's Phase 2.
-
-### In Scope
-
-#### Lambert (Backend)
-
-1. **Wire auto-pause through `IBackendClientFactory`**
-   - Inject `IBackendClientFactory` into `PrintFailureMonitorService`
-   - On failure detection, resolve the printer's backend client and call its pause method
-   - Set `failureEvent.AutoPaused = true` on success
-   - Graceful fallback: if pause fails, log the error and broadcast with `AutoPaused = false`
-   - The backend clients already support pause: `PausePrintAsync` / `PauseJobAsync` / etc.
-
-2. **Enrich `FailureDetectionDto` with snapshot URL**
-   - Add `string? SnapshotUrl` to `FailureDetectionDto`
-   - Populate it in `HandleFailureDetectedAsync` from the camera's `SnapshotUrl`
-   - Frontend can use this to show the "what triggered it" image
-
-3. **Improve status endpoint to return real data**
-   - `GET /api/failure-detection/status` should return:
-     ```json
-     {
-       "enabled": true,
-       "monitoredPrinterCount": 3,
-       "activePrinterCount": 1,
-       "scanIntervalSeconds": 30,
-       "confidenceThreshold": 0.7,
-       "autoPauseEnabled": true,
-       "lastScanAt": "2025-07-14T10:00:00Z"
-     }
-     ```
-   - This requires `PrintFailureMonitorService` to track and expose `LastScanAt` and counts. Add a simple `IFailureMonitorStatus` interface the controller can read.
-
-#### Ripley (Frontend)
-
-4. **Add `snapshotUrl` to `FailureDetectionEvent` type**
-   - Update `src/types/api.ts` — add `snapshotUrl?: string` to `FailureDetectionEvent`
-
-5. **Improve the toast notification**
-   - Show the confidence as a percentage (already done)
-   - Add a "View" action button on the toast that opens the snapshot URL in a new tab (or shows it in a lightweight modal)
-   - Differentiate auto-paused vs. not-paused in the toast styling (red vs. amber)
-
-6. **Add a failure detection status indicator to the printer card**
-   - When a `FailureDetected` event arrives for a specific printer, show a warning badge/icon on that printer's card (both Compact and Detailed variants)
-   - This should be transient — clear after a reasonable timeout (e.g., 60s) or when the user dismisses it
-   - The existing "ML" badge shows monitoring is active; this new badge shows "failure detected"
-
-7. **Expose monitoring status in the Settings → Monitoring section**
-   - Query `GET /api/failure-detection/status` and display the real-time monitoring status (monitored printers, last scan, etc.) above the Obico servers list
-   - Keep it simple: a status card with key metrics, not a full dashboard
-
-### Deferred to Phase 2
-
-- **Event persistence** — `FailureDetectionEvent` entity, EF migration, repository, history API. This is a full schema addition across both DB providers. Not worth rushing in Phase 1.
-- **Detection history page** — Requires persistence. Deferred.
-- **Per-printer detection settings** — Currently enable/disable is global. Per-printer granularity is nice-to-have.
-- **Confidence trend charts** — Requires history data.
-- **Notification channels** (email, Telegram, etc.) — Out of scope.
-- **Detection event acknowledgment/dismiss workflow** — Phase 2 with persistence.
-
-## API Contract Changes
-
-### Modified: `GET /api/failure-detection/status`
-
-**Response (200):**
-```json
-{
-  "enabled": boolean,
-  "monitoredPrinterCount": number,
-  "activePrinterCount": number,
-  "scanIntervalSeconds": number,
-  "confidenceThreshold": number,
-  "autoPauseEnabled": boolean,
-  "lastScanAt": string | null
-}
-```
-
-### Modified: `FailureDetectionDto` (SignalR broadcast)
-
-**Added field:**
-- `snapshotUrl` (`string?`) — URL of the camera snapshot that triggered detection
-
-### Unchanged
-- `POST /api/failure-detection/analyze/{printerId}` — stays as-is
-- `GET /api/failure-detection/history` — stays 501 until Phase 2
-- All Obico server CRUD endpoints — no changes
-
-## TypeScript Type Changes
-
-```typescript
-// Updated FailureDetectionEvent
-export interface FailureDetectionEvent {
-  printerId: string;
-  printerName: string;
-  jobId?: string;
-  confidence: number;
-  detectedAt: string;
-  autoPaused: boolean;
-  snapshotUrl?: string;  // NEW
-}
-
-// NEW: status endpoint response
-export interface FailureDetectionStatus {
-  enabled: boolean;
-  monitoredPrinterCount: number;
-  activePrinterCount: number;
-  scanIntervalSeconds: number;
-  confidenceThreshold: number;
-  autoPauseEnabled: boolean;
-  lastScanAt: string | null;
-}
-```
-
-## Execution Order
-
-1. Lambert: Wire auto-pause (#1) — this is the highest-value change
-2. Lambert: Enrich DTO (#2) + status endpoint (#3) — can be one PR
-3. Ripley: Type updates (#4) + toast improvements (#5) — parallel with Lambert
-4. Ripley: Printer card warning badge (#6) + settings status card (#7) — after Lambert's status endpoint lands
-
-Items 1-2 (Lambert) and 3-4 (Ripley) can start in parallel. Item 5-6 (Ripley) depends on Lambert's status endpoint.
-
-## Key Files
-
-**Backend:**
-- `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs` — main changes
-- `src/infra/Dtos/FailureDetectionDto.cs` — add SnapshotUrl
-- `src/api/Controllers/FailureDetectionController.cs` — status endpoint
-- `src/infra/Services/Printers/IBackendClientFactory.cs` — already exists, inject into monitor
-
-**Frontend:**
-- `src/Web/ReactApp/src/types/api.ts` — type additions
-- `src/Web/ReactApp/src/App.tsx` — toast improvements
-- `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx` — warning badge
-- `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx` — warning badge
-- `src/Web/ReactApp/src/features/admin/pages/SettingsPage.tsx` — monitoring status card
-- `src/Web/ReactApp/src/services/api.ts` — new status fetch method
-
----
-
-# Kane — Pre-Clear & Obico ML Badge Test Report
-
-**Date:** 2026-03-17
-**Author:** Kane (Tester)
-**Status:** FINDINGS
-
-## Bug Found: AutoPrintController 404 vs 400 Mismatch
-
-**File:** `src/api/Controllers/AutoPrintController.cs` line 106-122
-
-The `MarkPreClearAsync` endpoint declares `[ProducesResponseType(StatusCodes.Status404NotFound)]` in its OpenAPI attributes, but the catch block only returns `BadRequest(400)` for all `InvalidOperationException` errors — including when the printer is not found.
-
-**Impact:** API consumers (including the React client) may expect 404 for missing printers but will always receive 400. Swagger/OpenAPI documentation is misleading.
-
-**Recommendation:** Either:
-1. Differentiate exceptions: throw a `KeyNotFoundException` for missing printers and catch it separately to return 404, OR
-2. Remove the `ProducesResponseType(Status404NotFound)` attribute if 400 is the intended behavior.
-
-This pattern also exists in the `SetEnabledAsync` endpoint (line 68-78) which has the same mismatch.
-
-## Decision: Test File Placement
-
-Placed API pre-clear tests in `Controllers/AutoPrintPreClearTests.cs` (not the `Dispatch/` folder) because these test the HTTP endpoint behavior, not the background service dispatch logic. The existing `Dispatch/AutoDispatchBackgroundServiceTests.cs` tests the internal channel/trigger mechanism.
-
----
-
----
-decision_type: validation_plan
-status: proposed
-date: 2026-03-18
-author: kane
----
-
-# Spaghetti Detection — Validation Plan (First Slice)
-
-## Context
-
-Backend: `PrintFailureMonitorService` actively polls printers, analyzes snapshots via Obico, broadcasts `FailureDetected` events via SignalR.  
-Frontend: Shows "ML" badge when `obicoEnabled && isPrinting`, displays toast notifications on failure events.  
-Gap: No end-to-end validation that the **full detection loop** works trustworthy for users.
-
-**Goal:** Prove the user-visible failure detection loop is reliable. Don't attempt comprehensive future-state coverage — gate the first slice.
-
----
-
-## Quality Gates (User-Visible Trustworthiness)
-
-### Backend Integration Tests (Priority 1)
-
-**File:** `src/tests/Farm.Web.Api.Tests/Services/PrintFailureMonitorServiceTests.cs` (NEW)
-
-**Must verify:**
-1. **Printer eligibility** — Service only analyzes printers that are:
-   - Online
-   - State == "Printing"
-   - Have at least one enabled camera with non-empty `SnapshotUrl`
-   - Have `ObicoServerId` assigned OR fallback to global Obico URL
-
-2. **Obico server selection** — Service correctly picks:
-   - Printer's assigned `ObicoServer` if present
-   - Falls back to global `ObicoSettings.ObicoApiUrl` if no assignment
-   - Logs which server is used (validate log output)
-
-3. **SignalR broadcast** — When failure detected:
-   - `FailureDetectionDto` published to `PrinterHub.Clients.All.SendAsync("FailureDetected")`
-   - DTO contains: `printerId`, `printerName`, `jobId`, `confidence`, `detectedAt`, `autoPaused`
-   - `jobId` is correct (matches active print job from DB)
-
-4. **Disabled monitoring** — When `ObicoSettings.Enabled == false`:
-   - Service sleeps and does NOT analyze printers
-
-5. **Monitoring interval** — Cycles respect `ObicoSettings.ScanIntervalSeconds`
-
-**Edge cases:**
-- Printer with camera but offline → skipped
-- Printer with camera but idle → skipped
-- Printer printing but no camera → skipped
-- Multiple printers printing simultaneously → all analyzed (concurrency)
-- Obico API returns error → service logs warning, continues to next printer
-
-**Testing strategy:**
-- Use `CustomWebApplicationFactory` with in-memory SQLite
-- Seed test printers with cameras, Obico assignments, and active print jobs
-- Mock `IObicoFailureDetectionService.AnalyzeImageFromUrlAsync` to control failure detection results
-- Mock `IHubContext<PrinterHub>` to capture SignalR broadcasts
-- Mock `IPrinterStatusCacheReader` to control which printers appear as "Printing"
-- Use `IHostedService` test harness to trigger `ExecuteAsync` directly (no 30s delay)
-
-**Coverage target:** All decision branches in `PrintFailureMonitorService.RunMonitoringCycleAsync`
-
----
-
-### Frontend Component Tests (Priority 2)
-
-**File:** `src/Web/ReactApp/src/test/features/printers/failure-detection-toast.test.tsx` (NEW)
-
-**Must verify:**
-1. **Toast display** — When `printerSignalRService.onFailureDetected` fires:
-   - Toast shows: `⚠️ Failure detected on [printerName] (confidence: [N]%)`
-   - Auto-pause message appended if `autoPaused == true`
-   - Toast duration: 8000ms
-   - Toast variant: `warning`
-
-2. **Toast content accuracy** — Confidence rounded to integer (e.g., `85.5` → `85`)
-
-3. **Multiple events** — Multiple failure events show multiple toasts (not replaced)
-
-**Testing strategy:**
-- Mock `printerSignalRService` with controllable callback trigger
-- Render `<App />` (or extract failure handler to testable hook)
-- Simulate SignalR event via mock callback
-- Assert toast appearance with `screen.getByText` and/or `toast.warning` mock
-
-**Coverage target:** Full `onFailureDetected` callback in `App.tsx`
-
----
-
-### Frontend Integration Tests (Priority 3)
-
-**File:** `src/Web/ReactApp/src/test/features/printers/ml-badge-integration.test.tsx` (NEW or EXPAND existing obico-ml-badge.test.tsx)
-
-**Must verify:**
-1. **ML badge visibility rules** — Badge shows when:
-   - `printer.obicoEnabled == true`
-   - `printer.state == "Printing"`
-   - Badge hidden otherwise (all permutations tested in existing `obico-ml-badge.test.tsx`)
-
-2. **EditPrinterModal toggle** — When user toggles "Enable Obico monitoring":
-   - Save button becomes enabled
-   - Saving sends `obicoEnabled: true` to API
-   - (Already covered by existing `EditPrinterModal.test.tsx`)
-
-**Testing strategy:**
-- Existing tests cover this. Validate they still pass after backend changes.
-- If backend adds new fields to `FailureDetectionDto`, update type tests.
-
----
-
-## Edge Cases to Gate (Critical Path)
-
-### Backend Edge Cases
-1. **No printers configured** → Service sleeps, no crashes
-2. **No cameras configured** → Service finds 0 eligible printers, sleeps
-3. **All printers offline** → Service finds 0 eligible printers, sleeps
-4. **Obico server down** → Service logs error, continues monitoring other printers
-5. **Database connection lost mid-cycle** → Service logs error, retries next cycle
-6. **Printer goes offline during analysis** → Service handles exception, continues
-
-### Frontend Edge Cases
-1. **SignalR disconnected** → No toasts (expected, not a test failure)
-2. **Malformed event** → Toast shows with default values or gracefully skips
-3. **User dismisses toast** → No state corruption
-
-### Integration Edge Cases
-1. **Printer deleted during monitoring** → Service skips missing printer, no crash
-2. **Camera URL becomes invalid** → Analysis fails gracefully, logged warning
-3. **Print job completes during analysis** → Event still broadcasts (stale but harmless)
-
----
-
-## Deferred (Not First Slice)
-
-These are **out of scope** for the first validation slice:
-
-- **History persistence** — `GET /api/failure-detection/history` returns 501. Future work.
-- **Auto-pause implementation** — `PrintFailureMonitorService` logs "pause requires backend client integration." Future work.
-- **Manual analyze endpoint** — `POST /api/failure-detection/analyze/{printerId}` requires auth and Obico integration. Low priority.
-- **Confidence threshold tuning** — No user-configurable threshold yet. Future work.
-- **Multi-camera printers** — Service uses `FirstOrDefault()` camera. Future work.
-- **Rate limiting** — No protection against Obico API rate limits. Future work.
-- **Performance under load** — No stress test for 50+ printers. Future work.
-
----
-
-## Test Execution Order
-
-1. **Backend integration tests** — Prove monitoring loop correctness
-2. **Frontend component tests** — Prove toast notifications work
-3. **Manual smoke test** — Developer runs both API + React, triggers failure, sees toast
-4. **Full test suite** — All 1480 React + 1645 API tests must still pass
-
----
-
-## Success Criteria
-
-✅ All backend integration tests pass (new `PrintFailureMonitorServiceTests.cs`)  
-✅ All frontend component tests pass (new `failure-detection-toast.test.tsx`)  
-✅ Existing test suites pass with 0 regressions  
-✅ Developer smoke test confirms end-to-end flow works  
-✅ No new linting errors, no new compiler warnings
-
-**If ANY criteria fail, the slice is NOT ready for merge.**
-
----
-
-## Test Scaffolding Recommendations
-
-### Backend Test Structure (Minimal Scaffold)
-
-```csharp
-// src/tests/Farm.Web.Api.Tests/Services/PrintFailureMonitorServiceTests.cs
-[Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class PrintFailureMonitorServiceTests : IAsyncLifetime
-{
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly Mock<IObicoFailureDetectionService> _mockObicoService;
-    private readonly Mock<IHubContext<PrinterHub>> _mockHub;
-    private readonly Mock<IPrinterStatusCacheReader> _mockStatusCache;
-
-    // Test methods:
-    // - Service_OnlyAnalyzesPrintersWithCamerasAndPrintingState
-    // - Service_UsesAssignedObicoServerWhenAvailable
-    // - Service_FallsBackToGlobalObicoUrlWhenNoAssignment
-    // - Service_BroadcastsFailureEventWhenDetected
-    // - Service_SkipsAnalysisWhenObicoDisabled
-    // - Service_HandlesObicoApiErrorGracefully
-}
-```
-
-### Frontend Test Structure (Minimal Scaffold)
-
-```typescript
-// src/Web/ReactApp/src/test/features/printers/failure-detection-toast.test.tsx
-describe('Failure Detection Toast Notifications', () => {
-  it('displays toast when FailureDetected event received');
-  it('shows confidence as integer percentage');
-  it('appends auto-pause message when autoPaused is true');
-  it('shows multiple toasts for multiple events');
-});
-```
-
----
-
-## Rationale
-
-This plan prioritizes **user-visible correctness** over exhaustive internal unit tests. The critical path is:
-
-1. Backend monitors printers correctly
-2. Backend broadcasts events correctly
-3. Frontend displays toasts correctly
-
-Once this loop works, future slices can add history persistence, auto-pause, and advanced features.
-
-**No implementation yet** — this is the validation plan. Implementation happens in the next phase.
-
----
-
-# Decision: Bed Pre-Clear Feature for Auto-Print
-
-**Date:** 2026-03-20  
-**Agent:** Lambert (Backend Developer)  
-**Status:** Implemented ✅  
-**Impact:** Medium — Improves auto-print workflow efficiency
-
-## Context
-
-Users wanted the ability to tell the system "the printer bed is already clear" BEFORE a job finishes, so when the job completes, the next job dispatches immediately without waiting for the manual "bed clear" confirmation (PendingReady state).
-
-This is particularly useful when:
-- Operator is monitoring the printer and knows they'll clear the bed immediately
-- Multiple operators are available and one can clear the bed while another queues jobs
-- Reducing friction in high-throughput print farm operations
-
-## Decision
-
-Implemented a **pre-confirmation flag** (`BedPreConfirmed`) on the `Printer` entity that allows operators to declare bed readiness ahead of time.
-
-### Implementation Details
-
-1. **Database Schema**
-   - Added `BedPreConfirmed: bool` to `Printer` entity (defaults to `false`)
-   - Created EF Core migrations for both PostgreSQL and SQL Server
-
-2. **API Surface**
-   - New endpoint: `POST /api/auto-print/{printerId}/pre-clear`
-   - Returns `AutoPrintStatusDto` with `bedPreConfirmed` field
-   - Validation guards:
-     - Auto-print must be enabled
-     - Printer must be idle (not actively printing)
-
-3. **Workflow Integration**
-   - **At job completion** (`TransitionToPendingReadyAsync`):
-     - If `BedPreConfirmed == true` → skip PendingReady, go straight to Ready
-     - Reset flag after using it
-     - Trigger immediate dispatch
-   - **At dispatch time** (`AutoDispatchBackgroundService`):
-     - Allow dispatch if `AutoPrintState == Ready OR BedPreConfirmed == true`
-     - Reset flag after successful dispatch
-
-4. **State Lifecycle**
-   - Flag is **single-use** — automatically reset after:
-     - Job dispatch completes
-     - Transition through PendingReady state
-     - No queued jobs remaining
-   - Prevents perpetual pre-clear state
-
-## Alternatives Considered
-
-1. **Auto-transition to Ready after N seconds** — Rejected: unsafe, no operator control
-2. **Queue-level pre-clear (all jobs)** — Rejected: too coarse-grained, doesn't respect per-job bed clearing
-3. **Camera-based bed detection** — Rejected: requires ML integration, out of scope
-
-## Consequences
-
-### Positive
-- ✅ Zero friction for operators who know bed will be clear
-- ✅ Reduces dispatch latency from ~30s (manual confirmation) to immediate
-- ✅ Backwards compatible — existing auto-print workflow unchanged
-- ✅ Flag automatically resets, no stale state risk
-
-### Negative
-- ⚠️ Operator could pre-clear when bed isn't actually clear (user error)
-- ⚠️ Adds another button to UI (frontend team needs to design placement)
-
-### Neutral
-- Frontend work required to expose the pre-clear button
-- Webhook event added: `printer.bed_pre_confirmed`
-
-## Validation
-
-- **Build:** Clean (0 errors, 0 warnings)
-- **Tests:** All 2087 tests passing
-- **Format:** Compliant with dotnet format
-- **Migrations:** Created for both database providers
-
-## Related Work
-
-- **Frontend (pending):** UI to expose "Pre-Clear Bed" button
-- **Documentation (pending):** User guide for pre-clear feature
-- **Monitoring (future):** Track pre-clear usage metrics (is it being used?)
-
-## Notes
-
-This feature complements the existing auto-print workflow rather than replacing it. Operators can choose:
-1. **Traditional flow:** Wait for job to complete → manual "Ready" confirmation → dispatch
-2. **Pre-clear flow:** Mark bed pre-clear → job completes → immediate dispatch
-
-The flag's automatic reset ensures the feature is safe and doesn't leave the system in an unexpected state.
-
----
-
-# Decision: CreatedAtAction Must Use String Literals Without Async Suffix
-
-**Author:** Lambert (Backend Dev)
-**Date:** 2025-07-17
-**Status:** Proposed
-
-## Context
-
-ASP.NET Core's `SuppressAsyncSuffixInActionNames` defaults to `true`, which strips the `Async` suffix from action names during route registration. For example, `GetByIdAsync` is registered as `GetById`.
-
-Using `nameof(GetByIdAsync)` in `CreatedAtAction` produces the string `"GetByIdAsync"`, which does **not** match the registered route name `"GetById"`. This causes an `InvalidOperationException: No route matches the supplied values` at runtime.
-
-## Decision
-
-All `CreatedAtAction` calls **must** use string literals matching the registered action name (without the `Async` suffix), not `nameof()`.
-
-```csharp
-// ✅ Correct
-return CreatedAtAction("GetById", new { id = entity.Id }, dto);
-
-// ❌ Wrong — runtime exception
-return CreatedAtAction(nameof(GetByIdAsync), new { id = entity.Id }, dto);
-```
-
-## Affected Controllers
-
-- `TasksController.cs` — `nameof(GetByIdAsync)` → `"GetById"`
-- `ObicoServerController.cs` — `nameof(GetServerAsync)` → `"GetServer"`
-
-## Rationale
-
-- `nameof()` is compile-time safe but produces the **method name**, not the **route-registered action name**.
-- The ASP.NET Core convention strips `Async` from action names by default.
-- String literals are the only reliable way to reference the registered action name in `CreatedAtAction`.
-- This is a runtime-only failure (no compile error), making it easy to miss without integration tests.
-
----
-
-# Decision: Remove Farm.Importing Project
-
-**Author:** Lambert (Backend Dev)  
-**Date:** 2025-07-26  
-**Status:** Implemented (not yet committed)
-
-## Context
-The `Farm.Importing` project (`src/import/`) contained CSV/JSON import parsing services (`IImportParserService`, `IImportProcessorService`). This functionality was superseded by inline parsing in `PrintersService` which handles the same CSV/JSON import flows directly.
-
-## Decision
-Delete `Farm.Importing` entirely — project, tests, DI registrations, and all references.
-
-## Impact
-- Reduces solution complexity (2 fewer projects to build)
-- No runtime behavior change — PrintersService already handles all import paths
-- Build: clean (0 errors, 0 warnings), Tests: 2091 passing
-
----
-
-# Decision: Pre-commit hook architecture
-
-**Date:** 2025-07-26
-**Author:** Lambert (Backend)
-**Status:** Implemented
-
-## Context
-
-CI workflows (`ci-lint.yml`, `yamllint.yml`, `enforce-path-casing.yml`) catch lint issues on the server but feedback is slow (push → wait for CI). Developers need fast local feedback before committing.
-
-## Decision
-
-Created `.githooks/` with a portable pre-commit hook that mirrors CI checks on staged files only. Each check is independently skippable if its tool isn't installed, so the hook never blocks developers who haven't set up optional tooling.
-
-## Checks implemented
-
-| Check | Tool | CI mirror |
-|-------|------|-----------|
-| Shell lint | shellcheck | ci-lint.yml |
-| YAML lint | yamllint | yamllint.yml |
-| Path casing | node scripts/check-path-casing.js | enforce-path-casing.yml |
-| TypeScript lint | npx eslint | React dev standards |
-| C# format | dotnet format --verify-no-changes | .NET format standards |
-
-## Key choices
-
-- **`core.hooksPath` over symlinks** — modern git feature, no manual linking, works cross-platform
-- **Opt-in activation** — developers run `.githooks/setup.sh` once; not forced on clone
-- **CI stays in place** — hooks are fast feedback, CI is enforcement. Both coexist.
-- **Staged-only scope** — only lint files being committed, not the whole repo
-- **Graceful degradation** — missing tools produce warnings, not failures
-
-## Noted issues
-
-- Pre-existing path casing mismatch: `src/api/data/` in git vs `src/api/Data/` on disk. Hook correctly detects it. Separate fix needed.
-
----
-
-# Decision: Standardize All API Controller Routes to Kebab-Case
-
-**Date:** 2026-07-17
-**Author:** Lambert (Backend Dev)
-**Status:** Implemented
-
-## Context
-
-Several backend API controllers used inconsistent route patterns:
-- Some used `[Route("api/[controller]")]` which resolves to PascalCase (e.g., `/api/JobScheduling`)
-- Some used concatenated lowercase (e.g., `/api/autoprint`, `/api/systemlogs`)
-- The frontend `api.ts` was already calling kebab-case URLs like `/auto-print` and `/system-logs`
-
-## Decision
-
-All API controller routes now use explicit kebab-case strings instead of the `[controller]` convention. Brand names (e.g., `filaman`) are left unchanged.
-
-## Controllers Changed
-
-| Controller | Before | After |
+| Capability | Status | Notes |
 |---|---|---|
-| AutoPrintController | `api/autoprint` | `api/auto-print` |
-| SystemLogsController | `api/systemlogs` | `api/system-logs` |
-| JobSchedulingController | `api/[controller]` | `api/job-scheduling` |
-| PrintApprovalsController | `api/[controller]` | `api/print-approvals` |
-| RetriesController | `api/[controller]` | `api/retries` |
-| TasksController | `api/[controller]` | `api/tasks` |
-| AssetsController | `api/[controller]` | `api/assets` |
-| ArtifactsController | `api/[controller]` | `api/artifacts` |
-| FileConsistencyController | `api/[controller]` | `api/file-consistency` |
-| SlicersController | `api/[controller]` | `api/slicers` |
-| WorkersController | `api/[controller]` | `api/workers` |
+| Camera entity with `StreamUrl`, `SnapshotUrl` | ✅ | Supports standalone + printer-attached |
+| `CameraSource.PrusaLink` enum | ✅ | Exists but unused — PrusaLink client returns `null` for camera URLs |
+| `ISupportsCamera` on `PrusaLinkClient` | ✅ | Stub only — both methods return `null` |
+| Camera CRUD API | ✅ | Full create/update/delete/toggle/display endpoints |
+| Camera health monitoring | ✅ | 5-minute checks via HTTP to snapshot URLs, degraded/unhealthy tracking |
+| PrusaLink status polling | ✅ | 5-second interval, extracts temps, position, progress, job name |
+| Speed multiplier from PrusaLink | ⚠️ | Available in `SimplePrinterStatus.SpeedMultiplier` but **not propagated** via SignalR |
+| Nozzle diameter / MMU flag | ⚠️ | Available in `PrinterInformation` (one-time fetch) but **not in status updates** |
+| Z-height from PrusaLink | ✅ | `AxisZ` already in `PrinterStatusDto` |
+| Filament type from PrusaLink | ❌ | PrusaLink API doesn't expose this in status |
+| RTSP stream playback | ❌ | No transcoding infrastructure |
+| Event-driven camera snapshots | ❌ | No snapshot-on-state-change mechanism |
+| RTSP connectivity probing | ❌ | Health monitor only checks HTTP endpoints |
 
-## Rule Going Forward
+### What Prusa-StatusBar Does (Feature Map)
 
-All new controllers MUST use explicit kebab-case `[Route("api/my-resource")]` — never `[Route("api/[controller]")]`.
-
----
-
-# Decision: Never Stub EF Migrations
-
-**Author:** Lambert  
-**Date:** 2026-03-17  
-**Status:** RECOMMENDATION
-
-## Context
-The ObicoServer migrations were manually written with empty `Up()` methods and comments saying "schema managed by EnsureCreated." This meant existing deployments using EF migrations would never get the ObicoServers table.
-
-## Decision
-**All EF migrations must be generated by `dotnet ef migrations add`, never hand-written as empty stubs.** The app supports both `EnsureCreated` (new deployments) and EF migrations (existing deployments) — both paths must produce correct schema.
-
-## Rationale
-- `EnsureCreated` handles new databases but cannot update existing ones
-- EF migrations handle schema evolution for existing databases
-- Empty migrations silently break the migration path with no runtime error
-- This class of bug only manifests in production upgrades, never in fresh dev setups
+| Feature | How It Works | Relevance to PrintFarmer |
+|---|---|---|
+| Buddy Camera RTSP | `go2rtc` sidecar transcodes `rtsp://<ip>:554/live/` → HLS | High — enables browser-playable Buddy streams |
+| Snapshot provider | GET `go2rtc /api/frame.jpeg` for stills from any source | High — event snapshots, timelapse stills |
+| RTSP probe | TCP connect + RTSP DESCRIBE to verify camera before use | Medium — improves health checks for RTSP cameras |
+| Generic camera support | HTTP still URL, MJPEG frame grab, RTSP via go2rtc | Medium — already partly covered by PrintFarmer |
+| Notifications with snapshots | Capture still on print start/finish/attention events | High — enables event-driven camera capture |
+| Extra status fields | Speed, Z-height, filament, MMU, nozzle diameter | Medium — some already available, some not |
 
 ---
 
-# Decision: Obico Server API Key — Write-Only Security Pattern
+## Tier 1: Immediately Useful (Low–Medium Effort)
 
-**Author:** Lambert (Backend Dev)
-**Date:** 2026-03-17
-**Status:** IMPLEMENTED
+### 1A. Propagate Speed Multiplier via SignalR
 
-## Context
+**Effort:** Small (1–2 hours)
+**Value:** Users see print speed in real-time on the dashboard
 
-Obico ML servers can be self-hosted (no auth) or cloud/secured (requires API key). The existing multi-server ObicoServer entity had no authentication field.
+`PrusaCompositeStatus` already has access to `SimplePrinterStatus.SpeedMultiplier` but it's not included in the `PrusaCompositeStatus` record or `PrinterStatusDto`. Fix:
 
-## Decision
+1. Add `SpeedMultiplier` (int?, percentage 0–999) to `PrusaCompositeStatus`
+2. Add `SpeedMultiplier` to `PrinterStatusDto`
+3. Populate in `PrusaLinkPollingService` from the existing API response
+4. Display in frontend printer card/detail
 
-Added optional `ApiKey` field to `ObicoServer` with a **write-only security pattern**:
+**Note:** This is backend-agnostic — Moonraker and OctoPrint can also populate this field.
 
-- **API Response:** Returns `hasApiKey: true/false` — never exposes the actual key
-- **Create/Update:** Accepts `apiKey` string to set/update the key
-- **Clear Key:** Send empty string `""` in update to remove the key
-- **Auth Method:** Sent as `Authorization: Bearer <key>` header on all Obico API requests
+### 1B. Surface Nozzle Diameter & MMU Flag from Printer Info
 
-## Rationale
+**Effort:** Small (2–3 hours)
+**Value:** Operators see hardware config at a glance
 
-- API keys are secrets — exposing them in GET responses would be a security risk
-- The `hasApiKey` boolean lets the UI show whether auth is configured without leaking the value
-- Bearer token is the standard auth mechanism for HTTP APIs
-- Nullable field ensures backward compatibility — existing servers without keys continue working
+`PrinterInformation` from PrusaLink already contains `NozzleDiameter` (float) and `HasMmu` (bool). These are fetched once during discovery/connection but not exposed to the UI.
 
-## Impact
+1. Add `NozzleDiameter` and `HasMmu` to `Printer` entity (nullable, set during discovery)
+2. Include in printer detail API response
+3. Display in printer detail view
 
-- **Entity:** `ObicoServer.ApiKey` (nullable, max 500 chars)
-- **Services:** `IObicoFailureDetectionService` and `PrintFailureMonitorService` pass API key through
-- **Migrations:** Both PostgreSQL and SqlServer — simple `AddColumn` (nullable, no data loss)
-- **Frontend:** `ObicoServer` type gains `hasApiKey` boolean, create/update types gain `apiKey`
+**Migration required** — both Postgres and SqlServer.
 
-## Team Impact
+### 1C. Buddy Camera as Standalone Camera (Manual Config)
 
-- **Ripley (Frontend):** Update ObicoServersSection to include optional API key field in create/edit forms. Show "API key configured" badge when `hasApiKey` is true.
-- **Parker (DevOps):** No infrastructure changes needed — API key is per-server configuration.
+**Effort:** Small (1–2 hours)
+**Value:** Users can add Buddy cameras today using existing CRUD
 
----
+The existing camera CRUD already supports this. A user can:
+- Create a standalone camera with `StreamUrl = rtsp://<camera-ip>:554/live/`
+- Associate it with a printer via `PrinterId`
+- Set `CameraType = General` or `Wide`
 
-# Decision: Docker publish workflow triggers for release branch
+**What's missing:** The frontend Camera View can't play RTSP streams (browsers don't support RTSP natively). This is addressed in Tier 2. For now, `SnapshotUrl` could point to a go2rtc instance if the user runs one manually.
 
-**Date:** 2025-07-25
-**Author:** Lambert (Backend Dev)
+**Action:** Document this manual workflow in the camera setup guide. No code change needed.
 
-## Context
-The team needs Docker images built automatically when code is pushed to the `release` branch, matching the existing behavior for `main`.
+### 1D. RTSP Health Probe
 
-## Decision
-- `docker-publish.yml` now triggers on pushes to both `main` and `release` branches.
-- Release branch pushes produce two tags: `release` (mutable, always points to latest release push) and `release-sha-{short}` (immutable, tied to specific commit).
-- `containers.yml` was **not** modified. It's a scheduled optimization pipeline (daily + manual) that builds .NET/React natively then packages thin images. Its purpose is cache warming and base image freshness, not release gating. Adding push triggers there would duplicate the work `docker-publish.yml` already does on push events.
+**Effort:** Medium (4–6 hours)
+**Value:** Camera health checks work for RTSP cameras, not just HTTP
 
-## Consequences
-- Any push to `release` now builds and publishes all three images (api, frontend, monolith) to GHCR with `release` and `release-sha-*` tags.
-- Teams can pull `printfarmer-api:release` for the latest release candidate, or pin to a specific `release-sha-*` tag for reproducibility.
+Current `CameraHealthMonitorService` only does HTTP HEAD/GET to snapshot URLs. For RTSP cameras:
 
----
+1. Add an `ICameraProbe` interface with `ProbeAsync(string url)` returning health result
+2. Implement `HttpCameraProbe` (existing behavior) and `RtspCameraProbe`
+3. `RtspCameraProbe`: TCP connect to port 554, send RTSP `OPTIONS` request, check for `200 OK`
+4. Health monitor selects probe based on URL scheme (`rtsp://` vs `http://`)
 
-# Decision: Unified Docker Workflow
-
-**Author:** Parker (DevOps)
-**Date:** 2026-03-17
-**Status:** Implemented
-
-## Context
-
-We had two overlapping Docker CI/CD workflows:
-- `docker-publish.yml` — release pipeline using Dockerfile.multistage, comprehensive tagging, triggers on push/tags/manual
-- `containers.yml` — optimized pipeline using native build on runner + COPY into minimal containers, daily schedule + manual only
-
-Both built api and frontend images. containers.yml additionally built printer-discovery and orcaslicer-worker. docker-publish.yml additionally built monolith. Maintaining two workflows with different build strategies, triggers, and tagging was confusing and error-prone.
-
-## Decision
-
-Unified into a single `docker-publish.yml` workflow that takes the best of both:
-
-1. **Build strategy:** Native build (from containers.yml) for api, frontend, printer-discovery, orcaslicer-worker. Multistage Dockerfile (from docker-publish.yml) for monolith only — it can't use native build since it combines API + frontend in one image.
-
-2. **Triggers:** Combined — push to main/release, version tags, daily schedule, manual dispatch with tag_suffix input.
-
-3. **Tagging:** Comprehensive (from docker-publish.yml) — semver, branch names, SHA prefixes, release-specific tags, manual tags, nightly schedule tags. Applied uniformly to all 5 images.
-
-4. **All 5 images in one pipeline:** api, frontend, printer-discovery, orcaslicer-worker, monolith.
-
-5. **Monolith runs in parallel** with native-build containers — no dependency on build-dotnet/build-frontend jobs.
-
-## Consequences
-
-- **For the team:** One workflow to monitor, one place to update triggers/tagging/build logic.
-- **For builds:** Native build path is faster with better caching for 4 of 5 images. Monolith retains multistage build since it's architecturally different.
-- **For releases:** All 5 images get identical tagging treatment — semver tags on version pushes, SHA tags on branch pushes, nightly tags on schedule.
-- **Deleted:** `containers.yml` is gone. Any references to it should be updated.
-
-## Affected Components
-
-- `.github/workflows/docker-publish.yml` — replaced contents
-- `.github/workflows/containers.yml` — deleted
+This is self-contained, no external dependencies, and makes camera health work for Buddy cameras.
 
 ---
 
-# Decision: Frontend Type Alignment with Backend DTOs
+## Tier 2: Needs Architecture Work (Medium–High Effort)
 
-**Date:** 2026-03-17  
-**Agent:** Ripley (Frontend Dev)  
-**Status:** Implemented
+### 2A. RTSP → Browser-Playable Transcoding (go2rtc Sidecar)
 
-## Context
+**Effort:** High (2–3 days for initial; ongoing maintenance)
+**Value:** Live Buddy camera streams in the browser
 
-Compact printer cards showed disabled auto-dispatch icons for ALL printers, even those with auto-print enabled. Investigation revealed a type mismatch between backend DTOs and frontend TypeScript types.
+Browsers cannot play RTSP natively. Options:
 
-## Problem
+| Approach | Pros | Cons |
+|---|---|---|
+| **go2rtc sidecar container** | MIT-licensed, proven, RTSP→WebRTC/HLS/MSE, single binary | New container to manage, ~30MB image |
+| **ffmpeg transcoding in API** | No new container | Heavy CPU load, complex pipeline management |
+| **Client-side WebRTC** | No server transcoding | Requires STUN/TURN, complex NAT traversal |
 
-Backend `AutoPrintStatusDto` (C#):
-```csharp
-public class AutoPrintStatusDto {
-    public Guid PrinterId { get; set; }
-    public bool Enabled { get; set; }
-    public int QueueDepth { get; set; }
-    // ... other fields
-}
+**Recommendation: go2rtc sidecar container.**
+
+Architecture:
+```
+Browser ──WebRTC/MSE──▸ go2rtc (:1984) ──RTSP──▸ Buddy Camera (:554)
+                          ▲
+                          │ /api/frame.jpeg (snapshots)
+                          │
+                    PrintFarmer API (camera health, event snapshots)
 ```
 
-Serializes to camelCase JSON:
-```json
-{
-  "printerId": "...",
-  "enabled": true,
-  "queueDepth": 2
-}
-```
+Implementation:
+1. Add `docker-compose.go2rtc.yml` template to `scripts/docker/compose-templates/`
+2. go2rtc config generated from PrintFarmer camera registry (RTSP URLs → stream names)
+3. API proxies or redirects camera stream/snapshot requests through go2rtc
+4. Frontend `CameraView` component detects RTSP cameras and uses go2rtc WebRTC/MSE player
+5. Add `go2rtc` to `container-versions.conf`
 
-Frontend `AutoDispatchStatus` (TypeScript) had:
-```typescript
-interface AutoDispatchStatus {
-  printerId: string;
-  autoPrintEnabled: boolean;  // ❌ Wrong name
-  queuedJobCount: number;     // ❌ Wrong name
-}
-```
+**Config sync concern:** When cameras are added/removed, go2rtc config needs updating. Options:
+- **A)** go2rtc API mode — add/remove streams via REST API at runtime (preferred)
+- **B)** Config file regeneration + container restart on camera change
 
-Result: `autoDispatchStatus?.autoPrintEnabled` was always `undefined`, making all icons appear disabled.
+go2rtc supports runtime stream management via its API, so option A is cleaner.
 
-## Decision
+### 2B. Event-Driven Camera Snapshots
 
-**Align frontend types exactly with backend DTO property names (after camelCase serialization):**
+**Effort:** Medium (1–2 days)
+**Value:** Automatic snapshots on print start, finish, error — for notifications, history, timelapse
 
-```typescript
-export interface AutoDispatchStatus {
-  printerId: string;
-  enabled: boolean;              // ✅ Matches backend
-  state: AutoDispatchState;
-  queueDepth: number;            // ✅ Matches backend
-  printerName?: string;
-  isReady?: boolean;
-  currentJobName?: string;
-  lastActivity?: string;
-  bedPreConfirmed?: boolean;     // Added for pre-clear feature
-}
-```
+Architecture:
+1. `PrusaLinkPollingService` (and other backend pollers) already detect state transitions
+2. On state change (Idle→Printing, Printing→Finished, any→Error), emit a domain event
+3. New `CameraSnapshotService` subscribes to these events
+4. Service finds cameras associated with the printer, captures a snapshot (HTTP GET to snapshot URL or go2rtc `/api/frame.jpeg`)
+5. Store snapshot as a `PrintEvent` attachment or in a `CameraSnapshot` table
+6. Optionally include in notification payloads (future notification system)
 
-## Rationale
+**Dependencies:**
+- For HTTP/MJPEG cameras: works immediately
+- For RTSP cameras: requires go2rtc (2A) for snapshot capture via `/api/frame.jpeg`
 
-1. **Backend is the source of truth** — frontend types should mirror backend DTOs
-2. **JSON serialization is camelCase** — ASP.NET Core serializes PascalCase C# properties to camelCase JSON
-3. **Property names must match exactly** — TypeScript can't detect runtime mismatches at compile time
-4. **Type safety requires alignment** — mismatched names result in `undefined` values at runtime
+### 2C. Buddy Camera Auto-Discovery
 
-## Implementation
+**Effort:** Medium (1 day)
+**Value:** When adding a Prusa printer, automatically find its Buddy camera on the network
 
-Updated 4 files:
-- `src/types/api.ts` — Type definition
-- `src/features/printers/components/CompactPrinterCard.tsx` — 5 references
-- `src/features/printers/components/DetailedPrinterCard.tsx` — 5 references
-- `src/features/printers/__tests__/BedClearBanner.test.tsx` — 5 test references
+PrusaLink API doesn't expose camera information. Options:
 
-Also updated `BedClearBanner.tsx` to use `queueDepth` instead of `queuedJobCount`.
+1. **mDNS/Bonjour discovery** — Buddy cameras may advertise via mDNS (needs verification)
+2. **Subnet scan** — Probe port 554 on the printer's subnet for RTSP responders
+3. **User hint** — During printer setup, prompt "Does this printer have a Buddy camera?" and ask for IP
 
-## Consequences
+**Recommendation:** Start with option 3 (user hint during printer add/edit), add mDNS later if Buddy cameras advertise themselves.
 
-- ✅ Compact card icons now correctly reflect auto-dispatch state
-- ✅ No TypeScript errors (types were already present, just wrong names)
-- ✅ All 1471 tests passing
-- ⚠️ Future changes to backend DTOs require corresponding frontend type updates
-
-## Follow-Up
-
-Consider automated type generation from backend DTOs (e.g., NSwag, TypeScript code generation) to prevent future mismatches.
+Add a `CameraIp` or `BuddyCameraHost` field to the printer setup flow. When provided, auto-create a Camera entity with:
+- `StreamUrl = rtsp://<camera-ip>:554/live/`
+- `SnapshotUrl` = go2rtc endpoint (if available) or null
+- `Source = CameraSource.PrusaLink`
+- `CameraType = CameraType.Wide`
+- `PrinterId` = the printer being configured
 
 ---
 
-# Hardcoded API Paths Outside api.ts
+## Tier 3: Skip (Not Worth It / Doesn't Fit)
 
-**Author:** Ripley (Frontend Dev)  
-**Date:** 2026-03-16  
-**Status:** FOR DISCUSSION
+### 3A. go2rtc as Embedded Process (Not Container)
 
-## Problem
+Running go2rtc inside the API container adds process management complexity and breaks our single-process-per-container convention. The sidecar container approach is cleaner and aligns with our Docker deployment model.
 
-Found hardcoded API paths in `useAutoDispatch.ts` that bypass the centralized `apiClient` methods in `api.ts`. These call `apiClient.get/post/put` directly with string paths instead of using the typed methods.
+### 3B. Filament Type from PrusaLink Status
 
-## Affected Files
+PrusaLink's API doesn't expose the loaded filament type in status responses. PrintFarmer already has a separate filament/spool management system with Spoolman integration. Adding filament type detection from the printer would be unreliable and conflict with our spool tracking.
 
-- `src/features/printers/hooks/useAutoDispatch.ts` — 7 direct `apiClient.get/post/put` calls with `/auto-print/` paths
-- `src/features/printers/__tests__/BedClearBanner.test.tsx` — 3 test assertions checking those paths
+### 3C. Full MMU Status Tracking
 
-## Impact
+Prusa-StatusBar shows basic MMU presence. Full MMU status (which slot is active, errors, filament runout per slot) would require deep PrusaLink API integration that doesn't exist in the public API. The `HasMmu` flag from Tier 1B is sufficient for now.
 
-When backend routes change (like this kebab-case migration), these hardcoded paths silently break unless someone greps the entire codebase. The centralized `api.ts` methods exist for exactly this reason.
+### 3D. macOS-Style Notifications
 
-## Recommendation
-
-Refactor `useAutoDispatch.ts` to use the `apiClient.getAutoDispatchStatus()`, `apiClient.markPrinterReady()`, etc. methods already defined in `api.ts` instead of raw path calls.
+Prusa-StatusBar's notification system is macOS-native. PrintFarmer's notification architecture should be platform-agnostic (web push, email, webhooks). Camera snapshots in notifications (Tier 2B) is the right feature; the delivery mechanism is a separate concern.
 
 ---
 
-# Decision: Auto-Print Action Button Visibility Logic
+## Recommended Implementation Order
 
-**Author:** Ripley (Frontend Dev)
-**Date:** 2025-07-25
-**Status:** Implemented
+| Priority | Item | Effort | Dependencies |
+|---|---|---|---|
+| P0 | 1A — Speed multiplier in SignalR | 1–2h | None |
+| P0 | 1B — Nozzle diameter + MMU flag | 2–3h | DB migration |
+| P1 | 1D — RTSP health probe | 4–6h | None |
+| P1 | 1C — Document manual Buddy camera setup | 1h | None |
+| P2 | 2A — go2rtc sidecar for RTSP transcoding | 2–3d | Docker compose templates |
+| P2 | 2C — Buddy camera field in printer setup | 1d | 2A for full value |
+| P3 | 2B — Event-driven snapshots | 1–2d | 2A for RTSP cameras |
 
-## Context
-
-The Auto-Print Dashboard showed "Mark Ready", "Skip", and "Cancel" buttons unconditionally on all printer cards regardless of printer state. This meant users could see "Mark Ready" on a printer that was actively printing — a confusing UX since the bed is obviously not clear.
-
-## Decision
-
-Action buttons are now conditionally rendered based on the printer's auto-print workflow state (`state` field) and whether it's actively printing (`currentJobName`):
-
-| Button | Shown When | Rationale |
-|--------|-----------|-----------|
-| **Mark Ready** | `state === 'PendingReady'` AND not printing | Only meaningful when printer is waiting for bed-clear confirmation |
-| **Skip** | `state === 'PendingReady'` AND `queueDepth > 0` | Only skip when awaiting confirmation and there's a job to skip |
-| **Cancel** | `currentJobName` exists (actively printing) | Only cancel when there's an active print |
-
-## Changes
-
-- Added missing `state` field to frontend `AutoPrintStatus` TypeScript type (was already sent by backend but not consumed)
-- Added `Printing` and `Awaiting Bed Clear` status badges for better visual feedback
-- Updated tests to cover the new visibility logic (6 new test cases)
-
-## Impact
-
-Frontend-only change. No backend modifications needed — the `state` field was already being serialized.
+**Total estimated effort:** ~5–7 days for full implementation across all tiers.
 
 ---
 
-# Obico ML Monitoring UI Indicators
+## Architecture Decisions Required
 
-**Date:** 2026-03-17  
-**Agent:** Ripley (Frontend Developer)  
-**Status:** ✅ Implemented & Tested
+1. **go2rtc deployment model** — Sidecar container vs. user-managed external instance? Sidecar is recommended but adds a container to manage.
 
-## Context
+2. **Snapshot storage** — File system (like existing 3D model uploads) vs. database blob vs. object storage? File system is simplest and consistent with existing patterns.
 
-The backend already has Obico ML print failure monitoring with:
-- `PrintFailureMonitorService` capturing camera frames every 30s during prints
-- `FailureDetected` SignalR event broadcast with confidence scores
-- `Printer.ObicoServerId` FK indicating which printers are monitored
-- Manual analysis endpoint for on-demand checks
+3. **Camera-printer association for Buddy** — Extend printer setup form with optional camera IP, or keep camera management fully separate? Recommend extending printer setup for Prusa printers.
 
-The frontend had NO indicators showing:
-1. Which printers are actively being monitored
-2. When failures are detected by the ML system
-
-## Decision
-
-Implement three UI enhancements for Obico ML monitoring:
-
-### 1. SignalR Event Listener for `FailureDetected`
-- Register listener in `App.tsx` during SignalR connection
-- Show toast notification immediately when failure detected
-- Format: `⚠️ Failure detected on {printerName} (confidence: {X}%)`
-- Include auto-pause status in message if applicable
-- Use 8-second duration (longer than default) for critical warnings
-
-### 2. "ML" Badge on Printer Cards
-- Display shield icon + "ML" badge in both CompactPrinterCard and DetailedPrinterCard
-- Show ONLY when printer has `obicoServerId` assigned AND is currently printing
-- Position: Header section, after status pill
-- Visual: Accent-colored with shield icon, subtle styling to avoid clutter
-- Rationale: Badge only appears when monitoring is actively analyzing frames
-
-### 3. TypeScript Type Definition
-- Add `FailureDetectionEvent` interface to `api.ts`
-- Fields: `printerId`, `printerName`, `jobId?`, `confidence`, `detectedAt`, `autoPaused`
-- Matches backend's camelCase SignalR serialization
-
-## Implementation
-
-### Files Modified
-1. **types/api.ts** — Added `FailureDetectionEvent` interface
-2. **services/printer-signalr.ts** — Added callback type, event handler, subscription method
-3. **icons/MdiIcons.tsx** — Added `ShieldIcon` component (mdiShield from @mdi/js)
-4. **CompactPrinterCard.tsx** — Added ML badge logic and rendering
-5. **DetailedPrinterCard.tsx** — Added ML badge logic and rendering
-6. **App.tsx** — Registered failure detection listener with toast handler
-7. **test/App.smoke.test.tsx** — Updated mock to include `onFailureDetected` method
-
-### Code Patterns Followed
-- SignalR event naming: lowercase `failuredetected` (matches backend convention)
-- Toast notifications: sonner library with warning severity
-- Badge styling: Tailwind with pf- design tokens, accent color scheme
-- Icon integration: MDI icons via @mdi/js package (v7.4.47)
-- React Query: No additional hooks needed (SignalR handles real-time updates)
-
-## Alternatives Considered
-
-### Badge Visibility Strategy
-- **Rejected:** Show badge whenever printer has `obicoServerId` assigned
-- **Chosen:** Show badge only when printer is printing AND has `obicoServerId`
-- **Rationale:** Monitoring only actively checks frames during prints, so badge indicates "currently monitoring" not just "configured to monitor"
-
-### Toast Notification Approach
-- **Rejected:** In-app notification center with persistence
-- **Chosen:** Immediate toast with auto-dismiss
-- **Rationale:** Failure detection is time-sensitive — toast provides immediate user attention without requiring separate notification management UI
-
-### Badge Icon
-- **Rejected:** Eye icon (mdiEye) — implies "watching" but less clear about protection
-- **Rejected:** Alert icon (mdiAlert) — too alarming, badge is informational
-- **Chosen:** Shield icon (mdiShield) — clearly conveys monitoring/protection concept
-- **Rationale:** Shield icon universally understood as "protected" or "monitored" status
-
-## Testing
-
-- ✅ All 1471 existing tests pass
-- ✅ ESLint clean (0 errors)
-- ✅ Production build succeeds (7.38s)
-- ✅ TypeScript strict mode validation
-- ✅ SignalR mock updated for test compatibility
-
-## Notes
-
-- Backend already sends events with proper camelCase serialization
-- No API changes needed — all data already present in printer DTOs
-- Badge appears/disappears reactively based on printer state updates via SignalR
-- Toast is non-blocking and auto-dismisses after 8 seconds
-- Works across all printer backends (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge)
-
-## Future Enhancements (Out of Scope)
-
-1. **Notification History** — Persist failure detection events for later review
-2. **Confidence Threshold Settings** — UI for configuring detection sensitivity
-3. **Manual Analysis Button** — Quick-access button to trigger on-demand frame analysis
-4. **Detection Statistics** — Dashboard showing false positive rate, detection accuracy
-5. **Image Preview** — Show the actual frame that triggered the detection
+4. **go2rtc config sync** — Runtime API management (preferred) vs. config regeneration? Need to verify go2rtc's API supports all our needs.
 
 ---
 
-# Spaghetti Detection UI — Visual Mockup
+## Risk Assessment
 
-## Compact Printer Card (Grid View)
-
-```
-┌──────────────────────────────────────┐
-│ ┌────────────────────────────────┐   │
-│ │ [Printer Name]  [Printing]  🛡️│   │  ← Existing: name, state, Obico shield
-│ │                  [⚠️ Failure: 87%] │  ← NEW: Inline failure badge
-│ └────────────────────────────────┘   │
-│                                      │
-│ [Camera Feed Thumbnail]               │
-│                                      │
-│ [Progress Bar: 45%]                   │
-│ [Job Name: complex_part.gcode]        │
-│                                      │
-│ [Expand] [History] [Files]           │
-└──────────────────────────────────────┘
-```
-
-**Badge Variants:**
-- ⚠️ Yellow/Warning: Confidence <80% → `bg-pf-warning-bg text-pf-warning-text`
-- 🔴 Red/Error: Confidence ≥80% or auto-paused → `bg-pf-error-bg text-pf-error-text`
-
-## Detailed Printer Card (Expanded View)
-
-```
-┌────────────────────────────────────────────────────────┐
-│ ┌──────────────────────────────────────────────────┐   │
-│ │ [Printer Name]  [Printing]  🛡️                   │   │
-│ └──────────────────────────────────────────────────┘   │
-│                                                        │
-│ [Action Bar: Pause | Cancel | Emergency Stop]          │
-│                                                        │
-│ ┌─────────────────────────────────────────────────┐  │
-│ │ 🔴 Print Failure Detected                    [×]│  │  ← NEW: Alert panel
-│ │                                                  │  │
-│ │ • Confidence: 87%                                │  │
-│ │ • Print automatically paused                     │  │
-│ │ • Detected 2 minutes ago                         │  │
-│ └─────────────────────────────────────────────────┘  │
-│                                                        │
-│ [Progress Bar: 45%]                                    │
-│ [Job: complex_part.gcode]                              │
-│                                                        │
-│ [Camera Feed (if available)]                           │
-│                                                        │
-│ [Temperature Controls]                                 │
-│ [Movement Controls]                                    │
-│ [Filament Controls]                                    │
-└────────────────────────────────────────────────────────┘
-```
-
-**Alert Panel Variants:**
-- **Warning** (Confidence <80%):
-  - `type="warning"`
-  - Title: "Print Failure Detected"
-  - Body: "• Confidence: 72%\n• Detected 30 seconds ago"
-  - Border: `border-pf-warning`
-
-- **Error** (Confidence ≥80% OR auto-paused):
-  - `type="error"`
-  - Title: "Print Failure Detected"
-  - Body: "• Confidence: 87%\n• Print automatically paused\n• Detected 2 minutes ago"
-  - Border: `border-pf-error`
-
-## Toast Notification (Immediate Feedback)
-
-When failure is detected, a toast appears:
-
-```
-┌──────────────────────────────────────────────┐
-│ 🔴 Print failure detected on Printer A       │
-│    87% confidence                            │
-└──────────────────────────────────────────────┘
-```
-
-Duration: 10 seconds (allows user to notice and navigate)
-
-## Industrial Aesthetic Alignment
-
-**Color Palette:**
-- Warning: Yellow/amber tones matching PrintFarmer's warning system
-- Error: Red tones matching critical alerts
-- Consistent with existing `pf-warning-*` and `pf-error-*` design tokens
-
-**Typography:**
-- Header: `font-bebas uppercase tracking-wide` (existing printer card style)
-- Badge text: `text-xs font-medium` (compact, scannable)
-- Alert body: `text-sm` (readable, informative)
-
-**Spacing:**
-- Badges: `px-1.5 py-0.5` (tight, inline)
-- Alerts: `p-3` (generous, prominent)
-- Consistent with existing UI library components
-
-**Icons:**
-- AlertTriangleIcon (lucide-react) for compact badge
-- ShieldIcon continues to indicate Obico monitoring is active (separate concern)
-
-## Phase 2 Enhancements (Future)
-
-1. **Camera Snapshot Capture:** Show captured image at failure time
-2. **Actionable Buttons:** "Resume Print", "View Camera", "Mark False Positive"
-3. **Confidence Threshold Slider:** User-configurable in settings
-4. **History Timeline:** Vertical timeline of all detections with thumbnails
-5. **Analytics Dashboard:** Failure rate trends, confidence distribution charts
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| go2rtc adds deployment complexity | Medium | Make it optional; non-RTSP cameras work without it |
+| Buddy camera IP changes (DHCP) | Medium | Document static IP recommendation; health monitor detects failures |
+| RTSP probe false positives/negatives | Low | Use RTSP OPTIONS (lightweight), fall back to TCP connect |
+| go2rtc WebRTC NAT issues in Docker | Medium | go2rtc supports multiple output formats (HLS, MSE, WebRTC); fall back to HLS if WebRTC fails |
 
 ---
 
@@ -5991,3 +4085,14 @@ Four slicer-area frontend bugs fixed in a single session:
 - `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx`
 - `src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx`
 
+## References
+
+- [Prusa-StatusBar source](https://github.com/deimosfr/Prusa-StatusBar) — MIT license
+- [go2rtc](https://github.com/AlexxIT/go2rtc) — MIT license, 30MB Docker image
+- [PrusaLink API docs](https://github.com/prusa3d/Prusa-Link-Web) — camera endpoints not exposed
+- PrintFarmer camera infra: `src/infra/Domain/Camera.cs`, `src/api/Controllers/CamerasController.cs`
+- PrintFarmer PrusaLink plugin: `src/backends/Farm.Backend.Plugin.PrusaLink/`
+### 2026-04-26: User directive
+**By:** Jeff Papiez (via Copilot)
+**What:** Catalog model machine profile selection must only match slicer aliases defined in the catalog; do not fall back to manufacturer/model lookup for catalog selections.
+**Why:** User clarified that profile selection source of truth is the catalog's configured slicer alias.
