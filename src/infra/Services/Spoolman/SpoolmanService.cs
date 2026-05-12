@@ -749,15 +749,14 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             logger.LogDebug(ex, "Native Spoolman materials/available endpoint not available, falling back to aggregation");
         }
 
-        // Fallback: fetch all spools and aggregate client-side
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await ListSpoolsAsync(
-            new SpoolmanSpoolQueryParams { Limit = 500 }, ct);
+        // Fallback: fetch all filament definitions and aggregate distinct materials.
+        // Filaments are the source of truth for material types — querying spools
+        // was limited (500 cap) and missed materials with no active spools.
+        IReadOnlyList<SpoolmanFilamentDto> filaments = await ListFilamentsAsync(ct);
 
-        return result.Items
-            .Where(s => s.Archived is not true
-                && !string.IsNullOrWhiteSpace(s.Material)
-                && (s.RemainingWeightG is null || s.RemainingWeightG > 0))
-            .Select(s => s.Material)
+        return filaments
+            .Where(f => !string.IsNullOrWhiteSpace(f.Material))
+            .Select(f => f.Material!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
             .ToList()
