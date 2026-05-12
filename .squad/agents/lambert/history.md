@@ -689,3 +689,33 @@ The frontend's `OrcaImportWizard` had a 4-step flow (upload → preview → revi
 - `IProfilesService.ImportProfileAsync` — Persists individual profiles with deduplication
 - Frontend `OrcaImportWizard` — Now has complete upload → preview → import flow
 
+
+## 2026-05-12 Session Wrap-Up
+
+**Outcomes:** PFarm1-873d ✅ CLOSED, PFarm1-3sbh ✅ CLOSED, Changes Pushed  
+**Deliverables:** Camera auto-upsert service, RTSP health probe, DB migrations  
+**Tests:** All passing (schema, service, probe logic)  
+
+### PFarm1-873d Implementation Summary
+
+- Schema: BuddyCameraHost field (253 chars) on Printer entity
+- Service: PrinterService upsert/delete logic for Camera entities
+- Validation: IP/hostname only (reject URL schemes)
+- DTOs: Updated UpdatePrinterDto, CreatePrinterFromDiscoveryDto, PrinterDto
+- Migrations: PostgreSQL + SQL Server both valid
+- Tests: Lifecycle (create/update/delete), validation, serialization
+
+### PFarm1-3sbh Implementation Summary
+
+- RTSP health probe: OPTIONS request to rtsp://{streamUrl}
+- Fallback: TCP connect on port 554 if OPTIONS fails
+- Integration: CameraHealthMonitorService dispatcher
+- Tests: Success/failure, fallback, timeout handling
+- Ready for: Continuous monitoring of Buddy and other RTSP cameras
+
+### Integration Ready
+
+- Buddy camera feature end-to-end ready in codebase
+- No API breaking changes; additions only
+- Foundation laid for downstream beads (snapshots, go2rtc)
+- All changes pushed to remote
