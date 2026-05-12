@@ -1081,7 +1081,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       id="buddy-camera-ip"
                       type="text"
                       value={formData.buddyCameraIp || ''}
-                      onChange={e => handleInputChange('buddyCameraIp', e.target.value || undefined)}
+                      onChange={e => handleInputChange('buddyCameraIp', e.target.value)}
                       placeholder="192.168.1.100"
                       title="IP address of the Prusa Buddy board camera"
                     />

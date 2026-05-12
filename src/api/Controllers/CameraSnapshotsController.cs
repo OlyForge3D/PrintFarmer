@@ -1,6 +1,6 @@
-using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -95,11 +95,12 @@ public class CameraSnapshotsController(
         string snapshotRoot = _storagePathService.GetSnapshotStorageDirectory();
         string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
 
-        // Prevent path traversal: canonicalize and verify containment
-        string canonicalRoot = Path.GetFullPath(snapshotRoot);
+        // Prevent path traversal: canonicalize and verify containment.
+        // TrimEndingDirectorySeparator avoids double-separator when config path has a trailing slash.
+        string canonicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(snapshotRoot));
         string canonicalFull = Path.GetFullPath(fullPath);
-        if (!canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            && !canonicalFull.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+        if (!canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !canonicalFull.Equals(canonicalRoot, StringComparison.Ordinal))
         {
             _logger.LogWarning("[CameraSnapshots] Path traversal attempt blocked for snapshot {SnapshotId}", snapshotId);
             return BadRequest("Invalid snapshot path.");
@@ -131,11 +132,12 @@ public class CameraSnapshotsController(
         string snapshotRoot = _storagePathService.GetSnapshotStorageDirectory();
         string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
 
-        // Prevent path traversal: canonicalize and verify containment
-        string canonicalRoot = Path.GetFullPath(snapshotRoot);
+        // Prevent path traversal: canonicalize and verify containment.
+        // TrimEndingDirectorySeparator avoids double-separator when config path has a trailing slash.
+        string canonicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(snapshotRoot));
         string canonicalFull = Path.GetFullPath(fullPath);
-        if (!canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            && !canonicalFull.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+        if (!canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !canonicalFull.Equals(canonicalRoot, StringComparison.Ordinal))
         {
             _logger.LogWarning("[CameraSnapshots] Path traversal attempt blocked for snapshot {SnapshotId}", snapshotId);
             return BadRequest("Invalid snapshot path.");
