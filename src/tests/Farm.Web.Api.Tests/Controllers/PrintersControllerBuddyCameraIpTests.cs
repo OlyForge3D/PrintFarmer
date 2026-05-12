@@ -148,4 +148,60 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         body.Should().NotContain(injection, because: "raw user input must not be reflected in error responses");
     }
+
+    [Fact]
+    public async Task UpdatePrinter_ClearsBuddyCameraIp_WhenCameraHasSnapshots_Succeeds()
+    {
+        // Arrange: printer with a PrusaLink buddy camera + one snapshot row
+        Guid printerId = await SeedPrinterAsync();
+
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var camera = new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                Name = "Buddy Camera",
+                Source = CameraSource.PrusaLink,
+                StreamUrl = "rtsp://192.168.1.50:554/live/",
+            };
+            db.Cameras.Add(camera);
+            await db.SaveChangesAsync();
+
+            var snapshot = new CameraSnapshot
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                CameraId = camera.Id,
+                EventType = "test",
+                FilePath = "/snapshots/test.jpg",
+                CapturedAt = DateTime.UtcNow,
+            };
+            db.CameraSnapshots.Add(snapshot);
+            await db.SaveChangesAsync();
+
+            // Also stamp BuddyCameraIp on the printer row so the service finds an existing camera
+            var printer = await db.Printers.FindAsync(printerId);
+            printer!.BuddyCameraIp = "192.168.1.50";
+            await db.SaveChangesAsync();
+        }
+
+        // Act: clear BuddyCameraIp — this would throw FK violation before the fix
+        var dto = new UpdatePrinterDto(BuddyCameraIp: "");
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", dto);
+
+        // Assert: succeeds and camera + snapshot rows are gone
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Cameras.Where(c => c.PrinterId == printerId).Should().BeEmpty(
+                because: "the buddy camera must be removed when BuddyCameraIp is cleared");
+            db.CameraSnapshots.Where(s => s.PrinterId == printerId).Should().BeEmpty(
+                because: "snapshots must be pre-deleted to avoid FK violation on the Restrict constraint");
+        }
+    }
 }
