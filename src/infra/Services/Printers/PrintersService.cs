@@ -64,6 +64,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="locationService">Service for location management</param>
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
+/// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -78,7 +79,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
-    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService) : IPrintersService
+    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
+    Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
@@ -93,6 +95,7 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
+    private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -4094,6 +4097,7 @@ public class PrintersService(
             printer.BuddyCameraIp = null;
             if (existing != null)
             {
+                await _go2RtcService.RemoveStreamAsync(existing.Id, ct);
                 _unitOfWork.Cameras.Remove(existing);
                 _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
             }
@@ -4113,6 +4117,14 @@ public class PrintersService(
                 existing.HealthStatus = CameraHealthStatus.Unknown;
                 existing.ConsecutiveFailures = 0;
                 existing.HealthMessage = null;
+
+                // Re-register stream in go2rtc with updated URL
+                string? snapshotUrl = await _go2RtcService.AddStreamAsync(existing.Id, rtspUrl, ct);
+                if (snapshotUrl != null)
+                {
+                    existing.SnapshotUrl = snapshotUrl;
+                }
+
                 _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, rtspUrl);
             }
         }
@@ -4133,6 +4145,13 @@ public class PrintersService(
                 HealthStatus = CameraHealthStatus.Unknown,
                 CreatedAt = DateTime.UtcNow,
             };
+
+            // Register stream in go2rtc and derive snapshot URL
+            string? snapshot = await _go2RtcService.AddStreamAsync(camera.Id, rtspUrl, ct);
+            if (snapshot != null)
+            {
+                camera.SnapshotUrl = snapshot;
+            }
 
             _unitOfWork.Cameras.Add(camera);
             _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, printer.Name, rtspUrl);
