@@ -229,3 +229,5 @@ Written comprehensive test suite for new ZIP bundle extraction utility. Utility 
 - Clear test names using BDD style
 - Proper setup/teardown with beforeEach
 - Both positive and negative test cases included
+
+**[Older entries archived on 2026-05-12 — see history.md for recent updates]**

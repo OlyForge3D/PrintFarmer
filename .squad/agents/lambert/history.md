@@ -28,13 +28,6 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - 2026-03-27: The smallest operator-relevant printer session timeline is a printer-scoped read model, not new persistence: anchor sessions on `PrintJob`, compose nested events from `QueuedAt`/`DispatchedAt`/`ActualStartTime`/`ActualEndTime` plus `JobStateHistory` and `FailureDetectionIncident`, and attach orphan incidents by printer + session window when `JobId` is missing.
 - 2026-03-26: `/api/failure-detection/status` already exposes the operator-facing monitoring reason/source/target/outcome contract. For richer PrintFarmer-owned UX, the safest backend addition is optional `jobName`/`fileName` on `FailureDetectionPrinterStatusDto` and SignalR `FailureDetectionDto`, sourced from `IPrinterStatusCacheReader` with queued-job fallback in `PrintFailureMonitorService`.
 - 2026-03-26: Persisted failure-detection history is a narrow incident slice, not a generic audit system: `FailureDetectionIncident` stores only detected failures, `PrintFailureMonitorService` records them through scoped `IFailureDetectionIncidentHistoryService`, and `GET /api/failure-detection/history?printerId=&take=` returns newest-first `FailureDetectionDto` rows with optional persisted `id`.
-- 2026-03-25: Upstream `moonraker-obico` is a co-located agent, not just an ML client. It links to Obico with a server auth token, talks directly to Moonraker with API-key/WebSocket access, captures JPEGs locally, and can tunnel HTTP/WebSocket traffic plus Janus-based webcam streaming.
-- 2026-03-27: PrintFailureMonitorService updates in-memory status every 30s scan cycle. No persistence of scan history = no historical queries, no timeline = no schema change burden for monitoring-only use case.
-- 2026-03-25: PrintFarmer's failure-detection path is central-server driven. `PrintFailureMonitorService` selects the first enabled camera with a `SnapshotUrl` (or legacy `Printer.CameraSnapshotUrl`) and passes that URL to `ObicoFailureDetectionService`; stream-only cameras are currently ignored.
-- 2026-03-25: Key paths for future Obico/Moonraker gap work: `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs`, `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs`, `src/api/Controllers/ObicoServerController.cs`, `src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs`, and `src/api/Controllers/PrintersController.cs`.
-- The spaghetti detection modal does not call Obico directly; it renders the cached per-printer snapshot returned by `GET /api/failure-detection/status` from `FailureDetectionController`, which is populated by `PrintFailureMonitorService`.
-- `PrintFailureMonitorService` stores `FailureDetectionResult.ErrorMessage` verbatim in `FailureDetectionPrinterStatusDto.Reason`, so raw upstream contract errors surface in the modal unless `ObicoFailureDetectionService` converts them into actionable messages.
-- For Obico compatibility, `GET /p/?img=...` stays the preferred contract, but a legacy `POST /p/` probe returning `405` is not a healthy fallback. `ObicoServerController` add/enable validation must reject that case so runtime monitoring and settings validation stay aligned.
 
 ## 2026-03-25: PendingReady Backend Contract Normalization → LANDED
 
@@ -771,3 +764,24 @@ The frontend's `OrcaImportWizard` had a 4-step flow (upload → preview → revi
 - No API breaking changes; additions only
 - Foundation laid for downstream beads (snapshots, go2rtc)
 - All changes pushed to remote
+
+## 2026-05-12 go2rtc Sidecar Implementation — Session Complete
+
+**Task:** PFarm1-lzf0 — Implement go2rtc sidecar for RTSP transcoding  
+**Status:** ✅ CLOSED  
+**Timestamp:** 2026-05-12T19:20:00Z
+
+**Backend Changes:**
+- Docker Compose: Added go2rtc service container
+- Stream Registry: Implemented PrinterStreamRegistry manager for transcode URL resolution
+- API Routes: Added /api/rtc/* handlers for stream transcoding requests
+- Service Integration: Connected camera health monitor and stream dispatcher
+- DTOs: UpdatePrinterDto includes transcodeStreamUrl for WebRTC output
+
+**Validation:**
+- ✅ All tests passing
+- ✅ Build passing
+- ✅ No new warnings
+- ✅ go2rtc stream initialization verified
+
+**Outcome:** go2rtc sidecar ready for RTSP-to-WebRTC transcoding. Bridge between Buddy/Prusa camera streams and frontend WebRTC viewers.

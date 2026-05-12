@@ -28,7 +28,6 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 - Containerized deployments must use Docker DNS names like `spoolman:8000` and `obico-ml-api:3333` for internal services. Hardcoded LAN IPs caused the same class of `No route to host` failures seen in runtime monitoring.
 - Updating `.env` / `.deploy-config` back to DNS-based service names restored internal connectivity for Spoolman and reinforced that similar 3333 errors should be investigated as runtime target-selection or network issues first.
-- This is an operational configuration rule, not a controller-route bug.
 
 ## 2026-03-25: Obico follow-up validation handoff
 
