@@ -190,7 +190,7 @@ export function PrinterCameraPreview({
             <p className="text-sm font-medium">
               {hasCameraSource
                 ? showLiveStream ? 'Live stream unavailable' : 'Camera preview unavailable'
-                : 'No camera configured'}
+                : 'No linked camera configured'}
             </p>
             {hasCameraSource && (
               <p className="mt-1 text-xs text-pf-text-tertiary">

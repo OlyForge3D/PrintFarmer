@@ -177,7 +177,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
   const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
-  // Camera URL handling
+  // Camera source handling
   const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
   const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
@@ -479,7 +479,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               disabled={!hasCameraUrls || !isEnabled}
               className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
+              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>

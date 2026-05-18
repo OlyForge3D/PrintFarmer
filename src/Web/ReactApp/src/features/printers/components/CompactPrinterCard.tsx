@@ -184,7 +184,7 @@ export function CompactPrinterCard({
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
-  // Check if printer has camera URLs - just verify if URLs have values from database
+  // Check if this printer has a camera source available for preview.
   const cameraSnapshotUrl = printer.cameraSnapshotUrl;
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
@@ -342,7 +342,7 @@ export function CompactPrinterCard({
             disabled={!hasCameraUrls || !isEnabled}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
+            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
           <Button
