@@ -231,3 +231,22 @@ Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions f
 **Outcome:** BuddyCameraIp field ready for integration with backend camera auto-discovery service.
 
 - 2026-05-20: Assigned mobile controls v1 spike #279 — validate backend print-state enforcement (block jog/preheat/home while printing or paused). Trust `PrinterBackendCapabilities.supportsTemperatureControl` flag per locked decision. See decisions.md "Mobile API Drift + Basic Printer Controls v1".
+
+## 2026-05-21: Spike #279 — Server-side guards for /temps and /move
+
+**Role:** Tester/QA (read-only investigation)
+**Verdict:** **(c) NOT trust backend** — iOS client must fully gate /temps and /move client-side.
+
+**Key findings:**
+- Controller + service + plugins all forward `/temps` and `/move` blindly. No `Printer.Status` check anywhere.
+- All failures collapse to `bool false` → HTTP 404, masking real causes (offline / capability missing / firmware 409 / exception).
+- Per-backend: Moonraker accepts mid-print silently; PrusaLink/OctoPrint firmware 409s but result is lost; FlashForge has no movement capability; SDCP implements neither.
+- Zero test coverage on either route (`FNDA:0` in coverage report).
+
+**Outputs:**
+- Comment: https://github.com/OlyForge3D/PrintFarmer/issues/279#issuecomment-4509132269
+- Follow-up: #290 (P0, labels `squad,squad:ripley,type:bug,area:api,priority:P0`)
+- Decision: `.squad/decisions/inbox/ripley-279-server-guard-verdict.md`
+
+**For Hudson (#284-#286):** disable temp/move controls when status ∈ `{Printing, Pausing, Paused, Resuming, Cancelling, Heating}`. Re-evaluate on every SignalR `printerupdated`. Moonraker has no firmware safety net — consider a small operator warning even when status looks idle.
+- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.

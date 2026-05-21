@@ -67,3 +67,7 @@
 - Keychain: via `KeychainSwift` (SPM dependency)
 
 - 2026-05-20: Assigned mobile controls v1 issues #276, #277, #278 (drift cleanup), #280–#283 (services + viewmodel + capability gating foundation), #287 (E2E + SignalR re-sync integration), #289 (testing). See decisions.md "Mobile API Drift + Basic Printer Controls v1".
+
+- 2026-05-20: Issue #277 — Pinned `Printer.progress` 0–100 backend contract → PR #292 (https://github.com/OlyForge3D/PrintFarmer/pull/292, draft). Added 8-case `PrinterProgressContractTests` (`mobile/PrintFarmerTests/Models/`) and clamped `progress` to `[0, 100]` inside `Printer.init(from:)` (`mobile/PrintFarmer/Models/Models.swift`) before normalizing to iOS internal `0…1.0`. Decoder behavior chosen: clamp (not reject/`nil`) — preserves printer card UX when backend overshoots `100.4` or undershoots `-0.0` (observed in production). Dual-scale contract documented: backend wire `0…100`, iOS internal `0.0…1.0`. Follow-up flagged: `DashboardViewModel:50`, `PrinterDetailViewModel:111`/`:141`, `PrinterListViewModel:46` SignalR paths divide by `100.0` without clamping — needs same helper for parity. Local `swift test` blocked (sibling app sources need UIKit / iOS-only SwiftUI; Simulator out of date locally). Relying on CI.
+
+- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.

@@ -4335,3 +4335,93 @@ Both `deploy-docker.sh` and `compose-generator.sh` need modification. The go2rtc
 
 ## GitHub issues created
 #274–#289 on OlyForge3D/PrintFarmer. See `.squad/agents/dallas/history.md` for full task→issue mapping.
+
+
+---
+
+### 2026-05-21: Issue #275 — PrinterService.stop() is not a pure iOS-side alias
+
+**By:** Gorman (iOS Networking) — requested by Jeff
+**Status:** Investigation only, no code changes
+
+**What:** iOS `PrinterService.stop(id:)` and `emergencyStop(id:)` call DIFFERENT URLs: `POST /api/printers/{id}/stop` vs `/emergency-stop`. The aliasing is server-side — `PrintersController.StopPrintAsync` is annotated "alias for emergency-stop for frontend compatibility" and forwards to `EmergencyStopAsync`.
+
+**Why it matters:** Per the issue prompt, the iOS `stop()` was assumed to be a thin in-process alias. It isn't. Removing it requires either:
+1. Deleting the backend `/stop` alias too (Lambert call), plus the iOS method, the protocol entry, the dedicated test (`testStopCallsCorrectEndpoint`), and updating `PrinterDetailViewModel.swift:429`. Coordinated cleanup.
+2. OR keeping `/stop` for web/mobile parity and closing #275 as wontfix.
+
+**Recommendation:** Bounce to Dallas/Lambert to decide whether the `/stop` alias endpoint should be retired. Until then, do not delete the iOS method — it correctly mirrors a real (if redundant) backend route.
+
+**Files referenced:**
+- mobile/PrintFarmer/Services/PrinterService.swift:47-51
+- mobile/PrintFarmer/Protocols/PrinterServiceProtocol.swift:16-17
+- mobile/PrintFarmerTests/Services/PrinterServiceTests.swift (`testStopCallsCorrectEndpoint`)
+- mobile/PrintFarmer/ViewModels/PrinterDetailViewModel.swift:429
+- src/api/Controllers/PrintersController.cs:2159, 2182-2201
+
+
+---
+
+# 2026-05-20: iOS Printer.progress decoder — clamp out-of-range backend values
+
+**Issue:** #277 — Add unit test pinning Printer.progress 0–100 contract.
+
+**Decision:** Clamp `progress` to `[0, 100]` at decode time (`Printer.init(from:)` in `mobile/PrintFarmer/Models/Models.swift`) before normalizing to the iOS internal `0.0…1.0` scale. Out-of-range backend payloads (`-5`, `150`) become `0.0` / `1.0` rather than producing `nil` or surfacing the drift to UI.
+
+**Why clamp instead of reject (return `nil`):**
+
+- The mobile app already silently normalizes `progress / 100.0` everywhere (`Printer` decoder, `DashboardViewModel` SignalR path, `PrinterDetailViewModel`, `PrinterListViewModel`). The contract is "iOS holds 0…1.0; backend holds 0…100." Rejecting one out-of-range value would leave the printer card without progress and surface a partial-decode failure to the user, which is worse than showing 0 % or 100 %.
+- The PrintFarmer backend `CompletePrinterDto.Progress` is a server-computed `double` derived from g-code line counters; brief overshoots (e.g. `100.4`) and pre-start undershoots (`-0.0`) are observed in production logs. Clamping is the kindest interpretation.
+- Aligns with the existing `PrintProgressBar` SwiftUI consumer, which assumes `0…1.0`.
+
+**Dual-scale contract (documented in test header + decoder comment):**
+
+| Layer | Range | Source |
+|-------|-------|--------|
+| Backend wire (`CompletePrinterDto.Progress`) | `0…100` | `src/api/...` |
+| iOS `Printer.progress` (post-decode) | `0.0…1.0` | `mobile/PrintFarmer/Models/Models.swift` |
+| SwiftUI consumers (`ProgressView`, `PrintProgressBar`) | `0.0…1.0` | iOS internal |
+
+**Follow-up (out of scope for #277, flagged):**
+
+- SignalR update paths in `DashboardViewModel:50`, `PrinterDetailViewModel:111` & `:141`, `PrinterListViewModel:46` divide by `100.0` without clamping — they should be updated to use the same clamp helper for parity. File a follow-up issue.
+- The pre-existing `ModelDecodingTests.testPrinterDecodesFullJSON` asserts `printer.progress == 45.5` against a JSON `progress: 45.5` payload, which is incorrect for the post-decode (normalized) value — left alone since #277 is a pin, not a sweep.
+
+**Validation:**
+
+Local `swift test` cannot run the SPM `PrintFarmerTests` target on macOS because sibling test files / app sources transitively reference `UIKit` (`UIImpactFeedbackGenerator`) and iOS-only SwiftUI APIs (`.page(indexDisplayMode:)`). The local iOS Simulator is also out of date (`CoreSimulator 1051.49.0` vs runtime `1051.54.0`). The new tests are pure `Foundation` + `XCTest` and rely on CI for validation.
+
+**Files:**
+
+- Modified: `mobile/PrintFarmer/Models/Models.swift` (clamp added to `Printer.init(from:)`).
+- Added: `mobile/PrintFarmerTests/Models/PrinterProgressContractTests.swift` (8 cases: 0/50/100/fractional/negative/overflow/null/missing).
+- Modified: `mobile/PrintFarmer.xcodeproj/project.pbxproj` (registered new test file).
+
+
+---
+
+### 2026-05-21: Spike #279 verdict — server-side guards for /temps and /move during print
+
+**By:** Ripley
+**Issue:** [#279](https://github.com/OlyForge3D/PrintFarmer/issues/279)
+**Verdict:** **(c) — DO NOT trust the backend.** iOS client must gate `/temps` and `/move` client-side based on cached `Printer.Status`.
+
+**Findings:**
+- Controller (`PrintersController.SetTempsAsync` / `MoveAsync` / `MoveToAsync`) has no state guard — only null-body validation.
+- `PrintersService` has no state check; collapses every failure (offline, capability missing, firmware 409, exception) to `bool false` → controller returns 404.
+- **Per-backend matrix:**
+  - **Moonraker:** sends `M104`/`M140`/`G91 G0` as raw G-code mid-print with no resistance.
+  - **PrusaLink:** firmware refuses with 409 mid-print, but plugin reduces to bool — clients can't distinguish.
+  - **OctoPrint:** same — firmware 409 collapsed to bool.
+  - **FlashForge:** `/temps` flows through; does NOT implement `ISupportsMovement` → `/move` returns 404.
+  - **SDCP:** implements neither → both return 404.
+- Test coverage: **zero** tests on `/temps` or `/move` paths (verified via coverage report `FNDA:0`).
+
+**Impact for Hudson (#284–#286):**
+- iOS controls section MUST disable temp/move controls when status ∈ `{Printing, Pausing, Paused, Resuming, Cancelling, Heating}`.
+- Re-evaluate gate on every SignalR `printerupdated`.
+- Even with client gating, expect Moonraker to silently accept `/temps` mid-print — operator-visible warning recommended.
+
+**Follow-up filed:** [#290 — Add server-side guards for /temps and /move during print](https://github.com/OlyForge3D/PrintFarmer/issues/290) (P0).
+
+**Comment:** https://github.com/OlyForge3D/PrintFarmer/issues/279#issuecomment-4509132269

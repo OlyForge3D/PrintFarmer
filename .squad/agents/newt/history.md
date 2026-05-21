@@ -215,3 +215,5 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 - PrintFarmer's pf-* token system provides good OrcaSlicer-like dark industrial aesthetic when used consistently
 
 - 2026-05-20: Assigned mobile controls v1 UX design support on issues #284 (preheat), #285 (jog), #286 (home). Fixed presets and feedrates locked per v1 — no customization UX needed. See decisions.md "Mobile API Drift + Basic Printer Controls v1".
+
+- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.
