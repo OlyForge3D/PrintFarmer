@@ -271,6 +271,7 @@ struct PrinterDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     headerSection(printer)
                     temperatureSection(printer)
+                    PrinterControlsSection(printer: printer, printerService: services.printerService)
 
                     if let jobName = printer.fileName ?? printer.jobName,
                        let state = printer.state?.lowercased(),
@@ -318,6 +319,7 @@ struct PrinterDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 headerSection(printer)
                 temperatureSection(printer)
+                PrinterControlsSection(printer: printer, printerService: services.printerService)
                 filamentSection(printer)
                 AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
 
