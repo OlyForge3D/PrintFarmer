@@ -65,3 +65,5 @@
 - API client: `PrintFarmer/Services/APIClient.swift`
 - ServiceContainer: `PrintFarmer/Services/ServiceContainer.swift`
 - Keychain: via `KeychainSwift` (SPM dependency)
+
+- 2026-05-20: Assigned mobile controls v1 issues #276, #277, #278 (drift cleanup), #280–#283 (services + viewmodel + capability gating foundation), #287 (E2E + SignalR re-sync integration), #289 (testing). See decisions.md "Mobile API Drift + Basic Printer Controls v1".

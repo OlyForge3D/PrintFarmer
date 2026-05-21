@@ -98,3 +98,5 @@ Back-button crashes from untracked/uncancelled async Tasks mutating state after 
 - Auth views: `PrintFarmer/Views/Auth/`
 - ViewModels: `PrintFarmer/ViewModels/`
 - Navigation: `PrintFarmer/Navigation/AppDestination.swift`
+
+- 2026-05-20: Assigned mobile controls v1 issues #274 (maintenance toggle role gate), #275 (drift cleanup), #284 (preheat UI), #285 (jog UI), #286 (home UI), #288 (polish). See decisions.md "Mobile API Drift + Basic Printer Controls v1".

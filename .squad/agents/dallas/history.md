@@ -128,3 +128,27 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 ### Decision Record
 
 - **File:** `.squad/decisions/inbox/dallas-go2rtc-deployment.md`
+
+### 2025-05-20: Mobile API Drift + Basic Printer Controls v1 — 16 GitHub issues filed
+Created in `OlyForge3D/PrintFarmer`. Task# → GH#:
+
+| # | GH | Title | Assignee | Phase | Depends on |
+|---|----|----|----|----|----|
+| 1 | #274 | [iOS] Gate Maintenance toggle on farm_admin role | squad:hudson | Drift cleanup | — |
+| 2 | #275 | [iOS] Remove redundant PrinterService.stop() alias | squad:gorman | Drift cleanup | — |
+| 3 | #276 | [iOS] Surface homedAxes in PrinterStatusDetail | squad:hudson | Drift cleanup | — |
+| 4 | #277 | [iOS] Add unit test pinning Printer.progress 0–100 contract | squad:gorman | Drift cleanup | — |
+| 5 | #278 | [iOS] Remove dead int-branch decoders for string-only enums | squad:gorman | Drift cleanup | — |
+| 6 | #279 | [API] Spike: confirm /temps and /move enforce server-side guards while printing | squad:ripley | Spike | — |
+| 7 | #280 | [iOS] Add PrinterBackendCapabilities model + getBackendCapabilities() | squad:gorman | Foundation | — |
+| 8 | #281 | [iOS] Extend PrinterService with setTemperatures, home, homeXY, homeZ, move | squad:gorman | Foundation | — |
+| 9 | #282 | [iOS] Create PrinterControlsViewModel (capability cache, command queue) | squad:gorman | Foundation | #280, #281 |
+| 10 | #283 | [UX] Design printer-controls section (preheat, home, jog) | squad:newt | Design | — |
+| 11 | #284 | [iOS] Build PrinterControlsSection — preheat subgroup | squad:hudson | UI build | #279, #280, #282, #283 |
+| 12 | #285 | [iOS] Build PrinterControlsSection — home subgroup | squad:hudson | UI build | #280, #282, #283 |
+| 13 | #286 | [iOS] Build PrinterControlsSection — jog/move subgroup | squad:hudson | UI build | #280, #282, #283 |
+| 14 | #287 | [iOS] Integrate PrinterControlsSection into PrinterDetailView | squad:hudson | Integration | #284, #285, #286 |
+| 15 | #288 | [iOS] Accessibility pass on controls section | squad:hudson | Polish | #287 |
+| 16 | #289 | [iOS] Snapshot tests for PrinterControlsSection (Moonraker/FlashForge/SDCP) | squad:hudson | Testing | #279, #287 |
+
+Locked v1 decisions captured in `.squad/decisions/inbox/dallas-mobile-controls-v1-locked.md` (fixed presets PLA/PETG/ABS/CoolDown, fixed feedrates XY=3000 / Z=600, step picker 0.1/1/10/100mm, trust `supportsTemperatureControl` capability, no optimistic UI — wait for `printerupdated` SignalR event, cooldown sets both to 0, match backend auth, hide section when `!isOnline`, block controls while printing/paused, human squad only — no copilot routing).
