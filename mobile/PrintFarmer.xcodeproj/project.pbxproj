@@ -24,6 +24,7 @@
 		05882F81ABFBD68C96376608 /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D49DAAAE1D5A8AC05429321 /* MockAuthService.swift */; };
 		137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */; };
 		14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */; };
+		BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */; };
 		174F8F2B2DBC083C8D2425E9 /* ServiceError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */; };
 		1D1B7EDF3FD6B2A17D268882 /* PrinterServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288048764D1B47272B433307 /* PrinterServiceProtocol.swift */; };
 		1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574F629AF29665D4872351E8 /* LoginView.swift */; };
@@ -264,6 +265,7 @@
 		6B199518AF445724CE1C3213 /* MockJobService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockJobService.swift; sourceTree = "<group>"; };
 		6E4E6FB4888EBB6541E982BC /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
+		FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterProgressContractTests.swift; sourceTree = "<group>"; };
 		809149B9D7E0B339296A7E1E /* SignalRServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRServiceProtocol.swift; sourceTree = "<group>"; };
 		820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceProtocol.swift; sourceTree = "<group>"; };
 		8A79AB745B0C9E1AF64A943D /* DashboardViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModelTests.swift; sourceTree = "<group>"; };
@@ -787,6 +789,7 @@
 			isa = PBXGroup;
 			children = (
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
+				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -956,6 +959,7 @@
 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
+				BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
