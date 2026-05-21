@@ -213,3 +213,5 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 - Progress bars should always include ARIA progressbar role for screen readers
 - Onboarding empty states benefit from illustrations — icon-only feels minimal for "first run" experience
 - PrintFarmer's pf-* token system provides good OrcaSlicer-like dark industrial aesthetic when used consistently
+
+- 2026-05-20: Assigned mobile controls v1 UX design support on issues #284 (preheat), #285 (jog), #286 (home). Fixed presets and feedrates locked per v1 — no customization UX needed. See decisions.md "Mobile API Drift + Basic Printer Controls v1".

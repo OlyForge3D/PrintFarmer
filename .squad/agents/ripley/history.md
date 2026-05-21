@@ -229,3 +229,5 @@ Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions f
 - ✅ No new warnings
 
 **Outcome:** BuddyCameraIp field ready for integration with backend camera auto-discovery service.
+
+- 2026-05-20: Assigned mobile controls v1 spike #279 — validate backend print-state enforcement (block jog/preheat/home while printing or paused). Trust `PrinterBackendCapabilities.supportsTemperatureControl` flag per locked decision. See decisions.md "Mobile API Drift + Basic Printer Controls v1".
