@@ -4646,22 +4646,6 @@ When sibling PRs in a batch touch overlapping files (e.g., #295 capabilities + #
 **What:** Issue #302 root cause traced to `PrintersService.cs:2959` — `for (int i = 1; i < mmuGateCount; i++)` creates `mmuGateCount - 1` MmuGate toolheads (3 for default 4), leaving T0 as Physical. Result on Bambu: 1 Physical + 3 MmuGate instead of 4 MmuGate. Frontend `AmsSlotVisualization` is data-driven and will render 4 slots correctly once the seeding produces 4 gates.
 **Why:** Tagged issue `area:backend` and stopped before implementing — fix needs decision on `mmuGateCount` semantics (total gates vs. total toolheads), test update for `MmuGateAutoCreationTests.CreatePrinter_MultiMaterialTrue_CreatesThreeMmuGateToolheads`, and a repair routine for already-seeded printers. Frontend dedup of the lower "Spools" section is queued as a follow-up that must land after the backend fix.
 
-### 2025-11-22: Issue #302 — Bambu AMS seeding only 3 of 4 MmuGate toolheads
-
-**Decision:** Apply Ripley's Option A — change loop bound in `CreateMmuVirtualToolheads` from `< mmuGateCount` to `<= mmuGateCount`. Semantics: `mmuGateCount = N` now produces N MmuGate toolheads at indices 1..N (T0 reserved for the Physical hotend).
-
-**Rejected:** Option B (rename parameter to `maxIndex` + touch every caller). Higher blast radius; Option A is local and the new semantics match how every existing caller already passes `4` for Bambu AMS.
-
-**Companion changes:** Updated `SetToolheadSpoolAsync` and `ClearToolheadSpoolAsync` from `Math.Max(4, toolheadIndex + 1)` to `Math.Max(4, toolheadIndex)` so on-demand gate creation matches the new semantics.
-
-**Validation:** Build clean. `MmuGateAutoCreationTests` 11/11 pass, including new `[Theory]` for `mmuGateCount` = 1, 4, 16 and `[Fact]` for 0.
-
-**PR:** OlyForge3D/PrintFarmer#303 (draft, base `development`).
-
-**DEFERRED — needs follow-up issue:** Production printers already seeded with 3 MmuGate toolheads under the old loop bound will not be repaired by this code change. Recommend a startup hosted service or migration to backfill index 4 for any `MultiMaterial = true` printer with `MmuGate.Count == 3`.
-
-**By:** Lambert (via jpapiez)
-
 ### 2026-05-21: PR #301 review — PreheatSubgroup (Hudson) verdict: 💬 Comment
 
 **By:** Vasquez (Code Reviewer)
@@ -4675,4 +4659,61 @@ When sibling PRs in a batch touch overlapping files (e.g., #295 capabilities + #
 **By:** hudson (via coordinator)
 **What:** When sibling Xcode pbxproj-touching PRs (e.g. PrinterControls subgroups) have one merge first, the others rebase with predictable conflicts in two regions: parent group children list (e.g. `PrintFarmerTests` → `Views` ref) and the test target's Sources build phase. Resolve by **union** — keep both sides' references. Each branch typically generates a distinct `Views` group ID; both definitions already exist independently in the file body, so referencing both is non-destructive and Xcode tolerates duplicate-name groups with distinct IDs.
 **Why:** Applied to PRs #300 (home) and #301 (preheat) after #299 (jog) merged. Both rebased cleanly with `plutil -lint` passing. Force-pushed; both report `mergeable: MERGEABLE`. Local xcodebuild blocked by iOS 26.5 SDK absence; CI is authoritative.
+
+
+### 2026-05-21: iOS PrinterControlsSection forwards SignalR via parent, does not re-subscribe
+**By:** Hudson (iOS Dev) for jpapiez
+**What:** When a child SwiftUI view needs to react to `printerupdated` SignalR events but the parent `PrinterDetailViewModel` already subscribes via `configureSignalR`, the child must NOT open its own hub registration. Instead, accept the `printer: Printer` as a let-bound input and use `.onChange(of: printer.isOnline)` / `.onChange(of: printer.state)` to forward into the child VM. This is the pattern used by `PrinterControlsSection` (PR #304, issue #287).
+**Why:** Acceptance criteria on #287 say "View subscribes to printerupdated SignalR events", but duplicating the subscription would leak hub registrations and cause double-handling. Parent already owns the subscription and the printer rebuild — child observes the resulting value change. Single source of truth; no leaks.
+**Scope:** iOS / SwiftUI views composed inside `PrinterDetailView` (or any view whose parent VM owns a SignalR subscription).
+
+### 2026-05-21T14:35:00-07:00: Snapshot testing — proposed dependency add for #289
+**By:** Hudson (requested by Jeff Papiez)
+**What:** Issue #289 requires snapshot tests for `PrinterControlsSection`. The repo has NO existing snapshot infrastructure (verified: no `swift-snapshot-testing`, no `Package.resolved`, no `__Snapshots__` directory; "snapshot" mentions in tests are unrelated — they refer to camera image data on `PrinterServiceProtocol.getSnapshot`). Issue is labeled `go:needs-research`. Two viable paths:
+
+1. **Recommended:** Add `pointfreeco/swift-snapshot-testing` (~1.18.x) as a Swift Package dependency to the test target only.
+   - Update `mobile/Package.swift`: add `https://github.com/pointfreeco/swift-snapshot-testing` to `dependencies`, add `SnapshotTesting` product to the `PrintFarmerTests` testTarget.
+   - Update `mobile/PrintFarmer.xcodeproj/project.pbxproj`: add `XCRemoteSwiftPackageReference` + `XCSwiftPackageProductDependency` linked to `PrintFarmerTestsTarget` build phase. (Non-trivial pbxproj surgery; Xcode-generated normally.)
+   - Snapshot baselines stored under `PrintFarmerTests/__Snapshots__/PrinterControlsSectionTests/`.
+   - **CI implication:** Local xcodebuild is blocked by iOS 26.5 SDK / CoreSimulator drift (recurring theme in Hudson history). Baselines MUST be generated on CI or a machine with a working sim. Recording mode (`isRecording = true`) cannot be run from this dev box right now.
+
+2. **Alternative (lightweight, no dep):** Hierarchy/text snapshots — render the view via `UIHostingController`, walk the view tree via reflection or capture `ViewThatFits`/`AnyView` description, and assert string equality against checked-in `.txt` fixtures. Brittle and gives weaker regression coverage than `swift-snapshot-testing` image diffs; not recommended.
+
+**Why:** Path 1 is the industry-standard for SwiftUI snapshot testing and is what the issue text assumes ("If the existing snapshot infra is `swift-snapshot-testing`, reuse it"). Path 2 reinvents a wheel poorly. The blocker is dependency-add approval (one new package) + acceptance that baselines come from CI.
+
+**Proposal:** Approve path 1. Hudson will land the dep add + test scaffolding + three test cases (Moonraker / FlashForge / SDCP) × (idle visible / printing hidden) in a follow-up commit on `squad/289-controls-snapshot`, with `isRecording = true` on first CI run to capture baselines, then a second commit flipping back to `isRecording = false`. Draft PR opened against #289 with research notes pending Lead approval.
+
+### 2026-05-21T14:42:00Z: Shared disabled-control treatment + localized a11y for controls subgroups (issue #288)
+**By:** Hudson (iOS Developer) — requested by Brady Gaster
+
+**What:** Built `DisabledControlStyle.swift` housing three reusable view modifiers used by all controls subgroups:
+- `.disabledControlStyle(isDisabled:cornerRadius:)` — 50% opacity + Canvas-drawn 45° diagonal stripe overlay at 8% white (falls back to flat grey when `accessibilityReduceTransparency` is on). Spec §2.4 color-blind cue.
+- `.errorBorderHighlight(isActive:cornerRadius:)` — 1.5pt `pfError` stroked border with `easeInOut(0.2)` animation. Surfaced when `viewModel.lastError?.command.kind` matches the button's identity.
+- `.disabledTapReveal(isDisabled:reason:onReveal:)` — overlay tap detection for touch-only devices since SwiftUI `.help()` only fires on hover. Each subgroup wires this into a local `handleTap` helper that drives a transient `disabledTapMessage` caption auto-dismissed after 3s.
+
+Applied to:
+- `PreheatSubgroup.swift` — per-preset error matching via `isErrored(preset:)`.
+- `HomeSubgroup.swift` — per-axis-set error matching via `isErrored(matching: ["X","Y","Z"]/["X","Y"]/["Z"])`.
+- `JogSubgroup.swift` — per-direction matching via `isErrored(direction:)` against `selectedAxis` + sign of `distanceMm`.
+
+All `accessibilityLabel`/`Hint`/`Value` strings now go through `String(localized:, comment:)` so labels are localization-ready (issue #288 deliverable). Error hint pattern: `"Failed: \(message). Double tap to retry."`. Pending value: `"Sending command"`. Disabled hint surfaces `viewModel.blockedReason`. `accessibilityAddTraits` flips to `.updatesFrequently` while a command is pending so VoiceOver re-announces.
+
+**Renamed `Printer.previewStub` → `Printer.previewFallbackPrinter`** (per Vasquez's review — the original sarcastic flag on `try! JSONDecoder().decode(...)` was the actual concern). Three call sites updated in PreheatSubgroup.
+
+**Why:** Spec `mobile/docs/design/printer-controls-section.md` §2.4 and §4 explicitly require the diagonal stripe + pfError border + localized VoiceOver scripts. Three subgroups landed earlier without these, and #288 captures the gap. The shared modifier file means we don't open-code the stripe pattern in three places.
+
+**Validation status:**
+- `swiftc -parse` on all four files: clean.
+- `plutil -lint project.pbxproj`: OK after registering `DisabledControlStyle.swift` (4 pbxproj entries: PBXBuildFile, PBXFileReference, PBXGroup child, Sources phase).
+- `xcodebuild -list`: project loads, both targets visible.
+- Full build deferred to CI (iOS 26.5 SDK drift makes local `xcodebuild build` unreliable here).
+
+**Out of scope (filed as follow-ups if needed):** `PrinterControlsSection.shouldHide(for:)` removes the entire section during `printing | paused | starting`, which conflicts with spec §3.4's "visible but locked" expectation. The disabled treatment is still applied on transient state changes (single-flight sibling buttons, capability flips), so it earns its keep regardless.
+
+**Files touched:**
+- `mobile/PrintFarmer/Views/PrinterControls/DisabledControlStyle.swift` (new)
+- `mobile/PrintFarmer/Views/PrinterControls/PreheatSubgroup.swift`
+- `mobile/PrintFarmer/Views/PrinterControls/HomeSubgroup.swift`
+- `mobile/PrintFarmer/Views/PrinterControls/JogSubgroup.swift`
+- `mobile/PrintFarmer.xcodeproj/project.pbxproj`
 

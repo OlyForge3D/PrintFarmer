@@ -639,3 +639,5 @@ The main `AppDbContext` has initialization logic in `DatabaseInitializationExten
 ## Learnings
 
 - **2025-11-22 — PrintersService MMU gate semantics (issue #302, PR #303).** `mmuGateCount` parameter on `CreateMmuVirtualToolheads` / `SyncMmuVirtualToolheads` / `SyncMmuToolheadsOnEntity` means **total number of AMS gates**, NOT a strict upper-bound index. Loop must be `for (int i = 1; i <= mmuGateCount; i++)` to produce N gates at indices 1..N (T0 reserved for Physical hotend). Companion helpers `SetToolheadSpoolAsync` / `ClearToolheadSpoolAsync` use `Math.Max(4, toolheadIndex)` (no `+1`) — index N maps directly to a count-of-N. Bambu defaults to `mmuGateCount = 4`. Existing data already seeded under the old `<` bound is **not** auto-repaired — backfill needs a separate hosted service or migration.
+
+- **2026-05-21 — Issue #302 closed.** Ripley's frontend dedup (PR #305) merged on top of my backend gate-count fix (PR #303). Backend + frontend both shipped; AMS slot rendering is correct end-to-end now.

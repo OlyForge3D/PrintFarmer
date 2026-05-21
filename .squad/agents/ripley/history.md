@@ -105,3 +105,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - AMS slot rendering bug: `CreateMmuVirtualToolheads` loop is `i < mmuGateCount` → produces N-1 gates. Fix is loop bound, not frontend.
 - Triage discipline: posted analysis comment on #302, tagged `area:backend`, handed off to Lambert without implementing.
 - Frontend dedup of lower 'Spools' section is still queued (after backend lands).
+
+### 2026-05-21 — Issue #302 frontend dedup shipped (PR #305)
+- Removed duplicate lower "Spools" section in `AmsSlotVisualization` once Lambert's backend gate-count fix (PR #303) was on `development`.
+- PR #305 merged; issue #302 CLOSED end-to-end (backend + frontend both landed).
