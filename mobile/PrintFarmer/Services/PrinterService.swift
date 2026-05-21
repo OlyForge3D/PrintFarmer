@@ -4,6 +4,7 @@ import Foundation
 
 actor PrinterService: PrinterServiceProtocol {
     private let apiClient: APIClient
+    private var capabilitiesCache: [UUID: PrinterBackendCapabilities] = [:]
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
@@ -98,5 +99,50 @@ actor PrinterService: PrinterServiceProtocol {
 
     func changeFilament(printerId: UUID) async throws -> CommandResult {
         try await apiClient.post("/api/printers/\(printerId)/filament-change")
+    }
+
+    // MARK: - Capabilities
+
+    /// Returns merged backend capabilities for the given printer.
+    ///
+    /// Fetches `/api/printers/{id}/backend-capabilities` and overlays the
+    /// authoritative `supportsMovement` / `supportsTemperatureControl` values
+    /// onto the static fallback derived from the wire DTO's `backend` field.
+    /// Falls back to the static table when the endpoint is unavailable.
+    /// Results are cached in-memory keyed by `printerId`.
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        if let cached = capabilitiesCache[printerId] {
+            return cached
+        }
+
+        let merged: PrinterBackendCapabilities
+        do {
+            let wire: PrinterBackendCapabilitiesWireDto = try await apiClient.get(
+                "/api/printers/\(printerId)/backend-capabilities"
+            )
+            let backend = wire.backend ?? .unknown
+            let base = PrinterBackendCapabilities.fallback(for: backend)
+            merged = PrinterBackendCapabilities(
+                supportsMovement: wire.supportsMovement ?? base.supportsMovement,
+                supportsTemperatureControl: wire.supportsTemperatureControl ?? base.supportsTemperatureControl,
+                supportsBedTemperature: base.supportsBedTemperature,
+                supportsFanControl: base.supportsFanControl,
+                supportsHoming: base.supportsHoming,
+                supportedAxes: base.supportedAxes
+            )
+        } catch let error as NetworkError {
+            // Endpoint missing or printer unknown to capabilities service:
+            // derive from the printer's backend type.
+            switch error {
+            case .notFound, .serverError:
+                let printer = try await get(id: printerId)
+                merged = PrinterBackendCapabilities.fallback(for: printer.backend)
+            default:
+                throw error
+            }
+        }
+
+        capabilitiesCache[printerId] = merged
+        return merged
     }
 }
