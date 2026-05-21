@@ -2714,7 +2714,7 @@ public class PrintersService(
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2799,7 +2799,7 @@ public class PrintersService(
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2956,7 +2956,9 @@ public class PrintersService(
             mmuGateCount, printer.Name, printer.Id);
 
         var gates = new List<Toolhead>();
-        for (int i = 1; i < mmuGateCount; i++)
+
+        // Indices 1..mmuGateCount: T0 is the physical hotend, T1..Tn are AMS gates.
+        for (int i = 1; i <= mmuGateCount; i++)
         {
             gates.Add(new Toolhead
             {
