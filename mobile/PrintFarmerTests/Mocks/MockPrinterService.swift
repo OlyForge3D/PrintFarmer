@@ -152,7 +152,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .moonraker)
     }
 
+    var beforeSetTemperatures: (@Sendable () async -> Void)?
+
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        if let hook = beforeSetTemperatures { await hook() }
         setTemperaturesCalledWith = (printerId, hotend, bed)
         if let error = errorToThrow { throw error }
     }
