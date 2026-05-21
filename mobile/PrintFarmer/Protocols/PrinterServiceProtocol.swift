@@ -24,6 +24,9 @@ protocol PrinterServiceProtocol: Sendable {
     func loadFilament(printerId: UUID) async throws -> CommandResult
     func unloadFilament(printerId: UUID) async throws -> CommandResult
     func changeFilament(printerId: UUID) async throws -> CommandResult
+
+    // Capabilities
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities
 }
 
 // Convenience overload
