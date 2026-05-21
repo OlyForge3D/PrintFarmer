@@ -100,3 +100,17 @@ Back-button crashes from untracked/uncancelled async Tasks mutating state after 
 - Navigation: `PrintFarmer/Navigation/AppDestination.swift`
 
 - 2026-05-20: Assigned mobile controls v1 issues #274 (maintenance toggle role gate), #275 (drift cleanup), #284 (preheat UI), #285 (jog UI), #286 (home UI), #288 (polish). See decisions.md "Mobile API Drift + Basic Printer Controls v1".
+
+### Issue #276 — Surface homedAxes in PrinterStatusDetail (2026-05-21)
+**Files Modified:**
+- `mobile/PrintFarmer/Models/Models.swift` — added `homedAxes: String?` to `PrinterStatusDetail` with explicit memberwise init defaulting `homedAxes = nil`.
+- `mobile/PrintFarmer/Services/Demo/DemoPrinterService.swift` — pass through `p.homedAxes` from demo `Printer`.
+- `mobile/PrintFarmer/ViewModels/PrinterDetailViewModel.swift` — thread `homedAxes` through `applyStatusUpdate` (SignalR) and propagate `detail.homedAxes` to `printer.homedAxes` in `applyStatusDetail` only when present (avoids clobbering with nil from partial payloads).
+- `mobile/PrintFarmer/Views/Printers/PrinterDetailView.swift` — new `homedAxesBadges(_:)` rendering compact X/Y/Z capsules in the gradient header trailing column. Green for homed (string contains axis letter, case-insensitive), gray otherwise. Hidden entirely when both `printer.homedAxes` and `viewModel.statusDetail?.homedAxes` are nil.
+- `mobile/PrintFarmerTests/Models/ModelDecodingTests.swift` — three decoder tests covering present (`"xyz"`), absent (key omitted → nil), and empty (`""`).
+
+**Wire format:** Backend sends compact `string?` ("xyz", "xy", "" or nil) — confirmed via `MoonrakerSubscriptionService.cs` (`state.HomedAxes` is `string`) and existing fixtures. Issue text suggested `[String]?` array shape, but mirrored the actual wire format to stay consistent with existing `Printer.homedAxes` and fixtures.
+
+**Build:** `swift build` (library target) clean. xcodebuild simulator builds blocked locally on iOS 26.5 platform / CoreSimulator drift — environmental, not code-side.
+
+- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.

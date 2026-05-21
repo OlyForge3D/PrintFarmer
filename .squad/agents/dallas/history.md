@@ -152,3 +152,5 @@ Created in `OlyForge3D/PrintFarmer`. Task# → GH#:
 | 16 | #289 | [iOS] Snapshot tests for PrinterControlsSection (Moonraker/FlashForge/SDCP) | squad:hudson | Testing | #279, #287 |
 
 Locked v1 decisions captured in `.squad/decisions/inbox/dallas-mobile-controls-v1-locked.md` (fixed presets PLA/PETG/ABS/CoolDown, fixed feedrates XY=3000 / Z=600, step picker 0.1/1/10/100mm, trust `supportsTemperatureControl` capability, no optimistic UI — wait for `printerupdated` SignalR event, cooldown sets both to 0, match backend auth, hide section when `!isOnline`, block controls while printing/paused, human squad only — no copilot routing).
+
+- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.
