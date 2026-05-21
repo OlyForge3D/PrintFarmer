@@ -96,6 +96,7 @@ struct PreheatSubgroup: View {
         }()
         let isInteractive = canControl && !isAnyPreheatInProgress
 
+        let hasError = isErrored(preset: preset)
         Button {
             handleTap(preset: preset, canControl: canControl)
         } label: {
@@ -105,8 +106,11 @@ struct PreheatSubgroup: View {
         .disabled(isAnyPreheatInProgress || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
         // reveal the disabled reason; regular width shows the reason inline.
+        .disabledControlStyle(isDisabled: !isInteractive && !isPending, cornerRadius: 8)
+        .errorBorderHighlight(isActive: hasError, cornerRadius: 8)
         .accessibilityLabel(accessibilityLabel(preset: preset, isPending: isPending))
-        .accessibilityHint(accessibilityHint(canControl: canControl))
+        .accessibilityHint(accessibilityHint(canControl: canControl, hasError: hasError))
+        .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
         .help(viewModel.blockedReason ?? "")
     }
@@ -178,23 +182,38 @@ struct PreheatSubgroup: View {
     private func accessibilityLabel(preset: PreheatPreset, isPending: Bool) -> String {
         if isPending {
             return preset == .coolDown
-                ? "Cooling down, in progress"
-                : "Preheating to \(preset.spokenName), in progress"
+                ? String(localized: "Cooling down, in progress", comment: "VoiceOver: Cool Down button while command is in flight")
+                : String(localized: "Preheating to \(preset.spokenName), in progress", comment: "VoiceOver: preheat button while command is in flight")
         }
         if preset == .coolDown {
-            return "Cool down, 0 degrees hotend, 0 degrees bed"
+            return String(localized: "Cool down, 0 degrees hotend, 0 degrees bed", comment: "VoiceOver: Cool Down button idle state")
         }
         let bedSegment = (viewModel.capabilities?.supportsBedTemperature == false)
-            ? "no heated bed"
-            : "\(Int(preset.bed)) degrees bed"
-        return "Preheat to \(preset.spokenName), \(Int(preset.hotend)) degrees hotend, \(bedSegment)"
+            ? String(localized: "no heated bed", comment: "VoiceOver bed segment when printer has no heated bed")
+            : String(localized: "\(Int(preset.bed)) degrees bed", comment: "VoiceOver bed segment temperature")
+        return String(localized: "Preheat to \(preset.spokenName), \(Int(preset.hotend)) degrees hotend, \(bedSegment)", comment: "VoiceOver: preheat button idle state")
     }
 
-    private func accessibilityHint(canControl: Bool) -> String {
+    private func accessibilityHint(canControl: Bool, hasError: Bool) -> String {
+        if hasError, let message = viewModel.lastError?.message {
+            return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last preheat command failed")
+        }
         if !canControl, let reason = viewModel.blockedReason {
-            return "Disabled. \(reason)"
+            return String(localized: "Disabled. \(reason)", comment: "VoiceOver hint when controls are disabled")
         }
         return ""
+    }
+
+    private func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
+        if isPending { return String(localized: "Sending command", comment: "VoiceOver value while a control command is in flight") }
+        if hasError { return String(localized: "Failed", comment: "VoiceOver value when last command failed") }
+        return ""
+    }
+
+    private func isErrored(preset: PreheatPreset) -> Bool {
+        guard let last = viewModel.lastError else { return false }
+        if case let .preheat(errPreset) = last.command.kind, errPreset == preset { return true }
+        return false
     }
 }
 
@@ -409,7 +428,7 @@ private enum PreheatSubgroupPreviewFactory {
         isOnline: Bool,
         startPendingPreset: PreheatPreset?
     ) -> PrinterControlsViewModel {
-        let printer = Printer.previewStub(state: printerState, isOnline: isOnline)
+        let printer = Printer.previewFallbackPrinter(state: printerState, isOnline: isOnline)
         let service = PreheatSubgroupPreviewService(capabilities: capabilities, hangForever: startPendingPreset != nil)
         let vm = PrinterControlsViewModel(printerService: service, printer: printer)
         // Asynchronously load preview capabilities immediately so the canvas
@@ -447,7 +466,7 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func stop(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func emergencyStop(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func setMaintenanceMode(id: UUID, inMaintenance: Bool) async throws -> Printer {
-        Printer.previewStub(state: "ready", isOnline: true)
+        Printer.previewFallbackPrinter(state: "ready", isOnline: true)
     }
     func getQueueOverview(model: String?, nozzle: Double?, material: String?) async throws -> [QueueOverview] { [] }
     func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult { CommandResult(success: true, message: nil) }
@@ -482,9 +501,11 @@ private extension PrinterControlsViewModel {
 // MARK: - Printer preview stub
 
 private extension Printer {
-    /// Decodes a minimal `Printer` from a JSON literal so SwiftUI previews
-    /// don't depend on the test bundle. The struct has no memberwise init.
-    static func previewStub(state: String, isOnline: Bool) -> Printer {
+    /// Decodes a minimal `Printer` from a JSON literal for SwiftUI previews
+    /// and preview-only service shims. The struct has no memberwise init, so
+    /// we round-trip through `JSONDecoder`. This is preview infrastructure —
+    /// never called from production code paths.
+    static func previewFallbackPrinter(state: String, isOnline: Bool) -> Printer {
         let json = """
         {
             "id": "11111111-1111-1111-1111-111111111111",

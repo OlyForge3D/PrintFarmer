@@ -12,6 +12,12 @@ struct JogSubgroup: View {
 
     @State private var selectedAxis: String = "X"
     @State private var selectedStep: Double = 1
+    /// Transient caption shown when the user taps a jog button while controls
+    /// are disabled. Mirrors `PreheatSubgroup` so the disabled reason surfaces
+    /// on touch devices where `.help()` doesn't fire.
+    @State private var disabledTapMessage: String?
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     static let stepOptions: [Double] = [0.1, 1, 10, 100]
     private static let canonicalAxes: [String] = ["X", "Y", "Z"]
@@ -46,10 +52,18 @@ struct JogSubgroup: View {
             Text("Jog")
                 .font(.headline)
                 .foregroundStyle(Color.pfTextPrimary)
+                .accessibilityAddTraits(.isHeader)
 
             axisPicker
             stepPicker
             jogButtons
+
+            if let message = disabledTapMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .transition(.opacity)
+            }
         }
         .task {
             await viewModel.loadCapabilities()
@@ -69,45 +83,48 @@ struct JogSubgroup: View {
 
     private var axisPicker: some View {
         let axes = Self.visibleAxes(for: viewModel.capabilities)
-        return Picker("Jog axis", selection: $selectedAxis) {
+        return Picker(String(localized: "Jog axis", comment: "Jog subgroup axis picker label"), selection: $selectedAxis) {
             ForEach(axes, id: \.self) { axis in
                 Text(axis).tag(axis)
             }
         }
         .pickerStyle(.segmented)
-        .accessibilityLabel("Jog axis")
-        .accessibilityHint("Choose X, Y, or Z axis to move.")
+        .accessibilityLabel(String(localized: "Jog axis", comment: "VoiceOver label for jog axis picker"))
+        .accessibilityHint(String(localized: "Choose X, Y, or Z axis to move.", comment: "VoiceOver hint for jog axis picker"))
         .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
     }
 
     private var stepPicker: some View {
-        Picker("Jog step distance", selection: $selectedStep) {
+        Picker(String(localized: "Jog step distance", comment: "Jog subgroup step picker label"), selection: $selectedStep) {
             ForEach(Self.stepOptions, id: \.self) { step in
                 Text(stepLabel(step)).tag(step)
             }
         }
         .pickerStyle(.segmented)
-        .accessibilityLabel("Jog step distance")
-        .accessibilityHint("Choose how many millimeters each tap moves.")
+        .accessibilityLabel(String(localized: "Jog step distance", comment: "VoiceOver label for jog step picker"))
+        .accessibilityHint(String(localized: "Choose how many millimeters each tap moves.", comment: "VoiceOver hint for jog step picker"))
         .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
     }
 
     private var jogButtons: some View {
         HStack(spacing: 8) {
-            jogButton(direction: -1, symbol: "minus.circle.fill", labelText: "Jog backward")
-            jogButton(direction: 1, symbol: "plus.circle.fill", labelText: "Jog forward")
+            jogButton(direction: -1, symbol: "minus.circle.fill")
+            jogButton(direction: 1, symbol: "plus.circle.fill")
         }
     }
 
     @ViewBuilder
-    private func jogButton(direction: Double, symbol: String, labelText: String) -> some View {
+    private func jogButton(direction: Double, symbol: String) -> some View {
         let isPending = isPendingJog(direction: direction)
         let signedStep = direction * selectedStep
         let stepLabelText = stepLabel(selectedStep)
-        let signLabel = direction > 0 ? "plus" : "minus"
+        let hasError = isErrored(direction: direction)
+        let isInteractive = viewModel.canControl && viewModel.pendingCommand == nil
 
         Button {
-            Task { await viewModel.jog(axis: selectedAxis, distanceMm: signedStep) }
+            handleTap {
+                Task { await viewModel.jog(axis: selectedAxis, distanceMm: signedStep) }
+            }
         } label: {
             ZStack {
                 if isPending {
@@ -123,13 +140,77 @@ struct JogSubgroup: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
-        .accessibilityLabel("Jog \(selectedAxis) \(signLabel) \(stepLabelText) millimeters")
-        .accessibilityHint("Moves \(selectedAxis) \(signLabel) \(stepLabelText) millimeters.")
-        .accessibilityValue(viewModel.pendingCommand != nil ? "Pending" : "")
+        .disabled(!isInteractive && !shouldRevealDisabledTooltipOnTap)
+        .disabledControlStyle(isDisabled: !isInteractive && !isPending)
+        .errorBorderHighlight(isActive: hasError)
+        .accessibilityLabel(jogAccessibilityLabel(direction: direction, stepLabelText: stepLabelText))
+        .accessibilityHint(jogAccessibilityHint(direction: direction, stepLabelText: stepLabelText, hasError: hasError))
+        .accessibilityValue(jogAccessibilityValue(isPending: isPending, hasError: hasError))
+        .accessibilityAddTraits(isPending ? .updatesFrequently : .isButton)
+        .help(viewModel.blockedReason ?? "")
     }
 
     // MARK: - Helpers
+
+    private var shouldRevealDisabledTooltipOnTap: Bool {
+        horizontalSizeClass != .regular
+    }
+
+    private func handleTap(_ action: () -> Void) {
+        guard viewModel.canControl, viewModel.pendingCommand == nil else {
+            let message = viewModel.blockedReason
+                ?? String(localized: "Another command is in flight.", comment: "Fallback when jog tap blocked by single-flight")
+            withAnimation(.easeInOut(duration: 0.15)) {
+                disabledTapMessage = message
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if disabledTapMessage == message {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        disabledTapMessage = nil
+                    }
+                }
+            }
+            return
+        }
+        disabledTapMessage = nil
+        action()
+    }
+
+    private func jogAccessibilityLabel(direction: Double, stepLabelText: String) -> String {
+        if direction > 0 {
+            return String(localized: "Jog \(selectedAxis) plus \(stepLabelText) millimeters", comment: "VoiceOver label for positive jog")
+        }
+        return String(localized: "Jog \(selectedAxis) minus \(stepLabelText) millimeters", comment: "VoiceOver label for negative jog")
+    }
+
+    private func jogAccessibilityHint(direction: Double, stepLabelText: String, hasError: Bool) -> String {
+        if hasError, let message = viewModel.lastError?.message {
+            return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last jog command failed")
+        }
+        if !viewModel.canControl, let reason = viewModel.blockedReason {
+            return String(localized: "Disabled. \(reason)", comment: "VoiceOver hint when jog is disabled")
+        }
+        if direction > 0 {
+            return String(localized: "Moves \(selectedAxis) plus \(stepLabelText) millimeters.", comment: "VoiceOver hint for positive jog")
+        }
+        return String(localized: "Moves \(selectedAxis) minus \(stepLabelText) millimeters.", comment: "VoiceOver hint for negative jog")
+    }
+
+    private func jogAccessibilityValue(isPending: Bool, hasError: Bool) -> String {
+        if isPending { return String(localized: "Sending command", comment: "VoiceOver value while a jog command is in flight") }
+        if hasError { return String(localized: "Failed", comment: "VoiceOver value when last jog failed") }
+        return ""
+    }
+
+    private func isErrored(direction: Double) -> Bool {
+        guard let last = viewModel.lastError else { return false }
+        if case let .jog(axis, distance) = last.command.kind {
+            return axis.uppercased() == selectedAxis.uppercased()
+                && (distance > 0 ? direction > 0 : direction < 0)
+        }
+        return false
+    }
 
     private func isPendingJog(direction: Double) -> Bool {
         guard case let .jog(axis, distance)? = viewModel.pendingCommand?.kind else { return false }
