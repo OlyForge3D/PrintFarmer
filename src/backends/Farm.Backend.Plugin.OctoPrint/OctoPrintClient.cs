@@ -873,7 +873,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"OctoPrint refused bed temperature (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -903,7 +913,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"OctoPrint refused hotend temperature (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -958,7 +978,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"OctoPrint refused jog (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

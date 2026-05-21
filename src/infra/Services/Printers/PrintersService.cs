@@ -2056,12 +2056,12 @@ public class PrintersService(
     /// Pass null for heater to skip temperature change (e.g., hotend=210, bed=null sets only hotend).
     /// Temperatures clamped to safe ranges by backend firmware (typically 0-300°C hotend, 0-120°C bed).
     /// </remarks>
-    public async Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
+    public async Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2090,25 +2090,31 @@ public class PrintersService(
                         success = success && hotendSuccess;
                     }
 
-                    return success;
+                    return success ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
                 }
 
-                return false;
+                return PrinterControlOutcome.BackendUnsupported;
             }
 
             // Moonraker, PrusaLink, SDCP: use generic temperature control
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused temperature command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to set temperatures on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2128,12 +2134,12 @@ public class PrintersService(
     /// At least one axis parameter should be provided; null values are ignored.
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2144,15 +2150,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                bool ok = await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused move command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2173,12 +2185,12 @@ public class PrintersService(
     /// Coordinates are typically limited to printer build volume (e.g., 0-250mm for Prusa).
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2189,15 +2201,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused moveto command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move to position on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 

@@ -53,6 +53,7 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     IPrintFarmerTelemetryService telemetryService,
     Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
+    Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader printerStatusCache,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -72,6 +73,7 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
     private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _printerStatusCache = printerStatusCache;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -2043,6 +2045,8 @@ public class PrintersController(
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] Farm.Infrastructure.TempTargets targets, CancellationToken ct)
     {
@@ -2051,15 +2055,24 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
-        _telemetryService.RecordPrinterOperation("set_temperature", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
+        Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+            await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
+        _telemetryService.RecordPrinterOperation("set_temperature", id.ToString(), outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok);
+        return MapControlOutcome(outcome);
     }
 
     [HttpPost("{id:guid}/move")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> MoveAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
@@ -2068,15 +2081,24 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        _telemetryService.RecordPrinterOperation("move", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
+        Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+            await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        _telemetryService.RecordPrinterOperation("move", id.ToString(), outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok);
+        return MapControlOutcome(outcome);
     }
 
     [HttpPost("{id:guid}/moveto")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> MoveToAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
@@ -2085,9 +2107,51 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        _telemetryService.RecordPrinterOperation("move_to", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
+        Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+            await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        _telemetryService.RecordPrinterOperation("move_to", id.ToString(), outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok);
+        return MapControlOutcome(outcome);
+    }
+
+    private async Task<ActionResult<CommandResult>?> GatePrinterControlAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        Farm.Infrastructure.PrinterStatusDto? status = _printerStatusCache.GetStatus(id);
+        if (Farm.Infrastructure.Services.Printers.PrinterControlGate.IsBusyForControl(status?.State))
+        {
+            return Conflict(new CommandResult(false, $"Printer is currently {status?.State?.ToLowerInvariant()}."));
+        }
+
+        return null;
+    }
+
+    private ActionResult<CommandResult> MapControlOutcome(Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome)
+    {
+        return outcome switch
+        {
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok =>
+                new CommandResult(true, null),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.NotFound =>
+                NotFound(new CommandResult(false, "Printer not found.")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendBusy =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Printer firmware refused the command (busy).")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnsupported =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend does not support this command.")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnreachable =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend unreachable or returned an error.")),
+            _ => StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Command failed.")),
+        };
     }
 
     [HttpPost("{id:guid}/pause")]
