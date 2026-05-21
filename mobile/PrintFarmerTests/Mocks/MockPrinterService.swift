@@ -31,6 +31,11 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var loadFilamentCalledWith: UUID?
     var unloadFilamentCalledWith: UUID?
     var changeFilamentCalledWith: UUID?
+    var setTemperaturesCalledWith: (printerId: UUID, hotend: Double?, bed: Double?)?
+    var homeCalledWith: (printerId: UUID, axes: [String])?
+    var homeXYCalledWith: UUID?
+    var homeZCalledWith: UUID?
+    var moveCalledWith: (printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int)?
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
@@ -147,6 +152,31 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .moonraker)
     }
 
+    func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        setTemperaturesCalledWith = (printerId, hotend, bed)
+        if let error = errorToThrow { throw error }
+    }
+
+    func home(printerId: UUID, axes: [String]) async throws {
+        homeCalledWith = (printerId, axes)
+        if let error = errorToThrow { throw error }
+    }
+
+    func homeXY(printerId: UUID) async throws {
+        homeXYCalledWith = printerId
+        if let error = errorToThrow { throw error }
+    }
+
+    func homeZ(printerId: UUID) async throws {
+        homeZCalledWith = printerId
+        if let error = errorToThrow { throw error }
+    }
+
+    func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
+        moveCalledWith = (printerId, axis, distanceMm, feedrateMmMin)
+        if let error = errorToThrow { throw error }
+    }
+
     func reset() {
         printersToReturn = []
         printerToReturn = nil
@@ -172,6 +202,11 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         loadFilamentCalledWith = nil
         unloadFilamentCalledWith = nil
         changeFilamentCalledWith = nil
+        setTemperaturesCalledWith = nil
+        homeCalledWith = nil
+        homeXYCalledWith = nil
+        homeZCalledWith = nil
+        moveCalledWith = nil
         spoolsToReturn = []
     }
 }
