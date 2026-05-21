@@ -29,6 +29,7 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             x: p.x, y: p.y, z: p.z,
             hotendTemp: p.hotendTemp, bedTemp: p.bedTemp,
             hotendTarget: p.hotendTarget, bedTarget: p.bedTarget,
+            homedAxes: p.homedAxes,
             spoolInfo: p.spoolInfo, mmuStatus: nil)
     }
 

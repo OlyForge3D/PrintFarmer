@@ -98,6 +98,36 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertNotNil(printer.cameraStreamUrl)
     }
 
+    // MARK: - PrinterStatusDetail homedAxes (#276)
+
+    private func decodeStatusDetail(_ json: String) throws -> PrinterStatusDetail {
+        try decoder.decode(PrinterStatusDetail.self, from: json.data(using: .utf8)!)
+    }
+
+    func testPrinterStatusDetailDecodesHomedAxesPresent() throws {
+        let json = """
+        {"id":"550e8400-e29b-41d4-a716-446655440000","isOnline":true,"state":"idle","homedAxes":"xyz"}
+        """
+        let detail = try decodeStatusDetail(json)
+        XCTAssertEqual(detail.homedAxes, "xyz")
+    }
+
+    func testPrinterStatusDetailDecodesHomedAxesAbsent() throws {
+        let json = """
+        {"id":"550e8400-e29b-41d4-a716-446655440000","isOnline":true,"state":"idle"}
+        """
+        let detail = try decodeStatusDetail(json)
+        XCTAssertNil(detail.homedAxes)
+    }
+
+    func testPrinterStatusDetailDecodesHomedAxesEmpty() throws {
+        let json = """
+        {"id":"550e8400-e29b-41d4-a716-446655440000","isOnline":false,"state":null,"homedAxes":""}
+        """
+        let detail = try decodeStatusDetail(json)
+        XCTAssertEqual(detail.homedAxes, "")
+    }
+
     func testPrinterMinimalJSON() throws {
         let printer = try decoder.decode(
             Printer.self,

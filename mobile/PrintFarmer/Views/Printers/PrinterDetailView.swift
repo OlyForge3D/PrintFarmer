@@ -442,6 +442,10 @@ struct PrinterDetailView: View {
                             .background(.black.opacity(0.3), in: Capsule())
                             .foregroundStyle(.white)
                     }
+
+                    if let homedAxes = printer.homedAxes ?? viewModel.statusDetail?.homedAxes {
+                        homedAxesBadges(homedAxes)
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -472,6 +476,30 @@ struct PrinterDetailView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(baseColor.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    // MARK: - Homed Axes
+
+    /// Compact X/Y/Z badges showing which axes have been homed. Hidden entirely when
+    /// the backend doesn't supply the field (older backend or unsupported printer).
+    @ViewBuilder
+    private func homedAxesBadges(_ homedAxes: String) -> some View {
+        let normalized = homedAxes.lowercased()
+        HStack(spacing: 4) {
+            ForEach(["x", "y", "z"], id: \.self) { axis in
+                let isHomed = normalized.contains(axis)
+                Text(axis.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        isHomed ? Color.green.opacity(0.85) : Color.black.opacity(0.3),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Temperatures

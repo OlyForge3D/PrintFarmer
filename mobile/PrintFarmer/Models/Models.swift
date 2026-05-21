@@ -357,8 +357,50 @@ struct PrinterStatusDetail: Codable, Sendable {
     let bedTemp: Double?
     let hotendTarget: Double?
     let bedTarget: Double?
+    // Compact axis homing string from backend, e.g. "xyz", "xy", "" or nil. Mirrors `Printer.homedAxes`.
+    let homedAxes: String?
     let spoolInfo: PrinterSpoolInfo?
     let mmuStatus: MmuStatus?
+
+    init(
+        id: UUID,
+        isOnline: Bool,
+        state: String?,
+        progress: Double?,
+        jobName: String?,
+        thumbnailUrl: String?,
+        cameraStreamUrl: String?,
+        cameraSnapshotUrl: String?,
+        x: Double?,
+        y: Double?,
+        z: Double?,
+        hotendTemp: Double?,
+        bedTemp: Double?,
+        hotendTarget: Double?,
+        bedTarget: Double?,
+        homedAxes: String? = nil,
+        spoolInfo: PrinterSpoolInfo?,
+        mmuStatus: MmuStatus?
+    ) {
+        self.id = id
+        self.isOnline = isOnline
+        self.state = state
+        self.progress = progress
+        self.jobName = jobName
+        self.thumbnailUrl = thumbnailUrl
+        self.cameraStreamUrl = cameraStreamUrl
+        self.cameraSnapshotUrl = cameraSnapshotUrl
+        self.x = x
+        self.y = y
+        self.z = z
+        self.hotendTemp = hotendTemp
+        self.bedTemp = bedTemp
+        self.hotendTarget = hotendTarget
+        self.bedTarget = bedTarget
+        self.homedAxes = homedAxes
+        self.spoolInfo = spoolInfo
+        self.mmuStatus = mmuStatus
+    }
 }
 
 // MARK: - MMU Status (matches MmuStatusDto)
