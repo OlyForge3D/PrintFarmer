@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>PrintFarmer uses the camera to scan QR codes on filament spools for quick inventory management.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PrintFarmer connects to your local network to communicate with your 3D printer farm server.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_printfarmer._tcp</string>
+	</array>
+	<key>NFCReaderUsageDescription</key>
+	<string>PrintFarmer scans NFC tags on printers and filament spools for quick identification and management.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.printfarmer.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>printfarmer</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

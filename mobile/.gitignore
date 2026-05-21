@@ -1,0 +1,41 @@
+# Squad: ignore generated logs
+.squad/orchestration-log/
+.squad/log/
+
+# Xcode
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+DerivedData/
+build/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+build.log
+test.log
+
+# Secrets & certificates
+.env
+.env.*
+*.p8
+*.p12
+*.pem
+*.key
+secrets/
+# Squad: ignore runtime state (logs, inbox, sessions)
+.squad/decisions/inbox/
+.squad/sessions/
+# Squad: SubSquad activation file (local to this machine)
+.squad-workstream
+# Beads: local working files
+.beads/backup/
+.beads/embeddeddolt/
