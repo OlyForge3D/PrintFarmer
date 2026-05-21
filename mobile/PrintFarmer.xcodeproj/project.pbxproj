@@ -193,6 +193,8 @@
 		06290C51382B80A7269F5807 /* DemoSignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 647C4A6609FCEA4362C65F32 /* DemoSignalRService.swift */; };
 		20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1813AB98B7AEA3A598863F /* DemoMode.swift */; };
 		82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */; };
+		A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000A1 /* JogSubgroup.swift */; };
+		A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000B1 /* JogSubgroupTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -395,6 +397,8 @@
 		647C4A6609FCEA4362C65F32 /* DemoSignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSignalRService.swift; sourceTree = "<group>"; };
 		5F1813AB98B7AEA3A598863F /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMode.swift; sourceTree = "<group>"; };
 		94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeBanner.swift; sourceTree = "<group>"; };
+		A2B6286100000000000000A1 /* JogSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroup.swift; sourceTree = "<group>"; };
+		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -509,6 +513,7 @@
 				D7EABE37D6B7E8A44802BE1A /* Services */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* Utilities */,
 				4D7DEC203F06522448F70C97 /* ViewModels */,
+				A2B6286100000000000000D1 /* Views */,
 				CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */,
 			);
 			path = PrintFarmerTests;
@@ -656,6 +661,7 @@
 				4CDE928BC4B813AB90009605 /* Locations */,
 				0F7FA49FF64B34C211841EF0 /* Maintenance */,
 				771CDF6A20CC0E555A100EEE /* Notifications */,
+				A2B6286100000000000000C1 /* PrinterControls */,
 				549E659961D3A9E494F5ADEF /* Printers */,
 				CBAC88193AFA3F2403893113 /* Settings */,
 				255B7030A4CC2759FC7FC79B /* ContentView.swift */,
@@ -704,6 +710,22 @@
 				BA0262E35EBDB310533C010A /* SettingsView.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		A2B6286100000000000000C1 /* PrinterControls */ = {
+			isa = PBXGroup;
+			children = (
+				A2B6286100000000000000A1 /* JogSubgroup.swift */,
+			);
+			path = PrinterControls;
+			sourceTree = "<group>";
+		};
+		A2B6286100000000000000D1 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2B6286100000000000000B1 /* JogSubgroupTests.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		CC3B7B4670D1DE3829893360 /* Dashboard */ = {
@@ -973,6 +995,7 @@
 				814473DF28A49641B79766BA /* LoginViewModelTests.swift in Sources */,
 				E0411324A6C10BFCD5EAB595 /* PrinterDetailViewModelTests.swift in Sources */,
 				A1C5DEF1234567890ABC0003 /* PrinterControlsViewModelTests.swift in Sources */,
+				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
 				709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */,
 				9496A75515E3FA0FAF3DEB95 /* AuthViewModelTests.swift in Sources */,
 				BD4B3C1A942D0E9675E2B73A /* JobListViewModelTests.swift in Sources */,
@@ -1130,6 +1153,7 @@
 				DADAA45CEF6DEBFEFF5B983D /* UptimeView.swift in Sources */,
 				6B8B43A62528D0D7D70BD718 /* AutoDispatchSection.swift in Sources */,
 				D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */,
+				A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
