@@ -138,6 +138,15 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
+    var capabilitiesToReturn: PrinterBackendCapabilities?
+    var getBackendCapabilitiesCalledWith: UUID?
+
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        getBackendCapabilitiesCalledWith = printerId
+        if let error = errorToThrow { throw error }
+        return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .moonraker)
+    }
+
     func reset() {
         printersToReturn = []
         printerToReturn = nil

@@ -104,4 +104,9 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func changeFilament(printerId: UUID) async throws -> CommandResult {
         CommandResult(success: true, message: "Filament changed (demo)")
     }
+
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        let backend = printers.first(where: { $0.id == printerId })?.backend ?? .moonraker
+        return PrinterBackendCapabilities.fallback(for: backend)
+    }
 }
