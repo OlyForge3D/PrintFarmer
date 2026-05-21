@@ -150,6 +150,7 @@ final class PrinterDetailViewModel {
             bedTemp: update.bedTemp ?? statusDetail?.bedTemp,
             hotendTarget: update.hotendTarget ?? statusDetail?.hotendTarget,
             bedTarget: update.bedTarget ?? statusDetail?.bedTarget,
+            homedAxes: update.homedAxes ?? statusDetail?.homedAxes,
             spoolInfo: update.spoolInfo ?? statusDetail?.spoolInfo,
             mmuStatus: update.mmuStatus ?? statusDetail?.mmuStatus
         )
@@ -392,6 +393,7 @@ final class PrinterDetailViewModel {
         current.bedTemp = detail.bedTemp
         current.hotendTarget = detail.hotendTarget
         current.bedTarget = detail.bedTarget
+        if let homed = detail.homedAxes { current.homedAxes = homed }
         current.spoolInfo = detail.spoolInfo
         printer = current
     }
