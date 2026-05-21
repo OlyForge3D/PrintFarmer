@@ -67,6 +67,7 @@ import {
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
+import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldHideToolheadSpoolPicker';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
@@ -1172,10 +1173,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           );
         })()}
 
-        {/* Spool Section - hide for live MMU printers to avoid duplicate assignment UIs */}
+        {/* Spool Section - hide for live MMU printers and AMS-served toolheads to avoid duplicate assignment UIs */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          const hasLiveMmuGates = !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
-          if (hasLiveMmuGates) return null;
+          if (shouldHideToolheadSpoolPicker(displayPrinter?.mmuStatus?.gates, printerDetails?.toolheads)) return null;
 
           // Physical multi-toolhead (e.g., Snapmaker U1): toolheads stored in config DB
           const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
