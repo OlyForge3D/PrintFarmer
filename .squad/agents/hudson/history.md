@@ -114,3 +114,8 @@ Back-button crashes from untracked/uncancelled async Tasks mutating state after 
 **Build:** `swift build` (library target) clean. xcodebuild simulator builds blocked locally on iOS 26.5 platform / CoreSimulator drift — environmental, not code-side.
 
 - 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.
+### 2026-05-21: Issue #274 — Gated Maintenance toggle on farm_admin role
+- Added `currentUserRole: String?` computed property on `AuthViewModel` (returns "farm_admin" if present in `currentUser.roles`, else first role, else nil). `UserDTO.roles: [String]` already exists on the /api/auth/me response — no backend change needed.
+- Wrapped Maintenance toggle in `PrinterDetailView` with `if authViewModel.currentUserRole == "farm_admin"`. Injected `@Environment(AuthViewModel.self)`.
+- Added 4 unit tests in `AuthViewModelTests` covering currentUserRole (nil when no user, returns farm_admin when present in multi-role array, returns first role for non-admin, nil for empty roles).
+- Build verification: local Xcode SDK is broken (iOS 26.5 SDK not installed, CoreSimulator out of date). Used `swiftc -parse` on changed files — exit 0, no syntax errors. Full xcodebuild left to CI.

@@ -3,6 +3,7 @@ import SwiftUI
 struct PrinterDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var viewModel: PrinterDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
@@ -862,21 +863,23 @@ struct PrinterDetailView: View {
                     .disabled(viewModel.isPerformingAction)
                 }
 
-                // Maintenance toggle
-                Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    let task = Task { await viewModel.toggleMaintenance() }
-                    activeTasks.append(task)
-                } label: {
-                    Label(
-                        printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
-                        systemImage: "wrench.and.screwdriver"
-                    )
-                    .fullWidthActionButton()
+                // Maintenance toggle (admin only)
+                if authViewModel.currentUserRole == "farm_admin" {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let task = Task { await viewModel.toggleMaintenance() }
+                        activeTasks.append(task)
+                    } label: {
+                        Label(
+                            printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
+                            systemImage: "wrench.and.screwdriver"
+                        )
+                        .fullWidthActionButton()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
+                    .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
                 }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
-                .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
 
                 #if canImport(UIKit)
                 // Write NFC printer tag
