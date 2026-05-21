@@ -1,7 +1,0 @@
-[
-  {"persistent_name": "Dallas", "role": "Lead", "universe": "alien", "created_at": "2026-03-06T18:33:00Z", "legacy_named": false, "status": "active"},
-  {"persistent_name": "Ripley", "role": "iOS Dev", "universe": "alien", "created_at": "2026-03-06T18:33:00Z", "legacy_named": false, "status": "active"},
-  {"persistent_name": "Lambert", "role": "Networking", "universe": "alien", "created_at": "2026-03-06T18:33:00Z", "legacy_named": false, "status": "active"},
-  {"persistent_name": "Ash", "role": "Tester", "universe": "alien", "created_at": "2026-03-06T18:33:00Z", "legacy_named": false, "status": "active"},
-  {"persistent_name": "Parker", "role": "UI/UX Designer", "universe": "alien", "created_at": "2026-03-09T21:00:00Z", "legacy_named": false, "status": "active"}
-]
