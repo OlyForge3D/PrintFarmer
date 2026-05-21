@@ -57,7 +57,7 @@ struct PreheatSubgroup: View {
 
             grid
 
-            if let message = disabledTapMessage {
+            if let message = blockedReasonMessage {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)
@@ -90,11 +90,11 @@ struct PreheatSubgroup: View {
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
         // burst commands like "PLA then ABS".
-        let anyPreheatPending: Bool = {
+        let isAnyPreheatInProgress: Bool = {
             guard case .preheat = viewModel.pendingCommand?.kind else { return false }
             return true
         }()
-        let isInteractive = canControl && !anyPreheatPending
+        let isInteractive = canControl && !isAnyPreheatInProgress
 
         Button {
             handleTap(preset: preset, canControl: canControl)
@@ -102,19 +102,28 @@ struct PreheatSubgroup: View {
             buttonLabel(preset: preset, isPending: isPending)
         }
         .buttonStyle(PreheatButtonStyle(preset: preset, isEnabled: isInteractive, isPending: isPending))
-        .disabled(isPending || (!canControl && !shouldRevealDisabledTooltipOnTap))
-        // We keep the button tappable when canControl is false on iPhone so
-        // we can surface the blocked-reason caption; iPad/Mac uses .help().
+        .disabled(isAnyPreheatInProgress || isBlockedWithoutTapReveal(canControl: canControl))
+        // On compact layouts we keep blocked buttons tappable so the user can
+        // reveal the disabled reason; regular width shows the reason inline.
         .accessibilityLabel(accessibilityLabel(preset: preset, isPending: isPending))
         .accessibilityHint(accessibilityHint(canControl: canControl))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
         .help(viewModel.blockedReason ?? "")
     }
 
+    private var blockedReasonMessage: String? {
+        if horizontalSizeClass == .regular {
+            return viewModel.blockedReason
+        }
+        return disabledTapMessage
+    }
+
     private var shouldRevealDisabledTooltipOnTap: Bool {
-        // Always allow the tap-to-reveal behavior on phones; native `.help()`
-        // covers regular size class without a tap.
         horizontalSizeClass != .regular
+    }
+
+    private func isBlockedWithoutTapReveal(canControl: Bool) -> Bool {
+        !canControl && !shouldRevealDisabledTooltipOnTap
     }
 
     private func buttonLabel(preset: PreheatPreset, isPending: Bool) -> some View {
@@ -403,9 +412,9 @@ private enum PreheatSubgroupPreviewFactory {
         let printer = Printer.previewStub(state: printerState, isOnline: isOnline)
         let service = PreheatSubgroupPreviewService(capabilities: capabilities, hangForever: startPendingPreset != nil)
         let vm = PrinterControlsViewModel(printerService: service, printer: printer)
-        // Seed capabilities synchronously so the canvas renders the right
-        // visibility state without an async load.
-        vm.previewSeedCapabilities(capabilities)
+        // Asynchronously load preview capabilities immediately so the canvas
+        // settles on the configured visibility state.
+        vm.previewLoadCapabilitiesAsync()
         if let preset = startPendingPreset {
             // Kick off a preheat that the preview service will never resolve,
             // pinning the button in pending state.
@@ -462,10 +471,10 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
 // MARK: - Preview seam on the ViewModel
 
 private extension PrinterControlsViewModel {
-    /// Drives the existing `loadCapabilities()` path through the preview
-    /// service so the canvas reflects the configured capabilities without a
-    /// production-code-affecting back door.
-    func previewSeedCapabilities(_ caps: PrinterBackendCapabilities) {
+    /// Kicks off the existing `loadCapabilities()` path through the preview
+    /// service so the canvas converges on the configured capabilities without
+    /// a production-code-affecting back door.
+    func previewLoadCapabilitiesAsync() {
         Task { @MainActor in await self.loadCapabilities() }
     }
 }
@@ -489,16 +498,8 @@ private extension Printer {
             "obicoEnabled": false
         }
         """
-        // Decoding a string literal under our control will not fail; if it
-        // ever did we'd see it instantly in the preview canvas.
-        return (try? JSONDecoder().decode(Printer.self, from: Data(json.utf8)))
-            ?? unsafeBitCastedFallback()
-    }
-
-    /// Should be unreachable — present only so the preview returns a concrete
-    /// value without `try!` if the struct definition ever drifts.
-    private static func unsafeBitCastedFallback() -> Printer {
-        let empty = "{\"id\":\"11111111-1111-1111-1111-111111111111\",\"name\":\"\",\"backend\":\"unknown\",\"backendPort\":80,\"inMaintenance\":false,\"isEnabled\":false,\"obicoEnabled\":false}"
-        return try! JSONDecoder().decode(Printer.self, from: Data(empty.utf8))
+        // Decoding a string literal under our control is preview-only and
+        // should never fail; if it does, surfacing it immediately is useful.
+        return try! JSONDecoder().decode(Printer.self, from: Data(json.utf8))
     }
 }
