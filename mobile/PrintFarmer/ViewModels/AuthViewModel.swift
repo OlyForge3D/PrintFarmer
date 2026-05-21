@@ -9,6 +9,14 @@ final class AuthViewModel {
     var currentUser: UserDTO?
     var isLoading = false
     var errorMessage: String?
+
+    /// The current user's primary role for permission gating.
+    /// Returns "farm_admin" when the user has that role; otherwise the first role; nil if unauthenticated.
+    var currentUserRole: String? {
+        guard let roles = currentUser?.roles else { return nil }
+        if roles.contains("farm_admin") { return "farm_admin" }
+        return roles.first
+    }
     /// True once the initial session restore check has completed.
     private(set) var hasCheckedAuth = false
 
