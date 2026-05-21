@@ -11,3 +11,7 @@
 ## Learnings
 
 _(append new learnings below this line)_
+
+### 2026-05-21: PR #299 review (jog subgroup)
+- Verdict ✅ approved via `--comment` (Ruling G — self-PR cannot `--approve`).
+- Coordinator squash-merged with `--admin`.

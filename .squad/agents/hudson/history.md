@@ -122,3 +122,26 @@ Back-button crashes from untracked/uncancelled async Tasks mutating state after 
 
 
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
+
+### 2026-05-21: Issue #286 — PrinterControlsSection jog subgroup (PR #299)
+**Files Created:**
+- `mobile/PrintFarmer/Views/PrinterControls/JogSubgroup.swift` — segmented axis (X/Y/Z, filtered by `capabilities.supportedAxes`) + step picker (0.1/1/10/100 mm, default 1) + 60pt `+`/`-` buttons calling `viewModel.jog(axis:distanceMm:)` with signed step. Hides when `!supportsMovement` or `supportedAxes` empty. Disables while `pendingCommand != nil` or `!canControl`. Loads capabilities on `.task`. Snaps `selectedAxis` if the supported set narrows.
+- `mobile/PrintFarmerTests/Views/JogSubgroupTests.swift` — covers `visibleAxes(for:)` (nil → full canonical, X/Y-only filters Z, empty → empty), `isHidden(for:)` (false on nil, true on `!supportsMovement`, true on empty axes, false on full), and locked v1 step option set.
+
+**xcodeproj registration:** Added new `PrinterControls` group under Views and `Views` group under PrintFarmerTests. UUIDs prefixed `A2B62861…`. `plutil -lint` clean. Folder creation may conflict with #284/#285; #287 reconciles section composition.
+
+**Verification:** `swiftc -parse` clean on both files. Local xcodebuild still blocked by iOS 26.5 SDK / CoreSimulator drift — full build runs in CI on the PR.
+
+**Design notes:**
+- Feedrate is internal to `PrinterControlsViewModel` per Newt's spec (3000 mm/min XY, 600 mm/min Z) — no UI surface in v1.
+- Pending side is identified by matching `viewModel.pendingCommand?.kind == .jog` against `selectedAxis` and the sign of the distance, so only the tapped side spinners while both buttons disable to prevent burst-spam.
+
+
+### 2026-05-21: PRs #300 and #301 rebased onto development
+- After #299 (jog subgroup) merged, PRs #300 (home) and #301 (preheat) had pbxproj conflicts in two regions: PrintFarmerTests group children (Views ref) and PrintFarmerTests Sources build phase.
+- Resolution: union both sides. Each branch defines its own Views group with a distinct ID (jog A2B62...D1, home A2D4EF...0006, preheat A1C5DEF...0022); group definition bodies exist independently in the file, so keeping both refs is non-destructive. Xcode tolerates duplicate-name groups with distinct IDs.
+- Local xcodebuild blocked by iOS 26.5 SDK / CoreSimulator drift; plutil -lint passed both. Force-pushed both branches with --force-with-lease. Both PRs: mergeable=MERGEABLE, mergeStateStatus=UNSTABLE (CI running).
+- Pattern recorded as decision (hudson-pbxproj-rebase-pattern).
+
+- 2026-05-23 pbxproj rebase: use `git checkout --conflict=diff3 <file>` before union-merging conflicts. Default 2-way markers factor common suffixes out, splitting PBXGroup definitions across boundaries — regex union then loses closing braces. diff3 keeps each side complete.
+- pbxproj validation: `plutil -lint` rejects OpenStep comments. Use `xcodebuild -list -project foo.xcodeproj` instead. Quick sanity: balanced { / } and ( / ) counts.

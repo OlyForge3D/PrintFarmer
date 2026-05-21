@@ -28,3 +28,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - **2026-04-05 — OrcaSlicer import endpoint.** `POST /api/slicer/profiles/import/orca` (`farm_admin` policy) parses bundle JSON via `IOrcaBundleParsingService.ParseBundle`, filters by `SelectedPrinters` / `SelectedFilaments` / `SelectedProcesses`, calls `IProfilesService.ImportProfileAsync` per preset (content-hash dedup applies). Per-preset failures collected as warnings; whole-import failures return 500. Closes the missing leg of the `OrcaImportWizard` upload→preview→import flow.
 
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`.
+
+## Learnings
+
+- **2025-11-22 — PrintersService MMU gate semantics (issue #302, PR #303).** `mmuGateCount` parameter on `CreateMmuVirtualToolheads` / `SyncMmuVirtualToolheads` / `SyncMmuToolheadsOnEntity` means **total number of AMS gates**, NOT a strict upper-bound index. Loop must be `for (int i = 1; i <= mmuGateCount; i++)` to produce N gates at indices 1..N (T0 reserved for Physical hotend). Companion helpers `SetToolheadSpoolAsync` / `ClearToolheadSpoolAsync` use `Math.Max(4, toolheadIndex)` (no `+1`) — index N maps directly to a count-of-N. Bambu defaults to `mmuGateCount = 4`. Existing data already seeded under the old `<` bound is **not** auto-repaired — backfill needs a separate hosted service or migration.
