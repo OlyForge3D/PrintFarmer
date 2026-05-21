@@ -46,6 +46,36 @@ When triaging, the Lead should ask:
 4. **Is it security-sensitive?** Auth, encryption, access control → always 🔴
 5. **Is it medium complexity with specs?** Feature with clear requirements, refactoring with tests → likely 🟡
 
+## Repo Routing
+
+When work is repo-specific, pass the correct repo path as `WORKTREE_PATH` in the spawn prompt.
+
+| Work Domain | Repo | Path |
+|-------------|------|------|
+| Backend API, EF Core, migrations, SignalR hubs, slicer workers | PFarm1 | `/Users/jpapiez/s/PFarm1` |
+| React dashboard, Tailwind, Vitest frontend tests | PFarm1 | `/Users/jpapiez/s/PFarm1` |
+| iOS app, SwiftUI views, Swift models, XCTest | PFarm-Ios | `/Users/jpapiez/s/PFarm-Ios` |
+| Spoolman Python backend, FastAPI routes, Alembic migrations | spoolman_pf | `/Users/jpapiez/s/spoolman_pf` |
+| Spoolman React frontend, Ant Design, Refine | spoolman_pf | `/Users/jpapiez/s/spoolman_pf` |
+| Cross-repo API contracts, shared types | Both PFarm1 + spoolman_pf | Both paths |
+
+### Agent Repo Assignments
+
+| Agent | Primary Repo(s) | Notes |
+|-------|----------------|-------|
+| Lambert 🔧 | PFarm1 | C#/.NET — will step into spoolman_pf Python with explicit instruction |
+| Ripley ⚛️ | PFarm1, spoolman_pf | React/TypeScript in both repos |
+| Parker ⚙️ | PFarm1, spoolman_pf | Docker/CI touches both |
+| Kane 🧪 | All three | Tests span repos |
+| Ash 📝 | All three | Docs span repos |
+| Dallas 🏗️ | All three | Architecture is cross-repo |
+| Newt 🎨 | PFarm1, spoolman_pf, PFarm-Ios | React UI + iOS HIG/SwiftUI design |
+| Hudson 📱 | PFarm-Ios | All SwiftUI views and navigation |
+| Gorman 🌐 | PFarm-Ios | All networking, REST clients, SignalR, Swift models |
+| Brett 🔍 | All three | Research has no repo boundary |
+
+> **iOS work:** PFarm-Ios uses Swift/SwiftUI. Lambert and Ripley are not Swift experts — for iOS-specific implementation, prefer asking Dallas to scope the work and spawn a focused task, or use @copilot for well-defined Swift changes. Brett can research Swift patterns.
+
 ## Rules
 
 1. **Eager by default** — spawn all agents who could usefully start work, including anticipatory downstream work.

@@ -18,6 +18,14 @@ UI/UX Designer specializing in industrial-grade interface design for hardware co
 - Defers to Dallas (Lead) on scope and priority decisions
 - May reject UI implementations that don't meet quality standards (Reviewer role for visual quality)
 
+## iOS Design Scope
+
+- **Apple HIG compliance:** Touch targets minimum 44pt (`.standard`), 50pt for primary actions (`.prominent`) per `ActionButtonStyle`
+- **SwiftUI design:** Color tokens (`ThemeColors.swift`), spacing consistency, font hierarchy, Dark Mode support
+- **iOS visual audit:** Audits SwiftUI views for touch target compliance, spacing, contrast, and HIG adherence
+- Works with Hudson (iOS Dev) — Newt specifies, Hudson implements complex SwiftUI logic; Newt can implement pure styling/layout changes directly
+- Key iOS component: `PrintFarmer/Views/Components/ActionButtonStyle.swift`
+
 ## Design Philosophy
 
 - **Industrial precision:** Clean lines, purposeful spacing, information density without clutter

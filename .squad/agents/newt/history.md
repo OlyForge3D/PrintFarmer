@@ -15,6 +15,28 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 
 ---
 
+## iOS Design — Migrated from PFarm-Ios Parker (2026-05-20)
+
+### Touch Target Compliance & Button Sizing (2026-03-09)
+**Problem:** Full-width action buttons throughout the iOS app were ~34-36pt — below Apple HIG minimum.
+
+**Solution:** Created `PrintFarmer/Views/Components/ActionButtonStyle.swift` with `.fullWidthActionButton()` view modifier:
+- `.standard` = 44pt height (Apple HIG minimum for all interactive elements)
+- `.prominent` = 50pt height (primary actions: "Start Print", "Emergency Stop", "Sign In")
+
+**Applied across 8 view files:** `LoginView`, `PrinterDetailView`, `JobDetailView`, `NFCScanButton`, `NFCWriteView`, `AutoPrintSection`, `MaintenanceAlertRow`
+
+**Design rules established:**
+- Minimum 44pt touch target for all action buttons per Apple HIG
+- 50pt for primary actions requiring extra prominence
+- Font upgraded from `.caption` → `.subheadline` on small-button rows (AutoPrint, MaintenanceAlert) for readability
+- Consistent 8pt gap between vertically stacked buttons
+- Maintained existing `.destructive` role, color tinting, and font weights
+
+**Key file:** `PrintFarmer/Views/Components/ActionButtonStyle.swift`
+
+---
+
 ## FailureDetectionMonitoringSummary Redesign (2026-06-10)
 
 **Task:** Redesign failure detection summary component to reduce visual weight on printer cards  
