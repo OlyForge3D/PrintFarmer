@@ -262,8 +262,12 @@ struct Printer: Codable, Identifiable, Sendable {
 
         isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
         state = try c.decodeIfPresent(String.self, forKey: .state)
-        // Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
-        progress = try c.decodeIfPresent(Double.self, forKey: .progress).map { $0 / 100.0 }
+        // Backend contract: progress is 0–100 (percent). iOS internal scale is 0–1.0
+        // (PrintProgressBar / SwiftUI ProgressView consumers). Clamp out-of-range backend
+        // values to [0, 100] before normalizing so drift never produces UI > 100% or < 0%.
+        // See PrinterProgressContractTests for the pin (issue #277).
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress)
+            .map { min(max($0, 0), 100) / 100.0 }
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
