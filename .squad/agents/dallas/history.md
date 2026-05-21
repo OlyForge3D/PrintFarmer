@@ -178,3 +178,10 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 
 
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
+
+### 2026-05-21 — Mobile-controls v1 board cleared (team update from Scribe)
+- PR #306 (Hudson, #289 snapshot tests w/ swift-snapshot-testing on test target only) merged.
+- PR #308 (Lambert, #290 backend capability guards: `PrinterControlOutcome` enum, 409/busy gate, typed exceptions) merged.
+- #276 verified shipped end-to-end (homedAxes across backend → SignalR → iOS decoder); closed.
+- Mobile-controls v1 board now fully clear: #275 wontfix, #276/#279/#280–#290/#302 all closed.
+- New bug #309 filed: spaghetti detection shield says "printer not printing" on actively-printing printers. Ripley investigating.

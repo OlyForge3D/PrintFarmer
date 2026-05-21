@@ -101,3 +101,11 @@
 - **pbxproj registration for new Views/PrinterControls files:** 4 entries — PBXBuildFile, PBXFileReference, PBXGroup child in `PrinterControls`, and Sources build phase entry. Always `plutil -lint` after.
 - **Local `xcodebuild build` is unreliable here** because CoreSimulator drifts vs Xcode (iOS 26.5 SDK build version mismatch). CI is authoritative. Use `swiftc -parse` + `xcodebuild -list` as the local smoke test.
 - **`create_file` will not overwrite existing files** — use `replace_string_in_file` / `multi_replace_string_in_file`, or `rm` then `create_file`. The latter is fine when the rewrite is structural.
+
+## 2026-05-21T15:00 — #289 snapshot tests implemented
+
+Implemented PrinterControlsSectionSnapshotTests (5 cases: Moonraker / FlashForge / SDCP backend profiles + capabilities-nil loading state + disabled state via state "error"). Wired pointfreeco/swift-snapshot-testing ~1.18.x to TEST target only via both Package.swift (testTarget dep) and PrintFarmer.xcodeproj (XCRemoteSwiftPackageReference + XCSwiftPackageProductDependency + packageProductDependencies on PrintFarmerTests + frameworks build phase).
+
+Key conventions: Printer fixture decoded via TestFixtures.decodePrinter from TestJSON.printer (no memberwise init), MockPrinterService.capabilitiesToReturn seeds caps, assertSnapshot(of: host(section), as: .image(on: .iPhone13)) per case. plutil -lint passes. xcodebuild -resolvePackageDependencies hit local CoreSimulator drift — baselines must regenerate on CI. PR #306 updated and marked ready.
+
+Note for future: shell heredoc + backticks is a recurring foot-gun. Just use file-edit tools for content that has any markdown chars.

@@ -109,3 +109,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 ### 2026-05-21 — Issue #302 frontend dedup shipped (PR #305)
 - Removed duplicate lower "Spools" section in `AmsSlotVisualization` once Lambert's backend gate-count fix (PR #303) was on `development`.
 - PR #305 merged; issue #302 CLOSED end-to-end (backend + frontend both landed).
+
+### 2026-05-21 — Picked up bug #309 (team update)
+- Mobile-controls v1 board cleared this round (Hudson #289 PR #306, Lambert #290 PR #308, #276 verified shipped).
+- User filed bug #309: spaghetti detection shield in web app says "printer not printing" on printers that ARE actively printing. State-detection mismatch on the shield component. Investigation underway — own this through fix.
