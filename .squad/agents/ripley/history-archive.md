@@ -362,3 +362,191 @@ Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions f
 **Outcome:** BuddyCameraIp field ready for integration with backend camera auto-discovery service.
 
 **[Older entries archived on 2026-05-12 — see history.md for recent updates]**
+
+
+---
+
+## [Archived 2026-05-21 by Scribe — full ## Learnings section before Phase 1 closeout summarization]
+
+## Learnings
+
+- **Blob URL lifecycle:** `URL.createObjectURL()` allocates memory that persists until explicitly revoked or page unloads. In SPAs, components can unmount without page unload, so always track and revoke.
+- **Custom vs system profile split:** Custom profiles from `listCustomProfiles()` are NOT in the system profile queries (`machineProfilesForModel`). Any selection validation must check both data sources.
+- **OrcaSlicer rawJson metadata:** Custom profiles store the original OrcaSlicer JSON in `rawJson`. Key fields: `printer_model` for machine profiles, `compatible_printers` array for filament/process profiles.
+- **Multi-file import pattern:** Use `Array.from(files)` to iterate FileList, accumulate counts, and show aggregate results. Per-file `try/catch` prevents one bad file from blocking the rest.
+- **Filament settings types (PFarm1-pysq.2):** Created filamentSettingsTypes.ts with 108 OrcaSlicer filament settings using native snake_case keys from orcaSettingsMetadata.json. Compound (per-extruder) fields typed as string; non-compound use number/boolean/string. Mode map marks 12 core keys as simple, rest as advanced. Category map matches OrcaSlicer Tab.cpp tab structure. Defaults use typical PLA values.
+- **coFloats rendering (PFarm1-suv8):** `coType: "coFloats"` settings store comma-separated per-extruder values (e.g. "500,200"). Added `'coFloats'` control type to `resolveControlType` and compound rendering in `MetadataSettingRow` that splits on commas, renders per-extruder inputs, and joins back on change. Single values still render as normal number inputs. The `metadata-editors.test.ts` VALID_CONTROLS set must include any new control types.
+
+### 2025-01-12: Multi-axis Cut + Drag Interference Fix
+
+**Issue 1: Drag-to-move interfering with Cut/Paint tools**
+- Root cause: `draggable` prop on `STLModel` and `PrebuiltSTLModel` only checked `layFlatMode`, `assemblyViewActive`, and `transformMode`, but not tool modes
+- Fix: Extended draggable condition to also be false when any modifying tool is active:
+  - `cutMode`, `supportPaintMode`, `seamPaintMode`, `colorPaintMode`, `fuzzySkinPaintMode`, `measureMode`, `textPlacementMode`
+- Both `STLModel` and `PrebuiltSTLModel` components updated in `SlicerBedVisualization.tsx`
+
+**Issue 2: Multi-axis cut control (OrcaSlicer-style)**
+- Completely rewrote `CutPlaneOverlay.tsx` to support X/Y/Z axis cuts
+- Key changes:
+  - Added `CutAxis` type: `'x' | 'y' | 'z'`
+  - Generalized `splitGeometryAtPlane` to accept axis parameter
+  - Updated `classifyPoint` to work with any axis value
+  - Plane orientation:
+    - Z: rotation (0,0,0) - horizontal (unchanged)
+    - X: rotation (0, π/2, 0) - vertical perpendicular to X
+    - Y: rotation (π/2, 0, 0) - vertical perpendicular to Y
+  - Added red sphere drag handle (3mm radius) at plane center
+  - Drag cursor changes based on axis: `ns-resize` for Z, `ew-resize` for X/Y
+  
+**New UI Panel (matching OrcaSlicer):**
+- Mode selector: "Planar" (static, disabled)
+- Build Volume display: shows bed dimensions
+- Cut position: axis dropdown (X/Y/Z) + numeric input (mm) + reset button
+- Action buttons: "Add connectors" (disabled/coming soon), "Reset cut"
+- After cut section:
+  - Upper part: Keep ✓, Place on cut ✓, Flip □ (with teal color indicator)
+  - Lower part: Keep ✓, Place on cut □, Flip □ (with purple color indicator)
+  - Cut to parts □
+- "Perform cut" button (primary)
+
+**Interface Changes:**
+- Updated `CutPlaneOverlayProps` to accept `bedConfig: BedConfig`
+- Added `CutOptions` interface with all cut configuration options
+- Updated `onCutComplete` callback signature to accept optional `CutOptions`
+- Updated `SlicerBedVisualizationProps.onCutComplete` type to match
+- Modified `handleCutComplete` in `SlicerWorkspace.tsx` to:
+  - Accept optional `CutOptions` parameter
+  - Respect `keepUpper`/`keepLower` options (only add models that should be kept)
+  - Added TODO stubs for `placeOnCut`, `flip`, and `cutToParts` options
+
+**Implementation Details:**
+- Reset cutHeight to 0.5 (center) when axis changes
+- Compute axis-specific bounds from model bounding box
+- Handle sphere moved to child of plane mesh for correct transformation
+- Panel positioned top-right at fixed world coordinates (not attached to plane)
+- Used Button components (not raw buttons) to satisfy ESLint rules
+- Avoided raw `<select>` elements (used styled button for axis toggle instead)
+
+**Patterns:**
+- R3F `useFrame` for syncing plane/handle position with model transform
+- `useMemo` for expensive bounding box calculations
+- `useCallback` for event handlers to prevent re-renders
+- Ref-based dragging state (`isDraggingRef`) to avoid render loops
+- Toast notifications for user feedback
+
+**Validation:**
+- TypeScript: ✅ No errors
+- ESLint: ✅ No errors or warnings
+- Tests: Pre-existing failures unrelated to our changes (import resolution issues in test setup)
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/slicer/components/viewer/CutPlaneOverlay.tsx` (complete rewrite, ~580 lines)
+- `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerBedVisualization.tsx` (draggable guards, bedConfig prop)
+- `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx` (handleCutComplete signature)
+
+---
+
+## PFarm1-4ex2 — Hollow cut detection (2026-04-25)
+
+**Learnings:**
+- The cut tool already handles disjoint cap loops correctly: `orderCapEdges` returns `THREE.Vector3[][]` and the consumer iterates each loop through `earClipTriangulate`. Only nested loops (true holes — e.g. the inner ring of a hollow tube cross-section) remain a v1 limitation.
+- AABB containment in the cap's 2D projection plane is a cheap, no-import heuristic for detecting nested loops without point-in-polygon tests.
+- Full hole bridging would require either constrained Delaunay triangulation or ear-clipping with bridge edges connecting outer/inner loops — a much larger change deferred from this v1 fix.
+
+---
+
+## Slicer page UI cohesion polish (2026-07-21)
+
+**Learnings:**
+- SlicerSelector used `p-4 mb-3` while all other section cards use `p-3 mb-2`. Standardized.
+- Emoji fallbacks (🔪, 🖨️) replaced with SVG MDI icons (`GearIcon`, `PrinterIcon`) for consistency and rendering reliability.
+- Empty/loading states in NewSliceJobPage had `italic` on instructional text ("Select a machine profile…") which should only apply to loading/no-data messages.
+- Online status dot in PrinterSlicerSelector is very small (`w-2 h-2`); adding `ring-1 ring-{color}/30` provides a subtle glow that increases visibility without changing size.
+- Process section card was missing `space-y-2` that all other sections had — easy to miss in a 2400-line file.
+- Select placeholder patterns were inconsistent (`-- Select X --` vs short form). Standardized to `Select x...` / `Loading...`.
+
+---
+
+## Spoolman Filter Options Endpoint (2026-05-03)
+
+**Status:** ✅ DELIVERED
+
+**Summary:**
+Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions from Spoolman, enabling dynamic filter option population in SpoolsTab instead of relying on hardcoded values.
+
+**Backend Changes:**
+- Endpoint: `GET /api/spoolman/filter-options` → `IEnumerable<FilterOptionDto>`
+- Response DTO: `FilterOptionDto { Id: string, Name: string }`
+- Serialization: `JsonPropertyName` for camelCase naming
+- Integrated with Spoolman service layer
+
+**Frontend Changes:**
+- Hook: `useSpoolFilterOptions()` with TanStack Query caching
+- Integration: SpoolsTab loads options on mount via `useEffect`
+- Error handling: Toast notifications for API failures
+- Type safety: Full TypeScript coverage
+
+**Validation:**
+- Backend: All tests passing
+- Frontend: 1734/1734 tests passed, 12 skipped
+- Linting: No new warnings
+- Serialization: camelCase validated
+
+### Session: Buddy Camera IP frontend field (PFarm1-873d)
+
+**Task:** Add `buddyCameraIp` field to the printer edit UI for PrusaLink printers.
+
+**Changes:**
+- `types/api.ts`: Added `buddyCameraIp?: string` to `UpdatePrinterDto` and `PrinterDetails`
+- `EditPrinterModal.tsx`: Added field to form initialization, dirty tracking, and Camera Configuration section
+- Field is conditional on `formData.backend === PrinterBackend.PrusaLink`
+- Shows derived RTSP URL preview (`rtsp://{ip}:554/live/`) when an IP is entered
+
+**Decisions:**
+- Not added to `CreatePrinterDto` or `AddPrinterModal` — backend `CreatePrinterFromDiscoveryDto` doesn't have the field; set via edit after creation
+- Used `handleInputChange` pattern consistent with existing camera URL fields
+- Placed inside the Camera Configuration section, after the snapshot URL field
+
+
+## 2026-05-12 Buddy Camera IP Field — Session Complete
+
+**Task:** PFarm1-873d — Implement BuddyCameraIp field in EditPrinterModal  
+**Status:** ✅ CLOSED  
+**Timestamp:** 2026-05-12T19:20:00Z
+
+**Changes:**
+- `types/api.ts`: Added `buddyCameraIp?: string` to UpdatePrinterDto and PrinterDetails
+- `EditPrinterModal.tsx`: Added Camera Configuration section with buddyCameraIp field, conditional on PrusaLink backend
+- RTSP URL preview: Shows `rtsp://{ip}:554/live/` when IP is entered
+- Form state: Integrated with dirty tracking and form initialization
+
+**Validation:**
+- ✅ Build passing
+- ✅ Lint passing  
+- ✅ No new warnings
+
+**Outcome:** BuddyCameraIp field ready for integration with backend camera auto-discovery service.
+
+- 2026-05-20: Assigned mobile controls v1 spike #279 — validate backend print-state enforcement (block jog/preheat/home while printing or paused). Trust `PrinterBackendCapabilities.supportsTemperatureControl` flag per locked decision. See decisions.md "Mobile API Drift + Basic Printer Controls v1".
+
+## 2026-05-21: Spike #279 — Server-side guards for /temps and /move
+
+**Role:** Tester/QA (read-only investigation)
+**Verdict:** **(c) NOT trust backend** — iOS client must fully gate /temps and /move client-side.
+
+**Key findings:**
+- Controller + service + plugins all forward `/temps` and `/move` blindly. No `Printer.Status` check anywhere.
+- All failures collapse to `bool false` → HTTP 404, masking real causes (offline / capability missing / firmware 409 / exception).
+- Per-backend: Moonraker accepts mid-print silently; PrusaLink/OctoPrint firmware 409s but result is lost; FlashForge has no movement capability; SDCP implements neither.
+- Zero test coverage on either route (`FNDA:0` in coverage report).
+
+**Outputs:**
+- Comment: https://github.com/OlyForge3D/PrintFarmer/issues/279#issuecomment-4509132269
+- Follow-up: #290 (P0, labels `squad,squad:ripley,type:bug,area:api,priority:P0`)
+- Decision: `.squad/decisions/inbox/ripley-279-server-guard-verdict.md`
+
+**For Hudson (#284-#286):** disable temp/move controls when status ∈ `{Printing, Pausing, Paused, Resuming, Cancelling, Heating}`. Re-evaluate on every SignalR `printerupdated`. Moonraker has no firmware safety net — consider a small operator warning even when status looks idle.
+- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.
+
+
+- 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).

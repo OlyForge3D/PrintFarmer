@@ -681,3 +681,216 @@ Local `swift test` cannot run the SPM `PrintFarmerTests` target on macOS because
 **Follow-up filed:** [#290 — Add server-side guards for /temps and /move during print](https://github.com/OlyForge3D/PrintFarmer/issues/290) (P0).
 
 **Comment:** https://github.com/OlyForge3D/PrintFarmer/issues/279#issuecomment-4509132269
+
+---
+
+## 2026-05-21: Inbox merge — Mobile Controls v1 Phase 1
+
+_Merged by Scribe from `.squad/decisions/inbox/` during Ralph rounds 2–5 closeout._
+
+
+---
+
+# Dallas — 2026-05-21 — Issues #275 and #290 triage
+
+## Issue #275 — closed `not planned` (wontfix)
+
+**Decision:** Option (a) — keep both `/api/printers/{id}/stop` and `/api/printers/{id}/emergency-stop`, document, close.
+
+**Reasoning:**
+- Gorman's investigation showed iOS `PrinterService.stop()` calls `/stop`, which is a real route on the backend (not in-process aliasing). The original premise of #275 — that `.stop()` is a redundant in-process alias — was incorrect.
+- Refactor (option b) touches backend + iOS + web with deprecation cycle for negligible gain.
+- Renaming `/stop` to a "real" route (option c) is semantic gymnastics — both endpoints still execute the same emergency-stop operation.
+- The 5-line backend shim (`PrintersController.StopAsync` → `EmergencyStopAsync`) is documented as intentional compat surface. No bug, no maintenance burden, no security gap.
+
+**Action taken:**
+- Comment posted on #275 with full triage rationale.
+- Issue closed with reason `not planned`.
+- No code changes. iOS `stop()`, protocol entry, test (`testStopCallsCorrectEndpoint`), `PrinterDetailViewModel.swift:429`, and backend shim all stay.
+
+---
+
+## Issue #290 — reassigned `squad:⚛️ ripley` → `squad:🏗️ dallas`
+
+**Decision:** I take ownership. Cross-cutting backend implementation across all printer plugins is architecture/cross-domain work — Ripley is a tester. We have no dedicated backend agent, so it lands with me.
+
+**Reasoning:**
+- Spike found zero server-side guards across backend plugins. Real gap, but not a v1 blocker:
+  - Existing design locks already require **client-side** guards (web + iOS) — covered by the 16-issue plan.
+  - Server-side guards = defense-in-depth (catches direct API callers / scripts / future third-party clients).
+- Practical priority: **P1** (post-v1). Will adjust the priority label when scheduling. Kept `priority:p0` for now since I'm not changing the existing prioritization scheme without a separate decision.
+- Did NOT file a request for a new backend agent. Decision: I'll hold the work as Lead until volume justifies adding a backend specialist.
+
+**Action taken:**
+- Comment posted on #290 explaining routing decision.
+- Labels: removed `squad:⚛️ ripley`, removed accidentally-added `squad:dallas` (non-emoji), added `squad:🏗️ dallas`.
+- Scope preserved from Ripley's original filing. Per-plugin sub-issues to be created during design phase.
+
+
+---
+
+# Gorman — Issue #280: hybrid backend-capabilities (endpoint + static fallback)
+
+**Date:** 2026-05-21
+**Agent:** Gorman (iOS Networking)
+**PR:** https://github.com/OlyForge3D/PrintFarmer/pull/295
+**Issue:** #280
+
+## What
+
+iOS `PrinterService.getBackendCapabilities(printerId:)` resolves the new `PrinterBackendCapabilities` model via a **hybrid** path:
+
+1. GET `/api/printers/{id}/backend-capabilities` and decode the wire DTO.
+2. Read `backend` (PrinterBackend) from the response, look up `PrinterBackendCapabilities.fallback(for: backend)` as the base.
+3. Overlay the API's authoritative `supportsMovement` and `supportsTemperatureControl` on top of the fallback.
+4. The remaining four fields (`supportsBedTemperature`, `supportsFanControl`, `supportsHoming`, `supportedAxes`) come entirely from the static fallback table — the backend DTO does not currently expose them.
+5. On `.notFound` / `.serverError`, fetch the printer and return `fallback(for: printer.backend)` alone.
+6. Cached in-memory in the `PrinterService` actor by `UUID`.
+
+## Why this matters team-wide
+
+- **Backend-side follow-up:** the iOS side now consumes `supportsBedTemperature`, `supportsFanControl`, `supportsHoming`, `supportedAxes` as if they were first-class fields. When the backend `PrinterBackendCapabilitiesDto` grows them, the wire decode will pick them up automatically and the overlay can tighten in one line. No iOS migration needed.
+- **Static fallback table is the contract** until the API catches up. Backend changes that contradict the table (e.g. introducing a flag that says SDCP supports homing) need to update both the API DTO and the iOS table.
+- **Wire DTO field naming:** iOS decodes `printerId`, `backend`, `supportsMovement`, `supportsTemperatureControl` plus all the other capability bools (forward-compat). Any rename on the backend will silently break decode — coordinate via this decision file.
+
+## Static fallback table (authoritative for the four missing fields)
+
+| Backend | Movement | Temp | Bed | Fan | Homing | Axes |
+|---|---|---|---|---|---|---|
+| Moonraker, PrusaLink, OctoPrint | ✓ | ✓ | ✓ | ✓ | ✓ | X,Y,Z |
+| FlashForge | ✓ | ✓ | – | – | ✓ | X,Y,Z |
+| SDCP | – | – | – | – | – | (none) |
+| Unknown | – | – | – | – | – | (none) |
+
+## Surfaces
+
+- New: `mobile/PrintFarmer/Models/PrinterBackendCapabilities.swift`
+- New: `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` (8 cases)
+- Edited: `PrinterServiceProtocol.swift`, `PrinterService.swift`, `DemoPrinterService.swift`, `MockPrinterService.swift`
+
+## Conventions confirmed (for future iOS PRs)
+
+- `PrinterService` methods take `UUID`, not `String`, regardless of issue spec wording.
+- Pbxproj registration is deferred for new files; `Package.swift` SPM paths auto-discover them. CI uses `swift test`. Xcode users may need to drag files in manually until a coordinated pbxproj sweep.
+- Pure-model fallback tables get pure-model XCTest cases (no `MockURLProtocol`).
+
+
+---
+
+### 2026-05-21T00:00:00Z: Printer-controls v1 design — non-obvious calls
+**By:** Newt (UX) for #283
+**What:**
+- Single-flight queue is **per subgroup**, not global. Preheat lock does not freeze Home/Jog.
+- Pending → Default timeout = **5 seconds** with a neutral toast ("Sent. Awaiting printer."), not an error.
+- Disabled-during-print uses **greyscale + 8% diagonal stripe overlay** for color-blind users (per #15).
+- Capability missing → **remove the control from the layout**. No greyed slot, no tooltip.
+- Error banner sits **directly under the affected subgroup** (not at section top) so the failed command is unambiguous.
+- Debounce: **250ms trailing-edge** on every control tap.
+- Lockout banner is **section-level**, not per-subgroup.
+- Mid-print state hides nothing — controls greyed + striped + announce "Controls locked" once via VoiceOver.
+- Section is fully hidden when `printer.isOnline == false` (`EmptyView()`).
+- Jog `+/−` use **60pt** height (above standard 44/50pt) — they're the most-tapped.
+
+**Why:** Locks ambiguity in the spec so #284/#285/#286 implementation does not need follow-up design clarifications.
+
+**Doc:** `mobile/docs/design/printer-controls-section.md`
+
+
+---
+
+# Decision: PrinterControlsViewModel public contract (#282)
+
+**Author:** Gorman
+**Date:** 2026-05-21
+**Issue:** #282
+**PR:** https://github.com/OlyForge3D/PrintFarmer/pull/298
+**File:** `mobile/PrintFarmer/ViewModels/PrinterControlsViewModel.swift`
+
+This freezes the public surface so Hudson can build views without reading source.
+
+## Public types
+
+- `PreheatPreset` — `.pla` (200/60), `.petg` (240/80), `.abs` (240/100), `.coolDown` (0/0). `coolDown` always sends 0/0 regardless of capabilities.
+- `ControlCommand { kind: Kind, startedAt: Date }` with `Kind`:
+  - `.preheat(PreheatPreset)`
+  - `.home(axes: [String])` — uppercase axis names
+  - `.jog(axis: String, distanceMm: Double)`
+- `ControlsError { command: ControlCommand, message: String, isRetryable: Bool }`
+
+## Constants
+
+- `static let xyFeedrateMmMin: Int = 3000`
+- `static let zFeedrateMmMin: Int = 600`
+
+## Published state (all `@Published private(set)`)
+
+- `capabilities: PrinterBackendCapabilities?`
+- `lastError: ControlsError?`
+- `pendingCommand: ControlCommand?`
+- `isLoadingCapabilities: Bool`
+
+## Init
+
+`init(printerService: PrinterServiceProtocol, printer: Printer, clock: @escaping () -> Date = Date.init)`
+
+## Methods
+
+- `func loadCapabilities() async` — single-fetch cache; on error falls back to `PrinterBackendCapabilities.fallback(for: printer.backend)` **silently** (does not set `lastError`).
+- `func preheat(_ preset: PreheatPreset) async` — gated on `supportsTemperatureControl` (except `.coolDown`); bed value silently dropped if `!supportsBedTemperature`.
+- `func homeAll() async` / `func homeXY() async` / `func homeZ() async` — gated on `supportsHoming`.
+- `func jog(axis: String, distanceMm: Double) async` — gated on `supportsMovement`. Axis uppercased. Feedrate: Z → 600, else 3000 mm/min.
+- `func dismissError()` — clears `lastError`.
+- `func handlePrinterUpdate(_ updated: Printer)` — SignalR hook. Replaces internal printer **and clears `pendingCommand`**.
+
+## Computed
+
+- `canControl: Bool` — `printer.isOnline && !isPrintingOrPaused`.
+- `blockedReason: String?` — `"Printer is offline."` | `"Controls are locked while a print is active."` | `nil`.
+- `isPrintingOrPaused` matches state strings `"printing"`, `"paused"`, `"starting"` (case-insensitive).
+
+## Behavioral contract (do not change without coordination)
+
+1. **SignalR is the truth.** `pendingCommand` is set when a command begins and is **only cleared by `handlePrinterUpdate(_:)` (SignalR) or by command failure**. A successful API return leaves `pendingCommand` set so the spinner persists until the printer actually responds.
+2. **Single-flight, no queue.** A second command issued while `pendingCommand != nil` returns silently with no error and no state change. UI must disable controls based on `pendingCommand != nil`.
+3. **Capabilities never block UX.** Fetch failures fall back silently. Per-command capability gates short-circuit (no API call, no error) when the backend doesn't support the action.
+4. **Error mapping** (`static func mapError(_:) -> (message: String, isRetryable: Bool)`):
+   - 5xx / conflict / network → `isRetryable = true`
+   - 4xx → `isRetryable = false`
+5. **No automatic retry.** UI surfaces `lastError`; user retries by reissuing the command (which is now allowed because `pendingCommand` was cleared on failure).
+
+
+---
+
+# Mobile Controls v1 — Review Batch 1 Architectural Rulings
+
+**By:** Dallas (review of PRs #291–#297, 2026-05-21)
+**What:** Architectural rulings made during batch-1 review. Capture for downstream work (#282 ViewModel, #284–#286 UI build).
+**Why:** Several decisions need the team's persistent memory beyond per-PR comments.
+
+## Ruling A — `homedAxes` is `String?`, not `[String]?` (PR #294)
+The backend wire format is a compact lowercase string: `"xyz"`, `"xy"`, `""`, or `nil`. iOS models (`Printer.homedAxes`, `PrinterStatusDetail.homedAxes`) MUST match this shape. View rendering uses case-insensitive `contains("x"|"y"|"z")` per axis. Tests cover present / absent / empty.
+
+## Ruling B — Defensive nil-guard on partial status updates (PR #294)
+`PrinterDetailViewModel` MUST guard against partial detail-update payloads clobbering existing values:
+```swift
+if let homed = detail.homedAxes { current.homedAxes = homed }
+```
+This pattern should be applied to other optional-but-stateful fields when adding new ViewModel update paths.
+
+## Ruling C — Capabilities resolution: hybrid endpoint + static fallback (PR #295)
+v1 strategy: GET `/api/printers/{id}/backend-capabilities` → overlay onto static `PrinterBackendCapabilities.fallback(for: PrinterBackend)`. Backend currently surfaces only 2/14 fields; fallback table fills the rest. Failure modes (`.notFound`, `.serverError`) → use static fallback (no error to user). Actor-isolated cache `[UUID: PrinterBackendCapabilities]`, **no TTL in v1** — flagged for v2 follow-up if a printer's backend can change mid-session.
+
+## Ruling D — Capability missing ≠ disabled (PR #296)
+When a capability is false, the corresponding control is **removed from the UI**, not greyed out. Mid-print disable IS greyed (with diagonal-stripe overlay per #15 colorblind spec). Two distinct visual states; do not conflate.
+
+## Ruling E — `PrintJobPriority.from(intValue:)` is preserved (PR #293)
+While the wire format for enums is string-only (`JsonStringEnumConverter` global), `PrintJobDto.Priority` is serialized as a raw int field (NOT an enum on the wire). The `from(intValue:)` helper stays. Same exemption: `SignalRModels.AnyCodable` Int branch is correct (heterogeneous wrapper).
+
+## Ruling F — `MovePrinterRequest` unknown-axis fallback to `.x` is acceptable for v1 (PR #297, non-blocking)
+The locked axis picker (XYZ enum) prevents an unknown axis from reaching encoding in practice. Silent fallback to `.x` is acceptable for v1. Add a `precondition` assertion or exhaustive switch on axis when hardening (likely in #287 integration or post-v1).
+
+## Ruling G — Self-PR review constraint
+GitHub blocks `gh pr review --approve` on PRs authored by the reviewing user. Use `--comment` for verdicts + `--admin` for squash-merge. This applies to any squad agent reviewing their own PR — Dallas reviewing as Lead is not exempt when authoring.
+
+## Ruling H — Cross-author rebase handoff after merge cascades
+When sibling PRs in a batch touch overlapping files (e.g., #295 capabilities + #297 service methods on PrinterService), reviewer must NOT rebase the conflicting branches unilaterally — that violates the reviewer/author separation principle. Instead, post a "needs rebase" comment with explicit conflict-resolution guidance (e.g., "keep both sides; mechanical merge"). The original author rebases.

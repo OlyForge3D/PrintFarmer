@@ -77,3 +77,17 @@
 - Backend wire format confirmed string for all five: `MotionType` and `AutoDispatchState` rely on global `JsonStringEnumConverter` (registered in `ControllerStartup` + `SignalRStartup`); `PrinterBackend` and `PrintJobStatus` have permissive *read* converters but their `Write()` always emits string. `PrintJobPriority` is wire-serialized as raw `int` on `PrintJobDto.Priority`, so the Swift Codable enum is never invoked from real payloads — the `PrintJobPriority.from(intValue:)` helper IS still called from `JobDetailView`/`JobListView` and was preserved.
 - `SignalRModels.swift`'s `AnyCodable.init(from:)` Int branch left in place — that wrapper handles heterogeneous JSON values, not enum fields.
 - Verified with `swiftc -typecheck` on all `Models/*.swift`. Full Xcode build/test not runnable in this env (CoreSimulator out of date, iOS 26.5 SDK not installed).
+
+### 2026-05-21: Issue #282 — PrinterControlsViewModel (PR #298)
+- Built `mobile/PrintFarmer/ViewModels/PrinterControlsViewModel.swift` (~230 lines, Swift 6, `@MainActor` `ObservableObject`) + 14 XCTest cases in `mobile/PrintFarmerTests/ViewModels/PrinterControlsViewModelTests.swift`. Branch `squad/282-controls-viewmodel`, worktree `/Users/jpapiez/s/PFarm1-282`, draft PR https://github.com/OlyForge3D/PrintFarmer/pull/298 base `development`.
+- Public surface: `PreheatPreset` (.pla=200/60, .petg=240/80, .abs=240/100, .coolDown=0/0), `ControlCommand { kind, startedAt }`, `ControlsError { command, message, isRetryable }`. `@Published private(set) capabilities/lastError/pendingCommand/isLoadingCapabilities`. Methods: `loadCapabilities`, `preheat`, `homeAll/XY/Z`, `jog(axis:distanceMm:)`, `dismissError`, `handlePrinterUpdate(_:)`. Computed: `canControl`, `blockedReason`. Constants: XY feedrate 3000, Z feedrate 600 mm/min.
+- **Capability fetch errors are silent** — falls back to `PrinterBackendCapabilities.fallback(for:)` rather than surfacing via `lastError`. Capabilities are a backend probe, not a user action; surfacing fetch failure would block all commands behind a transient error.
+- **`pendingCommand` only cleared by SignalR `handlePrinterUpdate(_:)` or by failure** — successful API call leaves it set so the spinner persists until the printer actually responds. SignalR is the source of truth for "command effect complete".
+- **Bed temp silently dropped when `!supportsBedTemperature`** (FlashForge etc.). `coolDown` always sends 0/0 regardless — turning off is universal.
+- **Single-flight, no queue** — second concurrent command returns silently. UI uses `pendingCommand != nil` to disable buttons; this is a safety net.
+- **Test hook** added to `mobile/PrintFarmerTests/Mocks/MockPrinterService.swift`: `var beforeSetTemperatures: (@Sendable () async -> Void)?` invoked at top of `setTemperatures`. Single-flight test uses an `AsyncGate` actor to suspend the first call while firing the second.
+- **pbxproj patching**: 4 anchor points per Swift file (PBXBuildFile, PBXFileReference, group children, Sources phase). Used `PrinterDetailViewModel(.swift|Tests.swift)` references as anchors. New IDs: `A1C5DEF1234567890ABC0001`–`0004`. `grep -c PrinterControlsViewModel project.pbxproj` → 8.
+- **Validation gap**: local `xcodebuild test` not run — CoreSimulator/iOS SDK still broken locally. Relying on CI.
+
+
+- 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
