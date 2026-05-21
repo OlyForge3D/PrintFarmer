@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../Orca/orcaslicer"
+		},
+		{
+			"path": "../spoolman_pf"
+		}
+	],
+	"settings": {
+		"github.copilot.chat.codeGeneration.instructions": [
+			{
+				"file": ".github/copilot-instructions.md"
+			}
+		],
+		"github.copilot.chat.reviewSelection.instructions": [
+			{
+				"text": "Focus on Console, ASP.NET Core, Entity Framework, xUnit best practices and repo conventions."
+			}
+		]
+	}
+}

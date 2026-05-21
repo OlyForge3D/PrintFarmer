@@ -15,6 +15,8 @@
 | 🏗️ Dallas | Lead | .squad/agents/dallas/charter.md | Active |
 | ⚛️ Ripley | Frontend Dev | .squad/agents/ripley/charter.md | Active |
 | 🔧 Lambert | Backend Dev | .squad/agents/lambert/charter.md | Active |
+| 📱 Hudson | iOS Developer | .squad/agents/hudson/charter.md | Active |
+| 🌐 Gorman | iOS Networking | .squad/agents/gorman/charter.md | Active |
 | 🧪 Kane | Tester | .squad/agents/kane/charter.md | Active |
 | 📝 Ash | Documentation Specialist | .squad/agents/ash/charter.md | Active |
 | 🔍 Brett | Researcher | .squad/agents/brett/charter.md | Active |
@@ -29,6 +31,22 @@
 ## Project Context
 
 - **Owner:** Jeff Papiez
-- **Project:** PrintFarmer — React TypeScript dashboard for managing multiple 3D printers
-- **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS, Vitest, xUnit
+- **Project:** PrintFarmer platform — printer farm management, iOS companion app, and Spoolman fork
+- **Team Root:** `/Users/jpapiez/s/PFarm1/.squad/` — shared across all repos (main-checkout strategy)
 - **Created:** 2026-03-05
+
+## Repos
+
+| Repo | Local Path | Primary Language | Domain |
+|------|-----------|-----------------|--------|
+| PrintFarmer (PFarm1) | `/Users/jpapiez/s/PFarm1` | C# .NET + React TypeScript | Backend API, React dashboard, slicer workers |
+| PrintFarmerMobile (PFarm-Ios) | `/Users/jpapiez/s/PFarm-Ios` | Swift / SwiftUI | iOS companion app |
+| Spoolman fork (spoolman_pf) | `/Users/jpapiez/s/spoolman_pf` | Python + React TypeScript | Filament spool tracking service |
+
+## Stacks
+
+| Repo | Stack |
+|------|-------|
+| PFarm1 | C# .NET 10, ASP.NET Core, EF Core, SignalR, React 19, TypeScript, Tailwind CSS, Vitest, xUnit |
+| PFarm-Ios | Swift 6, SwiftUI, Combine, XCTest |
+| spoolman_pf | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |

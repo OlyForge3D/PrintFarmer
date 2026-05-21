@@ -89,5 +89,23 @@
     "legacy_named": false,
     "status": "active",
     "model": "claude-opus-4.6"
+  },
+  {
+    "persistent_name": "Hudson",
+    "universe": "alien",
+    "role": "iOS Developer",
+    "created_at": "2026-05-20T00:00:00Z",
+    "legacy_named": false,
+    "status": "active",
+    "note": "Migrated from PFarm-Ios squad (was Ripley)"
+  },
+  {
+    "persistent_name": "Gorman",
+    "universe": "alien",
+    "role": "iOS Networking",
+    "created_at": "2026-05-20T00:00:00Z",
+    "legacy_named": false,
+    "status": "active",
+    "note": "Migrated from PFarm-Ios squad (was Lambert)"
   }
 ]
