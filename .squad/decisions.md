@@ -4638,3 +4638,41 @@ GitHub blocks `gh pr review --approve` on PRs authored by the reviewing user. Us
 
 ## Ruling H — Cross-author rebase handoff after merge cascades
 When sibling PRs in a batch touch overlapping files (e.g., #295 capabilities + #297 service methods on PrinterService), reviewer must NOT rebase the conflicting branches unilaterally — that violates the reviewer/author separation principle. Instead, post a "needs rebase" comment with explicit conflict-resolution guidance (e.g., "keep both sides; mechanical merge"). The original author rebases.
+
+---
+
+### 2026-05-21T09:38-07:00: AMS slot count is a backend off-by-one, not a frontend hardcode
+**By:** Ripley (requested by Jeff Papiez)
+**What:** Issue #302 root cause traced to `PrintersService.cs:2959` — `for (int i = 1; i < mmuGateCount; i++)` creates `mmuGateCount - 1` MmuGate toolheads (3 for default 4), leaving T0 as Physical. Result on Bambu: 1 Physical + 3 MmuGate instead of 4 MmuGate. Frontend `AmsSlotVisualization` is data-driven and will render 4 slots correctly once the seeding produces 4 gates.
+**Why:** Tagged issue `area:backend` and stopped before implementing — fix needs decision on `mmuGateCount` semantics (total gates vs. total toolheads), test update for `MmuGateAutoCreationTests.CreatePrinter_MultiMaterialTrue_CreatesThreeMmuGateToolheads`, and a repair routine for already-seeded printers. Frontend dedup of the lower "Spools" section is queued as a follow-up that must land after the backend fix.
+
+### 2025-11-22: Issue #302 — Bambu AMS seeding only 3 of 4 MmuGate toolheads
+
+**Decision:** Apply Ripley's Option A — change loop bound in `CreateMmuVirtualToolheads` from `< mmuGateCount` to `<= mmuGateCount`. Semantics: `mmuGateCount = N` now produces N MmuGate toolheads at indices 1..N (T0 reserved for the Physical hotend).
+
+**Rejected:** Option B (rename parameter to `maxIndex` + touch every caller). Higher blast radius; Option A is local and the new semantics match how every existing caller already passes `4` for Bambu AMS.
+
+**Companion changes:** Updated `SetToolheadSpoolAsync` and `ClearToolheadSpoolAsync` from `Math.Max(4, toolheadIndex + 1)` to `Math.Max(4, toolheadIndex)` so on-demand gate creation matches the new semantics.
+
+**Validation:** Build clean. `MmuGateAutoCreationTests` 11/11 pass, including new `[Theory]` for `mmuGateCount` = 1, 4, 16 and `[Fact]` for 0.
+
+**PR:** OlyForge3D/PrintFarmer#303 (draft, base `development`).
+
+**DEFERRED — needs follow-up issue:** Production printers already seeded with 3 MmuGate toolheads under the old loop bound will not be repaired by this code change. Recommend a startup hosted service or migration to backfill index 4 for any `MultiMaterial = true` printer with `MmuGate.Count == 3`.
+
+**By:** Lambert (via jpapiez)
+
+### 2026-05-21: PR #301 review — PreheatSubgroup (Hudson) verdict: 💬 Comment
+
+**By:** Vasquez (Code Reviewer)
+
+**What:** Reviewed PR #301 (`feat(ios): build PrinterControlsSection preheat subgroup`). Posted a `--comment` review on `OlyForge3D/PrintFarmer#301`. Spec adherence is good (presets, layout, single-flight, a11y, hit target, capability gating). Four non-blocking findings: unused `previewSeedCapabilities(_ caps:)` parameter, iPad disabled-tap reveal gap (`.disabled` + `.help()` won't show on touch-only iPad), accessibility-label localization gap (informational — no localization infra exists yet under `mobile/PrintFarmer/`), and a misnamed `unsafeBitCastedFallback()` helper.
+
+**Why:** Confirms the iOS Preheat subgroup respects the client-side capability-gating decision (#279/#290) — backend not trusted, gating happens in `isVisible(capabilities:)` on the view and re-validated at dispatch in `PrinterControlsViewModel.preheat`. Author can address the unused param + iPad reveal gap before flipping out of draft; localization and the rename are safe follow-ups.
+
+### 2026-05-21: pbxproj rebase pattern — union resolution after sibling subgroup PRs merge
+
+**By:** hudson (via coordinator)
+**What:** When sibling Xcode pbxproj-touching PRs (e.g. PrinterControls subgroups) have one merge first, the others rebase with predictable conflicts in two regions: parent group children list (e.g. `PrintFarmerTests` → `Views` ref) and the test target's Sources build phase. Resolve by **union** — keep both sides' references. Each branch typically generates a distinct `Views` group ID; both definitions already exist independently in the file body, so referencing both is non-destructive and Xcode tolerates duplicate-name groups with distinct IDs.
+**Why:** Applied to PRs #300 (home) and #301 (preheat) after #299 (jog) merged. Both rebased cleanly with `plutil -lint` passing. Force-pushed; both report `mergeable: MERGEABLE`. Local xcodebuild blocked by iOS 26.5 SDK absence; CI is authoritative.
+

@@ -131,3 +131,6 @@ Hudson fixed by lifting all labels (Jog 4 + Home 6) to `static let`, binding via
 - A11y testing with string constants: assert through the computed property the view renders from, not bare constants.
 - Bind-source ≡ test-source rule: if view and test both read constant through property X, test is non-tautological.
 - Tiebreaker methodology disputes: trace chain end-to-end; tiebreaker decision is final (no appeal/rework round).
+### 2026-05-21: PR #299 review (jog subgroup)
+- Verdict ✅ approved via `--comment` (Ruling G — self-PR cannot `--approve`).
+- Coordinator squash-merged with `--admin`.
