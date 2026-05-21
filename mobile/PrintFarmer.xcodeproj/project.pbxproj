@@ -130,6 +130,8 @@
 		E1E5F6A7B8C9D0E1F2A3B4C5 /* NFCWriteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F6A7B8C9D0E1F2A3B4C5D6 /* NFCWriteView.swift */; };
 		E46139D1458EC8E0E1D8E832 /* NotificationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */; };
 		EA1637E6E57AC07CE7EBCF2D /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A04E921C5D66B7F4B5F80B3C /* KeychainSwift */; };
+		D1A6C200000000000000F001 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D1A6C200000000000000F005 /* SnapshotTesting */; };
+		D1A6C200000000000000F002 /* PrinterControlsSectionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */; };
 		ED545B8192219C8947CF7F73 /* MockJobService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B199518AF445724CE1C3213 /* MockJobService.swift */; };
 		EF380A83B48A16EAB8906C70 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D5770CC799908B9483AE95 /* ThemeManager.swift */; };
 		F1A1B2C3D4E5F6A7B8C9D0E1 /* QRCodeParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F6A7B8C9D0E1F2 /* QRCodeParserTests.swift */; };
@@ -411,6 +413,7 @@
 		A2B6286100000000000000A1 /* JogSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroup.swift; sourceTree = "<group>"; };
 		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
 		A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisabledControlStyle.swift; sourceTree = "<group>"; };
+		D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSectionSnapshotTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -426,6 +429,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D1A6C200000000000000F001 /* SnapshotTesting in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -774,6 +778,7 @@
 			isa = PBXGroup;
 			children = (
 				A2B6286100000000000000B1 /* JogSubgroupTests.swift */,
+				D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -939,6 +944,9 @@
 				6B13A1FE16AAC0FD5736C6C3 /* PBXTargetDependency */,
 			);
 			name = PrintFarmerTests;
+			packageProductDependencies = (
+				D1A6C200000000000000F005 /* SnapshotTesting */,
+			);
 			productName = PrintFarmerTests;
 			productReference = DBF8A7CD5FCE695B24F4AD00 /* PrintFarmerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -1048,6 +1056,7 @@
 				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
 				A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */,
 				A1C5DEF1234567890ABC0021 /* PreheatSubgroupTests.swift in Sources */,
+				D1A6C200000000000000F002 /* PrinterControlsSectionSnapshotTests.swift in Sources */,
 				709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */,
 				9496A75515E3FA0FAF3DEB95 /* AuthViewModelTests.swift in Sources */,
 				BD4B3C1A942D0E9675E2B73A /* JobListViewModelTests.swift in Sources */,
@@ -1462,6 +1471,14 @@
 				minimumVersion = 24.0.0;
 			};
 		};
+		D1A6C200000000000000F004 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.18.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1469,6 +1486,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 2AFD394787A3655B48DC756A /* XCRemoteSwiftPackageReference "keychain-swift" */;
 			productName = KeychainSwift;
+		};
+		D1A6C200000000000000F005 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D1A6C200000000000000F004 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
