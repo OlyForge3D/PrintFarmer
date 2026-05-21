@@ -13,22 +13,8 @@ enum PrinterBackend: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .unknown
-            case 1: self = .moonraker
-            case 2: self = .prusaLink
-            case 3: self = .sdcp
-            case 4: self = .octoPrint
-            case 5: self = .flashForge
-            default: self = .unknown
-            }
-        } else {
-            self = .unknown
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
     }
 }
 
@@ -40,19 +26,8 @@ enum MotionType: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .cartesian
-            case 1: self = .coreXY
-            case 2: self = .delta
-            default: self = .unknown
-            }
-        } else {
-            self = .unknown
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
     }
 }
 
@@ -68,24 +43,8 @@ enum PrintJobStatus: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .queued
-            case 1: self = .assigned
-            case 2: self = .starting
-            case 3: self = .printing
-            case 4: self = .paused
-            case 5: self = .completed
-            case 6: self = .failed
-            case 7: self = .cancelled
-            default: self = .queued
-            }
-        } else {
-            self = .queued
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .queued
     }
 }
 
@@ -97,23 +56,14 @@ enum PrintJobPriority: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .low
-            case 1: self = .normal
-            case 2: self = .high
-            case 3: self = .urgent
-            default: self = .normal
-            }
-        } else {
-            self = .normal
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .normal
     }
 
     /// Maps the backend integer priority value to the enum.
+    /// PrintJobDto serializes `priority` as a raw `int`, not as a `JsonStringEnumConverter` enum,
+    /// so callers that consume that field continue to use this helper.
+
     static func from(intValue: Int) -> PrintJobPriority? {
         switch intValue {
         case 0: .low
@@ -133,20 +83,8 @@ enum AutoDispatchState: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .none
-            case 1: self = .pendingReady
-            case 2: self = .ready
-            case 3: self = .dismissed
-            default: self = .none
-            }
-        } else {
-            self = .none
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .none
     }
 }
 
