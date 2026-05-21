@@ -200,6 +200,7 @@
 		82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */; };
 		A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000A1 /* JogSubgroup.swift */; };
 		A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000B1 /* JogSubgroupTests.swift */; };
+		A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -409,6 +410,7 @@
 		94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeBanner.swift; sourceTree = "<group>"; };
 		A2B6286100000000000000A1 /* JogSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroup.swift; sourceTree = "<group>"; };
 		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
+		A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisabledControlStyle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -763,6 +765,7 @@
 			children = (
 				A2B6286100000000000000A1 /* JogSubgroup.swift */,
 				A3E7287000000000000000A1 /* PrinterControlsSection.swift */,
+				A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */,
 			);
 			path = PrinterControls;
 			sourceTree = "<group>";
@@ -1206,6 +1209,7 @@
 				6B8B43A62528D0D7D70BD718 /* AutoDispatchSection.swift in Sources */,
 				D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */,
 				A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */,
+				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
