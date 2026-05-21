@@ -239,3 +239,43 @@ final class AuthViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.currentUser)
     }
 }
+
+// MARK: - currentUserRole
+
+extension AuthViewModelTests {
+
+    private func makeUser(roles: [String]) -> UserDTO {
+        UserDTO(
+            id: UUID(),
+            username: "test",
+            email: "test@example.com",
+            firstName: nil,
+            lastName: nil,
+            isActive: true,
+            emailConfirmed: true,
+            lastLogin: nil,
+            createdAt: Date(),
+            roles: roles,
+            permissions: []
+        )
+    }
+
+    func testCurrentUserRoleNilWhenNoUser() {
+        XCTAssertNil(viewModel.currentUserRole)
+    }
+
+    func testCurrentUserRoleReturnsFarmAdminWhenPresent() {
+        viewModel.currentUser = makeUser(roles: ["operator", "farm_admin"])
+        XCTAssertEqual(viewModel.currentUserRole, "farm_admin")
+    }
+
+    func testCurrentUserRoleReturnsFirstRoleWhenNotAdmin() {
+        viewModel.currentUser = makeUser(roles: ["operator"])
+        XCTAssertEqual(viewModel.currentUserRole, "operator")
+    }
+
+    func testCurrentUserRoleNilForEmptyRoles() {
+        viewModel.currentUser = makeUser(roles: [])
+        XCTAssertNil(viewModel.currentUserRole)
+    }
+}
