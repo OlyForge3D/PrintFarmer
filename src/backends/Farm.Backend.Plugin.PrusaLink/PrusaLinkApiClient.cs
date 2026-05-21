@@ -780,7 +780,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"PrusaLink refused tool temperature (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -810,7 +820,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"PrusaLink refused bed temperature (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -847,7 +867,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"PrusaLink refused jog (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
