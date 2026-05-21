@@ -54,6 +54,9 @@ permissions:
 jobs:
   build-and-upload:
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -91,22 +94,22 @@ jobs:
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           CI_KEYCHAIN_PWD="ci-keychain-temp-password"
           echo "Setting up keychain at: $KEYCHAIN_PATH"
-          
+
           # Create temporary keychain (ephemeral — destroyed in cleanup step)
           security create-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
-          
+
           # Set keychain settings (timeout 6 hours, no lock on sleep)
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          
+
           # Unlock keychain
           security unlock-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
-          
+
           # Set as default keychain
           security default-keychain -s "$KEYCHAIN_PATH"
-          
+
           # Add to keychain search list
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
-          
+
           echo "✅ Keychain setup complete"
 
       - name: Setup code signing with fastlane match
@@ -166,21 +169,19 @@ jobs:
           xcodebuild \
             -exportArchive \
             -archivePath "build/PrintFarmer.xcarchive" \
-            -exportOptionsPlist .github/ExportOptions.plist \
+            -exportOptionsPlist ExportOptions.plist \
             -exportPath "build/IPA" \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
 
       - name: Upload to TestFlight
         env:
-          # Required secrets: APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_CONTENT
-          # API_KEY_CONTENT: paste the raw .p8 file content (or base64-encoded — auto-detected)
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
           TESTFLIGHT_EXTERNAL_GROUPS: ${{ secrets.TESTFLIGHT_EXTERNAL_GROUPS }}
         run: |
           API_KEY_JSON=$RUNNER_TEMP/api_key.json
-          
+
           # Build API key JSON — accepts raw .p8 content or base64-encoded
           export API_KEY_JSON_PATH="$API_KEY_JSON"
           python3 -c "
@@ -199,7 +200,7 @@ jobs:
               json.dump(data, f, indent=2)
           print('API key JSON created successfully')
           "
-          
+
           PILOT_ARGS=(
             --ipa "build/IPA/PrintFarmer.ipa"
             --api_key_path "$API_KEY_JSON"
@@ -227,7 +228,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*TestFlight Beta Uploaded*\n*Version:* ${{ steps.version.outputs.version }}\n*Build:* ${{ steps.version.outputs.build_number }}\n*Tag:* ${{ steps.version.outputs.tag_name }}\n*Repo:* <https://github.com/olyforge3d/PrintFarmerMobile|olyforge3d/PrintFarmerMobile>"
+                    "text": "*TestFlight Beta Uploaded*\n*Version:* ${{ steps.version.outputs.version }}\n*Build:* ${{ steps.version.outputs.build_number }}\n*Tag:* ${{ steps.version.outputs.tag_name }}\n*Repo:* <https://github.com/OlyForge3D/PrintFarmer|OlyForge3D/PrintFarmer>"
                   }
                 }
               ]
@@ -241,9 +242,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag_name }}
-          name: "PrintFarmer ${{ steps.version.outputs.version }}"
+          name: "PrintFarmer iOS ${{ steps.version.outputs.version }}"
           body: |
-            ## Beta Release: ${{ steps.version.outputs.version }}
+            ## iOS Beta Release: ${{ steps.version.outputs.version }}
             - Build Number: ${{ steps.version.outputs.build_number }}
             - Status: ✅ Uploaded to TestFlight
             - Access: Check TestFlight app or email invite
