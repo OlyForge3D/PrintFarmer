@@ -326,8 +326,8 @@ public interface IPrintersService
     /// <param name="hotend">Target hotend temperature in Celsius, or null to leave unchanged</param>
     /// <param name="bed">Target bed temperature in Celsius, or null to leave unchanged</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if temperature command succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
 
     /// <summary>
     /// Moves the print head by specified offsets from current position (relative movement).
@@ -338,8 +338,8 @@ public interface IPrintersService
     /// <param name="z">Z-axis offset in millimeters, or null to skip Z movement</param>
     /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if movement succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
 
     /// <summary>
     /// Moves the print head to specified absolute position coordinates.
@@ -350,8 +350,8 @@ public interface IPrintersService
     /// <param name="z">Target Z-axis position in millimeters, or null to skip Z movement</param>
     /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if positioning succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
 
     /// <summary>
     /// Pauses the currently running print job without canceling it.
