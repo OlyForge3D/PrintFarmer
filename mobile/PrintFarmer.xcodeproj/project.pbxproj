@@ -95,6 +95,7 @@
 		A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */; };
 		A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */; };
 		A1C5DEF1234567890ABC0011 /* PreheatSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0010 /* PreheatSubgroup.swift */; };
+		A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E7287000000000000000A1 /* PrinterControlsSection.swift */; };
 		B1C2D3E4F5A6B7C8D9E0F1A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* AppDelegate.swift */; };
 		B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */; };
 		B8A7F6E5D4C3B2A1F2E1D0C9 /* NFCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */; };
@@ -261,6 +262,7 @@
 		A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroup.swift; sourceTree = "<group>"; };
 		A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroupTests.swift; sourceTree = "<group>"; };
 		A1C5DEF1234567890ABC0010 /* PreheatSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreheatSubgroup.swift; sourceTree = "<group>"; };
+		A3E7287000000000000000A1 /* PrinterControlsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSection.swift; sourceTree = "<group>"; };
 		4B4E2EE087E92C131271B37F /* FilamentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentModels.swift; sourceTree = "<group>"; };
 		4E45A19848758E2DB8543C2A /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModel.swift; sourceTree = "<group>"; };
@@ -760,6 +762,7 @@
 			isa = PBXGroup;
 			children = (
 				A2B6286100000000000000A1 /* JogSubgroup.swift */,
+				A3E7287000000000000000A1 /* PrinterControlsSection.swift */,
 			);
 			path = PrinterControls;
 			sourceTree = "<group>";
@@ -1118,6 +1121,7 @@
 				A1C5DEF1234567890ABC0001 /* PrinterControlsViewModel.swift in Sources */,
 				A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */,
 				A1C5DEF1234567890ABC0011 /* PreheatSubgroup.swift in Sources */,
+				A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */,
 				69BA22247633D68EB315F6C3 /* PrinterListViewModel.swift in Sources */,
 				5E141422FB3849E6169FA79E /* ContentView.swift in Sources */,
 				1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */,
