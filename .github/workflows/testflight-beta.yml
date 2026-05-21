@@ -1,0 +1,264 @@
+# =============================================================================
+# TestFlight Beta Build — CI/CD Pipeline
+# =============================================================================
+#
+# REQUIRED GITHUB SECRETS:
+#
+#   MATCH_PASSWORD
+#     The passphrase used when running `fastlane match init` to encrypt/decrypt
+#     certificates in the match git repo.
+#
+#   MATCH_GIT_URL
+#     URL of the private certificates repo.
+#     Value: https://github.com/OlyForge3D/PrintFarmerApp-certificates.git
+#
+#   MATCH_GIT_BASIC_AUTHORIZATION
+#     Base64-encoded "username:token" for git access to the certificates repo.
+#     Generate with: echo -n "username:ghp_your_token" | base64
+#
+#   APP_STORE_CONNECT_API_KEY_ID
+#     Key ID from App Store Connect > Users and Access > Integrations > Keys.
+#
+#   APP_STORE_CONNECT_API_ISSUER_ID
+#     Issuer ID from App Store Connect > Users and Access > Integrations > Keys.
+#
+#   APP_STORE_CONNECT_API_KEY_CONTENT
+#     The .p8 private key file content (raw PEM or base64-encoded).
+#
+# OPTIONAL:
+#   SLACK_WEBHOOK_URL — Slack incoming webhook for build notifications.
+#
+# =============================================================================
+
+name: TestFlight Beta Build
+
+on:
+  push:
+    tags:
+      - 'v*-beta*'
+      - 'v*-rc*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Beta environment'
+        required: true
+        default: 'internal'
+        type: choice
+        options:
+          - internal
+          - external
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION=$(echo "$TAG_NAME" | sed -E 's/^v(.+)-.*/\1/')
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION | Build: $BUILD_NUMBER | Tag: $TAG_NAME"
+
+      - name: Select Xcode version
+        run: |
+          # Prefer Xcode 26+ (iOS 26 SDK required by App Store after April 2026)
+          XCODE_PATH=$(ls -d /Applications/Xcode_26*.app /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using Xcode at: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install fastlane
+        run: |
+          sudo gem install fastlane -NV
+
+      - name: Setup Keychain
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          CI_KEYCHAIN_PWD="ci-keychain-temp-password"
+          echo "Setting up keychain at: $KEYCHAIN_PATH"
+
+          # Create temporary keychain (ephemeral — destroyed in cleanup step)
+          security create-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+
+          # Set keychain settings (timeout 6 hours, no lock on sleep)
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+
+          # Unlock keychain
+          security unlock-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+
+          # Set as default keychain
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # Add to keychain search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+          echo "✅ Keychain setup complete"
+
+      - name: Setup code signing with fastlane match
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          fastlane match appstore \
+            --readonly \
+            --git_url "$MATCH_GIT_URL" \
+            --app_identifier "com.olyforge3d.printfarmer.ios" \
+            --keychain_name "$KEYCHAIN_PATH" \
+            --keychain_password "$MATCH_PASSWORD"
+
+      - name: Allow codesign keychain access
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          CI_KEYCHAIN_PWD="ci-keychain-temp-password"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+
+      - name: Update build version numbers
+        run: |
+          agvtool new-version -all ${{ steps.version.outputs.build_number }}
+          agvtool new-marketing-version ${{ steps.version.outputs.version }}
+
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath build/SourcePackages
+
+      - name: Build for App Store
+        timeout-minutes: 30
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Release \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -archivePath "build/PrintFarmer.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="match AppStore com.olyforge3d.printfarmer.ios" \
+            DEVELOPMENT_TEAM=ZPKA84F3TY \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
+            archive
+
+      - name: Export IPA
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          xcodebuild \
+            -exportArchive \
+            -archivePath "build/PrintFarmer.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/IPA" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+          TESTFLIGHT_EXTERNAL_GROUPS: ${{ secrets.TESTFLIGHT_EXTERNAL_GROUPS }}
+        run: |
+          API_KEY_JSON=$RUNNER_TEMP/api_key.json
+
+          # Build API key JSON — accepts raw .p8 content or base64-encoded
+          export API_KEY_JSON_PATH="$API_KEY_JSON"
+          python3 -c "
+          import json, os, base64
+          content = os.environ['APP_STORE_CONNECT_API_KEY_CONTENT']
+          # Auto-detect: if it starts with '-----BEGIN' it's raw PEM, otherwise base64
+          if not content.strip().startswith('-----BEGIN'):
+              content = base64.b64decode(content).decode('utf-8')
+          data = {
+              'key_id': os.environ['APP_STORE_CONNECT_API_KEY_ID'],
+              'issuer_id': os.environ['APP_STORE_CONNECT_API_ISSUER_ID'],
+              'key': content,
+              'in_house': False
+          }
+          with open(os.environ['API_KEY_JSON_PATH'], 'w') as f:
+              json.dump(data, f, indent=2)
+          print('API key JSON created successfully')
+          "
+
+          PILOT_ARGS=(
+            --ipa "build/IPA/PrintFarmer.ipa"
+            --api_key_path "$API_KEY_JSON"
+            --changelog "Beta build from tag: ${{ steps.version.outputs.tag_name }}"
+          )
+
+          if [ -n "${TESTFLIGHT_EXTERNAL_GROUPS:-}" ]; then
+            echo "Distributing to external TestFlight groups: $TESTFLIGHT_EXTERNAL_GROUPS"
+            PILOT_ARGS+=(--distribute_external true --groups "$TESTFLIGHT_EXTERNAL_GROUPS")
+          else
+            echo "No TESTFLIGHT_EXTERNAL_GROUPS secret set; uploading build without external distribution."
+          fi
+
+          fastlane pilot upload "${PILOT_ARGS[@]}"
+
+      - name: Notify Slack
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "✅ TestFlight Beta Build Uploaded",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*TestFlight Beta Uploaded*\n*Version:* ${{ steps.version.outputs.version }}\n*Build:* ${{ steps.version.outputs.build_number }}\n*Tag:* ${{ steps.version.outputs.tag_name }}\n*Repo:* <https://github.com/OlyForge3D/PrintFarmer|OlyForge3D/PrintFarmer>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: Create GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: "PrintFarmer iOS ${{ steps.version.outputs.version }}"
+          body: |
+            ## iOS Beta Release: ${{ steps.version.outputs.version }}
+            - Build Number: ${{ steps.version.outputs.build_number }}
+            - Status: ✅ Uploaded to TestFlight
+            - Access: Check TestFlight app or email invite
+
+            **Release Notes:** Coming from commit history
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          API_KEY_JSON=$RUNNER_TEMP/api_key.json
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -f "$API_KEY_JSON" || true
