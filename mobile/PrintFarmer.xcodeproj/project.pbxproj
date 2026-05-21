@@ -92,6 +92,8 @@
 		AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62BAD7F52A9EFEE471AA461C /* RequestModels.swift */; };
 		AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */; };
 		A1C5DEF1234567890ABC0001 /* PrinterControlsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0002 /* PrinterControlsViewModel.swift */; };
+		A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */; };
+		A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */; };
 		B1C2D3E4F5A6B7C8D9E0F1A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* AppDelegate.swift */; };
 		B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */; };
 		B8A7F6E5D4C3B2A1F2E1D0C9 /* NFCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */; };
@@ -253,6 +255,8 @@
 		45FDB4137FE34914C387AE17 /* SignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRService.swift; sourceTree = "<group>"; };
 		4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailViewModel.swift; sourceTree = "<group>"; };
 		A1C5DEF1234567890ABC0002 /* PrinterControlsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsViewModel.swift; sourceTree = "<group>"; };
+		A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroup.swift; sourceTree = "<group>"; };
+		A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroupTests.swift; sourceTree = "<group>"; };
 		4B4E2EE087E92C131271B37F /* FilamentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentModels.swift; sourceTree = "<group>"; };
 		4E45A19848758E2DB8543C2A /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModel.swift; sourceTree = "<group>"; };
@@ -514,9 +518,18 @@
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* Utilities */,
 				4D7DEC203F06522448F70C97 /* ViewModels */,
 				A2B6286100000000000000D1 /* Views */,
+				A2D4EF0123456789ABCD0006 /* Views */,
 				CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */,
 			);
 			path = PrintFarmerTests;
+			sourceTree = "<group>";
+		};
+		A2D4EF0123456789ABCD0006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		2A991A21494BE0619C801F85 /* Models */ = {
@@ -604,6 +617,14 @@
 			path = Printers;
 			sourceTree = "<group>";
 		};
+		A2D4EF0123456789ABCD0003 /* PrinterControls */ = {
+			isa = PBXGroup;
+			children = (
+				A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */,
+			);
+			path = PrinterControls;
+			sourceTree = "<group>";
+		};
 		5C999E731352905727541C3C = {
 			isa = PBXGroup;
 			children = (
@@ -663,6 +684,7 @@
 				771CDF6A20CC0E555A100EEE /* Notifications */,
 				A2B6286100000000000000C1 /* PrinterControls */,
 				549E659961D3A9E494F5ADEF /* Printers */,
+				A2D4EF0123456789ABCD0003 /* PrinterControls */,
 				CBAC88193AFA3F2403893113 /* Settings */,
 				255B7030A4CC2759FC7FC79B /* ContentView.swift */,
 				C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */,
@@ -996,6 +1018,7 @@
 				E0411324A6C10BFCD5EAB595 /* PrinterDetailViewModelTests.swift in Sources */,
 				A1C5DEF1234567890ABC0003 /* PrinterControlsViewModelTests.swift in Sources */,
 				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
+				A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */,
 				709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */,
 				9496A75515E3FA0FAF3DEB95 /* AuthViewModelTests.swift in Sources */,
 				BD4B3C1A942D0E9675E2B73A /* JobListViewModelTests.swift in Sources */,
@@ -1070,6 +1093,7 @@
 				0D7D6FE112414AE495990773 /* PendingReadyMonitor.swift in Sources */,
 				AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */,
 				A1C5DEF1234567890ABC0001 /* PrinterControlsViewModel.swift in Sources */,
+				A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */,
 				69BA22247633D68EB315F6C3 /* PrinterListViewModel.swift in Sources */,
 				5E141422FB3849E6169FA79E /* ContentView.swift in Sources */,
 				1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */,
