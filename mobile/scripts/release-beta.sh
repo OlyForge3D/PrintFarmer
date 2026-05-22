@@ -14,7 +14,28 @@ if [[ -z "$BETA_NUM" ]]; then
   exit 1
 fi
 
-TAG="v1.0-beta.${BETA_NUM}"
+ROOT="$(git rev-parse --show-toplevel)"
+VERSION_FILE="$ROOT/VERSION"
+SYNC_SCRIPT="$ROOT/scripts/sync-monorepo-version.sh"
+
+if [[ ! -f "$VERSION_FILE" ]]; then
+  echo "❌ VERSION file not found at $VERSION_FILE"
+  exit 1
+fi
+
+BASE_VERSION_RAW="$(tr -d '[:space:]' < "$VERSION_FILE")"
+BASE_VERSION="${BASE_VERSION_RAW#v}"
+
+if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "❌ VERSION must be semantic (vX.Y.Z or X.Y.Z). Found: $BASE_VERSION_RAW"
+  exit 1
+fi
+
+if [[ -x "$SYNC_SCRIPT" ]]; then
+  "$SYNC_SCRIPT" --check
+fi
+
+TAG="v${BASE_VERSION}-beta.${BETA_NUM}"
 RELEASE_REMOTE="release"
 FORBIDDEN_PATHS=(.squad/ .ai-team/ .ai-team-templates/ team-docs/ docs/proposals/)
 
@@ -57,12 +78,23 @@ fi
 
 # 4. Tag
 echo "🏷️  Tagging ${TAG}..."
+
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "❌ Tag ${TAG} already exists locally."
+  exit 1
+fi
+
+if git ls-remote --tags "$RELEASE_REMOTE" | grep -q "refs/tags/${TAG}$"; then
+  echo "❌ Tag ${TAG} already exists on ${RELEASE_REMOTE}."
+  exit 1
+fi
+
 git tag "$TAG"
 
 # 5. Show build number for verification
 BUILD_NUM=$(git rev-list --count HEAD)
 echo ""
-echo "📦 Version: 1.0 | Build: ${BUILD_NUM} | Tag: ${TAG}"
+echo "📦 Version: ${BASE_VERSION} | Build: ${BUILD_NUM} | Tag: ${TAG}"
 echo ""
 
 # 6. Push to release remote (OlyForge3D)

@@ -1,6 +1,10 @@
 <Project>
 
   <PropertyGroup>
+    <RepoVersionRaw>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</RepoVersionRaw>
+    <RepoVersion>$([System.Text.RegularExpressions.Regex]::Replace('$(RepoVersionRaw)', '^v', ''))</RepoVersion>
+    <Version>$(RepoVersion)</Version>
+    <InformationalVersion>$(RepoVersion)</InformationalVersion>
     <!-- Disable Central Package Management - using per-project version management -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AnalysisMode>All</AnalysisMode>
