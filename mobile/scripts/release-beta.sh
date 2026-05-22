@@ -36,7 +36,7 @@ if [[ -x "$SYNC_SCRIPT" ]]; then
 fi
 
 TAG="v${BASE_VERSION}-beta.${BETA_NUM}"
-RELEASE_REMOTE="origin"
+RELEASE_REMOTE="release"
 FORBIDDEN_PATHS=(.squad/ .ai-team/ .ai-team-templates/ team-docs/ docs/proposals/)
 
 echo "🚀 Releasing ${TAG}"
@@ -89,12 +89,23 @@ fi
 
 # 4. Tag
 echo "🏷️  Tagging ${TAG}..."
+
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "❌ Tag ${TAG} already exists locally."
+  exit 1
+fi
+
+if git ls-remote --tags "$RELEASE_REMOTE" | grep -q "refs/tags/${TAG}$"; then
+  echo "❌ Tag ${TAG} already exists on ${RELEASE_REMOTE}."
+  exit 1
+fi
+
 git tag "$TAG"
 
 # 5. Show build number for verification
 BUILD_NUM=$(git rev-list --count HEAD)
 echo ""
-echo "📦 Version: 1.0 | Build: ${BUILD_NUM} | Tag: ${TAG}"
+echo "📦 Version: ${BASE_VERSION} | Build: ${BUILD_NUM} | Tag: ${TAG}"
 echo ""
 
 # 6. Push to release remote (OlyForge3D)

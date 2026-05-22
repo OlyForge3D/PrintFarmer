@@ -5,7 +5,7 @@ set -euo pipefail
 # Sync Monorepo Version
 # ============================================================================
 # Ensures VERSION file is the single source of truth across the monorepo.
-# Updates mobile Xcode project marketing version and any other version refs.
+# Updates mobile Xcode project marketing version and web package.json version.
 #
 # Usage:
 #   ./scripts/sync-monorepo-version.sh           # Sync version to all targets
@@ -17,6 +17,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 readonly ROOT
 readonly VERSION_FILE="$ROOT/VERSION"
 readonly MOBILE_PBXPROJ="$ROOT/mobile/PrintFarmer.xcodeproj/project.pbxproj"
+readonly WEB_PACKAGE_JSON="$ROOT/src/Web/ReactApp/package.json"
 
 CHECK_ONLY=false
 
@@ -46,7 +47,6 @@ sync_xcode_version() {
     fi
 
     if "$CHECK_ONLY"; then
-        # Check if MARKETING_VERSION matches
         local current
         current=$(grep -m1 'MARKETING_VERSION' "$MOBILE_PBXPROJ" | sed 's/.*= *//;s/ *;.*//' | tr -d '[:space:]')
         if [[ "$current" != "$version" ]]; then
@@ -57,10 +57,54 @@ sync_xcode_version() {
         return 0
     fi
 
-    # Update all MARKETING_VERSION entries in pbxproj
     sed -i.bak "s/MARKETING_VERSION = [^;]*/MARKETING_VERSION = $version/" "$MOBILE_PBXPROJ"
     rm -f "${MOBILE_PBXPROJ}.bak"
     echo "✅ Updated mobile MARKETING_VERSION to $version"
+}
+
+sync_web_version() {
+    local version="$1"
+
+    if [[ ! -f "$WEB_PACKAGE_JSON" ]]; then
+        echo "⚠️  Web package.json not found at $WEB_PACKAGE_JSON — skipping web sync"
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "⚠️  python3 not available — skipping web package.json sync" >&2
+        return 0
+    fi
+
+    local current_web_version
+    current_web_version="$(python3 - <<'PY' "$WEB_PACKAGE_JSON"
+import json, sys
+with open(sys.argv[1], encoding='utf-8') as f:
+    data = json.load(f)
+print(data.get('version', ''))
+PY
+)"
+
+    if [[ "$current_web_version" == "$version" ]]; then
+        echo "✅ Web package.json already at $version"
+        return 0
+    fi
+
+    if "$CHECK_ONLY"; then
+        echo "❌ Web package.json version mismatch: got '$current_web_version', expected '$version'" >&2
+        return 1
+    fi
+
+    python3 - <<'PY' "$WEB_PACKAGE_JSON" "$version"
+import json, sys
+path, version = sys.argv[1], sys.argv[2]
+with open(path, encoding='utf-8') as f:
+    data = json.load(f)
+data['version'] = version
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+PY
+    echo "✅ Updated web package.json version to $version"
 }
 
 main() {
@@ -70,6 +114,7 @@ main() {
     echo "📦 Monorepo version: $version"
 
     sync_xcode_version "$version"
+    sync_web_version "$version"
 
     if ! "$CHECK_ONLY"; then
         echo "✅ All version targets synced to $version"
