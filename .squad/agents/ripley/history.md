@@ -113,3 +113,10 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 ### 2026-05-21 — Picked up bug #309 (team update)
 - Mobile-controls v1 board cleared this round (Hudson #289 PR #306, Lambert #290 PR #308, #276 verified shipped).
 - User filed bug #309: spaghetti detection shield in web app says "printer not printing" on printers that ARE actively printing. State-detection mismatch on the shield component. Investigation underway — own this through fix.
+
+### 2026-05-21T23:14Z — Issue #309 spaghetti shield triage (backend handoff, no code change)
+- **Symptom:** Shield/modal says "Printer is not actively printing." on actively-printing printers (two reproducing).
+- **Root cause:** Backend, not frontend. `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs:107-117` (`EvaluateMonitoringWindow`) requires `status.State == "Printing"` (case-insensitive, exact); any other normalized state (`Paused`, `Heating`, `Resuming`, `Pausing`, ...) returns the literal `NotPrintingReason = "Printer is not actively printing."` defined at line 36. Inconsistent with the busy-state set established in PR #308 / issue #290 (`PrinterControlGate.IsBusyForControl({Printing, Pausing, Paused, Resuming, Cancelling, Heating})`).
+- **Frontend pass-through confirmed:** `usePrinterFailureDetectionStatus` is a pure DTO consumer; `FailureDetectionMonitoringBadge` and `failureDetectionStatus.ts` render backend `state`/`reason` verbatim. No client-side predicate to fix.
+- **Action:** Posted analysis to #309 (comment 4513509761), added `area:backend` label, handed to Lambert. No PR, no worktree.
+- **Lesson:** When a UI string is the exact literal of a backend `const string`, the frontend is almost certainly a passive renderer — grep the literal against `*.cs` before diving into React code. Same triage discipline as #302.
