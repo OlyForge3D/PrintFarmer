@@ -36,7 +36,7 @@ if [[ -x "$SYNC_SCRIPT" ]]; then
 fi
 
 TAG="v${BASE_VERSION}-beta.${BETA_NUM}"
-RELEASE_REMOTE="release"
+RELEASE_REMOTE="ios-release"
 FORBIDDEN_PATHS=(.squad/ .ai-team/ .ai-team-templates/ team-docs/ docs/proposals/)
 
 echo "🚀 Releasing ${TAG}"
