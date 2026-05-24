@@ -553,3 +553,34 @@ Audited all ObicoSettings consumers and enforced standardized injection pattern.
 **Pattern established:** All runtime settings now flow through single ISettingsService abstraction. User modifications via Settings UI immediately visible to all consumers.
 
 **Impact:** Runtime consistency; no stale config file values during execution; foundation for future settings work.
+
+## 2026-05-24: Consolidated Release Architecture Validation
+
+**Role:** Project Lead & Architect  
+**Status:** ✅ Complete  
+**Session:** 2026-05-24T20:06:00Z
+
+Reconstructed consolidated release strategy for web/API + iOS from single monorepo after prior chat loss. Formalized architecture decisions and 6-slice execution roadmap with Parker (DevOps).
+
+**Work Completed:**
+1. Assessed current state: mobile code ✅, TestFlight workflow ✅, VERSION file ✅, version sync ✅, release-beta.sh ❌ (merge conflict), iOS CI gate ❌, cliff.toml ❌
+2. Defined architecture: single tag triggers both Docker + iOS releases; three release types (v1.2.3 prod, v1.2.3-beta.N beta, v1.2.3-rc.N RC)
+3. Created 6-slice execution roadmap with dependencies and risk mitigation
+4. Identified P0 iOS blockers (#280-#283 printer controls) that gate first public beta
+5. Documented all findings in `.squad/decisions/inbox/dallas-consolidated-release.md`
+
+**Execution Slices Defined:**
+- Slice 1 (IMMEDIATE): Fix merge conflict in release-beta.sh (stash `temp-ios-release-cutover`)
+- Slice 2 (ASAP): Create iOS CI gate (validate Xcode builds on PR)
+- Slice 3 (1 hr): Unified tag orchestration + cliff.toml
+- Slice 4 (30 min): Move release-beta.sh to repo root, update for version sync + tag push
+- Slice 5 (Multi-session): Resolve P0 iOS blockers
+- Slice 6 (Future): App Store stable release workflow
+
+**Risks Documented:**
+- macOS runner concurrency limits for TestFlight builds
+- Secrets must be configured in OlyForge3D/PrintFarmer repo (not old PFarm-Ios)
+- Xcode version fallback (26+ → 16.x if needed)
+
+**Integration:** Parker implemented consolidated workflow design; Coordinator integrated both decisions into PR #311.
+

@@ -4388,3 +4388,120 @@ Test coverage includes:
 - ✅ Financial accuracy locked in for multi-toolhead scenarios
 - ✅ Regression gate prevents cost calculation regressions in future multi-toolhead work
 
+
+---
+
+## 5. Consolidated Release — Web/API + iOS from Single Repo (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Dallas (Lead)  
+**Status:** Approved (architecture validated, execution path defined)
+
+### Context
+
+Jeff previously requested consolidating the iOS mobile app release alongside the main PrintFarmer web/API release from this single monorepo (PFarm1). The mobile code was subtree-merged from `PFarm-Ios` into `mobile/` and the TestFlight workflow (`testflight-beta.yml`) was promoted to the repo root. That chat was lost — this decision reconstructs and formalizes the consolidated release strategy.
+
+### Current State Assessment
+
+#### Already Done ✅
+
+1. **Mobile code in monorepo** — `mobile/` directory contains full Swift/SwiftUI iOS app (subtree merge from PFarm-Ios)
+2. **TestFlight CI workflow** — `.github/workflows/testflight-beta.yml` is fully operational at repo root, triggers on `v*-beta*` / `v*-rc*` tags
+3. **VERSION file** — Single source of truth at repo root (`v0.2.2` currently)
+4. **Version sync script** — `scripts/sync-monorepo-version.sh` syncs VERSION → Xcode `MARKETING_VERSION`
+5. **Bump script** — `scripts/bump-version.sh` handles semver bumps
+6. **Release beta script** — `mobile/scripts/release-beta.sh` (has merge conflict markers; stash `temp-ios-release-cutover` contains fix)
+7. **Docker publish workflow** — Triggers on `release` branch push and `v*` tags for web/API containers
+8. **Main release workflow** — `release.yml` creates tags, generates changelog (git-cliff), builds containers, creates GitHub Release
+9. **Draft release workflow** — `draft-release.yml` for creating draft releases
+10. **Auto-bump workflow** — `auto-bump-release.yml` for version bumping
+11. **Squad labels** — `area:ios` label exists; `squad:hudson` and `squad:gorman` agents assigned
+
+#### Missing / Blocked ❌
+
+1. **Merge conflict in release-beta.sh** — Lines 17-44 have merge conflict markers
+2. **No unified release workflow** — `release.yml` only handles web/API; iOS TestFlight is separate workflow
+3. **No `cliff.toml`** — Changelog generation may silently produce nothing
+4. **Tag strategy conflict** — Web/API uses `vX.Y.Z`; iOS beta uses `vX.Y.Z-beta.N`
+5. **P0 iOS blockers** — Issues #280, #281, #282, #283 marked "Blocking release"
+6. **No iOS CI gate** — No workflow validates Swift code on PR; TestFlight only runs on tag push
+
+### Architecture Decision
+
+**Single tag triggers both release flows.** The consolidated strategy:
+
+1. **Version bumps** use `scripts/bump-version.sh` → updates `VERSION` → `sync-monorepo-version.sh` propagates to Xcode project
+2. **Beta releases** (`vX.Y.Z-beta.N` tags): Trigger both `testflight-beta.yml` (iOS) and `docker-publish.yml` (containers)
+3. **Production releases** (`vX.Y.Z` tags): Trigger `release.yml` (containers + GitHub Release) and new App Store submission step
+4. **release-beta.sh** becomes the canonical script for cutting a beta across both platforms from one command
+
+### Execution Path (6 Slices, Ordered)
+
+**Slice 1 (IMMEDIATE, 5 min):** Fix merge conflict in `mobile/scripts/release-beta.sh`  
+**Slice 2 (ASAP, 30 min):** Create iOS CI gate (`.github/workflows/ios-ci.yml`)  
+**Slice 3 (1 hr):** Unified tag orchestration + `cliff.toml`  
+**Slice 4 (30 min):** Move `release-beta.sh` to repo root, update script  
+**Slice 5 (Multi-session):** Resolve P0 iOS blockers (#280-#283)  
+**Slice 6 (Future):** Production App Store submission workflow  
+
+### Risks
+
+- **macOS runner availability** — TestFlight builds require `macos-latest`; limited concurrency
+- **Secrets configuration** — MATCH_PASSWORD, APP_STORE_CONNECT_API_* must be in OlyForge3D/PrintFarmer repo
+- **Xcode version** — Workflow selects Xcode 26+; fallback to 16.x available
+
+---
+
+## 6. Consolidated Release Pipeline (IMPLEMENTED)
+
+**Author:** Parker (DevOps)  
+**Date:** 2026-03-26  
+**Status:** Implemented
+
+### Context
+
+PrintFarmer previously had separate release mechanisms for main app (`release.yml`) and mobile (`testflight-beta.yml`). A unified release path was needed after iOS merge into monorepo.
+
+### Decision
+
+#### Single Entry Point: `consolidated-release.yml`
+
+One `workflow_dispatch` workflow orchestrates both release targets:
+
+- **Input:** Version tag (`vX.Y.Z`, `vX.Y.Z-beta.N`, `vX.Y.Z-rc.N`)
+- **Skippable targets:** Either Docker or iOS can be skipped per-run
+- **Tag conventions:**
+  - `v1.2.3` → Production (Docker images published; iOS requires separate App Store submission)
+  - `v1.2.3-beta.N` → Beta (Docker pre-release + TestFlight internal)
+  - `v1.2.3-rc.N` → Release candidate (Docker pre-release + TestFlight external groups)
+
+#### Version Sync: `scripts/sync-monorepo-version.sh`
+
+- Reads `VERSION` file as single source of truth
+- Syncs `MARKETING_VERSION` in Xcode `project.pbxproj`
+- Called during release validation before tagging
+- Supports `--check` mode for CI verification
+
+#### Existing Workflows Preserved
+
+- `testflight-beta.yml` still works independently on `v*-beta*` tag push (backward compat)
+- `release.yml` still works independently for Docker-only releases
+- `docker-publish.yml` called as reusable workflow from consolidated release
+
+### What's Still Needed (TODOs)
+
+1. **App Store Connect secrets** in GitHub repo settings:
+   - `MATCH_PASSWORD`, `MATCH_GIT_URL`, `MATCH_GIT_BASIC_AUTHORIZATION`
+   - `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_API_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_CONTENT`
+   - `TESTFLIGHT_EXTERNAL_GROUPS` (optional)
+2. **`REPO_PAT`** secret for tag push (existing requirement)
+3. **App Store stable release** — Requires separate manual workflow or Fastlane (future work)
+4. **`cliff.toml`** — If missing, changelog generation gracefully degrades to git log
+
+### Impact
+
+- **Parker** owns workflow maintenance
+- **All team members** can trigger releases via GitHub Actions UI
+- **Mobile team** no longer needs separate repo or tooling
+- **Tagging convention** is shared — one tag covers both platforms
+
