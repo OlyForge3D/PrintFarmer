@@ -386,3 +386,20 @@ User redeployed API + frontend after commit `826e98ae` (slicer upload/retrieval 
 - **Path construction must return absolute paths** when downstream code uses `File.Exists()` — relative paths depend on CWD which varies between dev and container environments.
 
 
+
+## 2026-05-24: Mobile Beta Release v1.0-beta.69
+
+**Role:** DevOps & Deployment Engineer  
+**Status:** ✅ Complete
+
+- Created tag `v1.0-beta.69` on `development` branch at commit `71701ef04`.
+- Previous mobile beta tag: `v1.0-beta.68`.
+- Tag pushed to origin; confirmed via `git ls-remote`.
+- TestFlight workflow (`testflight-beta.yml`) triggers on `v1.0-beta.*` tag push pattern.
+- No source file modifications required — pure tag-based release.
+
+### Learnings
+
+- Mobile beta releases are tag-only operations from `development` branch.
+- Tag pattern: `v1.0-beta.N` (incrementing integer suffix).
+- The `testflight-beta.yml` workflow handles build + TestFlight upload automatically on tag push.
