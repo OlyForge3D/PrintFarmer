@@ -35,6 +35,7 @@ name: TestFlight Beta Build
 on:
   push:
     tags:
+      - 'v*-alpha*'
       - 'v*-beta*'
       - 'v*-rc*'
   workflow_dispatch:
