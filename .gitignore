@@ -112,4 +112,3 @@ tools/installer/dist/
 # Beads / Dolt files (added by bd init)
 .dolt/
 .beads-credential-key
-*.csproj.lscache

@@ -1,18 +1,5 @@
 # Dallas History
 
-## Learnings
-
-### Consolidated Release Assessment (2026-03-25)
-
-- Mobile app (`mobile/`) was subtree-merged from PFarm-Ios repo; TestFlight workflow already at repo root
-- VERSION file + sync-monorepo-version.sh already bridge web/API and iOS versioning
-- Stash `temp-ios-release-cutover` on main contains the merge-conflict fix for release-beta.sh — needs applying
-- P0 iOS issues #280-283 (printer controls foundation) gate first public beta
-- No iOS CI gate exists yet — Swift code can regress silently between TestFlight releases
-- Label duplication: both `squad:dallas` and `squad:🏗️ dallas` exist (same for ripley) — may confuse automation
-- cliff.toml is empty — changelog generation in release.yml produces nothing currently
-- Execution path: fix stash → iOS CI gate → unified tag orchestration → script cleanup → resolve P0s → prod workflow
-
 ## Core Context
 
 Dallas is the project lead & product architect. Key contributions:
@@ -553,34 +540,3 @@ Audited all ObicoSettings consumers and enforced standardized injection pattern.
 **Pattern established:** All runtime settings now flow through single ISettingsService abstraction. User modifications via Settings UI immediately visible to all consumers.
 
 **Impact:** Runtime consistency; no stale config file values during execution; foundation for future settings work.
-
-## 2026-05-24: Consolidated Release Architecture Validation
-
-**Role:** Project Lead & Architect  
-**Status:** ✅ Complete  
-**Session:** 2026-05-24T20:06:00Z
-
-Reconstructed consolidated release strategy for web/API + iOS from single monorepo after prior chat loss. Formalized architecture decisions and 6-slice execution roadmap with Parker (DevOps).
-
-**Work Completed:**
-1. Assessed current state: mobile code ✅, TestFlight workflow ✅, VERSION file ✅, version sync ✅, release-beta.sh ❌ (merge conflict), iOS CI gate ❌, cliff.toml ❌
-2. Defined architecture: single tag triggers both Docker + iOS releases; three release types (v1.2.3 prod, v1.2.3-beta.N beta, v1.2.3-rc.N RC)
-3. Created 6-slice execution roadmap with dependencies and risk mitigation
-4. Identified P0 iOS blockers (#280-#283 printer controls) that gate first public beta
-5. Documented all findings in `.squad/decisions/inbox/dallas-consolidated-release.md`
-
-**Execution Slices Defined:**
-- Slice 1 (IMMEDIATE): Fix merge conflict in release-beta.sh (stash `temp-ios-release-cutover`)
-- Slice 2 (ASAP): Create iOS CI gate (validate Xcode builds on PR)
-- Slice 3 (1 hr): Unified tag orchestration + cliff.toml
-- Slice 4 (30 min): Move release-beta.sh to repo root, update for version sync + tag push
-- Slice 5 (Multi-session): Resolve P0 iOS blockers
-- Slice 6 (Future): App Store stable release workflow
-
-**Risks Documented:**
-- macOS runner concurrency limits for TestFlight builds
-- Secrets must be configured in OlyForge3D/PrintFarmer repo (not old PFarm-Ios)
-- Xcode version fallback (26+ → 16.x if needed)
-
-**Integration:** Parker implemented consolidated workflow design; Coordinator integrated both decisions into PR #311.
-
