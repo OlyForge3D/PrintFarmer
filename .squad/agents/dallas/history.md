@@ -1,5 +1,18 @@
 # Dallas History
 
+## Learnings
+
+### Consolidated Release Assessment (2026-03-25)
+
+- Mobile app (`mobile/`) was subtree-merged from PFarm-Ios repo; TestFlight workflow already at repo root
+- VERSION file + sync-monorepo-version.sh already bridge web/API and iOS versioning
+- Stash `temp-ios-release-cutover` on main contains the merge-conflict fix for release-beta.sh — needs applying
+- P0 iOS issues #280-283 (printer controls foundation) gate first public beta
+- No iOS CI gate exists yet — Swift code can regress silently between TestFlight releases
+- Label duplication: both `squad:dallas` and `squad:🏗️ dallas` exist (same for ripley) — may confuse automation
+- cliff.toml is empty — changelog generation in release.yml produces nothing currently
+- Execution path: fix stash → iOS CI gate → unified tag orchestration → script cleanup → resolve P0s → prod workflow
+
 ## Core Context
 
 Dallas is the project lead & product architect. Key contributions:

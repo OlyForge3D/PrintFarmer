@@ -158,6 +158,31 @@ Improves operational reliability by allowing ML API timeout behavior to be tuned
 - 2026-03-26: In `/Users/jpapiez/s/obico-server`, `ml_api/Dockerfile` extends `thespaghettidetective/ml_api_base:1.4`. The published base image reliably includes `wget`, but not `curl`, so model-weight download steps in the runtime image should use `wget` unless the Dockerfile explicitly installs `curl`.
 - 2026-03-26: The safest validation path for this Obico rebuild issue is `docker compose build ml_api` from the obico-server repo root, then `docker run --rm <image> sh -lc 'command -v wget && ls -l /model_cache/ml_api/...` to confirm both the fetch tool and downloaded model artifacts exist.
 - 2026-03-26: Jeff's preference on the Obico fork task was explicit: patch locally, validate locally, report the exact next server commands, and do not push or commit unless strictly necessary.
+- 2026-03-26: Consolidated release uses `workflow_dispatch` (not tag-push) as the entry point so both Docker and iOS builds are orchestrated from one place. Tag-push workflows (`testflight-beta.yml`, `docker-publish.yml`) remain as fallback/independent triggers.
+- 2026-03-26: Monorepo version sync between `VERSION` file and Xcode `MARKETING_VERSION` must happen before tagging — the `sync-monorepo-version.sh` script handles this atomically.
+
+## 2026-03-26: Consolidated Release Pipeline
+
+**Role:** DevOps & Deployment Engineer  
+**Status:** ✅ Implemented
+
+**What was done:**
+1. Created `scripts/sync-monorepo-version.sh` — syncs VERSION file → Xcode MARKETING_VERSION
+2. Created `.github/workflows/consolidated-release.yml` — single-trigger release orchestrating Docker images + iOS TestFlight
+3. Fixed conflict markers in `mobile/scripts/release-beta.sh` (was blocking script execution)
+4. Documented decision in `.squad/decisions/inbox/parker-consolidated-release.md`
+
+**Architecture:**
+- One `workflow_dispatch` with version input + skip toggles for Docker / iOS
+- Validates version format, syncs monorepo versions, creates annotated tag
+- Calls `docker-publish.yml` as reusable workflow for server images
+- Inline iOS build job (from existing `testflight-beta.yml` logic) for mobile
+- Unified GitHub Release with combined release notes covering both platforms
+
+**Blocked items (require secrets/credentials):**
+- App Store Connect API secrets (already documented in `testflight-beta.yml` header)
+- `REPO_PAT` for tag push (pre-existing requirement)
+- Future: App Store stable release lane (only beta/RC trigger iOS currently)
 
 ## 2026-01-16: Obico ml_api Dockerfile model download fix
 

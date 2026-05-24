@@ -1,0 +1,407 @@
+name: Consolidated Release
+
+# Unified release workflow for main PrintFarmer app (Docker containers)
+# AND iOS mobile app (TestFlight). Uses a single VERSION file and tag.
+#
+# Tag conventions:
+#   v1.2.3           → Production release (Docker images + App Store submission)
+#   v1.2.3-beta.N   → Beta release (Docker pre-release images + TestFlight beta)
+#   v1.2.3-rc.N     → Release candidate (Docker pre-release + TestFlight external)
+#
+# This workflow orchestrates both release paths from a single trigger.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (vX.Y.Z or vX.Y.Z-beta.N or vX.Y.Z-rc.N)'
+        required: true
+      skip_docker:
+        description: 'Skip Docker/server release'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      skip_mobile:
+        description: 'Skip iOS/TestFlight release'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  # ====================
+  # JOB 1: Validate and Tag
+  # ====================
+  validate-and-tag:
+    name: Validate & Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
+      is_beta: ${{ steps.parse.outputs.is_beta }}
+      base_version: ${{ steps.parse.outputs.base_version }}
+    steps:
+      - name: Parse version
+        id: parse
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+
+          # Validate format: vX.Y.Z or vX.Y.Z-beta.N or vX.Y.Z-rc.N
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+|-rc\.[0-9]+)?$ ]]; then
+            echo "❌ Version must match vX.Y.Z, vX.Y.Z-beta.N, or vX.Y.Z-rc.N"
+            echo "   Got: $VERSION"
+            exit 1
+          fi
+
+          # Extract base version (without prerelease suffix)
+          BASE_VERSION=$(echo "$VERSION" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+
+          IS_PRERELEASE="false"
+          IS_BETA="false"
+          if [[ "$VERSION" == *"-beta"* ]] || [[ "$VERSION" == *"-rc"* ]]; then
+            IS_PRERELEASE="true"
+          fi
+          if [[ "$VERSION" == *"-beta"* ]]; then
+            IS_BETA="true"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "is_beta=$IS_BETA" >> $GITHUB_OUTPUT
+          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
+
+          echo "📦 Version: $VERSION"
+          echo "   Base: $BASE_VERSION"
+          echo "   Prerelease: $IS_PRERELEASE"
+          echo "   Beta: $IS_BETA"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.REPO_PAT }}
+
+      - name: Verify VERSION file matches
+        run: |
+          VERSION="${{ steps.parse.outputs.version }}"
+          BASE="${{ steps.parse.outputs.base_version }}"
+          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+
+          # For prereleases, base version should match VERSION file
+          # For stable releases, exact match required
+          if [[ "${{ steps.parse.outputs.is_prerelease }}" == "true" ]]; then
+            if [[ "v${FILE_VERSION#v}" != "$BASE" ]] && [[ "${FILE_VERSION#v}" != "${BASE#v}" ]]; then
+              echo "⚠️  VERSION file ($FILE_VERSION) doesn't match base version ($BASE)"
+              echo "   Updating VERSION file to match..."
+              echo "$BASE" > VERSION
+            fi
+          else
+            EXPECTED="${BASE#v}"
+            ACTUAL="${FILE_VERSION#v}"
+            if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+              echo "Updating VERSION file: $FILE_VERSION → $BASE"
+              echo "$BASE" > VERSION
+            fi
+          fi
+
+      - name: Sync monorepo versions
+        run: |
+          if [[ -x ./scripts/sync-monorepo-version.sh ]]; then
+            ./scripts/sync-monorepo-version.sh
+          fi
+
+      - name: Create and push tag
+        run: |
+          set -e
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@github.com'
+          TAG="${{ steps.parse.outputs.version }}"
+
+          # Commit VERSION sync if changed
+          if [[ -n "$(git status --porcelain VERSION mobile/)" ]]; then
+            git add VERSION mobile/PrintFarmer.xcodeproj/project.pbxproj 2>/dev/null || true
+            git commit -m "chore(release): sync version to $TAG" || true
+            git push origin HEAD
+          fi
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; aborting to avoid overwrite."
+            exit 1
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          echo "✅ Tag $TAG created and pushed"
+
+  # ====================
+  # JOB 2: Docker / Server Release
+  # ====================
+  docker-release:
+    name: Server Release (Docker)
+    needs: validate-and-tag
+    if: github.event.inputs.skip_docker != 'true'
+    uses: ./.github/workflows/docker-publish.yml
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+
+  # ====================
+  # JOB 3: iOS / TestFlight Release
+  # ====================
+  mobile-release:
+    name: iOS Release (TestFlight)
+    needs: validate-and-tag
+    if: |
+      github.event.inputs.skip_mobile != 'true' &&
+      (needs.validate-and-tag.outputs.is_prerelease == 'true')
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-and-tag.outputs.version }}
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          TAG="${{ needs.validate-and-tag.outputs.version }}"
+          VERSION=$(echo "$TAG" | sed -E 's/^v(.+)-.*/\1/')
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION | Build: $BUILD_NUMBER | Tag: $TAG"
+
+      - name: Select Xcode version
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_26*.app /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using Xcode at: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install fastlane
+        run: sudo gem install fastlane -NV
+
+      - name: Setup Keychain
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          CI_KEYCHAIN_PWD="ci-keychain-temp-password"
+          security create-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+      - name: Setup code signing with fastlane match
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          fastlane match appstore \
+            --readonly \
+            --git_url "$MATCH_GIT_URL" \
+            --app_identifier "com.olyforge3d.printfarmer.ios" \
+            --keychain_name "$KEYCHAIN_PATH" \
+            --keychain_password "$MATCH_PASSWORD"
+
+      - name: Allow codesign keychain access
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          CI_KEYCHAIN_PWD="ci-keychain-temp-password"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+
+      - name: Update build version numbers
+        run: |
+          agvtool new-version -all ${{ steps.version.outputs.build_number }}
+          agvtool new-marketing-version ${{ steps.version.outputs.version }}
+
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath build/SourcePackages
+
+      - name: Build for App Store
+        timeout-minutes: 30
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Release \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -archivePath "build/PrintFarmer.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="match AppStore com.olyforge3d.printfarmer.ios" \
+            DEVELOPMENT_TEAM=ZPKA84F3TY \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
+            archive
+
+      - name: Export IPA
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          xcodebuild \
+            -exportArchive \
+            -archivePath "build/PrintFarmer.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/IPA" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+          TESTFLIGHT_EXTERNAL_GROUPS: ${{ secrets.TESTFLIGHT_EXTERNAL_GROUPS }}
+        run: |
+          API_KEY_JSON=$RUNNER_TEMP/api_key.json
+          export API_KEY_JSON_PATH="$API_KEY_JSON"
+          python3 -c "
+          import json, os, base64
+          content = os.environ['APP_STORE_CONNECT_API_KEY_CONTENT']
+          if not content.strip().startswith('-----BEGIN'):
+              content = base64.b64decode(content).decode('utf-8')
+          data = {
+              'key_id': os.environ['APP_STORE_CONNECT_API_KEY_ID'],
+              'issuer_id': os.environ['APP_STORE_CONNECT_API_ISSUER_ID'],
+              'key': content,
+              'in_house': False
+          }
+          with open(os.environ['API_KEY_JSON_PATH'], 'w') as f:
+              json.dump(data, f, indent=2)
+          "
+
+          PILOT_ARGS=(
+            --ipa "build/IPA/PrintFarmer.ipa"
+            --api_key_path "$API_KEY_JSON"
+            --changelog "Beta build from tag: ${{ steps.version.outputs.tag_name }}"
+          )
+
+          if [ -n "${TESTFLIGHT_EXTERNAL_GROUPS:-}" ]; then
+            PILOT_ARGS+=(--distribute_external true --groups "$TESTFLIGHT_EXTERNAL_GROUPS")
+          fi
+
+          fastlane pilot upload "${PILOT_ARGS[@]}"
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          API_KEY_JSON=$RUNNER_TEMP/api_key.json
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -f "$API_KEY_JSON" || true
+
+  # ====================
+  # JOB 4: Create GitHub Release
+  # ====================
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate-and-tag, docker-release, mobile-release]
+    if: always() && needs.validate-and-tag.result == 'success'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --current-tag ${{ needs.validate-and-tag.outputs.version }}
+        continue-on-error: true
+
+      - name: Build release notes
+        env:
+          VERSION: ${{ needs.validate-and-tag.outputs.version }}
+          IS_PRERELEASE: ${{ needs.validate-and-tag.outputs.is_prerelease }}
+          DOCKER_RESULT: ${{ needs.docker-release.result }}
+          MOBILE_RESULT: ${{ needs.mobile-release.result }}
+          CHANGELOG: ${{ steps.cliff.outputs.changelog }}
+        run: |
+          {
+            echo "## Release $VERSION"
+            echo ""
+            echo "### Release Components"
+            echo ""
+
+            if [[ "${{ github.event.inputs.skip_docker }}" != "true" ]]; then
+              if [[ "$DOCKER_RESULT" == "success" ]]; then
+                echo "- ✅ **Server (Docker images)** — Published to GHCR"
+              else
+                echo "- ❌ **Server (Docker images)** — Build failed or skipped"
+              fi
+            else
+              echo "- ⏭️ **Server (Docker images)** — Skipped"
+            fi
+
+            if [[ "${{ github.event.inputs.skip_mobile }}" != "true" ]] && [[ "$IS_PRERELEASE" == "true" ]]; then
+              if [[ "$MOBILE_RESULT" == "success" ]]; then
+                echo "- ✅ **iOS App** — Uploaded to TestFlight"
+              else
+                echo "- ❌ **iOS App** — Build failed or skipped"
+              fi
+            elif [[ "$IS_PRERELEASE" != "true" ]]; then
+              echo "- ℹ️ **iOS App** — Stable releases require separate App Store submission"
+            else
+              echo "- ⏭️ **iOS App** — Skipped"
+            fi
+
+            echo ""
+            echo "### Changes"
+            echo ""
+
+            if [[ -n "${CHANGELOG:-}" ]]; then
+              echo "$CHANGELOG"
+            else
+              PREV=$(git describe --tags --abbrev=0 --match 'v*' --exclude "$VERSION" 2>/dev/null || true)
+              if [[ -n "$PREV" ]]; then
+                git log --pretty=format:'- %s (%h)' "$PREV"..HEAD
+              else
+                echo "Initial release."
+              fi
+            fi
+
+            echo ""
+            echo "### Docker Images"
+            echo ""
+            echo '```bash'
+            echo "docker pull ghcr.io/olyforge3d/printfarmer-api:${VERSION#v}"
+            echo "docker pull ghcr.io/olyforge3d/printfarmer-frontend:${VERSION#v}"
+            echo "docker pull ghcr.io/olyforge3d/printfarmer-monolith:${VERSION#v}"
+            echo '```'
+          } > RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ needs.validate-and-tag.outputs.version }}
+          tag_name: ${{ needs.validate-and-tag.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ needs.validate-and-tag.outputs.is_prerelease == 'true' }}
