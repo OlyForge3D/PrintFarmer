@@ -157,7 +157,8 @@ jobs:
       - name: Extract provisioning profile name
         id: profile
         run: |
-          PROFILE_PATH=$(grep -lr "com.olyforge3d.printfarmer.ios" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/" | head -1)
+          PROFILE_PATH=$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision 2>/dev/null | head -1)
+          echo "Profile path: $PROFILE_PATH"
           PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :Name" /dev/stdin)
           echo "Profile name: $PROFILE_NAME"
           echo "name=$PROFILE_NAME" >> "$GITHUB_OUTPUT"
