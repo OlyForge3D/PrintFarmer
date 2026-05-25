@@ -4,6 +4,37 @@
 
 ## Learnings
 
+### 2026-05-24: Fix — PrinterBackendCapabilities.swift missing from Xcode target (beta.73 build failure)
+
+**Root cause:** `PrinterBackendCapabilities.swift` was created under
+`mobile/PrintFarmer/Models/` but never registered in the Xcode project. The file
+existed on disk but had no `PBXFileReference`, no `PBXBuildFile`, was absent from
+the Models group children, and was absent from the app target's Sources build phase.
+
+**Cascade errors this caused in CI (beta.73, run 26382724572):**
+- `JogSubgroup.swift:28,36` — `cannot find type 'PrinterBackendCapabilities' in scope`
+- `JogSubgroup.swift:43,71,85` — ObservedObject wrapper / Binding errors (type inference
+  broke because the type was unknown)
+- `PreheatSubgroup.swift:191` — `Optional<Binding<_>>` boolean error (cascade from
+  line 29 also referencing the type in a parameter)
+
+**Fix:** Added four entries to `project.pbxproj`: `PBXFileReference`
+(`A3C7DEF1234567890BCD0001`), `PBXBuildFile` (`A3C7DEF1234567890BCD0002`),
+Models group children, app target Sources build phase.
+
+**SwiftUI Binding pitfall:** When a model type is unknown to the compiler,
+`viewModel.someProperty` through `@ObservedObject` can produce `Binding<_>` cascade
+errors far from the real missing type. Check for missing Xcode project registration first.
+
+**Local-build rule caveat:** `swiftc -parse` is the local substitute when
+CoreSimulator is out of date AND Xcode's SPM subsystem passes
+`-c safe.bareRepository=explicit` programmatically (overrides global git config).
+`git config --global safe.bareRepository all` does not fix this.
+
+**Tagged:** v1.0-beta.74, TestFlight run 26383164985.
+
+---
+
 ### Issue #287 — PrinterControlsSection integration (PR #304, 2026-05-21)
 **Files:**
 - `mobile/PrintFarmer/Views/PrinterControls/PrinterControlsSection.swift` (new, 106 lines) — composite section owning `PrinterControlsViewModel` via `@StateObject`; hosts Preheat/Home/Jog subgroups.
