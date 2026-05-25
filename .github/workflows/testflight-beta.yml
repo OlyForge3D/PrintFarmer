@@ -145,6 +145,7 @@ jobs:
           fastlane match appstore \
             --readonly \
             --git_url "$MATCH_GIT_URL" \
+            --git_basic_authorization "$MATCH_GIT_BASIC_AUTHORIZATION" \
             --app_identifier "com.olyforge3d.printfarmer.ios" \
             --keychain_name "$KEYCHAIN_PATH" \
             --keychain_password "$MATCH_PASSWORD"
