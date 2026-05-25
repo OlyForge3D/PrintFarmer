@@ -237,3 +237,34 @@ Or explicitly: `if: startsWith(github.ref, 'refs/tags/v') && ${{ secrets.ENABLE_
 - Beta tag patterns must be explicitly excluded from production workflows
 - Mobile beta releases are independent from general app releases
 - The mobile pre-build discipline reduces wasted CI cycles and keeps TestFlight reliable
+
+---
+
+## 2026-05-24: TestFlight Build Number Offset — Monotonic CFBundleVersion
+
+**Role:** DevOps & Release Engineer  
+**Status:** Assigned (General-purpose agent)  
+**Coordination:** Jeff Papiez (Brady)
+
+### Context
+
+Previous mobile app in old PFarm-Ios repo reached CFBundleVersion 318. TestFlight hides new builds when CFBundleVersion is not monotonically increasing. Current `testflight-beta.yml` uses `run_number` (workflow run counter) as CFBundleVersion, which started at 16 in the new consolidated repo.
+
+### Solution
+
+Apply +400 offset to `run_number` in `testflight-beta.yml` when calculating CFBundleVersion:
+- Formula: `CFBundleVersion = run_number + 400`
+- Next build: 417
+
+This ensures TestFlight sees monotonically increasing build numbers and does not suppress releases.
+
+### Files to Modify
+
+- `.github/workflows/testflight-beta.yml`
+
+### Related Context
+
+- Commit: `89ad605ea`
+- Tag: `v1.0-beta.75`
+- Original request ref: Workflow scope fix isolated beta triggers; this offset ensures build continuity across repo consolidation.
+
