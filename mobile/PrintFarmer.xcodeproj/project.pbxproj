@@ -47,6 +47,7 @@
 		4097E554D29B3551A59C943D /* AppDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83CE3867D23C7CA26C423AB /* AppDestination.swift */; };
 		14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */; };
 		42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8D7C5C4CE62E9F3684E5B1F /* Models.swift */; };
+		A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */; };
 		4AF7E845E7195CD9D93A7CA3 /* JobService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAA04408A2539F908022484D /* JobService.swift */; };
 		4BF27ADE0992B441FDBEAD6E /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B45A5C9AA17194A8ED47D1F /* MockURLProtocol.swift */; };
 		4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6208E685EEDD0498124C143A /* SignalRModels.swift */; };
@@ -313,6 +314,7 @@
 		B23554EB41DA88AD092EB5C1 /* LocationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationListView.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* QRCodeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeParser.swift; sourceTree = "<group>"; };
 		B8D7C5C4CE62E9F3684E5B1F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilities.swift; sourceTree = "<group>"; };
 		BA0262E35EBDB310533C010A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BF23D467957EDEE89DB0A90A /* SpoolService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolService.swift; sourceTree = "<group>"; };
 		C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManager.swift; sourceTree = "<group>"; };
@@ -550,6 +552,7 @@
 			children = (
 				4B4E2EE087E92C131271B37F /* FilamentModels.swift */,
 				B8D7C5C4CE62E9F3684E5B1F /* Models.swift */,
+				A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */,
 				62BAD7F52A9EFEE471AA461C /* RequestModels.swift */,
 				6208E685EEDD0498124C143A /* SignalRModels.swift */,
 				B7D1020247C4116936C828DD /* AutoDispatchModels.swift */,
@@ -1101,6 +1104,7 @@
 				8ED9E2039EB36A33F0B9850D /* Formatting+Extensions.swift in Sources */,
 				660DA45F179749438845EEE1 /* SpoolmanSpool+ColorName.swift in Sources */,
 				42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */,
+				A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */,
 				AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */,
 				4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */,
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
