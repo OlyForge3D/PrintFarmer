@@ -139,13 +139,17 @@ jobs:
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          GH_TOKEN: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           
+          # Decode the basic auth and extract just the token (after the colon)
+          # MATCH_GIT_BASIC_AUTHORIZATION is base64(username:token)
+          DECODED_AUTH=$(echo "$MATCH_GIT_BASIC_AUTHORIZATION" | base64 -d)
+          TOKEN="${DECODED_AUTH##*:}"  # Extract everything after the colon
+          
           # Configure git to use token-based authentication
-          # The GH_TOKEN is expected to be a Personal Access Token or similar credential
-          git config --global url."https://github-actions:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://git:${TOKEN}@github.com/".insteadOf "https://github.com/"
           
           fastlane match appstore \
             --readonly \
