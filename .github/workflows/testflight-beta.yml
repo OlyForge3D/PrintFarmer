@@ -139,18 +139,17 @@ jobs:
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          GH_TOKEN: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           
-          # Configure git credentials for match repo access
+          # Use GitHub CLI token for git credentials
           git config --global credential.helper store
-          
-          # Create ~/.git-credentials file with basic auth token
-          # Remove the directory if it exists and create the credentials file
-          rm -rf ~/.git-credentials
-          echo "https://github-actions:${MATCH_GIT_BASIC_AUTHORIZATION}@github.com" > ~/.git-credentials
+          echo "https://github-actions:${GH_TOKEN}@github.com" > ~/.git-credentials
           chmod 600 ~/.git-credentials
+          
+          # Also set the token as env var for git to use
+          export GIT_CREDENTIALS_HELPER=store
           
           fastlane match appstore \
             --readonly \
