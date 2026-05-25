@@ -146,10 +146,9 @@ jobs:
           # Configure git credentials for match repo access
           git config --global credential.helper store
           
-          # Create credentials file with basic auth token
-          # The token is in format: base64(username:token) but fastlane match expects just the token as PAT
-          # Extract username and token from MATCH_GIT_BASIC_AUTHORIZATION if it's base64-encoded
-          mkdir -p ~/.git-credentials
+          # Create ~/.git-credentials file with basic auth token
+          # Remove the directory if it exists and create the credentials file
+          rm -rf ~/.git-credentials
           echo "https://github-actions:${MATCH_GIT_BASIC_AUTHORIZATION}@github.com" > ~/.git-credentials
           chmod 600 ~/.git-credentials
           
