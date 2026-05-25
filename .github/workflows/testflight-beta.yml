@@ -143,13 +143,9 @@ jobs:
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           
-          # Use GitHub CLI token for git credentials
-          git config --global credential.helper store
-          echo "https://github-actions:${GH_TOKEN}@github.com" > ~/.git-credentials
-          chmod 600 ~/.git-credentials
-          
-          # Also set the token as env var for git to use
-          export GIT_CREDENTIALS_HELPER=store
+          # Configure git to use token-based authentication
+          # The GH_TOKEN is expected to be a Personal Access Token or similar credential
+          git config --global url."https://github-actions:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
           
           fastlane match appstore \
             --readonly \
