@@ -154,6 +154,14 @@ jobs:
             --keychain_name "$KEYCHAIN_PATH" \
             --keychain_password "$MATCH_PASSWORD"
 
+      - name: Extract provisioning profile name
+        id: profile
+        run: |
+          PROFILE_PATH=$(grep -lr "com.olyforge3d.printfarmer.ios" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/" | head -1)
+          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :Name" /dev/stdin)
+          echo "Profile name: $PROFILE_NAME"
+          echo "name=$PROFILE_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Allow codesign keychain access
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
@@ -185,7 +193,7 @@ jobs:
             -archivePath "build/PrintFarmer.xcarchive" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="match AppStore com.olyforge3d.printfarmer.ios" \
+            PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile.outputs.name }}" \
             DEVELOPMENT_TEAM=ZPKA84F3TY \
             SWIFT_STRICT_CONCURRENCY=minimal \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
@@ -194,6 +202,8 @@ jobs:
       - name: Export IPA
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          # Patch ExportOptions.plist with actual profile name from match
+          /usr/libexec/PlistBuddy -c "Set :provisioningProfiles:com.olyforge3d.printfarmer.ios '${{ steps.profile.outputs.name }}'" ExportOptions.plist
           xcodebuild \
             -exportArchive \
             -archivePath "build/PrintFarmer.xcarchive" \
