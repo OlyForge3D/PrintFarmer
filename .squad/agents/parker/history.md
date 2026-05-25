@@ -403,3 +403,44 @@ User redeployed API + frontend after commit `826e98ae` (slicer upload/retrieval 
 - Mobile beta releases are tag-only operations from `development` branch.
 - Tag pattern: `v1.0-beta.N` (incrementing integer suffix).
 - The `testflight-beta.yml` workflow handles build + TestFlight upload automatically on tag push.
+
+---
+
+## 2026-05-24: Mobile Workflow Scope Fix — Prevent Beta Tags from Triggering Release Workflows
+
+**Role:** DevOps & Deployment Engineer  
+**Status:** ✅ Complete
+**Coordination:** Hudson (iOS), Coordinator
+
+### Problem
+
+Mobile beta tags (v1.0-beta.N) were triggering production deployment workflows:
+- `bootstrap-ubuntu-ci`
+- `docker-publish`
+- `devcontainer-multiarch`
+
+These workflows should only trigger on release tags (v[0-9]+.[0-9]+.[0-9]+), not mobile beta tags.
+
+### Fix Applied
+
+Updated workflow triggers to scope to release tags only:
+- Changed: `if: startsWith(github.ref, 'refs/tags/v')`
+- To: `if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'beta')`
+
+Or explicitly: `if: startsWith(github.ref, 'refs/tags/v') && ${{ secrets.ENABLE_RELEASE_ON_TAG == 'true' }}`
+
+### Files Modified
+
+- `.github/workflows/bootstrap-ubuntu-ci.yml`
+- `.github/workflows/docker-publish.yml`
+- `.github/workflows/devcontainer-multiarch.yml`
+
+### Related Directive
+
+**Mobile Pre-Build Requirement:** Before any commit that changes code under `mobile/`, the iOS app MUST build locally (xcodebuild) successfully. No untested mobile changes may be pushed that later fail in CI. This prevents the cycle of push → fail → tag bump → push again, keeping workflow runs efficient and focused.
+
+### Key Learnings
+
+- Beta tag patterns must be explicitly excluded from production workflows
+- Mobile beta releases are independent from general app releases
+- The mobile pre-build discipline reduces wasted CI cycles and keeps TestFlight reliable
