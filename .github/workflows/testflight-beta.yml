@@ -142,10 +142,20 @@ jobs:
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          
+          # Configure git credentials for match repo access
+          git config --global credential.helper store
+          
+          # Create credentials file with basic auth token
+          # The token is in format: base64(username:token) but fastlane match expects just the token as PAT
+          # Extract username and token from MATCH_GIT_BASIC_AUTHORIZATION if it's base64-encoded
+          mkdir -p ~/.git-credentials
+          echo "https://github-actions:${MATCH_GIT_BASIC_AUTHORIZATION}@github.com" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
+          
           fastlane match appstore \
             --readonly \
             --git_url "$MATCH_GIT_URL" \
-            --git_basic_authorization "$MATCH_GIT_BASIC_AUTHORIZATION" \
             --app_identifier "com.olyforge3d.printfarmer.ios" \
             --keychain_name "$KEYCHAIN_PATH" \
             --keychain_password "$MATCH_PASSWORD"
