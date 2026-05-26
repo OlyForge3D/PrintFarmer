@@ -35,6 +35,7 @@ WORKDIR /
 # The context root is the repository root (/home/pi/pfarm)
 COPY Directory.Build.props ./
 COPY global.json ./
+COPY VERSION ./
 COPY proto ./proto
 COPY src/ ./src/
 
