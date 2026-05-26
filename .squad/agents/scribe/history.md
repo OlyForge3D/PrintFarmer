@@ -207,3 +207,32 @@ PendingReady fix fully documented. No pending squad state. Branch clean after pu
 - Status: Workflow flowing smoothly, no blockers
 
 **Outcome:** Team decision records consolidated and archived. Ready for history summarization and git push.
+
+---
+
+## 2026-05-26T09:45:35.148-07:00 Camera Management Work Log
+
+**Task:** Log and consolidate the camera-management UI/backend work completed by Ripley and Lambert.
+
+**Status:** ✅ COMPLETE — Camera management work recorded; decision inbox processed.
+
+**Work Recorded:**
+1. Ripley earlier dispatch landed `feat(web): add edit/delete buttons to camera cards with modals` on `origin/development`; build, lint, and camera tests passed.
+2. Ripley-1 landed commit `353cd7ecb` on `development`:
+   - Fixed cropped/zoomed stream views by switching previews to `object-contain`.
+   - Added printer association and Detect Endpoints support to Edit Camera.
+   - Added linked printer name display to the cameras management table.
+   - Validation: `npm run build` and `npm run lint` passed; no affected component tests existed.
+3. Lambert landed commit `384868e28` on `development`:
+   - Added camera endpoint-detection API and `IPrinterCameraProbe` contract.
+   - Added Moonraker, OctoPrint, and SDCP probes.
+   - Added `printerName` to camera DTOs.
+   - Validation: restore and API build passed; focused camera tests passed; full suite/format failures were pre-existing and unrelated.
+
+**Decision Processing:**
+- Consolidated `.squad/decisions/inbox/lambert-camera-detect-endpoints.md` and `.squad/decisions/inbox/ripley-camera-management-ui.md` into `.squad/decisions.md`.
+- Removed the processed inbox files.
+- Left the pre-existing deleted inbox file state untouched.
+
+**Outcome:** Camera management history now captures the completed UI, API, DTO, and validation work. No commit was made because the user requested no additional commit beyond agent-pushed work.
+
