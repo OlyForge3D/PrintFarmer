@@ -1626,6 +1626,46 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Locations");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.LoginAuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Success");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("Username");
+
+                    b.ToTable("LoginAuditEntries");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceAlert", b =>
                 {
                     b.Property<Guid>("Id")
