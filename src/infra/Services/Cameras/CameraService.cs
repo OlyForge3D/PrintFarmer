@@ -52,6 +52,7 @@ public class CameraService : ICameraService
         CreatedAt = camera.CreatedAt,
         UpdatedAt = camera.UpdatedAt,
         PrinterId = camera.PrinterId,
+        PrinterName = camera.Printer?.Name,
         Source = camera.Source,
         CameraType = camera.CameraType,
         HealthStatus = camera.HealthStatus,
@@ -162,10 +163,10 @@ public class CameraService : ICameraService
                 throw new InvalidOperationException($"A camera with name '{dto.Name}' already exists");
             }
 
-            // Validate PrinterId if provided
+            Printer? printer = null;
             if (dto.PrinterId.HasValue)
             {
-                Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
+                printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
                 if (printer == null)
                 {
                     throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
@@ -183,6 +184,7 @@ public class CameraService : ICameraService
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
                 PrinterId = dto.PrinterId,
+                Printer = printer,
                 Source = dto.Source ?? CameraSource.Standalone,
                 CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,
@@ -273,19 +275,16 @@ public class CameraService : ICameraService
                 camera.CameraType = dto.CameraType.Value;
             }
 
-            // Validate and update PrinterId if provided
-            if (dto.PrinterId != camera.PrinterId)
+            if (dto.PrinterId.HasValue && dto.PrinterId != camera.PrinterId)
             {
-                if (dto.PrinterId.HasValue)
+                Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
+                if (printer == null)
                 {
-                    Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
-                    if (printer == null)
-                    {
-                        throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
-                    }
+                    throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
                 }
 
                 camera.PrinterId = dto.PrinterId;
+                camera.Printer = printer;
             }
 
             camera.UpdatedAt = DateTime.UtcNow;
@@ -446,7 +445,6 @@ public class CameraService : ICameraService
 
         try
         {
-            // Validate printer exists
             Printer? printer = await _printersService.FindByIdAsync(printerId, ct);
             if (printer == null)
             {
@@ -470,6 +468,7 @@ public class CameraService : ICameraService
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
                 PrinterId = printerId,
+                Printer = printer,
                 Source = dto.Source ?? CameraSource.Standalone,
                 CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,

@@ -1,4 +1,6 @@
 ﻿using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -69,6 +71,8 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
+        services.AddScoped<IPrinterCameraProbe, MoonrakerPrinterCameraProbe>();
+
         // Register the Moonraker client interface with its implementation
         services.AddScoped<IMoonrakerClient>(provider =>
         {
