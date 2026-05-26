@@ -37,6 +37,7 @@ import {
   ListIcon,
   PlayIcon,
   CalendarIcon,
+  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -270,6 +271,15 @@ const navigation: NavigationElement[] = [
     name: 'Settings',
     href: '/settings',
     icon: GearIcon,
+    requiredRole: 'farm_admin'
+  },
+
+  // — Security —
+  { name: 'Security', isSectionHeader: true, requiredRole: 'farm_admin' },
+  {
+    name: 'Login Audit',
+    href: '/admin/security/login-audit',
+    icon: ShieldIcon,
     requiredRole: 'farm_admin'
   },
 ];
