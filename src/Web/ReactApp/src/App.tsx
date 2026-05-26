@@ -61,6 +61,7 @@ import { LocationDashboardPage } from '@/features/locations/pages/LocationDashbo
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
+import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -219,6 +220,7 @@ function AuthenticatedAppRoutes() {
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
+        <Route path="security/login-audit" element={<LoginAuditPage />} />
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<Navigate to="/admin/workers?tab=jobs" replace />} />
