@@ -120,3 +120,8 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - **Frontend pass-through confirmed:** `usePrinterFailureDetectionStatus` is a pure DTO consumer; `FailureDetectionMonitoringBadge` and `failureDetectionStatus.ts` render backend `state`/`reason` verbatim. No client-side predicate to fix.
 - **Action:** Posted analysis to #309 (comment 4513509761), added `area:backend` label, handed to Lambert. No PR, no worktree.
 - **Lesson:** When a UI string is the exact literal of a backend `const string`, the frontend is almost certainly a passive renderer — grep the literal against `*.cs` before diving into React code. Same triage discipline as #302.
+
+### 2026-05-26T09:41:12-07:00 — Camera card edit/delete actions
+- Added admin-only Edit/Delete controls to camera feed cards and moved management-row editing into a shared `EditCameraModal`.
+- Camera edits reuse `cameraService.updateCamera`; deletes use the existing delete API with camera-name confirmation copy and refresh the camera list after success.
+- Validation: React build, lint, and targeted camera tests passed locally.
