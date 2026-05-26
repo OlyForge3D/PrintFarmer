@@ -1016,16 +1016,18 @@ public sealed class MoonrakerSubscriptionService(
 
         _logger.LogDebug("Processing status update for printer {PrinterId}. Raw status: {StatusObjGetRawText}", printerId, statusObj.GetRawText());
 
-        // Initialize klippy ready state from webhooks if not yet set
-        // This handles the initial subscription response which contains the current klippy state
-        if (!_klippyReadyState.ContainsKey(printerId) &&
-            statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
-            wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
+        // Moonraker may omit the webhooks object from subscription payloads on some Klipper setups.
+        // Any successful printer-object status still proves Klippy is reachable; only an explicit
+        // webhooks state should mark it not-ready/offline.
+        bool? resolvedReady = MoonrakerOnlineStatusClassifier.ResolveKlippyReady(statusObj);
+        if (resolvedReady.HasValue)
         {
-            string? webhooksState = ws.GetString();
-            bool isReady = webhooksState == "ready";
-            _klippyReadyState[printerId] = isReady;
-            _logger.LogInformation("Initialized klippyReadyState for printer {PrinterId}: {IsReady} (webhooks.state={WebhooksState})", printerId, isReady, webhooksState);
+            bool previousReady = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready;
+            _klippyReadyState[printerId] = resolvedReady.Value;
+            if (previousReady != resolvedReady.Value)
+            {
+                _logger.LogInformation("Updated klippyReadyState for printer {PrinterId}: {IsReady}", printerId, resolvedReady.Value);
+            }
         }
 
         // Process each object type separately by dispatching to handler methods
@@ -2330,6 +2332,25 @@ public sealed class MoonrakerSubscriptionService(
                 HomedAxes: null,
                 SpoolInfo: null);
 
+            PrinterStatusDto shutdownCacheUpdate = new(
+                Id: printerId,
+                IsOnline: false,
+                State: PrinterStateNormalizer.NormalizeState("Shutdown"),
+                Progress: null,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null,
+                X: null,
+                Y: null,
+                Z: null,
+                HotendTemp: null,
+                BedTemp: null,
+                HotendTarget: null,
+                BedTarget: null,
+                SpoolInfo: null);
+            _statusCacheWriter.UpdateStatus(shutdownCacheUpdate);
+
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
             await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
             _logger.LogDebug("Sent shutdown status for printer {PrinterId}", printerId);
@@ -2656,6 +2677,27 @@ public sealed class MoonrakerSubscriptionService(
                         _logger.LogError("Hub context is null in HTTP polling fallback for printer {PrinterName}", printer.Name);
                         return;
                     }
+
+                    PrinterStatusDto cacheUpdate = new(
+                        Id: printer.Id,
+                        IsOnline: compositeStatus.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(compositeStatus.State),
+                        Progress: compositeStatus.Progress,
+                        JobName: compositeStatus.JobName,
+                        ThumbnailUrl: compositeStatus.ThumbnailUrl,
+                        CameraStreamUrl: compositeStatus.CameraStreamUrl,
+                        CameraSnapshotUrl: compositeStatus.CameraSnapshotUrl,
+                        X: compositeStatus.X,
+                        Y: compositeStatus.Y,
+                        Z: compositeStatus.Z,
+                        HotendTemp: compositeStatus.HotendTemp,
+                        BedTemp: compositeStatus.BedTemp,
+                        HotendTarget: compositeStatus.HotendTarget,
+                        BedTarget: compositeStatus.BedTarget,
+                        SpoolInfo: spoolInfo,
+                        PrintTimeLeftSeconds: compositeStatus.PrintTimeLeftSeconds);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 
                     await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
 
