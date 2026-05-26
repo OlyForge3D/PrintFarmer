@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
-import { Alert, Button, FormField, Input, Textarea, Toggle } from '@/common/components/ui';
+import { Alert, Button, FormField, Input, Select, Textarea, Toggle } from '@/common/components/ui';
+import { PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
+import { usePrinters } from '@/common/hooks/useApi';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, UpdateCameraDto } from '@/types/api';
 
@@ -20,6 +23,7 @@ interface EditCameraFormData {
   location: string;
   sortOrder: number;
   isEnabled: boolean;
+  printerId: string;
 }
 
 const emptyFormData: EditCameraFormData = {
@@ -30,13 +34,37 @@ const emptyFormData: EditCameraFormData = {
   location: '',
   sortOrder: 0,
   isEnabled: true,
+  printerId: '',
 };
 
 export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCameraModalProps) {
+  const { data: printers = [] } = usePrinters({ enabled: isOpen });
   const [formData, setFormData] = useState<EditCameraFormData>(emptyFormData);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  const detectEndpointsMutation = useMutation({
+    mutationFn: (printerId: string) => cameraService.detectCameraEndpoints({ printerId }),
+    onSuccess: (result) => {
+      setFormData((previous) => ({
+        ...previous,
+        streamUrl: result.streamUrl ?? previous.streamUrl,
+        snapshotUrl: result.snapshotUrl ?? previous.snapshotUrl,
+      }));
+      setValidationErrors((previous) => {
+        const next = { ...previous };
+        delete next.streamUrl;
+        delete next.snapshotUrl;
+        return next;
+      });
+      toast.success('Camera endpoints detected');
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : 'Failed to detect camera endpoints';
+      toast.error(`Failed to detect camera endpoints: ${message}`);
+    },
+  });
 
   useEffect(() => {
     if (!isOpen || !camera) return;
@@ -49,6 +77,7 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
       location: camera.location ?? '',
       sortOrder: camera.sortOrder,
       isEnabled: camera.isEnabled,
+      printerId: camera.printerId ?? '',
     });
     setValidationErrors({});
     setError(null);
@@ -64,7 +93,8 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
       formData.snapshotUrl !== (camera.snapshotUrl ?? '') ||
       formData.location !== (camera.location ?? '') ||
       formData.sortOrder !== camera.sortOrder ||
-      formData.isEnabled !== camera.isEnabled
+      formData.isEnabled !== camera.isEnabled ||
+      formData.printerId !== (camera.printerId ?? '')
     );
   }, [camera, formData]);
 
@@ -78,6 +108,11 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
     });
     setError(null);
   };
+
+  const selectedPrinterName = useMemo(() => {
+    if (!formData.printerId) return null;
+    return printers.find((printer) => printer.id === formData.printerId)?.name ?? camera?.printerName ?? null;
+  }, [camera?.printerName, formData.printerId, printers]);
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -106,6 +141,7 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
       location: formData.location.trim() || undefined,
       sortOrder: formData.sortOrder,
       isEnabled: formData.isEnabled,
+      printerId: formData.printerId || null,
     };
 
     try {
@@ -122,6 +158,15 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleDetectEndpoints = () => {
+    if (!formData.printerId) {
+      toast.error('Select a printer before detecting camera endpoints.');
+      return;
+    }
+
+    detectEndpointsMutation.mutate(formData.printerId);
   };
 
   const handleClose = () => {
@@ -174,6 +219,47 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
               placeholder="Workshop, Main Room"
             />
           </FormField>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-end">
+          <FormField
+            label="Associated Printer"
+            htmlFor="edit-camera-printer"
+            helper={
+              selectedPrinterName
+                ? `Linked to ${selectedPrinterName}`
+                : 'Optional printer link for endpoint detection and camera grouping.'
+            }
+          >
+            <Select
+              id="edit-camera-printer"
+              value={formData.printerId}
+              onChange={(event) => setField('printerId', event.target.value)}
+              label="Associated Printer"
+            >
+              <option value="">No printer linked</option>
+              {printers.map((printer) => (
+                <option key={printer.id} value={printer.id}>
+                  {printer.name}
+                </option>
+              ))}
+              {camera?.printerId && !printers.some((printer) => printer.id === camera.printerId) && (
+                <option value={camera.printerId}>{camera.printerName ?? 'Current printer'}</option>
+              )}
+            </Select>
+          </FormField>
+
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handleDetectEndpoints}
+            loading={detectEndpointsMutation.isPending}
+            disabled={!formData.printerId || isSaving}
+            iconLeft={<PrinterSearchIcon className="w-4 h-4" />}
+            className="md:mb-0"
+          >
+            Detect Endpoints
+          </Button>
         </div>
 
         <FormField

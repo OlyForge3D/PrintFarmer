@@ -86,7 +86,7 @@ export function CameraCard({
           <img
             src={activeUrl ?? ''}
             alt={`${p.name} camera feed`}
-            className={`object-cover ${mediaClassName}`}
+            className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
