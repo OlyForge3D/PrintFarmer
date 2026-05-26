@@ -545,4 +545,45 @@ public class CameraManagementTests : IAsyncLifetime
     }
 
     #endregion
+
+    [Fact]
+    public async Task GetCamera_WithLinkedPrinter_IncludesPrinterName()
+    {
+        Printer printer = await CreateTestPrinterAsync("camera-associated-printer");
+        CameraDto camera = await CreateTestCameraAsync(name: "associated-camera", printerId: printer.Id);
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{camera.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        CameraDto? result = await response.Content.ReadFromJsonAsync<CameraDto>(_jsonOptions);
+        result.Should().NotBeNull();
+        result!.PrinterId.Should().Be(printer.Id);
+        result.PrinterName.Should().Be("camera-associated-printer");
+    }
+
+    [Fact]
+    public async Task DetectCameraEndpoints_UnsupportedBackend_ReturnsNotDetected()
+    {
+        Printer printer = await CreateTestPrinterAsync("camera-detect-unknown");
+        using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Printer dbPrinter = await context.Printers.SingleAsync(p => p.Id == printer.Id);
+            dbPrinter.Backend = (int)PrinterBackend.Unknown;
+            await context.SaveChangesAsync();
+        }
+
+        HttpResponseMessage response = await _client!.PostAsJsonAsync("/api/cameras/detect-endpoints", new DetectCameraEndpointsRequest
+        {
+            PrinterId = printer.Id
+        }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        CameraEndpointDetectionDto? result = await response.Content.ReadFromJsonAsync<CameraEndpointDetectionDto>(_jsonOptions);
+        result.Should().NotBeNull();
+        result!.Detected.Should().BeFalse();
+        result.Source.Should().Be("unknown");
+        result.StreamUrl.Should().BeNull();
+        result.SnapshotUrl.Should().BeNull();
+    }
 }

@@ -537,6 +537,7 @@ public static class ServiceCollectionExtensions
         // Register CameraService from Infrastructure layer - standalone camera management service
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Cameras.ICameraRepository, Farm.Infrastructure.Repositories.Cameras.EfCameraRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
+        _ = services.AddScoped<Farm.Infrastructure.Discovery.IPrinterCameraEndpointDetectionService, Farm.Infrastructure.Discovery.PrinterCameraEndpointDetectionService>();
 
         // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IGo2RtcService, Farm.Infrastructure.Services.Cameras.Go2RtcService>();
