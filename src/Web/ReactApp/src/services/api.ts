@@ -3773,6 +3773,17 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Detect camera endpoints for a printer backend.
+   */
+  async detectCameraEndpoints(
+    request: import('@/types/api').DetectCameraEndpointsRequest
+  ): Promise<import('@/types/api').DetectCameraEndpointsResponse> {
+    // TODO: Confirm Lambert's backend contract remains POST /api/cameras/detect-endpoints with { printerId }.
+    const response = await this.client.post('/cameras/detect-endpoints', request);
+    return response.data;
+  }
+
   // ====== NFC Devices ======
 
   async getNfcDevices(): Promise<import('@/types/api').NfcDeviceDto[]> {

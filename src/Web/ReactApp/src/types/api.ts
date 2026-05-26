@@ -2552,6 +2552,18 @@ export interface UpdateCameraDto {
   cameraType?: CameraType;
 }
 
+export interface DetectCameraEndpointsRequest {
+  printerId: string;
+}
+
+export interface DetectCameraEndpointsResponse {
+  streamUrl?: string;
+  snapshotUrl?: string;
+  source?: CameraSource;
+  cameraType?: CameraType;
+  message?: string;
+}
+
 export interface ToggleCameraDto {
   isEnabled: boolean;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useOptimistic, useState, useTransition } from 'react';
+import React, { useEffect, useMemo, useOptimistic, useState, useTransition } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Button, Textarea } from '@/common/components/ui';
@@ -12,6 +12,7 @@ import {
   PlusIcon,
   PrinterIcon
 } from '@/common/components/icons/MdiIcons';
+import { usePrinters } from '@/common/hooks/useApi';
 import { cameraService } from '@/services/cameraService';
 import { apiClient } from '@/services/api';
 import type { CameraDto, CreateCameraDto, Printer } from '@/types/api';
@@ -27,6 +28,11 @@ interface CameraManagementPanelProps {
  * Intended to be embedded inside the unified Cameras page.
  */
 export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPanelProps) {
+  const { data: printers = [] } = usePrinters();
+  const printersById = useMemo(
+    () => new Map(printers.map((printer) => [printer.id, printer.name])),
+    [printers]
+  );
   const [cameras, setCameras] = useState<CameraDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +45,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
     snapshotUrl: '',
     location: '',
     sortOrder: 0,
-    isEnabled: true
+    isEnabled: true,
+    printerId: undefined
   });
 
   // State for "Add from Printer" modal
@@ -100,7 +107,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
         snapshotUrl: '',
         location: '',
         sortOrder: 0,
-        isEnabled: true
+        isEnabled: true,
+        printerId: undefined
       });
       setShowForm(false);
       await loadCameras();
@@ -159,7 +167,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
       snapshotUrl: '',
       location: '',
       sortOrder: 0,
-      isEnabled: true
+      isEnabled: true,
+      printerId: undefined
     });
   };
 
@@ -191,7 +200,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
       snapshotUrl: printer.cameraSnapshotUrl || '',
       location: '',
       sortOrder: cameras.length,
-      isEnabled: true
+      isEnabled: true,
+      printerId: printer.id
     });
     setShowPrinterModal(false);
     setShowForm(true);
@@ -356,6 +366,9 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
                   Location
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                  Printer
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
@@ -384,6 +397,9 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-pf-text-secondary">{camera.location || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-pf-text-secondary">
+                    {camera.printerId ? printersById.get(camera.printerId) ?? 'Linked printer' : '-'}
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
