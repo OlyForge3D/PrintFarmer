@@ -550,3 +550,39 @@ Added GET `/api/spoolman/filter-options` endpoint to expose filter definitions f
 
 
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
+
+---
+
+## 2026-05-21 — Mobile Controls Phase 1 (archived from main history)
+
+_Detailed entries moved from ripley/history.md for space on 2026-05-26._
+
+### 2026-05-21T09:38-07:00 — Issue #302 AMS slot count investigation (no code change)
+
+**Symptom:** Bambu printer with AMS shows AMS panel "3/3 loaded" + duplicate "Spools — Assign spools to each toolhead" list (T0–T3) below.
+
+**Root cause (backend):** `src/infra/Services/Printers/PrintersService.cs:2959` — `for (int i = 1; i < mmuGateCount; i++)`. Default `mmuGateCount=4` ⇒ creates only 3 MmuGate toolheads at indices 1,2,3. T0 stays Physical. The test `MmuGateAutoCreationTests.CreatePrinter_MultiMaterialTrue_CreatesThreeMmuGateToolheads` codifies the wrong count, so it's the seeding semantics that need re-deciding (total gates vs. total toolheads), not just a mechanical loop fix.
+
+**Frontend is data-driven on the count.** `AmsSlotVisualization.tsx` renders `unit.slots.length` from props; `BAMBU_AMS_UNIT_SIZE = 4` is the chunk size for splitting >5 gates into multiple AMS units, not a slot cap. There is no hardcoded "3" anywhere in the renderer.
+
+**Duplicate "Spools" list (frontend follow-up):** `PrinterDetailsSidebar.tsx:1175-1247` only hides the lower section when `displayPrinter.mmuStatus.gates` has live gates (Klipper Happy-Hare path). Bambu data flows through `printerDetails.toolheads`, not `mmuStatus`, so the dedup guard never fires for Bambu. ~10-line fix to also hide when `printerDetails.toolheads` contains MmuGate entries — but it must land **after** the backend slot-count fix or the user loses any UI for the missing 4th slot.
+
+### 2026-05-21 — Issue #302 backend root cause
+- AMS slot rendering bug: `CreateMmuVirtualToolheads` loop is `i < mmuGateCount` → produces N-1 gates. Fix is loop bound, not frontend.
+- Triage discipline: posted analysis comment on #302, tagged `area:backend`, handed off to Lambert without implementing.
+- Frontend dedup of lower 'Spools' section is still queued (after backend lands).
+
+### 2026-05-21 — Issue #302 frontend dedup shipped (PR #305)
+- Removed duplicate lower "Spools" section in `AmsSlotVisualization` once Lambert's backend gate-count fix (PR #303) was on `development`.
+- PR #305 merged; issue #302 CLOSED end-to-end (backend + frontend both landed).
+
+### 2026-05-21 — Picked up bug #309 (team update)
+- Mobile-controls v1 board cleared this round (Hudson #289 PR #306, Lambert #290 PR #308, #276 verified shipped).
+- User filed bug #309: spaghetti detection shield in web app says "printer not printing" on printers that ARE actively printing. State-detection mismatch on the shield component. Investigation underway — own this through fix.
+
+### 2026-05-21T23:14Z — Issue #309 spaghetti shield triage (backend handoff, no code change)
+- **Symptom:** Shield/modal says "Printer is not actively printing." on actively-printing printers (two reproducing).
+- **Root cause:** Backend, not frontend. `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs:107-117` (`EvaluateMonitoringWindow`) requires `status.State == "Printing"` (case-insensitive, exact); any other normalized state (`Paused`, `Heating`, `Resuming`, `Pausing`, ...) returns the literal `NotPrintingReason = "Printer is not actively printing."` defined at line 36. Inconsistent with the busy-state set established in PR #308 / issue #290 (`PrinterControlGate.IsBusyForControl({Printing, Pausing, Paused, Resuming, Cancelling, Heating})`).
+- **Frontend pass-through confirmed:** `usePrinterFailureDetectionStatus` is a pure DTO consumer; `FailureDetectionMonitoringBadge` and `failureDetectionStatus.ts` render backend `state`/`reason` verbatim. No client-side predicate to fix.
+- **Action:** Posted analysis to #309 (comment 4513509761), added `area:backend` label, handed to Lambert. No PR, no worktree.
+- **Lesson:** When a UI string is the exact literal of a backend `const string`, the frontend is almost certainly a passive renderer — grep the literal against `*.cs` before diving into React code. Same triage discipline as #302.

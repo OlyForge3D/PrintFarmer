@@ -406,3 +406,106 @@ All `accessibilityLabel`/`Hint`/`Value` strings now go through `String(localized
 - `mobile/PrintFarmer/Views/PrinterControls/JogSubgroup.swift`
 - `mobile/PrintFarmer.xcodeproj/project.pbxproj`
 
+---
+
+## Camera Management Endpoint Detection and Association UI (2026-05-26T09:45:35.148-07:00)
+
+**Decision:** Camera management now treats printer association and endpoint discovery as first-class camera-editing workflows.
+
+**Owner(s):** Lambert (Backend), Ripley (Frontend)
+
+**Status:** Implemented on `development` in commits `384868e28`, `353cd7ecb`, and earlier Ripley commit `f0589aec0`.
+
+### Backend Contract
+
+- Added `POST /api/cameras/detect-endpoints` with request `{ "printerId": "<guid>" }`.
+- Success response uses camelCase camera endpoint fields: `streamUrl`, `snapshotUrl`, `detected`, and `source`.
+- Missing printers return `404`; unsupported backends and probe failures return `200` with `detected: false`.
+- Added `IPrinterCameraProbe` in the discovery layer and concrete Moonraker/Klipper, OctoPrint, and SDCP/Elegoo probes.
+- `CameraDto` now includes `printerId` and `printerName` so list/get/update responses can show linked printers.
+
+### Frontend UX
+
+- Camera cards expose farm-admin Edit and Delete actions using shared modal components.
+- Edit Camera includes an Associated Printer dropdown and Detect Endpoints button.
+- Detected endpoints populate Stream URL and Snapshot URL fields for the selected printer.
+- Camera management table now includes a Printer column using linked `printerName`.
+- Camera preview media uses `object-contain bg-black` so stream frames are not zoomed or cropped in fixed-aspect cards.
+
+### Validation
+
+- Ripley earlier dispatch: build, lint, and focused camera tests passed.
+- Ripley-1: `npm run build` and `npm run lint` passed; no affected component tests existed.
+- Lambert: restore and API build passed; focused camera tests passed. Full suite/format had pre-existing unrelated failures.
+
+### Follow-up
+
+- Add concrete endpoint probes for PrusaLink/Buddy companion cameras, FlashForge, and any future Bambu backend once backend-specific camera contracts are known.
+
+---
+
+## Decision: Printer Offline Classification (lambert-1, 2026-05-26)
+
+Moonraker/Klipper online state for list/detail surfaces is cached by `MoonrakerSubscriptionService` and served by `PrintersService.GetAllCompleteDtosAsync`.
+
+- Treat explicit Moonraker `webhooks.state != ready` as not-ready/offline, but do not require `webhooks` to be present on every subscription/status payload.
+- A successful Moonraker status payload containing printer objects (`toolhead`, `print_stats`, `display_status`, etc.) proves the printer is reachable and should keep `IsOnline=true`.
+- Transport failures, exhausted reconnect attempts, `notify_klippy_disconnected`, and `notify_klippy_shutdown` remain the paths that mark the printer offline.
+- HTTP polling fallback must update `PrinterStatusCache`, not just SignalR, so REST clients and mobile clients do not read stale status.
+
+---
+
+## Decision: arco1 Runtime Evidence — List vs. Detail Cache Discrepancy (lambert-probe2, 2026-05-26)
+
+UI `/printers` shows `ARCO1` as `Offline`, but API detail endpoint shows `isOnline: true` for the same printer. Direct Moonraker is reachable.
+
+**Diagnosis:** The bad data is not Moonraker. Strongest inconsistency is inside PrintFarmer API/status composition: the list endpoint has stale or misclassified `isOnline: false` while the detail endpoint has `isOnline: true` moments later.
+
+**Root cause candidate:** `src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerSubscriptionService.cs` around `_klippyReadyState`, `EmitConsolidatedStatusAsync`, and offline updates, plus list endpoint merge logic that combines persisted printer rows with `PrinterStatusCache`.
+
+**Artifacts:** captured under `arco1-probe2/` (printers-page.png, dashboard.png, arco1-detail/list JSON, moonraker endpoint responses, SignalR frames).
+
+---
+
+## Decision: Login Audit Log Backend (lambert-2, 2026-05-26)
+
+**Status:** Implemented — awaiting review. Migrations committed for Postgres + SqlServer.
+
+Added dedicated `LoginAuditEntry` table with `Username`, `IpAddress`, `UserAgent`, `Success`, `Timestamp`, `FailureReason` (indexed columns for fast queryable audit).
+
+### API Contract
+
+`GET /api/admin/security/login-audit` (requires `farm_admin` role).
+
+Query params: `from` / `to`, `username` (substring), `success` (bool), `page` / `pageSize` (default 50, max 200).
+
+Response: paginated `{ items: LoginAuditDto[], totalCount, page, pageSize }`.
+
+### Hook Point
+
+`AuthController.LoginAsync` — captures raw HTTP context (IP, User-Agent) at controller level.
+
+### TODOs
+
+- **Retention policy**: No cleanup job; recommend 30/90-day trim.
+- **Rate-limit correlation**: Future work with `AuthenticationRateLimitMiddleware`.
+- **Ripley UI**: See `ripley-2` decision below.
+
+---
+
+## Decision: Login Audit Log UI (ripley-2, 2026-05-26)
+
+**Status:** Implemented on `development`. 23 tests passing.
+
+Built `/admin/security/login-audit` page using project's Tailwind components (`Badge`, `DataTable`, `Tooltip`, `Select`, `Input`).
+
+### Key Decisions
+
+1. **UI library:** Project's custom `@/common/components/ui` (consistency with other admin pages).
+2. **Navigation:** Added "Security" section header in admin nav as peer to "Settings".
+3. **Tri-state success filter:** URL param stores `''` (all), `'true'` (success only), `'false'` (failure only).
+4. **Filter state:** Batch updates with `setMany({ ...update, page: 1 })`; debounced username field via individual setter.
+5. **API:** Direct `apiClient.get<T>()` in `securityAuditService.ts` (avoids modifying shared `api.ts` until pattern is stable).
+
+---
+

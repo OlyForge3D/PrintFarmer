@@ -74,7 +74,7 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 ## Recent
 
-_Last 5 most-recent learnings preserved from full history. Older entries are in `history-archive.md` (archived 2026-05-21 by Scribe)._
+_Last 5 most-recent learnings preserved from full history. Older entries are in `history-archive.md` (archived 2026-05-21 by Scribe, updated 2026-05-26)._
 
 - **2026-05-21 — Mobile spike #279 verdict (c).** iOS client must fully gate `/temps` and `/move` client-side based on cached `Printer.Status`. Backend forwards both routes blindly across all plugins (Moonraker silently accepts mid-print; PrusaLink/OctoPrint firmware 409s collapse to bool→404; FlashForge has no movement; SDCP implements neither). Zero test coverage on either route. For Hudson (#284–#286): disable temp/move when status ∈ `{Printing, Pausing, Paused, Resuming, Cancelling, Heating}`; re-evaluate on every SignalR `printerupdated`. Follow-up #290 reassigned to Dallas.
 - **2026-05-12 — Buddy Camera IP frontend field (PFarm1-873d).** `buddyCameraIp?: string` added to `UpdatePrinterDto` and `PrinterDetails` types. New "Camera Configuration" section in `EditPrinterModal.tsx` rendered conditionally on `formData.backend === PrinterBackend.PrusaLink`. Shows derived `rtsp://{ip}:554/live/` preview when an IP is entered. Field is edit-only (not on `AddPrinterModal`/`CreatePrinterDto`); set after creation via the edit modal. Used `handleInputChange` for dirty tracking, consistent with existing camera URL fields.
@@ -82,49 +82,22 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - **2026-04-25 — Hollow cut detection (PFarm1-4ex2).** Cut tool already handles disjoint cap loops correctly: `orderCapEdges` returns `THREE.Vector3[][]` and the consumer iterates each loop through `earClipTriangulate`. Only nested loops (true holes — inner ring of a hollow tube cross-section) remain v1 limitation. AABB containment in the cap's 2D projection plane is a cheap heuristic for detecting nested loops without point-in-polygon tests. Full hole bridging (constrained Delaunay or ear-clipping with bridge edges) deferred from v1 fix.
 - **2026-01-12 — Multi-axis Cut + Drag interference fix.** `draggable` prop on `STLModel` / `PrebuiltSTLModel` extended to be false when ANY tool mode is active (`cutMode`, `supportPaintMode`, `seamPaintMode`, `colorPaintMode`, `fuzzySkinPaintMode`, `measureMode`, `textPlacementMode`). Rewrote `CutPlaneOverlay.tsx` to support X/Y/Z axis cuts with axis-specific plane orientation (Z: rot(0,0,0), X: rot(0,π/2,0), Y: rot(π/2,0,0)). Red sphere drag handle (3mm radius) at plane center; cursor `ns-resize` for Z, `ew-resize` for X/Y. New OrcaSlicer-style UI panel: Mode selector, build volume display, cut position (axis dropdown + numeric mm input + reset), Add connectors (disabled), After-cut options (Keep upper/lower, Place on cut, Flip, Cut to parts), Perform cut button. R3F `useFrame` syncs plane/handle position with model transform.
 
-- 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`.
+---
 
-## 2026-05-21T09:38-07:00 — Issue #302 AMS slot count investigation (no code change)
+## 2026-05-26 — Camera Management UI + Login Audit Frontend
 
-**Symptom:** Bambu printer with AMS shows AMS panel "3/3 loaded" + duplicate "Spools — Assign spools to each toolhead" list (T0–T3) below.
+### Camera endpoint detection integration
+- Camera card management now supports Edit/Delete actions (admin-only).
+- Edit modal allows selecting an associated printer and detecting endpoints.
+- Detected `streamUrl` and `snapshotUrl` auto-populate from backend probe.
+- Validation: build, lint, and targeted camera tests passed.
 
-**Root cause (backend):** `src/infra/Services/Printers/PrintersService.cs:2959` — `for (int i = 1; i < mmuGateCount; i++)`. Default `mmuGateCount=4` ⇒ creates only 3 MmuGate toolheads at indices 1,2,3. T0 stays Physical. The test `MmuGateAutoCreationTests.CreatePrinter_MultiMaterialTrue_CreatesThreeMmuGateToolheads` codifies the wrong count, so it's the seeding semantics that need re-deciding (total gates vs. total toolheads), not just a mechanical loop fix.
-
-**Frontend is data-driven on the count.** `AmsSlotVisualization.tsx` renders `unit.slots.length` from props; `BAMBU_AMS_UNIT_SIZE = 4` is the chunk size for splitting >5 gates into multiple AMS units, not a slot cap. There is no hardcoded "3" anywhere in the renderer.
-
-**Duplicate "Spools" list (frontend follow-up):** `PrinterDetailsSidebar.tsx:1175-1247` only hides the lower section when `displayPrinter.mmuStatus.gates` has live gates (Klipper Happy-Hare path). Bambu data flows through `printerDetails.toolheads`, not `mmuStatus`, so the dedup guard never fires for Bambu. ~10-line fix to also hide when `printerDetails.toolheads` contains MmuGate entries — but it must land **after** the backend slot-count fix or the user loses any UI for the missing 4th slot.
-
-**Action taken:** Posted analysis to issue #302 (comment 4510504154), tagged `area:backend`. Frontend dedup queued as follow-up.
-
-**Lessons:**
-- No Bambu plugin under `src/backends/`; Bambu uses generic `PrintersService` toolhead seeding driven by `MultiMaterial` flag — same path as Prusa MMU3 / Klipper MMU.
-- When a count looks "hardcoded" in React, check the loop bounds in seeding code first. `for (i = 1; i < N; i++)` with N=4 only iterates 3 times.
-- `mmuGatesToToolheads` adapter only applies to live SignalR `mmuStatus.gates` (Klipper-side). Bambu's tray data isn't surfaced through that channel.
-
-### 2026-05-21: Issue #302 backend root cause
-- AMS slot rendering bug: `CreateMmuVirtualToolheads` loop is `i < mmuGateCount` → produces N-1 gates. Fix is loop bound, not frontend.
-- Triage discipline: posted analysis comment on #302, tagged `area:backend`, handed off to Lambert without implementing.
-- Frontend dedup of lower 'Spools' section is still queued (after backend lands).
-
-### 2026-05-21 — Issue #302 frontend dedup shipped (PR #305)
-- Removed duplicate lower "Spools" section in `AmsSlotVisualization` once Lambert's backend gate-count fix (PR #303) was on `development`.
-- PR #305 merged; issue #302 CLOSED end-to-end (backend + frontend both landed).
-
-### 2026-05-21 — Picked up bug #309 (team update)
-- Mobile-controls v1 board cleared this round (Hudson #289 PR #306, Lambert #290 PR #308, #276 verified shipped).
-- User filed bug #309: spaghetti detection shield in web app says "printer not printing" on printers that ARE actively printing. State-detection mismatch on the shield component. Investigation underway — own this through fix.
-
-### 2026-05-21T23:14Z — Issue #309 spaghetti shield triage (backend handoff, no code change)
-- **Symptom:** Shield/modal says "Printer is not actively printing." on actively-printing printers (two reproducing).
-- **Root cause:** Backend, not frontend. `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs:107-117` (`EvaluateMonitoringWindow`) requires `status.State == "Printing"` (case-insensitive, exact); any other normalized state (`Paused`, `Heating`, `Resuming`, `Pausing`, ...) returns the literal `NotPrintingReason = "Printer is not actively printing."` defined at line 36. Inconsistent with the busy-state set established in PR #308 / issue #290 (`PrinterControlGate.IsBusyForControl({Printing, Pausing, Paused, Resuming, Cancelling, Heating})`).
-- **Frontend pass-through confirmed:** `usePrinterFailureDetectionStatus` is a pure DTO consumer; `FailureDetectionMonitoringBadge` and `failureDetectionStatus.ts` render backend `state`/`reason` verbatim. No client-side predicate to fix.
-- **Action:** Posted analysis to #309 (comment 4513509761), added `area:backend` label, handed to Lambert. No PR, no worktree.
-- **Lesson:** When a UI string is the exact literal of a backend `const string`, the frontend is almost certainly a passive renderer — grep the literal against `*.cs` before diving into React code. Same triage discipline as #302.
-
-### 2026-05-26T09:41:12-07:00 — Camera card edit/delete actions
-- Added admin-only Edit/Delete controls to camera feed cards and moved management-row editing into a shared `EditCameraModal`.
-- Camera edits reuse `cameraService.updateCamera`; deletes use the existing delete API with camera-name confirmation copy and refresh the camera list after success.
-- Validation: React build, lint, and targeted camera tests passed locally.
+### Login audit log UI (23 tests)
+- Built `/admin/security/login-audit` page using project Tailwind components.
+- Features: date-range filter, username substring search, success/failure toggle, pagination.
+- Navigation: added "Security" section header as peer to "Settings" in admin nav.
+- API integration: direct `apiClient.get<T>()` in `securityAuditService.ts`.
+- Pushed to `development`; awaiting E2E validation.
 
 ## Learnings
 
