@@ -235,6 +235,35 @@ public class PasswordResetToken
 }
 
 /// <summary>
+/// Dedicated audit log for login attempts — both successes and failures.
+/// Provides an admin-facing security view separate from the broader AuthAuditLog.
+/// Username is stored as submitted (truncated, never interpreted); IpAddress supports IPv6.
+/// </summary>
+public class LoginAuditEntry
+{
+    /// <summary>Unique identifier for this entry.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>UTC timestamp when the attempt occurred. Stored as DateTime UTC per project conventions.</summary>
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Username or email as submitted by the client. Nullable — attacker junk is allowed.</summary>
+    public string? Username { get; set; }
+
+    /// <summary>Whether the login attempt succeeded.</summary>
+    public bool Success { get; set; }
+
+    /// <summary>Real client IP (X-Forwarded-For respected). Stored as string to support IPv6.</summary>
+    public string IpAddress { get; set; } = string.Empty;
+
+    /// <summary>User-Agent header value, if present.</summary>
+    public string? UserAgent { get; set; }
+
+    /// <summary>Normalized failure code, e.g. "invalid_credentials", "account_locked", "account_disabled". Null on success.</summary>
+    public string? FailureReason { get; set; }
+}
+
+/// <summary>
 /// Password policy configuration entity.
 /// Defines password complexity requirements for the system.
 /// </summary>

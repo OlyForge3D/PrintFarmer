@@ -126,6 +126,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
 
+    // Login attempt audit log (focused admin-facing security view)
+    public DbSet<LoginAuditEntry> LoginAuditEntries => Set<LoginAuditEntry>();
+
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
 
     // API Keys for OctoPrint API
