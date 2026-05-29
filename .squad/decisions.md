@@ -1,8 +1,29 @@
+## Decision: Round 11 — Bishop APPROVE #11, Hicks CR #13
+
+**Date:** 2025-11-21
+**Authors:** Bishop (code review), Hicks (code review)
+**Status:** In Review (PR #11 open + APPROVED, PR #13 open + REQUEST_CHANGES)
+
+### Summary
+
+- **Bishop re-review (PR #11 — preheat):** ✅ APPROVE. Cool Down fix confirmed working.
+  - Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/11#issuecomment-4570039961
+- **Hicks review (PR #13 — jog):** ❌ REQUEST_CHANGES. Two blockers identified:
+  1. **Per-axis capability gating:** `JogSubgroup` always shows X/Y/Z buttons; should differentiate (show only Z if backend caps differ).
+  2. **Test coverage:** Jog tests bypass SwiftUI view layer; don't verify picker selection, button taps, or view-level gating.
+  - Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570039264
+
+### Correction Note
+
+**Round 10 status mislabel:** PR #11 was listed as "Merged" in round 10 entry. **Actual state: Open.** PR status must always be verified via `gh pr view --repo <owner>/<repo> <number>` at decision time, not assumed.
+
+---
+
 ## Decision: Round 10 — Cool Down Label & Jog Subgroup
 
 **Date:** 2025-11-21
 **Authors:** Hudson (iOS)
-**Status:** In Review (PR #11 merged, PR #13 open)
+**Status:** In Review (PR #11 open, PR #13 open)
 
 ### Summary
 

@@ -29,3 +29,9 @@ _(append new learnings below this line)_
 - PrintFarmerMobile #1 — APPROVE: capability gating, 1 mm jog default, and /homexy + /homez route fixes are all present.
 - PrintFarmer #313 — APPROVE: stale override is idle-only in both badge and overlay, and unsupported-backend regressions are covered.
 - PrintFarmerMobile #9 — APPROVE: Printer.progress is now canonical 0-100 end to end, view bindings convert only where needed, no persisted progress migration risk was found, and tests pin 42.7 / 100.0 / 150.0 / -5.0.
+
+### 2025-11-21 — PrintFarmerMobile #11 re-review (preheat, Cool Down fix)
+
+- **Verdict:** ✅ APPROVE.
+- **Fix confirmed:** Cool Down preset label fixed (removed hardcoded "Off" ternary in `PreheatPreset.tempLabel`; format string now produces "0° / 0°" uniformly).
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/11#issuecomment-4570039961

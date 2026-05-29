@@ -32,3 +32,15 @@ _(append new learnings below this line)_
 ### 2026-05-21: PR #300 review (home subgroup)
 - Verdict ✅ approved via `--comment`.
 - Required Hudson rebase after #299 merged (pbxproj sibling conflicts).
+
+### 2025-11-21 — PrintFarmerMobile #13 review (jog subgroup)
+
+- **Verdict:** ❌ REQUEST_CHANGES. Two critical gaps identified.
+- **Blocker 1 — Per-axis capability gating:** `JogSubgroup` always renders X/Y/Z buttons regardless of backend capability state. Should differentiate: if backend supports only Z-axis jog (not XY), view should hide XY buttons or show disabled state. Spec requires axis-level gating, not subgroup-level binary.
+- **Blocker 2 — Test coverage gap:** Jog tests bypass SwiftUI view layer entirely. Tests drive `viewModel.move()` directly; they do not verify:
+  - Picker selection (X/Y/Z axis, step mm) affects correct button press.
+  - Button tap routing to correct `move(axis:distance:)` variant.
+  - Capability-gated button visibility/disabling in the actual view.
+  - These are SwiftUI-layer concerns and must be tested at the view level (not mocked).
+- **Lesson:** Capability gating is per-axis, not per-subgroup. Mobile spec #279/#280 distinguish between `supportsXYJog`, `supportsZJog`, `supportsHomingXY`, `supportsHomingZ`. View must reflect all four flags at button level.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570039264
