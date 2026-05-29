@@ -23,3 +23,9 @@ _(append new learnings below this line)_
 - PrintFarmerMobile #3 — APPROVE: farm_admin gate treats nil as non-admin and has solid role-case coverage.
 - PrintFarmerMobile #4 — APPROVE: temp/home/move routing looks correct, 409 conflict remains distinguishable, and nil fields are omitted from JSON.
 - PrintFarmer #313 — REQUEST_CHANGES: live-status override clobbers the disabled/unsupported-backend reason path and lacks a regression test for that case.
+
+## Review Pass r4 2026-05-28
+
+- PrintFarmerMobile #1 — APPROVE: capability gating, 1 mm jog default, and /homexy + /homez route fixes are all present.
+- PrintFarmer #313 — APPROVE: stale override is idle-only in both badge and overlay, and unsupported-backend regressions are covered.
+- PrintFarmerMobile #9 — APPROVE: Printer.progress is now canonical 0-100 end to end, view bindings convert only where needed, no persisted progress migration risk was found, and tests pin 42.7 / 100.0 / 150.0 / -5.0.
