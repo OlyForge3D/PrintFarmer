@@ -1989,13 +1989,21 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/home")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         bool ok = await _printersService.SendHomeAsync(id, ct);
         _telemetryService.RecordPrinterOperation("home_all", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
@@ -2009,13 +2017,21 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homexy")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         bool ok = await _printersService.HomeXYAsync(id, ct);
         _telemetryService.RecordPrinterOperation("home_xy", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
@@ -2029,13 +2045,21 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the Z-axis homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homez")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         bool ok = await _printersService.HomeZAsync(id, ct);
         _telemetryService.RecordPrinterOperation("home_z", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
