@@ -12,6 +12,12 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-23 — PR #14 APPROVE (Brett snapshot spike)
+
+- **Verdict:** ✅ APPROVE.
+- **Context:** FlashForge temp claim matches `fallback(for: .flashForge)` on stack branch. Noted: older `PrinterBackendCapabilitiesTests` fixture JSON shows FlashForge temp support off — Brett should describe source more precisely in any revision.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/14#issuecomment-4570277291
+
 ### 2025-11-22 — PR #13 re-review (jog subgroup init-state bug)
 
 - **Verdict:** ❌ REQUEST_CHANGES (same PR, real init bug uncovered on second pass).

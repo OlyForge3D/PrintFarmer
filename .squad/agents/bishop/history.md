@@ -12,6 +12,15 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-23 — PR #15 REQUEST_CHANGES (Newt integration plan)
+
+- **Verdict:** ❌ REQUEST_CHANGES.
+- **Blockers:**
+  1. **Home gating logic mis-stated:** Plan re-states gating as `canHomeAll` alone instead of OR of `canHomeAll || canHomeXY || canHomeZ` per PR #12 implementation. Spec mismatch.
+  2. **ViewModel scope under-specified:** `PrinterControlsViewModel` still requires `printerService` injection — plan doesn't address injection source or scope.
+  3. **Test scope under-specified:** #289 implies a new test file/test target update despite plan's "2 files / no new files" claim. Actual scope is unclear.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570286051
+
 ### 2026-05-21: PR #299 review (jog subgroup)
 - Verdict ✅ approved via `--comment` (Ruling G — self-PR cannot `--approve`).
 - Coordinator squash-merged with `--admin`.

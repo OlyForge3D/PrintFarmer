@@ -1,3 +1,17 @@
+## Decision: Round 18 — Lambert PR #318 (backend firmware-409); Hicks APPROVE #14; Bishop CR #15
+
+**Date:** 2025-11-23
+**Authors:** Lambert (backend), Hicks (iOS review), Bishop (backend review), Coordinator
+**Status:** PR #318 merged (plugins firmware-409 propagation), PR #14 APPROVE snapshot spike (Brett), PR #15 REQUEST_CHANGES (Newt integration under-spec)
+
+### Summary
+
+- **PR #318 (Backend busy-error propagation):** Moonraker `SendGcodePrivateAsync` throws on HTTP 409/503; SDCP `StartPrintAsync` round-trips status on Ack failure (new `IsPrintingStatus` internal helper + `InternalsVisibleTo`); FlashForge `StartPrintAsync` echoes `~M119` check on rejection (`IsBuildingStatus` promoted to internal). All backends now translate firmware signals into `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy` → 502. Controller gate (`PrinterControlGate.IsBusyForControl`) remains primary defense; plugin layer is defense-in-depth. 23 tests, 3 new files, all passing. Build clean, no new warnings. **Merged.**
+- **PR #14 APPROVE (Brett snapshot spike):** FlashForge temp claim matches `fallback(for: .flashForge)` on stack branch. Note: older `PrinterBackendCapabilitiesTests` fixture JSON shows FlashForge temp support off — Brett should describe source more precisely in any revision.
+- **PR #15 REQUEST_CHANGES (Newt integration plan):** Plan re-states Home gating incorrectly (restates `canHomeAll` alone instead of OR of `canHomeAll || canHomeXY || canHomeZ` per PR #12 implementation). ViewModel scope under-specified (`PrinterControlsViewModel` still requires `printerService` injection — plan doesn't address). Test scope under-specified (#289 implies a new test file/test target update despite plan's "2 files / no new files" claim).
+
+---
+
 ## Decision: Round 14 — Hudson PR #13 init-state fix; Bishop CR #12 spec-string hazard persists
 
 **Date:** 2025-11-22
