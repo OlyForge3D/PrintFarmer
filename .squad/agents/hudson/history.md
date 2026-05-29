@@ -45,6 +45,13 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - Confirmed round 13: PR #12 (HomeButton fix) merged → PR #13 (Jog subgroup) rebased onto updated `squad/285-home-subgroup` cleanly.
 - Always use `git commit -F <tempfile>` for multi-line messages with shell metacharacters.
 
+### Spec Branch Hazard (Round 14)
+**Spec strings from #283 live on `squad/283-design-printer-controls-section`, NOT on feature branches stacked off main.** When implementing against a spec, either:
+- `git show squad/283-design-printer-controls-section:docs/design/printer-controls-section.md` to extract exact spec strings,
+- Merge the spec branch first, or
+- Rely on coordinator-inlined exact strings in prompts.
+**Problem:** Reconstructing spec strings from memory causes VoiceOver label mismatches (e.g., "Double-tap" → "double-tap", axis-specific wording drift). **Fix:** Always reference the source branch or get strings inlined by coordinator before coding.
+
 ### Authentication & Role Gating (Issue #274)
 - `AuthViewModel` holds `currentUser: UserDTO?` with `currentUserRole: String?` computed property (returns "farm_admin" if present in roles array, else first role, else nil).
 - `UserDTO.roles: [String]` already exists in /api/auth/me — no backend change needed.

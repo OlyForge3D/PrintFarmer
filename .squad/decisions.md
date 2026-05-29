@@ -1,3 +1,18 @@
+## Decision: Round 14 — Hudson PR #13 init-state fix; Bishop CR #12 spec-string hazard persists
+
+**Date:** 2025-11-22
+**Authors:** Hudson (iOS), Bishop (code review), Coordinator
+**Status:** PR #13 merged (init-state fix), PR #12 REQUEST_CHANGES (spec strings + test gaps)
+
+### Summary
+
+- **PR #13 (Jog subgroup init fix):** `JogSubgroup` now has explicit `init` seeding `_selectedAxis = State(initialValue:)` from first available axis in capability subset. Added `canJogX/Y/ZOverride: Bool?` to ViewModel (nil = fallback to `supportsMovement`). Three new init-state tests: Z-only → `.z`, XY-only → `.x`, Y-only → `.y`. **Merged.**
+- **Bishop re-review (PR #12):** ❌ REQUEST_CHANGES (again). **Same gaps:** VoiceOver hints don't match spec **verbatim** (e.g., "Double-tap" with hyphen + XY/Z-specific wording). Tests hard-code expected strings instead of asserting through rendered `HomeButton`. Root cause: spec doc lives on `squad/283-design-printer-controls-section` (Newt's PR #1, not yet merged). Hudson's working branches don't have the spec file; he reconstructs strings from memory. **Fix:** Coordinator now inlines exact spec strings in Hudson's prompts, and directed him to `git show squad/283-design-printer-controls-section:docs/design/printer-controls-section.md`.
+- **Durable rule added:** Spec strings (VoiceOver labels, hints, button copy) must be asserted by reading from rendered view, not comparing hardcoded constants in tests. Constants in tests = compile-time tautology, not spec validation.
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570135789
+
+---
+
 ## Decision: Round 13 — Hudson fix #12, Hicks CR #13 rebase init-state bug
 
 **Date:** 2025-11-22
@@ -1091,3 +1106,8 @@ Scribe should flag in post-merge review:
 2. **VoiceOver spec adherence rule:**
    - VoiceOver labels and hints must match `docs/design/printer-controls-section.md` verbatim where the spec provides them.
    - Reviewers must cross-check accessibility audit against spec; mismatch is a blocker.
+
+3. **Spec-string testing rule (effective immediately):**
+   - Spec strings (VoiceOver labels, hints, button copy) must be asserted by reading from the rendered view, not comparing against hardcoded constants in tests.
+   - Constants in tests = compile-time tautology, not a spec check.
+   - Pattern: render view with fixture; read `.accessibilityLabel`, `.accessibilityHint` from inspected element; compare to spec source string.
