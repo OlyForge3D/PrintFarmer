@@ -85,6 +85,22 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 
 ## Learnings
 
+### 2026-05-28 — #290 Status-Gate Guards
+
+- **Layer choice:** 409 gate lives in the **controller** (`GatePrinterControlAsync`), not in `PrintersService`. Rationale: the cache read is a cross-cutting HTTP concern; the service shouldn't know about HTTP status codes. Service layer handles plugin-level busy signals via `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy` → 502.
+- **Gate states:** `PrinterControlGate.BusyStates` = Printing, Pausing, Paused, Resuming, Cancelling, Heating — aligned with `PrintFailureMonitorService` active-print set (PR #310 keeps them in sync).
+- **502 vs 409:** 409 = "our cache says you're printing, stop client-side." 502 = "firmware said no after we tried." Two distinct failure modes, two distinct codes.
+- **Plugin 409 propagation (OctoPrint + PrusaLink):** Both `OctoPrintClient` and `PrusaLinkApiClient` detect `HttpStatusCode.Conflict` in the temp/jog HTTP responses and throw `PrinterBackendBusyException`. `PrintersService` catches it → `BackendBusy`. This is scoped to SetTemp/Jog only — other capabilities unchanged.
+- **Key file paths:**
+  - `src/infra/Services/Printers/PrinterControlGate.cs`
+  - `src/infra/Services/Printers/PrinterControlOutcome.cs`
+  - `src/infra/Services/Printers/PrinterBackendBusyException.cs`
+  - `src/api/Controllers/PrintersController.cs` (lines ~2044–2155, `GatePrinterControlAsync` + `MapControlOutcome`)
+  - `src/tests/Farm.Web.Api.Tests/Controllers/PrintersControllerControlGuardsTests.cs`
+  - `src/backends/Farm.Backend.Plugin.OctoPrint/OctoPrintClient.cs` (409 throws in SetBed/SetHotend/Jog)
+  - `src/backends/Farm.Backend.Plugin.PrusaLink/PrusaLinkApiClient.cs` (409 throws in SetToolTemp/SetBedTemp/JogPrintHead)
+- **Test pattern for gated endpoints:** mock `IPrintersService.FindByIdAsync` + `IPrinterStatusCacheReader.GetStatus`, assert no downstream service call when gate fires.
+
 - Printer entity already has `CameraStreamUrl`/`CameraSnapshotUrl` fields + `ICollection<Camera> Cameras` nav property — two parallel camera tracks exist
 - `EditPrinterModal.tsx` already has a Camera Configuration section with Auto-Detect button (lines ~1040-1070)
 - `CameraService` has `CreateForPrinterAsync(printerId, dto)` — can be reused for Buddy camera creation
