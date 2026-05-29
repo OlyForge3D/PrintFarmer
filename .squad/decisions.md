@@ -1041,3 +1041,37 @@ Scribe should flag in post-merge review:
 - **R8:** Gorman #278 → Hudson `squad/284` branch (same race pattern).
 
 **Action:** Log this as a standing hazard. Each agent's pre-commit `git status` verification should reduce recurrence.
+
+---
+
+## Decision: Round 12 — Bishop REQUEST_CHANGES #12 (HomeSubgroup), Hudson fixes #13 (per-axis jog gating + view tests)
+
+**Date:** 2025-11-21
+**Authors:** Bishop (code review), Hudson (fix-up)
+**Status:** In Review (PR #12 open + REQUEST_CHANGES, PR #13 open + awaiting re-review)
+
+### Summary
+
+- **Bishop re-review (PR #12 — home):** ❌ REQUEST_CHANGES.
+  - **Blocker 1:** VoiceOver labels and hints do not match `docs/design/printer-controls-section.md` spec verbatim.
+  - **Blocker 2:** Tests bypass SwiftUI view layer — `JogSubgroupTests` exercised `viewModel` state directly instead of rendering `JogSubgroup` view and verifying picker selection, button visibility, and axis gating through the UI.
+  - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570057941
+
+- **Hudson fix-up (PR #13 — jog):** ✅ Addresses review blockers from Round 11.
+  - **Per-axis capability scaffolding:** Added `canJogX`, `canJogY`, `canJogZ` boolean flags to `PrinterControlsViewModel` (all currently derived from shared `supportsMovement` flag; seam left open for future backend differentiation). Aggregate `canJog` retained for compatibility.
+  - **View-level gating:** Replaced single `canJog` gate with `hasAnyJogCapability` check; `availableAxes` filters picker options by per-axis flags; picker auto-snaps `selectedAxis` when unavailable.
+  - **View-layer tests:** Rebuilt `JogSubgroupTests` to exercise rendered `JogSubgroup` view, not viewmodel state. Added testability extensions (`hasAnyJogCapabilityForTesting`, `canJogX/Y/ZForTesting`, `availableAxisLabelsForTesting`) matching `HomeSubgroup`/`PreheatSubgroup` pattern.
+  - **Caveat:** xcodebuild cannot run locally (iOS 26.5 simulator not installed); `swiftc` type-check passed.
+  - **Commit:** `6344c8f`
+
+### Durable Decision Rules Captured
+
+1. **View-layer testing rule (effective immediately for all SwiftUI subgroup PRs):**
+   - Tests must exercise the rendered view, not just viewmodel state.
+   - Reviewers must reject PRs whose test suites call viewmodel constructors or state mutators directly without rendering the SwiftUI component.
+   - Pattern: use testability extensions (`.hasAnyJogCapabilityForTesting`, etc.) to inject view state; render view with `@State`; verify picker visibility, button taps, and layout gating.
+   - Add to durable rules (see section below).
+
+2. **VoiceOver spec adherence rule:**
+   - VoiceOver labels and hints must match `docs/design/printer-controls-section.md` verbatim where the spec provides them.
+   - Reviewers must cross-check accessibility audit against spec; mismatch is a blocker.

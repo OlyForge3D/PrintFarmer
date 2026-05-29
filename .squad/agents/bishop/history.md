@@ -35,3 +35,12 @@ _(append new learnings below this line)_
 - **Verdict:** ✅ APPROVE.
 - **Fix confirmed:** Cool Down preset label fixed (removed hardcoded "Off" ternary in `PreheatPreset.tempLabel`; format string now produces "0° / 0°" uniformly).
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/11#issuecomment-4570039961
+
+### 2025-11-21 — PrintFarmerMobile #12 review (home subgroup)
+
+- **Verdict:** ❌ REQUEST_CHANGES.
+- **Blockers:**
+  1. **VoiceOver spec mismatch:** Labels and hints do not match `docs/design/printer-controls-section.md` verbatim. Spec-driven text is mandatory; no improvisation.
+  2. **Test layer violation:** `HomeSubgroupTests` exercises viewmodel state directly; does not render view or verify picker selection, button taps, axis gating through SwiftUI layer. Tests must render the component and use testability extensions to access state.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570057941
+- **Durable rule established:** Apply "test the view, not the viewmodel" rule to all SwiftUI subgroup PRs going forward. Reviewers must reject PRs whose tests only exercise viewmodel state without rendering the view.

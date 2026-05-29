@@ -56,6 +56,12 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - ViewModels: `PrintFarmer/ViewModels/`
 - Auth: `PrintFarmer/Views/Auth/`, `PrintFarmer/ViewModels/AuthViewModel.swift`
 
+### 2025-11-21: Round 12 — Jog fix-up (per-axis capability scaffolding + view-level tests)
+- **Per-axis capability pattern:** Hoist per-axis capability flags (`canJogX`, `canJogY`, `canJogZ`) into `PrinterControlsViewModel` even when currently all derived from one backend flag (e.g., `supportsMovement`). Leaves clean seam for future backend differentiation without view-layer churn.
+- **View-layer test access:** Use `*ForTesting` extensions (e.g., `hasAnyJogCapabilityForTesting`, `canJogX/Y/ZForTesting`, `availableAxisLabelsForTesting`) to expose state to test harness. Pattern matches `PreheatSubgroup` / `HomeSubgroup` precedent.
+- **Durable rule:** All SwiftUI subgroup tests must exercise rendered view, not viewmodel state directly; failure to do so is a blocker for code review.
+- PR #13 commit: `6344c8f`
+
 ## Milestone Summary
 - 2026-05-20: iOS squad merged; mobile controls v1 issues assigned (#274 role gate, #275 drift, #284–#286 controls, #288 polish).
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291–#298).
