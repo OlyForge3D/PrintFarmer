@@ -229,3 +229,33 @@ Written comprehensive test suite for new ZIP bundle extraction utility. Utility 
 - Clear test names using BDD style
 - Proper setup/teardown with beforeEach
 - Both positive and negative test cases included
+
+## 2026-05-28: Printer.progress Pinning Tests (#277)
+
+**Role:** QA / Regression Specialist
+**Status:** ✅ Complete — PR #6 opened, bug #5 filed
+
+### Learnings: Printer.progress current behavior
+
+**Decoder location:** `PrintFarmer/Models/Models.swift` line 266 (custom `init(from:)`)
+
+**Current behavior:** Backend 0-100 is divided by 100 → stored as 0.0-1.0 for SwiftUI.
+```swift
+// Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
+progress = try c.decodeIfPresent(Double.self, forKey: .progress).map { $0 / 100.0 }
+```
+
+Same /100 normalization applied in three ViewModel SignalR update handlers:
+- `PrinterListViewModel.swift:46`
+- `PrinterDetailViewModel.swift:111`
+- `DashboardViewModel.swift:50`
+
+**Bug found:** `PrinterStatusDetail.progress` has no custom decoder (raw passthrough, scale unknown). `PrinterDetailViewModel` line 141 mixes `Printer.progress` (0.0-1.0) with `statusDetail?.progress` (likely 0-100) in a fallback expression — potential 100× scale error on fallback path.
+
+**Existing test wrong:** `ModelDecodingTests.testPrinterDecodesFullJSON` line 35 asserts `printer.progress == 45.5` but decoder produces `0.455`. That assertion has the wrong expected value.
+
+**Contract decision needed:** Team must choose Option A (keep 0.0-1.0 everywhere, fix fallback) or Option B (passthrough 0-100, update all ProgressView consumers). Filed as bug #5 (OlyForge3D/PrintFarmerMobile).
+
+**Pinning tests written:** `PrintFarmerTests/Models/PrinterProgressContractTests.swift` — 6 tests covering typical value (42.7→0.427), boundaries (0, 100), missing field (nil), and out-of-range without clamping (150, -5). All pin current 0.0-1.0 behavior.
+
+**Note on test execution:** iOS 26.5 simulator runtime not installed in local environment; tests confirmed correct by code review against decoder source. Build environment issue is pre-existing.
