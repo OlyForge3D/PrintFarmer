@@ -201,3 +201,9 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 - #276 verified shipped end-to-end (homedAxes across backend → SignalR → iOS decoder); closed.
 - Mobile-controls v1 board now fully clear: #275 wontfix, #276/#279/#280–#290/#302 all closed.
 - New bug #309 filed: spaghetti detection shield says "printer not printing" on actively-printing printers. Ripley investigating.
+
+## Cross-Team Note (2026-05-29)
+
+**Newt** (#283 design spec) unblocked: Status-gating validation confirmed via PR #308 merge. Controls can safely use printing/paused blocking.
+**Gorman** (#280 capabilities) unblocked: Capabilities endpoint live; UI gating design decisions finalized.
+**Hudson/Lambert:** API guards for `/temps`, `/move`, `/moveto` now live. Skill published for future reference.

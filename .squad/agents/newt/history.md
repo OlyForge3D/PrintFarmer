@@ -267,3 +267,9 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 ### Files Created
 
 - `docs/design/printer-controls-section.md` — Full design specification (611 lines)
+
+## Cross-Team Note (2026-05-29)
+
+**Dallas** (#290 status-gating) complete: API guards validated via PR #308. State blocking for controls confirmed safe.
+**Gorman** (#280 capabilities) complete: Endpoint confirmed live. Fallback table canonical.
+**Unblocked:** UI gating decisions finalized; PR OlyForge3D/PrintFarmerMobile#1 design decisions locked.

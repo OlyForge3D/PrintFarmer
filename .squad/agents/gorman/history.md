@@ -104,3 +104,9 @@
   - `mobile/PrintFarmer/Services/PrinterService.swift` — implementation with fallback
   - `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` — 15 XCTest cases
 - **Build note**: `swiftc -typecheck` clean. Local `xcodebuild` unavailable (CoreSimulator out of date). Relying on CI. PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
+
+## Cross-Team Note (2026-05-29)
+
+**Dallas** (#290 status-gating) complete: API guards for `/temps`, `/move`, `/moveto` live via PR #308. Status-gating orthogonal to capabilities.
+**Newt** (#283 design spec) complete: Design decisions locked. UI gating ready to use capabilities endpoint.
+**Unblocked:** Fallback table canonical; endpoint `GET /api/printers/{printerId}/backend-capabilities` confirmed live. PR OlyForge3D/PrintFarmerMobile#2 awaiting CI.
