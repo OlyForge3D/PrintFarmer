@@ -1,0 +1,1129 @@
+diff --git a/.github/skills/swift-codable-omit-nil/SKILL.md b/.github/skills/swift-codable-omit-nil/SKILL.md
+new file mode 100644
+index 000000000..1f8127e1c
+--- /dev/null
++++ b/.github/skills/swift-codable-omit-nil/SKILL.md
+@@ -0,0 +1,54 @@
++## Swift Codable: Omit Nil Fields from JSON Encoding
++
++**When to use:** You have a Swift request model where some fields are optional and you want the
++JSON body to omit keys entirely (not emit `null`) when those fields are nil.
++
++**Why it matters:** Many backends treat a missing key differently from `null`. Swift's default
++`Codable` synthesis emits `null` for optional properties when `encodeIfPresent` is not used.
++
++### Pattern: Custom `encode(to:)` with conditional encoding
++
++```swift
++private struct SetTemperaturesRequest: Encodable, Sendable {
++    let hotend: Double?
++    let bed: Double?
++
++    func encode(to encoder: Encoder) throws {
++        var container = encoder.container(keyedBy: CodingKeys.self)
++        if let hotend { try container.encode(hotend, forKey: .hotend) }
++        if let bed    { try container.encode(bed,    forKey: .bed)    }
++    }
++
++    enum CodingKeys: String, CodingKey {
++        case hotend, bed
++    }
++}
++```
++
++`container.encode(_:forKey:)` only runs when the value is non-nil, so missing fields are
++completely absent from the JSON output.
++
++### Alternative: `[String: Value]` dictionary
++
++When the field set is dynamic (e.g., setting one of N axes), a dictionary is cleaner:
++
++```swift
++var body: [String: Double] = ["f": Double(feedrateMmMin)]
++body[axis.lowercased()] = distanceMm
++// Result: {"x": 10.0, "f": 3000.0} — y and z are absent
++```
++
++Dictionary keys that are never set are never emitted.
++
++### When to choose which
++
++| Situation | Prefer |
++|---|---|
++| Fixed set of optional fields (2–5), type-safe | Custom `Encodable` struct |
++| Dynamic key selection (e.g., "one of X/Y/Z") | `[String: Value]` dictionary |
++| Many optional fields with heterogeneous types | Custom `Encodable` struct |
++
++### Usage in PFarm-Ios
++
++- `SetTemperaturesRequest` (PrinterService.swift) — struct pattern for hotend/bed
++- `move(axis:)` body (PrinterService.swift) — dictionary pattern for axis dispatch
+diff --git a/.squad/agents/dallas/history.md b/.squad/agents/dallas/history.md
+index 07cdfe359..1b345f87c 100644
+--- a/.squad/agents/dallas/history.md
++++ b/.squad/agents/dallas/history.md
+@@ -201,3 +201,9 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
+ - #276 verified shipped end-to-end (homedAxes across backend → SignalR → iOS decoder); closed.
+ - Mobile-controls v1 board now fully clear: #275 wontfix, #276/#279/#280–#290/#302 all closed.
+ - New bug #309 filed: spaghetti detection shield says "printer not printing" on actively-printing printers. Ripley investigating.
++
++## Cross-Team Note (2026-05-29)
++
++**Newt** (#283 design spec) unblocked: Status-gating validation confirmed via PR #308 merge. Controls can safely use printing/paused blocking.
++**Gorman** (#280 capabilities) unblocked: Capabilities endpoint live; UI gating design decisions finalized.
++**Hudson/Lambert:** API guards for `/temps`, `/move`, `/moveto` now live. Skill published for future reference.
+diff --git a/.squad/agents/gorman/history.md b/.squad/agents/gorman/history.md
+index 2c1ef8c0e..f22d03cae 100644
+--- a/.squad/agents/gorman/history.md
++++ b/.squad/agents/gorman/history.md
+@@ -104,3 +104,50 @@
+   - `mobile/PrintFarmer/Services/PrinterService.swift` — implementation with fallback
+   - `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` — 15 XCTest cases
+ - **Build note**: `swiftc -typecheck` clean. Local `xcodebuild` unavailable (CoreSimulator out of date). Relying on CI. PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
++
++### 2026-05-28: Issue #281 — PrinterService command methods (PR #4)
++
++- **Endpoints confirmed** (`PrintersController.cs`):
++  - `POST /api/printers/{id}/temps` — body `{ "hotend": double, "bed": double }` (both fields; TempTargets C# record). 409 gate (`GatePrinterControlAsync`) applies.
++  - `POST /api/printers/{id}/home` — no body, homes all axes. **No 409 gate.**
++  - `POST /api/printers/{id}/homexy` — no body, dedicated endpoint. **No 409 gate.**
++  - `POST /api/printers/{id}/homez` — no body, dedicated endpoint. **No 409 gate.**
++  - `POST /api/printers/{id}/move` — body `{ "x"?, "y"?, "z"?, "f"? }` (MoveRequest C# record, all nullable doubles). 409 gate applies.
++- **409 handled by existing `NetworkError.conflict`** — `APIClient` already maps HTTP 409 → `.conflict`; no new error type needed.
++- **`home(axes:)` dispatches to three routes** — sorted axes comparison: `["X","Y"]` → `/homexy`, `["Z"]` → `/homez`, else → `/home`. `homeXY`/`homeZ` are protocol extension defaults.
++- **`setTemperatures` nil-omit via custom Encodable** — private `SetTemperaturesRequest` struct with custom `encode(to:)` that conditionally encodes each field. Pattern: `if let hotend { try container.encode(hotend, forKey: .hotend) }`.
++- **`move` body via `[String: Double]`** — naturally omits unused axes; keyed by `axis.lowercased()` + `"f"` feedrate. Callers pass locked feedrates (3000 XY, 600 Z).
++- **`DemoPrinterService` gap fixed** — `getBackendCapabilities` was missing from demo (overlooked in #280); added in this PR.
++- PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/4
++
++## Cross-Team Note (2026-05-29)
++
++**Dallas** (#290 status-gating) complete: API guards for `/temps`, `/move`, `/moveto` live via PR #308. Status-gating orthogonal to capabilities.
++**Newt** (#283 design spec) complete: Design decisions locked. UI gating ready to use capabilities endpoint.
++**Unblocked:** Fallback table canonical; endpoint `GET /api/printers/{printerId}/backend-capabilities` confirmed live. PR OlyForge3D/PrintFarmerMobile#2 awaiting CI.
++
++### 2026-05-28: Issue #282 — PrinterControlsViewModel (PR #7)
++
++- **Queue strategy chosen: Task-chain (not actor)**
++  - A dedicated `actor CommandQueue` was considered but rejected: it would require all callers to `await` the enqueue (changing sync wrappers to async), and adds indirection without benefit since the ViewModel is already `@MainActor`.
++  - Task-chain: `queueTail = Task { await previousTail?.value; ... }`. Each new task awaits the previous tail before executing. FIFO guaranteed. No actor needed. Cancel-on-deinit via `queueTail?.cancel()`.
++  - Caveat: `isCommandInFlight` goes `false` briefly between consecutive commands in a chain. Chosen as acceptable for controls UI (aggregate tracking). Per-command `[CommandType: Bool]` map deferred until view layer requests it.
++
++- **`@ObservationIgnored nonisolated(unsafe) var queueTail`** — required in Swift 6 for `@MainActor @Observable` classes: `@Observable` macro wraps stored properties in `_$observationRegistrar` which conflicts with `nonisolated(unsafe)` alone. `@ObservationIgnored` disables macro wrapping so the annotation takes effect. `deinit` can then cancel the task without a MainActor hop. Confirmed by: warning "nonisolated(unsafe) has no effect" disappears when combined with `@ObservationIgnored`.
++
++- **Capability cache invalidation rule**: no TTL-based invalidation. Cache is valid for the lifetime of the ViewModel instance. Consumers call `loadCapabilities()` again when they detect a backend reconnection (SignalR disconnect/reconnect signal). This keeps the cache simple; stale data is only possible during a reconnect window.
++
++- **Conflict-error UX string convention**: `NetworkError.conflict` (HTTP 409 — printer busy) → `"The printer is busy — please wait a moment and try again."`. All other errors use `error.localizedDescription`. The distinct string is static and English-only; i18n deferred. Pattern lives in `PrinterControlsViewModel.userFacingMessage(for:)`.
++
++- **`drainQueue()` test hook** — exposes `await queueTail?.value` as `internal` (not `private`) for test synchronization. Not intended for production call sites. Pattern matches existing test patterns in the project.
++
++- **Key files**:
++  - `mobile/PrintFarmer/ViewModels/PrinterControlsViewModel.swift` — new ViewModel
++  - `mobile/PrintFarmerTests/ViewModels/PrinterControlsViewModelTests.swift` — 14 XCTest cases
++- **PR**: https://github.com/OlyForge3D/PrintFarmerMobile/pull/7 (base: squad/281-printer-service-commands)
++
++## Learnings
++
++- **Swift 6 + @Observable + deinit**: Use `@ObservationIgnored nonisolated(unsafe)` for stored properties that deinit must access. `nonisolated(unsafe)` alone has no effect when the property is wrapped by `@Observable`'s `_$observationRegistrar`.
++- **Task-chain queue**: Preferred over `actor` for @MainActor ViewModels. Simpler, no async enqueue API, FIFO guaranteed, cancel-on-deinit straightforward.
++- **Conflict-error UX**: Standardized distinct string for HTTP 409 in `PrinterControlsViewModel.userFacingMessage(for:)`. Future ViewModels with commands should follow this pattern.
+diff --git a/.squad/agents/hudson/history.md b/.squad/agents/hudson/history.md
+index 67cd8a846..1c673fbe4 100644
+--- a/.squad/agents/hudson/history.md
++++ b/.squad/agents/hudson/history.md
+@@ -2,141 +2,59 @@
+ 
+ > Migrated from PFarm-Ios `.squad/agents/ripley/` on 2026-05-20 when the iOS squad was merged into the shared PrintFarmer uber-team.
+ 
+-## Learnings
+-
+-### 2026-05-24: Fix — PrinterBackendCapabilities.swift missing from Xcode target (beta.73 build failure)
+-
+-**Root cause:** `PrinterBackendCapabilities.swift` was created under
+-`mobile/PrintFarmer/Models/` but never registered in the Xcode project. The file
+-existed on disk but had no `PBXFileReference`, no `PBXBuildFile`, was absent from
+-the Models group children, and was absent from the app target's Sources build phase.
+-
+-**Cascade errors this caused in CI (beta.73, run 26382724572):**
+-- `JogSubgroup.swift:28,36` — `cannot find type 'PrinterBackendCapabilities' in scope`
+-- `JogSubgroup.swift:43,71,85` — ObservedObject wrapper / Binding errors (type inference
+-  broke because the type was unknown)
+-- `PreheatSubgroup.swift:191` — `Optional<Binding<_>>` boolean error (cascade from
+-  line 29 also referencing the type in a parameter)
+-
+-**Fix:** Added four entries to `project.pbxproj`: `PBXFileReference`
+-(`A3C7DEF1234567890BCD0001`), `PBXBuildFile` (`A3C7DEF1234567890BCD0002`),
+-Models group children, app target Sources build phase.
+-
+-**SwiftUI Binding pitfall:** When a model type is unknown to the compiler,
+-`viewModel.someProperty` through `@ObservedObject` can produce `Binding<_>` cascade
+-errors far from the real missing type. Check for missing Xcode project registration first.
+-
+-**Local-build rule caveat:** `swiftc -parse` is the local substitute when
+-CoreSimulator is out of date AND Xcode's SPM subsystem passes
+-`-c safe.bareRepository=explicit` programmatically (overrides global git config).
+-`git config --global safe.bareRepository all` does not fix this.
+-
+-**Tagged:** v1.0-beta.74, TestFlight run 26383164985.
+-
+----
+-
+-### Issue #287 — PrinterControlsSection integration (PR #304, 2026-05-21)
+-**Files:**
+-- `mobile/PrintFarmer/Views/PrinterControls/PrinterControlsSection.swift` (new, 106 lines) — composite section owning `PrinterControlsViewModel` via `@StateObject`; hosts Preheat/Home/Jog subgroups.
+-- `mobile/PrintFarmer/Views/Printers/PrinterDetailView.swift` (+2 lines) — inserted in both phone (`printerContent`) and iPad (`iPadPrinterContent`) layouts right after `temperatureSection(printer)`.
+-- `mobile/PrintFarmer.xcodeproj/project.pbxproj` — registered the new file under existing PrinterControls group (UUIDs `A3E72870…`).
+-
+-**Design decisions:**
+-- **No duplicate SignalR subscription.** Parent `PrinterDetailViewModel.configureSignalR` already handles `printerupdated` and rebuilds the `printer` value. Section forwards updates into its VM via two `.onChange` observers (`printer.isOnline`, `printer.state`) → `viewModel.handlePrinterUpdate(printer)`. Keeps a single source of truth and avoids leaking hub registrations.
+-- **Section-level visibility** (`!printer.isOnline || state ∈ {printing,paused,starting}`) returns `EmptyView()` so the whole control surface collapses; per-subgroup capability gating + per-button pending state continue to work underneath when the section is shown.
+-- **iPad layout:** Preheat full-width on its own row, then `HStack(HomeSubgroup, JogSubgroup)` each `.frame(maxWidth: .infinity)` — fills the left column without crowding.
+-- **VM ownership:** `@StateObject` inside the section (lazy, lifetime-bound to the section instance). VM constructed with parent's `services.printerService` to match `PrinterDetailViewModel.configure(printerService:)`.
+-
+-**Validation:** `plutil -lint` clean; `xcodebuild -list` resolves; `swiftc -parse` clean on new + modified files. Local xcodebuild simulator build still blocked by iOS 26.5 SDK / CoreSimulator drift — relying on CI.
+-
+-**Lesson (terminal hygiene):** `git commit -m` with a multi-line message containing backticks (e.g. around `printerupdated`) corrupted the zsh shell — backticks triggered command substitution and the shell hung consuming output from other workspace terminals. Fix: always use `git commit -F <tempfile>` for any message that has shell metacharacters or multiple lines. Matches Scribe's existing protocol; treating it as universal going forward.
+-
+----
+-
+-## Key File Paths (PFarm-Ios)
++## Key Learnings & Patterns
++
++### Xcode Project Registration (2026-05-24)
++When new Swift files are created but missing from `.pbxproj`, compiler errors cascade far from the actual problem. **Fix:** Add 4 entries to `pbxproj`: `PBXFileReference`, `PBXBuildFile`, group children entry, and target Sources build phase. Always validate with `plutil -lint` and `xcodebuild -list`.
++
++**Binding cascade pitfall:** Unknown types in `@ObservedObject` produce `Binding<_>` errors in dependent views, not at the definition site.
++
++### PrinterControls Section Composition (Issues #287, #284–#286)
++- `PrinterControlsSection` is a composite owned via `@StateObject` in `PrinterDetailView`, holding `PrinterControlsViewModel`.
++- No duplicate SignalR subscription — parent view's `configureSignalR` is the single source; section forwards updates via `.onChange` observers.
++- Capability gating (movement, temperature, control ops) lives in the ViewModel; section-level visibility hides entirely when offline or printing.
++- iOS layout: full-width preheat row + side-by-side Home/Jog on `HStack`.
++- Three subgroups: Preheat (list, not grid), Home (axis segmented picker), Jog (axis + step pickers + ±mm buttons).
++
++### Swift Encoding Patterns (Issue #281)
++- **Nil-omit via custom Encodable:** Temperature setpoints use private `SetTemperaturesRequest` with conditional `encode(to:)` to omit nil fields.
++- **Dictionary body for sparse structs:** Move requests use `[String: Double]` dict (cleaner than 4-field struct with custom encoder).
++
++### Disabled Control Style (Issue #288)
++- Centralize in `DisabledControlStyle.swift`: `.disabledControlStyle(isDisabled:cornerRadius:)`, `.errorBorderHighlight(isActive:)`, `.disabledTapReveal(isDisabled:reason:)`.
++- Diagonal-stripe overlay via `Canvas` at 45°, 8% white. Respects `@Environment(\.accessibilityReduceTransparency)`.
++- `.help()` does NOT fire on touch — use overlay tap detector + transient caption for error messaging (3s auto-dismiss).
++- Per-button error matching via `case let .jog(axis, distance)` pattern matching on `viewModel.lastError?.command.kind`.
++- VoiceOver hints: "Failed: {msg}. Double tap to retry" on errors, "Sending command" while pending, accessibility traits updated per state.
++
++### Snapshot Testing Setup (Issue #289)
++- Added `pointfreeco/swift-snapshot-testing ~1.18.x` to TEST target only (Package.swift + xcodeproj).
++- Convention: `Printer` fixture via `TestFixtures.decodePrinter`, mock capabilities, `assertSnapshot(of: host(section), as: .image(on: .iPhone13))`.
++- Baselines regenerate on CI due to local CoreSimulator drift (iOS 26.5 SDK / xcodebuild environmental).
++
++### pbxproj Rebase Pattern
++- Duplicate-name groups with distinct IDs coexist safely; use `git checkout --conflict=diff3 <file>` to preserve complete definitions before union-merging.
++- Validation: `plutil -lint`, `xcodebuild -list -project`, balanced `{}` and `()`.
++
++### Git/Shell Hygiene
++- **Backtick danger in heredoc:** Never inline backticks in a heredoc; use file-edit tool to write the body, then reference with `--body-file` or `replace_string_in_file`.
++- Always use `git commit -F <tempfile>` for multi-line messages with shell metacharacters.
++
++### Authentication & Role Gating (Issue #274)
++- `AuthViewModel` holds `currentUser: UserDTO?` with `currentUserRole: String?` computed property (returns "farm_admin" if present in roles array, else first role, else nil).
++- `UserDTO.roles: [String]` already exists in /api/auth/me — no backend change needed.
++- Role-gated UI: plain `if authViewModel.currentUserRole == "farm_admin" { ... }` conditional, not ViewModifier (Apple HIG: omit controls user can't use).
++- Injected via `@Environment(AuthViewModel.self)` from `PFarmApp`.
++
++## Key Files
+ - Reusable components: `PrintFarmer/Views/Components/`
+-- Theme/colors: `PrintFarmer/Theme/ThemeColors.swift`
+-- Auth views: `PrintFarmer/Views/Auth/`
++- Controls: `PrintFarmer/Views/PrinterControls/`
++- Theme: `PrintFarmer/Theme/ThemeColors.swift`
+ - ViewModels: `PrintFarmer/ViewModels/`
+-- Navigation: `PrintFarmer/Navigation/AppDestination.swift`
+-
+-- 2026-05-20: Assigned mobile controls v1 issues #274 (maintenance toggle role gate), #275 (drift cleanup), #284 (preheat UI), #285 (jog UI), #286 (home UI), #288 (polish). See decisions.md "Mobile API Drift + Basic Printer Controls v1".
+-
+-### Issue #276 — Surface homedAxes in PrinterStatusDetail (2026-05-21)
+-**Files Modified:**
+-- `mobile/PrintFarmer/Models/Models.swift` — added `homedAxes: String?` to `PrinterStatusDetail` with explicit memberwise init defaulting `homedAxes = nil`.
+-- `mobile/PrintFarmer/Services/Demo/DemoPrinterService.swift` — pass through `p.homedAxes` from demo `Printer`.
+-- `mobile/PrintFarmer/ViewModels/PrinterDetailViewModel.swift` — thread `homedAxes` through `applyStatusUpdate` (SignalR) and propagate `detail.homedAxes` to `printer.homedAxes` in `applyStatusDetail` only when present (avoids clobbering with nil from partial payloads).
+-- `mobile/PrintFarmer/Views/Printers/PrinterDetailView.swift` — new `homedAxesBadges(_:)` rendering compact X/Y/Z capsules in the gradient header trailing column. Green for homed (string contains axis letter, case-insensitive), gray otherwise. Hidden entirely when both `printer.homedAxes` and `viewModel.statusDetail?.homedAxes` are nil.
+-- `mobile/PrintFarmerTests/Models/ModelDecodingTests.swift` — three decoder tests covering present (`"xyz"`), absent (key omitted → nil), and empty (`""`).
+-
+-**Wire format:** Backend sends compact `string?` ("xyz", "xy", "" or nil) — confirmed via `MoonrakerSubscriptionService.cs` (`state.HomedAxes` is `string`) and existing fixtures. Issue text suggested `[String]?` array shape, but mirrored the actual wire format to stay consistent with existing `Printer.homedAxes` and fixtures.
+-
+-**Build:** `swift build` (library target) clean. xcodebuild simulator builds blocked locally on iOS 26.5 platform / CoreSimulator drift — environmental, not code-side.
+-
+-- 2026-05-21: Ralph Round 1 (Phase 0) completed — see `.squad/log/2026-05-21T09-00-00Z-ralph-round-1-phase-0.md`.
+-### 2026-05-21: Issue #274 — Gated Maintenance toggle on farm_admin role
+-- Added `currentUserRole: String?` computed property on `AuthViewModel` (returns "farm_admin" if present in `currentUser.roles`, else first role, else nil). `UserDTO.roles: [String]` already exists on the /api/auth/me response — no backend change needed.
+-- Wrapped Maintenance toggle in `PrinterDetailView` with `if authViewModel.currentUserRole == "farm_admin"`. Injected `@Environment(AuthViewModel.self)`.
+-- Added 4 unit tests in `AuthViewModelTests` covering currentUserRole (nil when no user, returns farm_admin when present in multi-role array, returns first role for non-admin, nil for empty roles).
+-- Build verification: local Xcode SDK is broken (iOS 26.5 SDK not installed, CoreSimulator out of date). Used `swiftc -parse` on changed files — exit 0, no syntax errors. Full xcodebuild left to CI.
+-
+-
+-- 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
+-
+-### 2026-05-21: Issue #286 — PrinterControlsSection jog subgroup (PR #299)
+-**Files Created:**
+-- `mobile/PrintFarmer/Views/PrinterControls/JogSubgroup.swift` — segmented axis (X/Y/Z, filtered by `capabilities.supportedAxes`) + step picker (0.1/1/10/100 mm, default 1) + 60pt `+`/`-` buttons calling `viewModel.jog(axis:distanceMm:)` with signed step. Hides when `!supportsMovement` or `supportedAxes` empty. Disables while `pendingCommand != nil` or `!canControl`. Loads capabilities on `.task`. Snaps `selectedAxis` if the supported set narrows.
+-- `mobile/PrintFarmerTests/Views/JogSubgroupTests.swift` — covers `visibleAxes(for:)` (nil → full canonical, X/Y-only filters Z, empty → empty), `isHidden(for:)` (false on nil, true on `!supportsMovement`, true on empty axes, false on full), and locked v1 step option set.
+-
+-**xcodeproj registration:** Added new `PrinterControls` group under Views and `Views` group under PrintFarmerTests. UUIDs prefixed `A2B62861…`. `plutil -lint` clean. Folder creation may conflict with #284/#285; #287 reconciles section composition.
+-
+-**Verification:** `swiftc -parse` clean on both files. Local xcodebuild still blocked by iOS 26.5 SDK / CoreSimulator drift — full build runs in CI on the PR.
+-
+-**Design notes:**
+-- Feedrate is internal to `PrinterControlsViewModel` per Newt's spec (3000 mm/min XY, 600 mm/min Z) — no UI surface in v1.
+-- Pending side is identified by matching `viewModel.pendingCommand?.kind == .jog` against `selectedAxis` and the sign of the distance, so only the tapped side spinners while both buttons disable to prevent burst-spam.
+-
+-
+-### 2026-05-21: PRs #300 and #301 rebased onto development
+-- After #299 (jog subgroup) merged, PRs #300 (home) and #301 (preheat) had pbxproj conflicts in two regions: PrintFarmerTests group children (Views ref) and PrintFarmerTests Sources build phase.
+-- Resolution: union both sides. Each branch defines its own Views group with a distinct ID (jog A2B62...D1, home A2D4EF...0006, preheat A1C5DEF...0022); group definition bodies exist independently in the file, so keeping both refs is non-destructive. Xcode tolerates duplicate-name groups with distinct IDs.
+-- Local xcodebuild blocked by iOS 26.5 SDK / CoreSimulator drift; plutil -lint passed both. Force-pushed both branches with --force-with-lease. Both PRs: mergeable=MERGEABLE, mergeStateStatus=UNSTABLE (CI running).
+-- Pattern recorded as decision (hudson-pbxproj-rebase-pattern).
+-
+-- 2026-05-23 pbxproj rebase: use `git checkout --conflict=diff3 <file>` before union-merging conflicts. Default 2-way markers factor common suffixes out, splitting PBXGroup definitions across boundaries — regex union then loses closing braces. diff3 keeps each side complete.
+-- pbxproj validation: `plutil -lint` rejects OpenStep comments. Use `xcodebuild -list -project foo.xcodeproj` instead. Quick sanity: balanced { / } and ( / ) counts.
+-
+-### 2026-05-21: Issue #289 — Snapshot tests for PrinterControlsSection (research-only PR #306)
+-**Outcome:** Stopped before implementing. Repo has NO snapshot testing infra. Verified: only dep in `mobile/Package.swift` is `keychain-swift`; no `Package.resolved`; no `__Snapshots__/` anywhere; existing `getSnapshot` references in MockPrinterService are camera image data, unrelated to UI snapshots. Issue is labeled `go:needs-research`. Acceptance criteria assume `swift-snapshot-testing` is already present.
+-
+-**Action:** Worktree `/Users/jpapiez/s/PFarm1-289`, branch `squad/289-controls-snapshot`. Committed `mobile/docs/snapshot-testing-research.md` with the full plan (Package.swift + pbxproj + test file matrix + CI baseline flow). Decision drop-file at `.squad/decisions/inbox/hudson-289-snapshot-testing-dep.md` proposing `pointfreeco/swift-snapshot-testing` ~1.18.x on the test target only. Draft PR #306 against `development`, gated on Lead approval.
+-
+-**Why no implementation now:** (1) pbxproj surgery for a new Swift Package reference is easier via Xcode UI on a machine with a working SDK; (2) local xcodebuild blocked by iOS 26.5 SDK/CoreSimulator drift (recurring), so baselines must be captured on CI; (3) the `go:needs-research` label is explicit signal to stop and propose.
+-
+-**Process lesson reinforced:** the heredoc backtick hazard bit twice in one session. PR body and history append both corrupted the shell when piped through heredoc with backticks. Always write the body/content to a file with the file-edit tool, then reference it with `--body-file` or `replace_string_in_file`. Never inline anything with backticks in a heredoc.
+-
+-## Learnings — 2026-05-21 (issue #288)
+-
+-- **Shared disabled treatment lives in `DisabledControlStyle.swift`** under `Views/PrinterControls/`. Three modifiers: `.disabledControlStyle(isDisabled:cornerRadius:)`, `.errorBorderHighlight(isActive:cornerRadius:)`, `.disabledTapReveal(isDisabled:reason:onReveal:)`. Use these on every new controls button instead of open-coding `.opacity(0.5)`.
+-- **Diagonal-stripe overlay uses `Canvas`** drawn at 45°, 8% white, 6pt spacing. Honors `@Environment(\.accessibilityReduceTransparency)` — falls back to flat grey when on. Spec §2.4.
+-- **`.help()` does NOT fire on touch.** For iPad/iPhone disabled affordance you must wire an overlay tap detector (`disabledTapReveal` or local `handleTap` helper) that surfaces `viewModel.blockedReason` as a transient caption. Pattern: `@State var disabledTapMessage: String?` + 3s auto-dismiss via `Task.sleep`.
+-- **Per-button error matching** against `viewModel.lastError?.command.kind`:
+-  - Preheat: `if case .preheat(let p) = ..., p == preset`
+-  - Home: `if case let .home(axes) = ..., axes == ["X","Y","Z"]` (or `["X","Y"]` / `["Z"]`)
+-  - Jog: `if case let .jog(axis, distance) = ..., axis.uppercased() == selectedAxis && sign(distance) == direction`
+-- **All a11y strings go through `String(localized: "...", comment: "...")`** — no hardcoded English. The `comment:` parameter shows up in `.xcloc` exports for translators.
+-- **Pattern for VoiceOver hint on error:** "Failed: {message}. Double tap to retry." Pending value: "Sending command". Disabled hint: surfaces `viewModel.blockedReason`.
+-- **`accessibilityAddTraits(isPending ? .updatesFrequently : .isButton)`** so VoiceOver re-announces while a command is in flight.
+-- **`Printer.previewStub` is now `Printer.previewFallbackPrinter`.** The decode-with-`try!` is the actual concern — name reflects "fallback" not "stub". 3 call sites in PreheatSubgroup (definition + 2 callers).
+-- **pbxproj registration for new Views/PrinterControls files:** 4 entries — PBXBuildFile, PBXFileReference, PBXGroup child in `PrinterControls`, and Sources build phase entry. Always `plutil -lint` after.
+-- **Local `xcodebuild build` is unreliable here** because CoreSimulator drifts vs Xcode (iOS 26.5 SDK build version mismatch). CI is authoritative. Use `swiftc -parse` + `xcodebuild -list` as the local smoke test.
+-- **`create_file` will not overwrite existing files** — use `replace_string_in_file` / `multi_replace_string_in_file`, or `rm` then `create_file`. The latter is fine when the rewrite is structural.
+-
+-## 2026-05-21T15:00 — #289 snapshot tests implemented
+-
+-Implemented PrinterControlsSectionSnapshotTests (5 cases: Moonraker / FlashForge / SDCP backend profiles + capabilities-nil loading state + disabled state via state "error"). Wired pointfreeco/swift-snapshot-testing ~1.18.x to TEST target only via both Package.swift (testTarget dep) and PrintFarmer.xcodeproj (XCRemoteSwiftPackageReference + XCSwiftPackageProductDependency + packageProductDependencies on PrintFarmerTests + frameworks build phase).
+-
+-Key conventions: Printer fixture decoded via TestFixtures.decodePrinter from TestJSON.printer (no memberwise init), MockPrinterService.capabilitiesToReturn seeds caps, assertSnapshot(of: host(section), as: .image(on: .iPhone13)) per case. plutil -lint passes. xcodebuild -resolvePackageDependencies hit local CoreSimulator drift — baselines must regenerate on CI. PR #306 updated and marked ready.
++- Auth: `PrintFarmer/Views/Auth/`, `PrintFarmer/ViewModels/AuthViewModel.swift`
+ 
+-Note for future: shell heredoc + backticks is a recurring foot-gun. Just use file-edit tools for content that has any markdown chars.
++## Milestone Summary
++- 2026-05-20: iOS squad merged; mobile controls v1 issues assigned (#274 role gate, #275 drift, #284–#286 controls, #288 polish).
++- 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291–#298).
++- 2026-05-24: Beta 74 released; Xcode registration patterns solidified.
++- 2026-05-28: Issue #274 re-run complete (role-gating decision finalized for PR #3).
+diff --git a/.squad/agents/newt/history.md b/.squad/agents/newt/history.md
+index d10f20a3f..23cd24c6b 100644
+--- a/.squad/agents/newt/history.md
++++ b/.squad/agents/newt/history.md
+@@ -267,3 +267,9 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
+ ### Files Created
+ 
+ - `docs/design/printer-controls-section.md` — Full design specification (611 lines)
++
++## Cross-Team Note (2026-05-29)
++
++**Dallas** (#290 status-gating) complete: API guards validated via PR #308. State blocking for controls confirmed safe.
++**Gorman** (#280 capabilities) complete: Endpoint confirmed live. Fallback table canonical.
++**Unblocked:** UI gating decisions finalized; PR OlyForge3D/PrintFarmerMobile#1 design decisions locked.
+diff --git a/.squad/agents/ripley/history.md b/.squad/agents/ripley/history.md
+index b6eb726e3..57c6cbb99 100644
+--- a/.squad/agents/ripley/history.md
++++ b/.squad/agents/ripley/history.md
+@@ -109,3 +109,5 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in
+ - 2026-05-26 — URL filter state + pagination: use `useUrlFilterState` with `filterable: false` on `page`/`pageSize` params, then call `setMany({ ...filterUpdate, page: 1 })` to reset pagination on filter changes. For debounced username input use the individual setter from `useUrlFilterState` — debounce is configured per-param in the config object.
+ - 2026-05-26 — `Badge` component does not spread HTML attributes (only `children`, `variant`, `size`, `dot`, `className`). Don't put `aria-label` on `<Badge>`; wrap in a `<span>` or test by text content instead.
+ - 2026-05-26 — `apiClient.get<T>()` is a public method on the ApiClient singleton returning `Promise<AxiosResponse<T>>`. Use it in services for new endpoints not yet wired into named methods on `apiClient` (e.g., while Lambert builds the backend in parallel). Access response body via `.data`.
++- 2026-08 — Spaghetti shield canonical status source (#309): `FailureDetectionPrinterStatusDto.isPrinting` is stale (backend polling, ~30s cycle). The canonical live "is printing" in React is `printer.state === 'Printing'` (SignalR-updated). `CompactPrinterCard` uses `state.toLowerCase().includes('printing')` to also catch Pausing. When the two diverge, pass the live value as `isPrinting` prop to `FailureDetectionMonitoringBadge`/`FailureDetectionMonitoringOverlay` and build an `effectiveStatus` that overrides both `isPrinting` and `reason`. Badge is in `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`.
++- 2026-08 — Spaghetti shield `stalePrintingMismatch` discriminator (#313): the condition that overrides a stale DTO reason must be `status.state === 'idle'` only — never `|| status.state === 'disabled'`. `idle` is the only state that can be stale (polling lag while the job just started). `disabled` is always intentional: either the global feature is off (*"Failure detection is disabled in Settings."*) or the backend does not support it. The DTO default is also `disabled` with an empty reason. Adding `disabled` to the mismatch condition would silently erase the operator-visible reason for unsupported backends. Backend reason strings live in `PrintFailureMonitorService.cs` (const `NotPrintingReason`, `StartingIdleReason`, `WarmupIdleReason`). Regression tests for both cases are in `FailureDetectionMonitoringBadge.test.tsx` and `FailureDetectionMonitoringOverlay.test.tsx`.
+diff --git a/.squad/decisions.md b/.squad/decisions.md
+index d9717d8b8..30cf78948 100644
+--- a/.squad/decisions.md
++++ b/.squad/decisions.md
+@@ -1,6 +1,265 @@
+ 
+ ---
+ 
++## Decision: Status-Gated Mutation Endpoints — Layer and HTTP Code Mapping
++
++**Date:** 2026-05-28
++**Issue:** OlyForge3D/PrintFarmer#290
++**Author:** Dallas
++**Status:** Implemented (PR #308, merged)
++
++### Decision
++
++The 409 state-gate for `/temps`, `/move`, and `/moveto` lives in the **controller layer**
++(`PrintersController.GatePrinterControlAsync`), not in `PrintersService`. The plugin layer
++propagates firmware 409s as `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy`
++→ 502 Bad Gateway.
++
++### HTTP Status Code Mapping
++
++| Condition | HTTP code | Reason |
++|---|---|---|
++| Cached status is Printing/Pausing/Paused/Resuming/Cancelling/Heating | 409 Conflict | Client-side pre-flight; API knows before trying |
++| Printer ID not found | 404 Not Found | Entity doesn't exist |
++| Firmware refused (409 from PrusaLink/OctoPrint) | 502 Bad Gateway | Upstream refused after we tried; client cannot fix this |
++| Backend does not support command | 502 Bad Gateway | Capability mismatch |
++| Backend unreachable | 502 Bad Gateway | Infrastructure fault |
++
++### Rationale
++
++- **Controller, not service**: The status cache check is a request pre-flight concern. Services
++  should not know about HTTP semantics. Keeps `PrintersService` focused on printer I/O.
++- **502 for upstream busy (not 409)**: 409 from our API means "you asked at the wrong time and
++  our state says so." 502 from our API means "we tried and the printer said no." These must be
++  distinguishable so iOS clients can show the right UX.
++- **`PrinterBackendBusyException`** is the seam: backend plugins throw it when firmware returns
++  409, service catches and maps to `BackendBusy`, controller maps to 502.
++- **Busy state list** (`PrinterControlGate.BusyStates`) is authoritative and kept in sync with
++  `PrintFailureMonitorService` via PR #310.
++
++### Files Changed
++
++- `src/infra/Services/Printers/PrinterControlGate.cs` (new)
++- `src/infra/Services/Printers/PrinterControlOutcome.cs` (new)
++- `src/infra/Services/Printers/PrinterBackendBusyException.cs` (new)
++- `src/api/Controllers/PrintersController.cs` (`GatePrinterControlAsync`, `MapControlOutcome`, `IPrinterStatusCacheReader` injection)
++- `src/backends/Farm.Backend.Plugin.OctoPrint/OctoPrintClient.cs` (409 → `PrinterBackendBusyException` in SetBed/SetHotend/Jog)
++- `src/backends/Farm.Backend.Plugin.PrusaLink/PrusaLinkApiClient.cs` (409 → `PrinterBackendBusyException` in SetToolTemp/SetBedTemp/JogPrintHead)
++- `src/tests/Farm.Web.Api.Tests/Controllers/PrintersControllerControlGuardsTests.cs` (new, 4 tests)
++
++---
++
++# Decision: PrinterBackendCapabilities — Endpoint Confirmed, Fallback Table Canonical
++
++**Date:** 2026-05-28
++**Agent:** Gorman
++**Issue:** #280
++**PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
++
++## Decision
++
++`GET /api/printers/{printerId}/backend-capabilities` **exists** in `PrintersController.cs`
++(src/api/Controllers/PrintersController.cs:181). No backend work is needed for Mobile Controls v1.
++
++## Fallback Table Values
++
++The static table in `PrinterBackendCapabilities.fallback(for:)` is now the canonical iOS
++fallback when the endpoint returns 404 or decoding fails:
++
++| Backend     | supportsMovement | supportsTemperatureControl | supportsControlOperations | Notes |
++|-------------|-----------------|---------------------------|--------------------------|-------|
++| Moonraker   | true            | true                      | true                     | Full FFF; camera+history too |
++| PrusaLink   | true            | true                      | true                     | Full FFF |
++| OctoPrint   | true            | true                      | true                     | Full FFF |
++| FlashForge  | true            | true                      | false                    | FFF; no fan control |
++| SDCP        | false           | false                     | false                    | Resin printer |
++| Unknown     | false           | false                     | false                    | Conservative |
++
++## Locked Decisions Applied
++
++- `supportsBedTemperature` is derived from `supportsTemperatureControl` — no separate field in
++  backend DTO. Locked per Mobile Controls v1 spec: trust `supportsTemperatureControl` for FlashForge.
++- `supportsFanControl` derived from `supportsControlOperations` — fan is a general control operation.
++
++## Downstream Impact
++
++- `PrinterControlsViewModel` (#282) already calls `PrinterBackendCapabilities.fallback(for:)` —
++  the interface and fallback signature are compatible.
++- UI gating (#284/#285/#286) can trust all four of the required booleans.
++
++---
++
++# Newt — 2026-05-28 — Printer Controls Design Decisions (#283)
++
++## Preheat: List layout, not grid
++
++**Decision:** Use vertical list rows for preheat presets instead of 2×2 grid.
++
++**Reasoning:**
++- List rows allow inline temperature readout (e.g., "PLA — 200°/60°") which provides at-a-glance reference
++- Full-width rows are easier to tap on phone screens
++- Consistent with iOS Settings patterns for actionable list items
++- Grid would require separate tap + temperature lookup, adding cognitive load
++
++## Disabled-While-Printing: Lock icon + opacity (color-blind friendly)
++
++**Decision:** Disabled state uses lock icon (`lock.fill`) at trailing edge plus 0.5 opacity, not just color change.
++
++**Reasoning:**
++- Per WCAG 2.2, disabled state must not rely on color alone
++- Lock icon provides shape-based indicator recognizable without color perception
++- Aligns with iOS system patterns (e.g., locked settings rows)
++- Ensures accessibility for protanopia/deuteranopia users
++
++## Jog: Segmented pickers + dynamic button labels
++
++**Decision:** Jog subgroup uses native segmented pickers for axis (X/Y/Z) and step (0.1/1/10/100mm), with +/− buttons showing dynamic labels like "Move X +10mm".
++
++**Reasoning:**
++- Segmented pickers are HIG-native and automatically meet touch target requirements
++- Dynamic button labels prevent mode errors (operator always knows what will happen)
++- Axis/step state is visually prominent in picker selection
++- Compact layout fits phone screens without scrolling
++
++## Section Visibility: Hidden when offline
++
++**Decision:** Entire Controls section is conditionally rendered only when `printer.isOnline == true`.
++
++**Reasoning:**
++- Controls require active printer connection — showing disabled controls when offline adds noise
++- Consistent with existing pattern: `actionSection` only renders when online
++- Reduces visual clutter for disconnected printers
++- Clear mental model: "no controls = printer not reachable"
++
++---
++
++# Decision: Role-gated UI uses plain `if`-conditional, not a ViewModifier
++
++**Date:** 2026-05-28  
++**Issue:** OlyForge3D/PrintFarmerMobile#3 (iOS #274)  
++**Author:** Hudson  
++**Status:** Implemented
++
++## Context
++
++The Maintenance toggle in `PrinterDetailView` must be hidden for non-`farm_admin` users.
++Two patterns were considered:
++
++1. **Plain `if authViewModel.currentUserRole == "farm_admin" { ... }`** around the button block.
++2. A custom `adminOnly()` ViewModifier that reads role from environment and calls `.hidden()` or returns `EmptyView`.
++
++## Decision
++
++Plain `if`-conditional (option 1).
++
++## Rationale
++
++- The button is **entirely absent** from the view hierarchy for non-admins, not merely hidden. This avoids focus/VoiceOver traversal and any accidental tap passthrough.
++- ViewModifier would still construct the button node and apply `.hidden()` — semantically weaker.
++- Consistent with Apple HIG: omit controls the user can't use rather than disable/hide them.
++- Simpler — no new abstraction needed for a single call site. If multiple admin-only surfaces emerge, a modifier becomes worthwhile and this decision should be revisited.
++
++## Consequences
++
++- Any future admin-only control needs the same one-liner `if authViewModel.currentUserRole == "farm_admin"`.  
++- If admin role gating becomes widespread (>3 sites), consider extracting a `.adminOnly(authViewModel)` modifier or an `@ViewBuilder adminOnly { ... }` helper.
++
++---
++
++# iOS #281 — PrinterService Command Method Routing Decisions
++
++**Date:** 2026-05-28  
++**Author:** Gorman  
++**Issue:** OlyForge3D/PrintFarmer#281  
++**PR:** OlyForge3D/PrintFarmerMobile#4
++
++## Decision 1: homeXY / homeZ map to dedicated backend routes, not a parameterized `/home`
++
++**Context:** Issue #281 spec described `home(printerId:axes:)` as a single method routing to
++`POST /api/printers/{id}/home`. Backend inspection revealed three separate no-body POST endpoints:
++`/home` (all axes), `/homexy`, `/homez`.
++
++**Decision:** `home(printerId:axes:)` dispatches internally by sorted axes array:
++- `["X","Y"]` → `/homexy`
++- `["Z"]` → `/homez`
++- anything else (empty, `["X","Y","Z"]`, etc.) → `/home`
++
++`homeXY` and `homeZ` are protocol extension defaults that call `home(axes:)`.
++
++**Rationale:** No new backend routes needed. Caller API matches the issue spec. Route selection
++is an implementation detail hidden from callers.
++
++## Decision 2: setTemperatures nil-omit via custom Encodable (not dictionary)
++
++**Context:** Backend `TempTargets` C# record always has both `hotend` and `bed` (non-nullable
++ints). Issue #281 allows callers to pass `nil` for either field to omit it.
++
++**Decision:** Private `SetTemperaturesRequest` with custom `encode(to:)` that conditionally
++encodes each field. Not a `[String: Double]` dictionary — typed struct is safer and more
++readable.
++
++**Rationale:** Dictionary approach works but loses type safety. Custom Encodable is the Swift
++idiomatic pattern for omitting optional JSON fields without `null` emission.
++
++## Decision 3: move body uses [String: Double] dictionary
++
++**Context:** `MoveRequest` C# record has `x?`, `y?`, `z?`, `f?` fields. Swift needs to set
++only the relevant axis.
++
++**Decision:** `var body: [String: Double] = ["f": Double(feedrateMmMin)]` then
++`body[axis.lowercased()] = distanceMm`. Dictionary naturally omits unset keys.
++
++**Rationale:** A 4-field Encodable struct with 3 nil fields and a custom encoder is more
++boilerplate than the problem warrants. Dictionary is clean and correct here.
++
++## Decision 4: 409 conflict maps to existing NetworkError.conflict
++
++**Context:** `GatePrinterControlAsync` returns HTTP 409 when printer is printing/busy.
++Applies to `/temps` and `/move` (not `/home*`).
++
++**Decision:** No new error case. `APIClient` already maps HTTP 409 → `NetworkError.conflict`.
++Callers (`PrinterControlsViewModel`) catch `.conflict` and surface "Printer busy" to the user.
++
++---
++
++# Decision: Canonical "Is Printing" Source for Failure Detection Shield
++
++**Date:** 2026-05-28  
++**Author:** Ripley  
++**Issue:** #309  
++**PR:** #313
++
++## Decision
++
++The failure-detection shield badge must derive `isPrinting` from the live printer state (`printer.state`), not from `FailureDetectionPrinterStatusDto.isPrinting`.
++
++## Context
++
++`FailureDetectionPrinterStatusDto.isPrinting` is computed by the backend failure-detection polling service on a ~30-second cycle. Between poll cycles, the DTO can report `isPrinting: false` while the printer has already started a print job. The badge was using this stale value directly, causing the shield to show "Printer is not printing." on actively printing printers.
++
++The live `printer.state` field is updated via SignalR in near-realtime and is the authoritative source of the printer's current state.
++
++## Rule
++
++When rendering `FailureDetectionMonitoringBadge` or `FailureDetectionMonitoringOverlay`:
++
++1. Compute live `isPrinting` from `printer.state`:
++   - `CompactPrinterCard`: `state.toLowerCase().includes('printing')` (catches Pausing too)
++   - `DetailedPrinterCard`: `isOnline && state === 'Printing'`
++2. Pass as `isPrinting` prop to the badge/overlay.
++3. Inside the badge, build `effectiveStatus = { ...status, isPrinting, reason: <override if staleMismatch> }`.
++4. Pass `effectiveStatus` (not raw `status`) to `FailureDetectionStatusModal`.
++
++If `isPrinting === true` but `status.state` is `'idle'` or `'disabled'`, also replace `status.reason` with a waiting message so the modal copy is accurate.
++
++## References
++
++- `FailureDetectionMonitoringBadge.tsx` — `isPrinting` prop, `stalePrintingMismatch`, `effectiveStatus`
++- `CompactPrinterCard.tsx` / `DetailedPrinterCard.tsx` — `isPrinting={isPrinting}` passed to badge
++- `usePrinterFailureDetectionStatus.ts` — 30s polling hook (stale source)
++
++---
++
+ # 2026-05-20: Mobile API Drift + Basic Printer Controls v1 — Locked Decisions
+ 
+ **By:** Dallas (Lead/Architect), via Jeff Papiez
+diff --git a/.squad/decisions/gorman-282-command-queue.md b/.squad/decisions/gorman-282-command-queue.md
+new file mode 100644
+index 000000000..4e51e8e5e
+--- /dev/null
++++ b/.squad/decisions/gorman-282-command-queue.md
+@@ -0,0 +1,153 @@
++# Decision: PrinterControlsViewModel Command Queue Design
++
++**Date**: 2026-05-28  
++**Author**: Gorman (iOS Networking & API Integration)  
++**Issue**: [#282](https://github.com/OlyForge3D/PrintFarmerMobile/issues/282) — [iOS] Create PrinterControlsViewModel  
++**PR**: [#7](https://github.com/OlyForge3D/PrintFarmerMobile/pull/7)  
++**Status**: Implemented
++
++---
++
++## Context
++
++`PrinterControlsViewModel` needs to serialize outbound printer commands (set temps, home, jog) so that rapid UI taps (tap-storm) don't fire multiple simultaneous HTTP calls to the same printer endpoint. The printer backend gates `/temps` and `/move` with HTTP 409 Conflict when a prior command is still in-flight.
++
++Two approaches were evaluated: a dedicated `actor CommandQueue`, and a **Task-chain**.
++
++---
++
++## Options Considered
++
++### Option A: Dedicated `actor CommandQueue`
++
++```swift
++actor CommandQueue {
++    private var running: Task<Void, Never>?
++
++    func enqueue(_ command: @escaping @Sendable () async throws -> Void) async {
++        let prev = running
++        running = Task {
++            await prev?.value
++            try? await command()
++        }
++        await running?.value  // caller awaits
++    }
++}
++```
++
++**Pros**: Strong isolation guarantee; actor protects its own state.  
++**Cons**:
++- All command-wrapper methods (`setTemperatures`, `home`, `move`, …) must become `async` since callers `await enqueue(...)`.
++- This changes the view-layer API contract: SwiftUI `Button` closures can't `await` directly; they need `Task { await vm.move(...) }` wrappers everywhere.
++- The ViewModel is already `@MainActor`-isolated — adding a second actor boundary adds hop overhead without concurrency benefit.
++- Testing requires `await vm.move(...)` at every call site instead of fire-and-forget with a single `await vm.drainQueue()`.
++
++### Option B: Task-chain (chosen)
++
++```swift
++private func enqueue(_ command: @escaping @Sendable () async throws -> Void) {
++    let previousTail = queueTail
++    queueTail = Task {
++        await previousTail?.value   // wait for previous command
++        guard !Task.isCancelled else { return }
++        isCommandInFlight = true
++        do { try await command() } catch { lastError = Self.userFacingMessage(for: error) }
++        isCommandInFlight = false
++    }
++}
++```
++
++**Pros**:
++- Command wrappers remain **synchronous** — `vm.move(...)` is a fire-and-forget call; view layer needs no `Task {}` wrappers.
++- FIFO ordering guaranteed: each new task awaits the previous tail before starting.
++- Cancel-on-deinit: `queueTail?.cancel()` tears down the chain when the ViewModel deallocates.
++- No actor hop: everything runs on `@MainActor`; service calls suspend off MainActor via structured concurrency.
++- Tests use `await vm.drainQueue()` (a single `await queueTail?.value`) to synchronize after any number of enqueues.
++
++**Cons**:
++- `isCommandInFlight` goes `false` briefly between consecutive commands (during the `await previousTail?.value` suspension). This is acceptable for the controls UI (aggregate indicator).
++- `queueTail` must be `@ObservationIgnored nonisolated(unsafe)` to allow `deinit` access (see Swift 6 note below).
++
++---
++
++## Decision
++
++**Task-chain** (Option B).
++
++The synchronous call-site API is the deciding factor. SwiftUI button handlers are synchronous by design; making `move()`/`home()` async would require `Task { await vm.cmd() }` at every call site across Hudson's upcoming views (#284-286). The Task-chain avoids this entirely.
++
++---
++
++## Swift 6 Implementation Note: deinit Access
++
++In Swift 6, `deinit` on a `@MainActor final class` is **not** automatically MainActor-isolated. Accessing `queueTail` from `deinit { queueTail?.cancel() }` raises:
++
++> "main actor-isolated property 'queueTail' can not be referenced from a nonisolated context"
++
++The fix requires **both** annotations:
++
++```swift
++@ObservationIgnored
++nonisolated(unsafe) private var queueTail: Task<Void, Never>?
++```
++
++- `@ObservationIgnored` — prevents the `@Observable` macro from wrapping the property in `_$observationRegistrar`. Without this, `nonisolated(unsafe)` has no effect (the macro's synthesized accessors remain MainActor-isolated).
++- `nonisolated(unsafe)` — declares that deinit (nonisolated context) may access the property. Safe here because `Task.cancel()` is a `Sendable`-safe operation callable from any concurrency context, and all other access to `queueTail` is strictly on the MainActor via `enqueue()` and `drainQueue()`.
++
++---
++
++## isCommandInFlight: Aggregate vs Per-Command
++
++**Aggregate** (single `Bool`) was chosen.
++
++Per-command tracking (`[CommandType: Bool]`) would require:
++1. A `CommandType` enum covering all five command methods.
++2. Additional state in `enqueue(_:)` to key the flag.
++3. View layer knowledge of which command type is in flight.
++
++The aggregate flag is sufficient for the controls UI: buttons are disabled while any command runs, and `lastError` identifies which command failed. Hudson can request per-command tracking in #284-286 if the design requires it.
++
++---
++
++## Conflict Error UX Convention
++
++`NetworkError.conflict` (HTTP 409 — printer is busy executing a prior command) maps to:
++
++```
++"The printer is busy — please wait a moment and try again."
++```
++
++All other errors use `error.localizedDescription`.
++
++**Rationale**: The generic `NetworkError.conflict.errorDescription` is `"Conflict — resource was modified"` — a developer-facing string that references HTTP semantics the user doesn't understand. The custom string is actionable: "wait and retry." Future ViewModels that enqueue printer commands should adopt this same string via a shared `PrinterControlsViewModel.userFacingMessage(for:)` call or a copy of the pattern.
++
++---
++
++## Files
++
++| File | Purpose |
++|---|---|
++| `PrintFarmer/ViewModels/PrinterControlsViewModel.swift` | ViewModel implementation |
++| `PrintFarmerTests/ViewModels/PrinterControlsViewModelTests.swift` | 14 XCTest cases |
++
++---
++
++## Test Coverage
++
++| Scenario | Test Method |
++|---|---|
++| Capability cache loads and caches | `testLoadCapabilities_cachesResult` |
++| Re-call refreshes from server | `testLoadCapabilities_recallRefetches` |
++| Derived booleans for Moonraker (all true) | `testDerivedBooleans_moonraker_allTrue` |
++| Derived booleans for SDCP (movement false) | `testDerivedBooleans_sdcp_movementFalse` |
++| Derived booleans before load (all false) | `testDerivedBooleans_beforeLoad_allFalse` |
++| Capability load error propagation | `testLoadCapabilities_propagatesError` |
++| **FIFO queue serialization** (with delays) | `testCommandQueue_isFIFO` |
++| isCommandInFlight false after drain | `testCommandQueue_isCommandInFlight_falseAfterDrain` |
++| Conflict (409) → distinct "busy" message | `testConflict_surfacesDistinctBusyMessage` |
++| Non-conflict → generic error description | `testNonConflict_usesGenericErrorDescription` |
++| setTemperatures happy path | `testSetTemperatures_happyPath` |
++| home(axes:) happy path | `testHome_allAxes_happyPath` |
++| homeXY() happy path | `testHomeXY_happyPath` |
++| homeZ() happy path | `testHomeZ_happyPath` |
++| move() happy path | `testMove_happyPath` |
+diff --git a/src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx b/src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx
+index 4351e0983..c8207a403 100644
+--- a/src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx
++++ b/src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx
+@@ -220,6 +220,7 @@ export function CompactPrinterCard({
+           <FailureDetectionMonitoringBadge
+             enabled={!!printer.obicoEnabled}
+             status={failureDetectionStatus}
++            isPrinting={isPrinting}
+             printerId={printer.id}
+             printerName={printer.name}
+             recentEvents={recentEvents}
+diff --git a/src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx b/src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx
+index eb84f9d04..415a59c6e 100644
+--- a/src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx
++++ b/src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx
+@@ -446,6 +446,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
+           <FailureDetectionMonitoringBadge
+             enabled={!!apiPrinter.obicoEnabled}
+             status={failureDetectionStatus}
++            isPrinting={isPrinting}
+             printerId={printer.id}
+             printerName={printer.name}
+             recentEvents={recentEvents}
+diff --git a/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx b/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx
+index eb1d5e7c1..5ff48354f 100644
+--- a/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx
++++ b/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx
+@@ -12,6 +12,9 @@ import { FailureDetectionStatusModal } from '@/features/printers/components/Fail
+ interface FailureDetectionMonitoringBadgeProps {
+   enabled: boolean;
+   status?: FailureDetectionPrinterStatusDto;
++  /** Live printer isPrinting from the printer card (state === 'Printing'). Overrides the
++   *  potentially-stale isPrinting field inside the polled FailureDetection DTO. */
++  isPrinting?: boolean;
+   className?: string;
+   printerId?: string;
+   printerName?: string;
+@@ -21,6 +24,7 @@ interface FailureDetectionMonitoringBadgeProps {
+ export function FailureDetectionMonitoringBadge({
+   enabled,
+   status,
++  isPrinting,
+   className,
+   printerId,
+   printerName,
+@@ -32,10 +36,27 @@ export function FailureDetectionMonitoringBadge({
+     return null;
+   }
+ 
+-  const displayState = getFailureDetectionDisplayState(status);
++  // The DTO's isPrinting is computed by a 30-second backend poll and can lag behind the
++  // live printer status (updated via SignalR). Override it with the live value when provided.
++  // Only patch the reason for 'idle' state — that is the stale "not printing" case.
++  // 'disabled' means the feature is intentionally off or the backend doesn't support it;
++  // its reason is always authoritative and must never be overwritten.
++  const stalePrintingMismatch = isPrinting === true && !!status && !status.isPrinting
++    && status.state === 'idle';
++  const effectiveStatus = isPrinting !== undefined && status
++    ? {
++        ...status,
++        isPrinting,
++        reason: stalePrintingMismatch
++          ? 'Waiting for the monitoring service to begin scanning the current print.'
++          : status.reason,
++      }
++    : status;
++
++  const displayState = getFailureDetectionDisplayState(effectiveStatus);
+   const label = getFailureDetectionStateLabel(displayState, enabled);
+-  const resolvedPrinterId = status?.printerId ?? printerId;
+-  const resolvedPrinterName = status?.printerName ?? printerName;
++  const resolvedPrinterId = effectiveStatus?.printerId ?? printerId;
++  const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
+ 
+   // Color mapping based on state
+   const iconColorClass = {
+@@ -71,7 +92,7 @@ export function FailureDetectionMonitoringBadge({
+         isOpen={isDetailsOpen}
+         onClose={() => setIsDetailsOpen(false)}
+         enabled={enabled}
+-        status={status}
++        status={effectiveStatus}
+         printerId={resolvedPrinterId}
+         printerName={resolvedPrinterName}
+         recentEvents={recentEvents}
+diff --git a/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx b/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx
+index afdbab5fc..37c003053 100644
+--- a/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx
++++ b/src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx
+@@ -12,6 +12,8 @@ import { FailureDetectionStatusModal } from '@/features/printers/components/Fail
+ interface FailureDetectionMonitoringOverlayProps {
+   enabled: boolean;
+   status?: FailureDetectionPrinterStatusDto;
++  /** Live printer isPrinting from the printer card. Overrides the stale isPrinting in the DTO. */
++  isPrinting?: boolean;
+   className?: string;
+   printerName?: string;
+ }
+@@ -54,6 +56,7 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
+ export function FailureDetectionMonitoringOverlay({
+   enabled,
+   status,
++  isPrinting,
+   className,
+   printerName,
+ }: FailureDetectionMonitoringOverlayProps) {
+@@ -63,10 +66,25 @@ export function FailureDetectionMonitoringOverlay({
+     return null;
+   }
+ 
+-  const displayState = getFailureDetectionDisplayState(status);
++  // Only patch the reason for 'idle' state — that is the stale "not printing" case.
++  // 'disabled' means the feature is intentionally off or the backend doesn't support it;
++  // its reason is always authoritative and must never be overwritten.
++  const stalePrintingMismatch = isPrinting === true && !!status && !status.isPrinting
++    && status.state === 'idle';
++  const effectiveStatus = isPrinting !== undefined && status
++    ? {
++        ...status,
++        isPrinting,
++        reason: stalePrintingMismatch
++          ? 'Waiting for the monitoring service to begin scanning the current print.'
++          : status.reason,
++      }
++    : status;
++
++  const displayState = getFailureDetectionDisplayState(effectiveStatus);
+   const label = getFailureDetectionStateLabel(displayState, enabled);
+   const styles = getChipStyles(displayState);
+-  const resolvedPrinterName = status?.printerName ?? printerName;
++  const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
+ 
+   return (
+     <>
+@@ -92,7 +110,7 @@ export function FailureDetectionMonitoringOverlay({
+         isOpen={isDetailsOpen}
+         onClose={() => setIsDetailsOpen(false)}
+         enabled={enabled}
+-        status={status}
++        status={effectiveStatus}
+         printerName={resolvedPrinterName}
+       />
+     </>
+diff --git a/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx b/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx
+index 67a4bbb22..c7ce1d895 100644
+--- a/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx
++++ b/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx
+@@ -335,4 +335,132 @@ describe('FailureDetectionMonitoringBadge', () => {
+     // Modal should open
+     expect(screen.getByRole('dialog')).toBeInTheDocument();
+   });
++
++  it('liveIsPrinting_OverridesStaleDto_WhenPrinterIsActivePrinting', () => {
++    // Regression test for #309: DTO isPrinting can lag up to 30s behind live SignalR status.
++    // When the printer card reports isPrinting=true, the shield must NOT show the stale
++    // "idle / not printing" state from the DTO.
++    const staleStatus: FailureDetectionPrinterStatusDto = {
++      printerId: 'printer-1',
++      printerName: 'Bambu X1',
++      state: 'idle',
++      reason: 'Printer is not printing.',
++      isPrinting: false, // stale — DTO hasn't polled yet since print started
++      detectionSource: 'global',
++      lastOutcome: 'none',
++      lastAnalyzedAt: null,
++    };
++
++    render(
++      <FailureDetectionMonitoringBadge
++        enabled={true}
++        status={staleStatus}
++        isPrinting={true} // live value from printer.state === 'Printing'
++      />
++    );
++
++    const button = screen.getByRole('button', { name: /open spaghetti detection details for bambu x1/i });
++
++    // The tooltip must NOT claim the printer is idle/off when it's actively printing.
++    // With live isPrinting=true overriding the stale DTO, state stays 'idle' (not 'error'),
++    // so it displays as 'Ready' rather than being suppressed as undefined.
++    expect(button).toHaveAttribute('title', expect.not.stringContaining('Off'));
++
++    // Open the modal and verify it does not show the stale "not printing" reason as the
++    // primary detail — the live override replaces the reason with an accurate message.
++    fireEvent.click(button);
++    expect(screen.getByRole('dialog')).toBeInTheDocument();
++    // The stale reason must be completely replaced — the override patches both isPrinting
++    // and the reason string so "Printer is not printing." never appears.
++    expect(screen.queryByText(/printer is not printing/i)).not.toBeInTheDocument();
++    // Instead, an accurate waiting message should appear.
++    expect(
++      screen.getAllByText('Waiting for the monitoring service to begin scanning the current print.').length
++    ).toBeGreaterThan(0);
++  });
++
++  it('liveIsPrinting_True_PreservesReason_WhenDisabledWithFeatureOffReason', () => {
++    // Regression for Bishop review on #313: state=disabled means the feature is
++    // intentionally off. The reason must be preserved even when live isPrinting=true.
++    const status: FailureDetectionPrinterStatusDto = {
++      printerId: 'printer-3',
++      printerName: 'Bambu X1C',
++      state: 'disabled',
++      reason: 'Failure detection is disabled in Settings.',
++      isPrinting: false,
++      detectionSource: 'none',
++      lastOutcome: 'none',
++      lastAnalyzedAt: null,
++    };
++
++    render(
++      <FailureDetectionMonitoringBadge
++        enabled={false}
++        status={status}
++        isPrinting={true}
++      />
++    );
++
++    fireEvent.click(screen.getByRole('button', { name: /open spaghetti detection details for bambu x1c/i }));
++
++    expect(screen.getByRole('dialog')).toBeInTheDocument();
++    expect(screen.getAllByText('Failure detection is disabled in Settings.').length).toBeGreaterThan(0);
++    expect(screen.queryByText(/waiting for the monitoring service/i)).not.toBeInTheDocument();
++  });
++
++  it('liveIsPrinting_True_PreservesReason_WhenDisabledWithUnsupportedBackendReason', () => {
++    // Regression for Bishop review on #313: backends that do not support failure detection
++    // report state=disabled with an explanatory reason. That reason must not be overwritten.
++    const status: FailureDetectionPrinterStatusDto = {
++      printerId: 'printer-4',
++      printerName: 'SDCP Resin Printer',
++      state: 'disabled',
++      reason: 'Backend does not support failure detection.',
++      isPrinting: false,
++      detectionSource: 'none',
++      lastOutcome: 'none',
++      lastAnalyzedAt: null,
++    };
++
++    render(
++      <FailureDetectionMonitoringBadge
++        enabled={true}
++        status={status}
++        isPrinting={true}
++      />
++    );
++
++    fireEvent.click(screen.getByRole('button', { name: /open spaghetti detection details for sdcp resin printer/i }));
++
++    expect(screen.getByRole('dialog')).toBeInTheDocument();
++    expect(screen.getAllByText('Backend does not support failure detection.').length).toBeGreaterThan(0);
++    expect(screen.queryByText(/waiting for the monitoring service/i)).not.toBeInTheDocument();
++  });
++
++  it('liveIsPrinting_False_OverridesStaleDto_WhenPrintJustEnded', () => {
++    // When a print ends, the live isPrinting goes false quickly (SignalR) but the DTO
++    // may still say isPrinting:true. The override should propagate the live value correctly.
++    const staleStatus: FailureDetectionPrinterStatusDto = {
++      printerId: 'printer-2',
++      printerName: 'Prusa MK4',
++      state: 'monitoring',
++      reason: 'Actively monitoring the current print.',
++      isPrinting: true, // stale — print already ended per SignalR
++      detectionSource: 'global',
++      lastOutcome: 'healthy',
++      lastAnalyzedAt: '2026-05-28T17:00:00Z',
++    };
++
++    render(
++      <FailureDetectionMonitoringBadge
++        enabled={true}
++        status={staleStatus}
++        isPrinting={false} // live: print has ended
++      />
++    );
++
++    const button = screen.getByRole('button', { name: /open spaghetti detection details for prusa mk4/i });
++    // State is 'monitoring' which displays as 'Guarding' regardless of isPrinting value
++    expect(button).toHaveAttribute('title', expect.stringContaining('Guarding'));
++  });
+ });
+diff --git a/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx b/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx
+index 53fb3924c..63dccaba7 100644
+--- a/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx
++++ b/src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx
+@@ -322,4 +322,62 @@ describe('FailureDetectionMonitoringOverlay', () => {
+       screen.getByText(/Open the latest snapshot and confirm/i)
+     ).toBeInTheDocument();
+   });
++
++  it('liveIsPrinting_True_PreservesReason_WhenDisabledWithFeatureOffReason', () => {
++    // Regression for Bishop review on #313: state=disabled means the feature is
++    // intentionally off. The reason must be preserved even when live isPrinting=true.
++    const status: FailureDetectionPrinterStatusDto = {
++      printerId: 'printer-3',
++      printerName: 'Bambu X1C',
++      state: 'disabled',
++      reason: 'Failure detection is disabled in Settings.',
++      isPrinting: false,
++      detectionSource: 'none',
++      lastOutcome: 'none',
++      lastAnalyzedAt: null,
++    };
++
++    renderWithQueryClient(
++      <FailureDetectionMonitoringOverlay
++        enabled={false}
++        status={status}
++        isPrinting={true}
++      />
++    );
++
++    fireEvent.click(screen.getByRole('button', { name: /open spaghetti detection details for bambu x1c/i }));
++
++    expect(screen.getByRole('dialog')).toBeInTheDocument();
++    expect(screen.getAllByText('Failure detection is disabled in Settings.').length).toBeGreaterThan(0);
++    expect(screen.queryByText(/waiting for the monitoring service/i)).not.toBeInTheDocument();
++  });
++
++  it('liveIsPrinting_True_PreservesReason_WhenDisabledWithUnsupportedBackendReason', () => {
++    // Regression for Bishop review on #313: backends that do not support failure detection
++    // report state=disabled with an explanatory reason. That reason must not be overwritten.
++    const status: FailureDetectionPrinterStatusDto = {
++      printerId: 'printer-4',
++      printerName: 'SDCP Resin Printer',
++      state: 'disabled',
++      reason: 'Backend does not support failure detection.',
++      isPrinting: false,
++      detectionSource: 'none',
++      lastOutcome: 'none',
++      lastAnalyzedAt: null,
++    };
++
++    renderWithQueryClient(
++      <FailureDetectionMonitoringOverlay
++        enabled={true}
++        status={status}
++        isPrinting={true}
++      />
++    );
++
++    fireEvent.click(screen.getByRole('button', { name: /open spaghetti detection details for sdcp resin printer/i }));
++
++    expect(screen.getByRole('dialog')).toBeInTheDocument();
++    expect(screen.getAllByText('Backend does not support failure detection.').length).toBeGreaterThan(0);
++    expect(screen.queryByText(/waiting for the monitoring service/i)).not.toBeInTheDocument();
++  });
+ });

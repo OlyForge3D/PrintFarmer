@@ -1,0 +1,1193 @@
+diff --git a/PrintFarmer.xcodeproj/project.pbxproj b/PrintFarmer.xcodeproj/project.pbxproj
+index ff343aa49..259c1de05 100644
+--- a/PrintFarmer.xcodeproj/project.pbxproj
++++ b/PrintFarmer.xcodeproj/project.pbxproj
+@@ -38,6 +38,8 @@
+ 		2868397DE77379D694A2172C /* PFarmApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDDEAB7ED1DC689B3B4FB5FB /* PFarmApp.swift */; };
+ 		2C63FB5B0F84E05DBBED37FF /* NotificationsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C832D8E0EECDD622BBEB9A68 /* NotificationsViewModelTests.swift */; };
+ 		2CB42A860B669F5B702F984D /* FilamentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4E2EE087E92C131271B37F /* FilamentModels.swift */; };
++		A1C5DEF1234567890ABC0001 /* PrinterBackendCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0002 /* PrinterBackendCapabilities.swift */; };
++		A1C5DEF1234567890ABC0003 /* PrinterBackendCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0004 /* PrinterBackendCapabilitiesTests.swift */; };
+ 		317FBEA2115393EBB15E8035 /* StatisticsServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10120F9FBE4ED41F47B5FDBB /* StatisticsServiceProtocol.swift */; };
+ 		34A13F4F8A2F168BA6B3E859 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6121AF27098BBC7AC438846 /* LocationService.swift */; };
+ 		3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9C17AD264628260EACB8E5E /* JobServiceProtocol.swift */; };
+@@ -247,6 +249,8 @@
+ 		45FDB4137FE34914C387AE17 /* SignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRService.swift; sourceTree = "<group>"; };
+ 		4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailViewModel.swift; sourceTree = "<group>"; };
+ 		4B4E2EE087E92C131271B37F /* FilamentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentModels.swift; sourceTree = "<group>"; };
++		A1C5DEF1234567890ABC0002 /* PrinterBackendCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilities.swift; sourceTree = "<group>"; };
++		A1C5DEF1234567890ABC0004 /* PrinterBackendCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilitiesTests.swift; sourceTree = "<group>"; };
+ 		4E45A19848758E2DB8543C2A /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
+ 		4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModel.swift; sourceTree = "<group>"; };
+ 		4FD237969E9A136249F6351A /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
+@@ -512,6 +516,7 @@
+ 			isa = PBXGroup;
+ 			children = (
+ 				4B4E2EE087E92C131271B37F /* FilamentModels.swift */,
++				A1C5DEF1234567890ABC0002 /* PrinterBackendCapabilities.swift */,
+ 				B8D7C5C4CE62E9F3684E5B1F /* Models.swift */,
+ 				62BAD7F52A9EFEE471AA461C /* RequestModels.swift */,
+ 				6208E685EEDD0498124C143A /* SignalRModels.swift */,
+@@ -787,6 +792,7 @@
+ 			isa = PBXGroup;
+ 			children = (
+ 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
++				A1C5DEF1234567890ABC0004 /* PrinterBackendCapabilitiesTests.swift */,
+ 			);
+ 			path = Models;
+ 			sourceTree = "<group>";
+@@ -956,6 +962,7 @@
+ 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
+ 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
+ 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
++				A1C5DEF1234567890ABC0003 /* PrinterBackendCapabilitiesTests.swift in Sources */,
+ 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
+ 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
+ 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
+@@ -1067,6 +1074,7 @@
+ 				B1C2D3E4F5A6B7C8D9E0F1A2 /* AppDelegate.swift in Sources */,
+ 				D1E2F3A4B5C6D7E8F9A0B1C2 /* PushNotificationManager.swift in Sources */,
+ 				2CB42A860B669F5B702F984D /* FilamentModels.swift in Sources */,
++				A1C5DEF1234567890ABC0001 /* PrinterBackendCapabilities.swift in Sources */,
+ 				BADFC6669F70FAF0AF21DB37 /* SpoolService.swift in Sources */,
+ 				5B82756AC8306EB8A20E68EE /* SpoolServiceProtocol.swift in Sources */,
+ 				A391E9CBE39F5EAF1A94264D /* SpoolPickerView.swift in Sources */,
+diff --git a/PrintFarmer/Models/PrinterBackendCapabilities.swift b/PrintFarmer/Models/PrinterBackendCapabilities.swift
+new file mode 100644
+index 000000000..31d40ec60
+--- /dev/null
++++ b/PrintFarmer/Models/PrinterBackendCapabilities.swift
+@@ -0,0 +1,167 @@
++import Foundation
++
++// MARK: - PrinterBackendCapabilities
++
++/// Backend capabilities for a specific printer, decoded from
++/// `GET /api/printers/{id}/backend-capabilities`.
++///
++/// Fields map directly to the server's `PrinterBackendCapabilitiesDto`.
++/// `supportsBedTemperature` and `supportsFanControl` are derived from
++/// the broader server fields per the locked Mobile Controls v1 decision.
++struct PrinterBackendCapabilities: Codable, Sendable, Equatable {
++    let printerId: UUID
++    let printerName: String
++    let backend: PrinterBackend
++
++    // Core capabilities decoded from server
++    let supportsMovement: Bool
++    let supportsTemperatureControl: Bool
++    let supportsControlOperations: Bool
++    let supportsCamera: Bool
++    let supportsFileList: Bool
++    let supportsFileUpload: Bool
++    let supportsFileDownload: Bool
++    let supportsStartPrint: Bool
++    let supportsFileMetadata: Bool
++    let supportsPrinterInformation: Bool
++    let supportsHistory: Bool
++    let supportsFilamentControl: Bool
++
++    // MARK: - Codable
++
++    private enum CodingKeys: String, CodingKey {
++        case printerId, printerName, backend
++        case supportsMovement, supportsTemperatureControl, supportsControlOperations
++        case supportsCamera, supportsFileList, supportsFileUpload, supportsFileDownload
++        case supportsStartPrint, supportsFileMetadata, supportsPrinterInformation
++        case supportsHistory, supportsFilamentControl
++    }
++
++    /// Safe-by-default decoder: `printerId`, `printerName`, and `backend` are required
++    /// (missing → throws). All capability booleans default to `false` when omitted so
++    /// a partial server payload never throws — unknown or future keys are simply off.
++    init(from decoder: Decoder) throws {
++        let c = try decoder.container(keyedBy: CodingKeys.self)
++        printerId                = try c.decode(UUID.self,           forKey: .printerId)
++        printerName              = try c.decode(String.self,         forKey: .printerName)
++        backend                  = try c.decode(PrinterBackend.self, forKey: .backend)
++        supportsMovement         = try c.decodeIfPresent(Bool.self, forKey: .supportsMovement)         ?? false
++        supportsTemperatureControl = try c.decodeIfPresent(Bool.self, forKey: .supportsTemperatureControl) ?? false
++        supportsControlOperations = try c.decodeIfPresent(Bool.self, forKey: .supportsControlOperations) ?? false
++        supportsCamera           = try c.decodeIfPresent(Bool.self, forKey: .supportsCamera)           ?? false
++        supportsFileList         = try c.decodeIfPresent(Bool.self, forKey: .supportsFileList)         ?? false
++        supportsFileUpload       = try c.decodeIfPresent(Bool.self, forKey: .supportsFileUpload)       ?? false
++        supportsFileDownload     = try c.decodeIfPresent(Bool.self, forKey: .supportsFileDownload)     ?? false
++        supportsStartPrint       = try c.decodeIfPresent(Bool.self, forKey: .supportsStartPrint)       ?? false
++        supportsFileMetadata     = try c.decodeIfPresent(Bool.self, forKey: .supportsFileMetadata)     ?? false
++        supportsPrinterInformation = try c.decodeIfPresent(Bool.self, forKey: .supportsPrinterInformation) ?? false
++        supportsHistory          = try c.decodeIfPresent(Bool.self, forKey: .supportsHistory)          ?? false
++        supportsFilamentControl  = try c.decodeIfPresent(Bool.self, forKey: .supportsFilamentControl)  ?? false
++    }
++
++    // MARK: Derived
++
++    /// True when the backend supports bed temperature control.
++    /// Per locked decision (Mobile Controls v1): trust `supportsTemperatureControl`
++    /// for FlashForge and all FFF backends — no separate spike required.
++    var supportsBedTemperature: Bool { supportsTemperatureControl }
++
++    /// True when the backend supports fan speed control.
++    /// Fan control is a subset of general control operations.
++    var supportsFanControl: Bool { supportsControlOperations }
++
++    // MARK: - Static Fallback Table
++
++    /// Returns a conservative best-effort capabilities value for **total-failure
++    /// scenarios** — 404 responses, network errors, or structurally malformed JSON
++    /// (e.g. wrong root type).
++    ///
++    /// **Contract after safe-by-default decoder:**
++    /// A well-formed server response with any keys missing will no longer throw;
++    /// omitted capability keys decode to `false` automatically. This fallback is
++    /// therefore only reached when the API is completely unreachable or returns a
++    /// non-decodable payload. It must *not* be used to infer capabilities from a
++    /// real (partial) server response.
++    ///
++    /// SDCP (resin) has no movement; all FFF backends support movement and temperature.
++    static func fallback(for backend: PrinterBackend, printerId: UUID = UUID(), printerName: String = "") -> PrinterBackendCapabilities {
++        switch backend {
++        case .sdcp:
++            // Resin printers: no movement, no temperature control (resin-specific)
++            return PrinterBackendCapabilities(
++                printerId: printerId,
++                printerName: printerName,
++                backend: backend,
++                supportsMovement: false,
++                supportsTemperatureControl: false,
++                supportsControlOperations: false,
++                supportsCamera: false,
++                supportsFileList: true,
++                supportsFileUpload: true,
++                supportsFileDownload: false,
++                supportsStartPrint: true,
++                supportsFileMetadata: false,
++                supportsPrinterInformation: true,
++                supportsHistory: false,
++                supportsFilamentControl: false
++            )
++        case .moonraker, .prusaLink, .octoPrint:
++            // Full FFF: movement, temperature, control operations all supported
++            return PrinterBackendCapabilities(
++                printerId: printerId,
++                printerName: printerName,
++                backend: backend,
++                supportsMovement: true,
++                supportsTemperatureControl: true,
++                supportsControlOperations: true,
++                supportsCamera: backend == .moonraker,
++                supportsFileList: true,
++                supportsFileUpload: true,
++                supportsFileDownload: true,
++                supportsStartPrint: true,
++                supportsFileMetadata: true,
++                supportsPrinterInformation: true,
++                supportsHistory: backend == .moonraker,
++                supportsFilamentControl: true
++            )
++        case .flashForge:
++            // FFF: movement and temperature supported; fan/camera limited
++            return PrinterBackendCapabilities(
++                printerId: printerId,
++                printerName: printerName,
++                backend: backend,
++                supportsMovement: true,
++                supportsTemperatureControl: true,
++                supportsControlOperations: false,
++                supportsCamera: false,
++                supportsFileList: true,
++                supportsFileUpload: true,
++                supportsFileDownload: false,
++                supportsStartPrint: true,
++                supportsFileMetadata: false,
++                supportsPrinterInformation: true,
++                supportsHistory: false,
++                supportsFilamentControl: false
++            )
++        case .unknown:
++            // Conservative: assume no special capabilities
++            return PrinterBackendCapabilities(
++                printerId: printerId,
++                printerName: printerName,
++                backend: backend,
++                supportsMovement: false,
++                supportsTemperatureControl: false,
++                supportsControlOperations: false,
++                supportsCamera: false,
++                supportsFileList: false,
++                supportsFileUpload: false,
++                supportsFileDownload: false,
++                supportsStartPrint: false,
++                supportsFileMetadata: false,
++                supportsPrinterInformation: false,
++                supportsHistory: false,
++                supportsFilamentControl: false
++            )
++        }
++    }
++}
+diff --git a/PrintFarmer/Protocols/PrinterServiceProtocol.swift b/PrintFarmer/Protocols/PrinterServiceProtocol.swift
+index 9dead4997..90352298f 100644
+--- a/PrintFarmer/Protocols/PrinterServiceProtocol.swift
++++ b/PrintFarmer/Protocols/PrinterServiceProtocol.swift
+@@ -24,6 +24,9 @@ protocol PrinterServiceProtocol: Sendable {
+     func loadFilament(printerId: UUID) async throws -> CommandResult
+     func unloadFilament(printerId: UUID) async throws -> CommandResult
+     func changeFilament(printerId: UUID) async throws -> CommandResult
++
++    // Backend capabilities
++    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities
+ }
+ 
+ // Convenience overload
+diff --git a/PrintFarmer/Services/Demo/DemoPrinterService.swift b/PrintFarmer/Services/Demo/DemoPrinterService.swift
+index e4e2d5e7b..9bd3ab63e 100644
+--- a/PrintFarmer/Services/Demo/DemoPrinterService.swift
++++ b/PrintFarmer/Services/Demo/DemoPrinterService.swift
+@@ -104,4 +104,8 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
+     func changeFilament(printerId: UUID) async throws -> CommandResult {
+         CommandResult(success: true, message: "Filament changed (demo)")
+     }
++
++    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
++        PrinterBackendCapabilities.fallback(for: .moonraker, printerId: printerId, printerName: "Demo Printer")
++    }
+ }
+diff --git a/PrintFarmer/Services/PrinterService.swift b/PrintFarmer/Services/PrinterService.swift
+index c848fda53..d4511444c 100644
+--- a/PrintFarmer/Services/PrinterService.swift
++++ b/PrintFarmer/Services/PrinterService.swift
+@@ -99,4 +99,17 @@ actor PrinterService: PrinterServiceProtocol {
+     func changeFilament(printerId: UUID) async throws -> CommandResult {
+         try await apiClient.post("/api/printers/\(printerId)/filament-change")
+     }
++
++    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
++        do {
++            return try await apiClient.get("/api/printers/\(printerId)/backend-capabilities")
++        } catch NetworkError.notFound {
++            // Endpoint not available for this printer — use fallback table
++            let printer = try await get(id: printerId)
++            return PrinterBackendCapabilities.fallback(for: printer.backend, printerId: printerId, printerName: printer.name)
++        } catch is DecodingError {
++            let printer = try await get(id: printerId)
++            return PrinterBackendCapabilities.fallback(for: printer.backend, printerId: printerId, printerName: printer.name)
++        }
++    }
+ }
+diff --git a/PrintFarmerTests/Mocks/MockPrinterService.swift b/PrintFarmerTests/Mocks/MockPrinterService.swift
+index eeeeaf6a0..82c24263a 100644
+--- a/PrintFarmerTests/Mocks/MockPrinterService.swift
++++ b/PrintFarmerTests/Mocks/MockPrinterService.swift
+@@ -32,6 +32,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
+     var unloadFilamentCalledWith: UUID?
+     var changeFilamentCalledWith: UUID?
+ 
++    var capabilitiesToReturn: PrinterBackendCapabilities?
++    var getBackendCapabilitiesCalledWith: UUID?
++
+     func list(includeDisabled: Bool = false) async throws -> [Printer] {
+         listPrintersCalled = true
+         listIncludeDisabledArg = includeDisabled
+@@ -138,6 +141,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
+         return commandResultToReturn
+     }
+ 
++    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
++        getBackendCapabilitiesCalledWith = printerId
++        if let error = errorToThrow { throw error }
++        return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .moonraker, printerId: printerId)
++    }
++
+     func reset() {
+         printersToReturn = []
+         printerToReturn = nil
+@@ -164,5 +173,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
+         unloadFilamentCalledWith = nil
+         changeFilamentCalledWith = nil
+         spoolsToReturn = []
++        capabilitiesToReturn = nil
++        getBackendCapabilitiesCalledWith = nil
+     }
+ }
+diff --git a/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift b/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift
+new file mode 100644
+index 000000000..72d296a3c
+--- /dev/null
++++ b/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift
+@@ -0,0 +1,259 @@
++import XCTest
++@testable import PrintFarmer
++
++/// Decoder tests for `PrinterBackendCapabilities`.
++/// Covers three fixture scenarios required by issue #280:
++/// full-support FFF, partial-support (no temperature), and resin (no movement).
++final class PrinterBackendCapabilitiesTests: XCTestCase {
++
++    private let decoder = JSONDecoder()
++
++    // MARK: - Fixtures
++
++    private let fullSupportJSON = """
++    {
++        "printerId": "550e8400-e29b-41d4-a716-446655440000",
++        "printerName": "Prusa MK4",
++        "backend": "Moonraker",
++        "supportsMovement": true,
++        "supportsTemperatureControl": true,
++        "supportsControlOperations": true,
++        "supportsCamera": true,
++        "supportsFileList": true,
++        "supportsFileUpload": true,
++        "supportsFileDownload": true,
++        "supportsStartPrint": true,
++        "supportsFileMetadata": true,
++        "supportsPrinterInformation": true,
++        "supportsHistory": true,
++        "supportsFilamentControl": true
++    }
++    """
++
++    private let partialSupportJSON = """
++    {
++        "printerId": "660e8400-e29b-41d4-a716-446655440001",
++        "printerName": "FlashForge Adventurer",
++        "backend": "FlashForge",
++        "supportsMovement": true,
++        "supportsTemperatureControl": false,
++        "supportsControlOperations": false,
++        "supportsCamera": false,
++        "supportsFileList": true,
++        "supportsFileUpload": true,
++        "supportsFileDownload": false,
++        "supportsStartPrint": true,
++        "supportsFileMetadata": false,
++        "supportsPrinterInformation": true,
++        "supportsHistory": false,
++        "supportsFilamentControl": false
++    }
++    """
++
++    private let resinJSON = """
++    {
++        "printerId": "770e8400-e29b-41d4-a716-446655440002",
++        "printerName": "Elegoo Saturn",
++        "backend": "SDCP",
++        "supportsMovement": false,
++        "supportsTemperatureControl": false,
++        "supportsControlOperations": false,
++        "supportsCamera": false,
++        "supportsFileList": true,
++        "supportsFileUpload": true,
++        "supportsFileDownload": false,
++        "supportsStartPrint": true,
++        "supportsFileMetadata": false,
++        "supportsPrinterInformation": true,
++        "supportsHistory": false,
++        "supportsFilamentControl": false
++    }
++    """
++
++    // MARK: - Full Support (FFF / Moonraker)
++
++    func testFullSupportDecodesAllTrueCapabilities() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: fullSupportJSON.data(using: .utf8)!
++        )
++
++        XCTAssertEqual(caps.printerId, UUID(uuidString: "550e8400-e29b-41d4-a716-446655440000"))
++        XCTAssertEqual(caps.printerName, "Prusa MK4")
++        XCTAssertEqual(caps.backend, .moonraker)
++        XCTAssertTrue(caps.supportsMovement)
++        XCTAssertTrue(caps.supportsTemperatureControl)
++        XCTAssertTrue(caps.supportsControlOperations)
++        XCTAssertTrue(caps.supportsCamera)
++        XCTAssertTrue(caps.supportsHistory)
++        XCTAssertTrue(caps.supportsFilamentControl)
++    }
++
++    func testFullSupportDerivedBedTemperatureIsTrue() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: fullSupportJSON.data(using: .utf8)!
++        )
++        // supportsBedTemperature is derived from supportsTemperatureControl
++        XCTAssertTrue(caps.supportsBedTemperature)
++    }
++
++    func testFullSupportDerivedFanControlIsTrue() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: fullSupportJSON.data(using: .utf8)!
++        )
++        // supportsFanControl is derived from supportsControlOperations
++        XCTAssertTrue(caps.supportsFanControl)
++    }
++
++    // MARK: - Partial Support (no temperature — FlashForge)
++
++    func testPartialSupportDecodesWithNoTemperature() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: partialSupportJSON.data(using: .utf8)!
++        )
++
++        XCTAssertEqual(caps.backend, .flashForge)
++        XCTAssertTrue(caps.supportsMovement)
++        XCTAssertFalse(caps.supportsTemperatureControl)
++        XCTAssertFalse(caps.supportsControlOperations)
++    }
++
++    func testPartialSupportDerivedBedTemperatureIsFalse() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: partialSupportJSON.data(using: .utf8)!
++        )
++        XCTAssertFalse(caps.supportsBedTemperature)
++    }
++
++    func testPartialSupportDerivedFanControlIsFalse() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: partialSupportJSON.data(using: .utf8)!
++        )
++        XCTAssertFalse(caps.supportsFanControl)
++    }
++
++    // MARK: - Resin (SDCP — no movement)
++
++    func testResinDecodesWithNoMovement() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: resinJSON.data(using: .utf8)!
++        )
++
++        XCTAssertEqual(caps.backend, .sdcp)
++        XCTAssertFalse(caps.supportsMovement)
++        XCTAssertFalse(caps.supportsTemperatureControl)
++        XCTAssertFalse(caps.supportsControlOperations)
++        XCTAssertFalse(caps.supportsBedTemperature)
++        XCTAssertFalse(caps.supportsFanControl)
++    }
++
++    func testResinSupportsFileOperations() throws {
++        let caps = try decoder.decode(
++            PrinterBackendCapabilities.self,
++            from: resinJSON.data(using: .utf8)!
++        )
++
++        XCTAssertTrue(caps.supportsFileList)
++        XCTAssertTrue(caps.supportsFileUpload)
++        XCTAssertTrue(caps.supportsStartPrint)
++        XCTAssertTrue(caps.supportsPrinterInformation)
++    }
++
++    // MARK: - Fallback Table
++
++    func testFallbackForSDCPHasNoMovement() {
++        let caps = PrinterBackendCapabilities.fallback(for: .sdcp)
++        XCTAssertFalse(caps.supportsMovement)
++        XCTAssertFalse(caps.supportsTemperatureControl)
++        XCTAssertFalse(caps.supportsBedTemperature)
++    }
++
++    func testFallbackForMoonrakerHasFullFFFSupport() {
++        let caps = PrinterBackendCapabilities.fallback(for: .moonraker)
++        XCTAssertTrue(caps.supportsMovement)
++        XCTAssertTrue(caps.supportsTemperatureControl)
++        XCTAssertTrue(caps.supportsBedTemperature)
++        XCTAssertTrue(caps.supportsFanControl)
++    }
++
++    func testFallbackForPrusaLinkHasFullFFFSupport() {
++        let caps = PrinterBackendCapabilities.fallback(for: .prusaLink)
++        XCTAssertTrue(caps.supportsMovement)
++        XCTAssertTrue(caps.supportsTemperatureControl)
++    }
++
++    func testFallbackForFlashForgeHasMovementButLimitedControl() {
++        let caps = PrinterBackendCapabilities.fallback(for: .flashForge)
++        XCTAssertTrue(caps.supportsMovement)
++        XCTAssertTrue(caps.supportsTemperatureControl)
++        XCTAssertFalse(caps.supportsControlOperations)
++        XCTAssertFalse(caps.supportsFanControl)
++    }
++
++    func testFallbackForUnknownIsConservative() {
++        let caps = PrinterBackendCapabilities.fallback(for: .unknown)
++        XCTAssertFalse(caps.supportsMovement)
++        XCTAssertFalse(caps.supportsTemperatureControl)
++        XCTAssertFalse(caps.supportsStartPrint)
++    }
++
++    // MARK: - Omitted-Key Safety (Bishop fix #1)
++
++    /// Single omission: `supportsTemperatureControl` absent → must decode to false,
++    /// not throw. All other explicit keys decode normally.
++    func testOmittedTemperatureControlDefaultsFalse() throws {
++        let json = """
++        {
++            "printerId": "880e8400-e29b-41d4-a716-446655440003",
++            "printerName": "Partial Printer",
++            "backend": "Moonraker",
++            "supportsMovement": true,
++            "supportsControlOperations": true,
++            "supportsCamera": false,
++            "supportsFileList": true,
++            "supportsFileUpload": true,
++            "supportsFileDownload": true,
++            "supportsStartPrint": true,
++            "supportsFileMetadata": true,
++            "supportsPrinterInformation": true,
++            "supportsHistory": false,
++            "supportsFilamentControl": true
++        }
++        """
++        let caps = try decoder.decode(PrinterBackendCapabilities.self, from: json.data(using: .utf8)!)
++
++        XCTAssertTrue(caps.supportsMovement, "Explicitly-present true cap should decode correctly")
++        XCTAssertFalse(caps.supportsTemperatureControl, "Omitted key must default to false")
++        XCTAssertFalse(caps.supportsBedTemperature, "Derived cap must also be false")
++    }
++
++    /// Multiple omissions: `supportsTemperatureControl` and `supportsMovement` both
++    /// absent → decode must succeed and both must be false.
++    func testOmittedTemperatureAndMovementDefaultFalse() throws {
++        let json = """
++        {
++            "printerId": "990e8400-e29b-41d4-a716-446655440004",
++            "printerName": "Sparse Printer",
++            "backend": "OctoPrint",
++            "supportsFileList": true,
++            "supportsFileUpload": true,
++            "supportsStartPrint": true,
++            "supportsPrinterInformation": true
++        }
++        """
++        let caps = try decoder.decode(PrinterBackendCapabilities.self, from: json.data(using: .utf8)!)
++
++        XCTAssertFalse(caps.supportsTemperatureControl, "Omitted temperature cap must default to false")
++        XCTAssertFalse(caps.supportsMovement,           "Omitted movement cap must default to false")
++        XCTAssertFalse(caps.supportsBedTemperature,     "Derived bed-temperature must be false")
++        XCTAssertFalse(caps.supportsFanControl,         "Derived fan-control must be false")
++        XCTAssertTrue(caps.supportsFileList,             "Explicitly-present caps must decode correctly")
++        XCTAssertTrue(caps.supportsStartPrint,           "Explicitly-present caps must decode correctly")
++    }
++}
+diff --git a/docs/design/printer-controls-section.md b/docs/design/printer-controls-section.md
+new file mode 100644
+index 000000000..7997d5043
+--- /dev/null
++++ b/docs/design/printer-controls-section.md
+@@ -0,0 +1,611 @@
++# Printer Controls Section — Design Specification
++
++**Issue:** [#283](https://github.com/OlyForge3D/PrintFarmer/issues/283)  
++**Author:** Newt (Industrial UI Designer)  
++**Date:** 2026-05-28  
++**Status:** Ready for Implementation
++
++## Overview
++
++This document specifies the UI design for the **Printer Controls** section in `PrinterDetailView.swift`. The section contains three subgroups: **Preheat**, **Home**, and **Jog** — providing operators with quick access to common maintenance tasks.
++
++### Design Principles
++
++- **Industrial precision:** Clear, data-forward controls with unambiguous labels
++- **Dark-first:** Designed for `pfBackground` (#0b1020) with appropriate contrast
++- **Accessible:** WCAG 2.2 AA compliant, color-blind friendly disabled states
++- **HIG compliant:** All touch targets ≥44pt per Apple Human Interface Guidelines
++
++---
++
++## Section Placement
++
++### Phone (Compact Width)
++
++The Controls section appears in `printerContent(_:)` **after** `actionSection` and **before** the view's bottom padding. It is rendered only when `printer.isOnline == true`.
++
++```
++┌────────────────────────────────────────┐
++│ Header Section                         │
++├────────────────────────────────────────┤
++│ Temperatures Section                   │
++├────────────────────────────────────────┤
++│ Current Job (if printing/paused)       │
++├────────────────────────────────────────┤
++│ Camera Section                         │
++├────────────────────────────────────────┤
++│ Failure Detection (if active)          │
++├────────────────────────────────────────┤
++│ Filament Section                       │
++├────────────────────────────────────────┤
++│ Auto-Dispatch Section                  │
++├────────────────────────────────────────┤
++│ Predictive Insights Link               │
++├────────────────────────────────────────┤
++│ Action Section (pause/resume/stop)     │
++├────────────────────────────────────────┤
++│ ▶ CONTROLS SECTION (new)               │  ← NEW
++│   ├ Preheat Subgroup                   │
++│   ├ Home Subgroup                      │
++│   └ Jog Subgroup                       │
++└────────────────────────────────────────┘
++```
++
++### iPad (Regular Width — 2-Column)
++
++In `iPadPrinterContent(_:)`, allocate Controls to the **left column** below Action Section:
++
++| Left Column | Right Column |
++|-------------|--------------|
++| Header | Camera |
++| Temperatures | Current Job |
++| Filament | Failure Detection |
++| Auto-Dispatch | |
++| Predictive Insights | |
++| Action Section | |
++| **Controls Section** | |
++
++---
++
++## Section Container
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Controls                                    [header]   │
++├─────────────────────────────────────────────────────────┤
++│  ┌─────────────────────────────────────────────────┐    │
++│  │  Preheat Subgroup                               │    │
++│  └─────────────────────────────────────────────────┘    │
++│  ┌─────────────────────────────────────────────────┐    │
++│  │  Home Subgroup                                  │    │
++│  └─────────────────────────────────────────────────┘    │
++│  ┌─────────────────────────────────────────────────┐    │
++│  │  Jog Subgroup                                   │    │
++│  └─────────────────────────────────────────────────┘    │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Container Styling
++
++```swift
++VStack(alignment: .leading, spacing: 12) {
++    Text("Controls")
++        .font(.headline)
++    
++    // Preheat subgroup
++    // Home subgroup
++    // Jog subgroup
++}
++```
++
++- **Section spacing:** 12pt between subgroups
++- **No outer card:** Subgroups have their own card backgrounds
++
++---
++
++## Preheat Subgroup
++
++### Layout — List Style (Recommended)
++
++A vertical list provides clear temperature readouts and sufficient touch targets.
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Preheat                                                │
++├─────────────────────────────────────────────────────────┤
++│  ┌───────────────────────────────────────────────────┐  │
++│  │ [🔥] PLA                               200° / 60° │  │
++│  ├───────────────────────────────────────────────────┤  │
++│  │ [🔥] PETG                             240° / 80°  │  │
++│  ├───────────────────────────────────────────────────┤  │
++│  │ [🔥] ABS                              240° / 100° │  │
++│  ├───────────────────────────────────────────────────┤  │
++│  │ [❄️] Cool Down                          0° / 0°   │  │
++│  └───────────────────────────────────────────────────┘  │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Component Anatomy
++
++```swift
++// PreheatRow — individual button row
++HStack {
++    Image(systemName: isCoolDown ? "snowflake" : "flame.fill")
++        .font(.body)
++        .foregroundStyle(isCoolDown ? Color.pfSecondaryAccent : Color.pfWarning)
++        .frame(width: 24)
++    
++    Text(materialName)                    // "PLA", "PETG", "ABS", "Cool Down"
++        .font(.subheadline.weight(.medium))
++    
++    Spacer()
++    
++    Text("\(hotendTemp)° / \(bedTemp)°")  // "200° / 60°"
++        .font(.subheadline.monospacedDigit())
++        .foregroundStyle(Color.pfTextSecondary)
++}
++.frame(minHeight: 44)                     // HIG touch target
++.contentShape(Rectangle())               // Full row tappable
++```
++
++### Presets (v1 Locked)
++
++| Material | Hotend | Bed | Icon |
++|----------|--------|-----|------|
++| PLA | 200°C | 60°C | `flame.fill` (pfWarning) |
++| PETG | 240°C | 80°C | `flame.fill` (pfWarning) |
++| ABS | 240°C | 100°C | `flame.fill` (pfWarning) |
++| Cool Down | 0°C | 0°C | `snowflake` (pfSecondaryAccent) |
++
++### Card Styling
++
++```swift
++VStack(spacing: 0) {
++    ForEach(presets) { preset in
++        PreheatRow(preset: preset, isDisabled: isDisabled, isPending: pendingPreset == preset)
++            .onTapGesture { /* call setTemps */ }
++        
++        if preset != presets.last {
++            Divider()
++                .padding(.leading, 36)  // Align with text, not icon
++        }
++    }
++}
++.padding(.vertical, 4)
++.background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
++.overlay(
++    RoundedRectangle(cornerRadius: 12)
++        .strokeBorder(Color.pfBorder, lineWidth: 1)
++)
++```
++
++---
++
++## Home Subgroup
++
++### Layout — Horizontal Button Row
++
++Three equally-sized buttons in a single row.
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Home                                                   │
++├─────────────────────────────────────────────────────────┤
++│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │
++│  │   Home All   │ │   Home XY    │ │   Home Z     │     │
++│  │     [🏠]     │ │    [↔️]      │ │    [↕️]      │     │
++│  └──────────────┘ └──────────────┘ └──────────────┘     │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Component Anatomy
++
++```swift
++HStack(spacing: 10) {
++    HomeButton(label: "Home All", icon: "house.fill", action: homeAll)
++    HomeButton(label: "Home XY", icon: "arrow.left.and.right", action: homeXY)
++    HomeButton(label: "Home Z", icon: "arrow.up.and.down", action: homeZ)
++}
++```
++
++### HomeButton View
++
++```swift
++Button(action: action) {
++    VStack(spacing: 6) {
++        Image(systemName: icon)
++            .font(.title3)
++        Text(label)
++            .font(.caption.weight(.medium))
++    }
++    .frame(maxWidth: .infinity)
++    .frame(height: 60)                    // Above 44pt minimum
++}
++.buttonStyle(.bordered)
++.tint(Color.pfAccent)
++.disabled(isDisabled)
++```
++
++### Button Specifications
++
++| Button | Icon | API Call |
++|--------|------|----------|
++| Home All | `house.fill` | `POST /api/printers/{id}/home` (all axes) |
++| Home XY | `arrow.left.and.right` | `POST /api/printers/{id}/home` (X, Y) |
++| Home Z | `arrow.up.and.down` | `POST /api/printers/{id}/home` (Z) |
++
++- **Touch target:** 60pt height × flexible width (≥44pt per button)
++- **Spacing:** 10pt between buttons
++- **Button style:** `.bordered` with `.pfAccent` tint
++
++---
++
++## Jog Subgroup
++
++### Layout — Segmented Pickers + Action Buttons
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Jog                                                    │
++├─────────────────────────────────────────────────────────┤
++│                                                         │
++│  Axis                                                   │
++│  ┌─────────┬─────────┬─────────┐                        │
++│  │    X    │    Y    │    Z    │  ← Segmented Picker    │
++│  └─────────┴─────────┴─────────┘                        │
++│                                                         │
++│  Step (mm)                                              │
++│  ┌───────┬───────┬───────┬───────┐                      │
++│  │  0.1  │   1   │  10   │  100  │  ← Segmented Picker  │
++│  └───────┴───────┴───────┴───────┘                      │
++│                                                         │
++│  ┌───────────────────┐  ┌───────────────────┐           │
++│  │        −          │  │         +         │           │
++│  │  Move X −10mm     │  │   Move X +10mm    │           │
++│  └───────────────────┘  └───────────────────┘           │
++│                                                         │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Component Anatomy
++
++```swift
++VStack(alignment: .leading, spacing: 16) {
++    // Axis picker
++    VStack(alignment: .leading, spacing: 6) {
++        Text("Axis")
++            .font(.caption)
++            .foregroundStyle(Color.pfTextSecondary)
++        
++        Picker("Axis", selection: $selectedAxis) {
++            Text("X").tag(Axis.x)
++            Text("Y").tag(Axis.y)
++            Text("Z").tag(Axis.z)
++        }
++        .pickerStyle(.segmented)
++    }
++    
++    // Step picker
++    VStack(alignment: .leading, spacing: 6) {
++        Text("Step (mm)")
++            .font(.caption)
++            .foregroundStyle(Color.pfTextSecondary)
++        
++        Picker("Step", selection: $selectedStep) {
++            Text("0.1").tag(0.1)
++            Text("1").tag(1.0)
++            Text("10").tag(10.0)
++            Text("100").tag(100.0)
++        }
++        .pickerStyle(.segmented)
++    }
++    
++    // Move buttons
++    HStack(spacing: 12) {
++        JogButton(direction: .minus, axis: selectedAxis, step: selectedStep)
++        JogButton(direction: .plus, axis: selectedAxis, step: selectedStep)
++    }
++}
++.padding()
++.background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
++.overlay(
++    RoundedRectangle(cornerRadius: 12)
++        .strokeBorder(Color.pfBorder, lineWidth: 1)
++)
++```
++
++### JogButton View
++
++```swift
++Button(action: action) {
++    VStack(spacing: 4) {
++        Image(systemName: direction == .minus ? "minus" : "plus")
++            .font(.title2.weight(.semibold))
++        
++        Text("Move \(axis.label) \(direction == .minus ? "−" : "+")\(Int(step))mm")
++            .font(.caption)
++            .foregroundStyle(Color.pfTextSecondary)
++    }
++    .frame(maxWidth: .infinity)
++    .frame(height: 56)                    // Above 44pt minimum
++}
++.buttonStyle(.bordered)
++.tint(Color.pfAccent)
++.disabled(isDisabled)
++```
++
++### Jog Specifications
++
++| Setting | Options | Default |
++|---------|---------|---------|
++| Axis | X, Y, Z | X |
++| Step | 0.1, 1, 10, 100 mm | 10 |
++| Feedrate XY | 3000 mm/min | (not surfaced) |
++| Feedrate Z | 600 mm/min | (not surfaced) |
++
++- **Touch target:** Jog buttons are 56pt tall
++- **Segmented pickers:** Use native `.segmented` style (HIG compliant)
++
++---
++
++## States
++
++### State Matrix
++
++| State | Preheat | Home | Jog | Section Visibility |
++|-------|---------|------|-----|-------------------|
++| **Idle** (online, not printing) | Enabled | Enabled | Enabled | Visible |
++| **Pending** (action in flight) | Spinner + dim | Spinner + dim | Spinner + dim | Visible |
++| **Printing / Paused** | Disabled | Disabled | Disabled | Visible |
++| **Offline** | — | — | — | **Hidden** |
++
++### Idle State
++
++- All controls interactive
++- Standard color tokens (`pfCard`, `pfAccent`, `pfTextPrimary`)
++
++### Pending State
++
++When an action is in flight (e.g., waiting for backend response):
++
++```swift
++// PreheatRow with pending state
++HStack {
++    if isPending {
++        ProgressView()
++            .frame(width: 24, height: 24)
++    } else {
++        Image(systemName: icon)
++            .frame(width: 24)
++    }
++    
++    Text(materialName)
++        .foregroundStyle(isPending ? Color.pfTextTertiary : Color.pfTextPrimary)
++    
++    Spacer()
++    
++    Text(tempLabel)
++        .foregroundStyle(Color.pfTextTertiary)
++}
++.opacity(isPending ? 0.6 : 1.0)
++.disabled(isPending)
++```
++
++**Pending visual treatment:**
++- Replace icon with `ProgressView()` spinner
++- Opacity: `0.6`
++- Text color: `pfTextTertiary`
++- Interaction: disabled
++
++### Disabled-While-Printing State
++
++When `printer.state ∈ {Printing, Pausing, Paused, Resuming, Cancelling, Heating}`:
++
++```swift
++// DisabledControlRow
++HStack {
++    Image(systemName: icon)
++        .foregroundStyle(Color.pfTextTertiary)
++        .frame(width: 24)
++    
++    Text(label)
++        .foregroundStyle(Color.pfTextTertiary)
++    
++    Spacer()
++    
++    // Add lock icon for color-blind accessibility
++    Image(systemName: "lock.fill")
++        .font(.caption2)
++        .foregroundStyle(Color.pfTextTertiary)
++}
++.opacity(0.5)
++.disabled(true)
++```
++
++**Disabled visual treatment (color-blind friendly):**
++- Opacity: `0.5`
++- Text/icon color: `pfTextTertiary`
++- **Lock icon:** Small `lock.fill` at trailing edge — provides non-color indicator
++- No interaction
++
++### Hidden-While-Offline State
++
++The entire Controls section is conditionally rendered:
++
++```swift
++// In printerContent(_:)
++if printer.isOnline {
++    controlsSection(printer)
++}
++```
++
++When `printer.isOnline == false`, the section does not render at all.
++
++---
++
++## Color Token Reference
++
++| Element | Light Mode | Dark Mode | Token |
++|---------|------------|-----------|-------|
++| Card background | #f8fafc | #0f172a | `pfCard` |
++| Border | #e2e8f0 | #243145 | `pfBorder` |
++| Primary text | #1e293b | #e5e7eb | `pfTextPrimary` |
++| Secondary text | #475569 | #9ca3af | `pfTextSecondary` |
++| Tertiary/disabled text | #64748b | #6b7280 | `pfTextTertiary` |
++| Accent (buttons) | #10b981 | #047857 | `pfAccent` / `pfButtonPrimary` |
++| Warning (flame icon) | #d97706 | #d97706 | `pfWarning` |
++| Cool icon | #1d4ed8 | #1d4ed8 | `pfSecondaryAccent` |
++
++---
++
++## Accessibility
++
++### VoiceOver Labels
++
++| Control | Label | Hint |
++|---------|-------|------|
++| PLA row | "Preheat PLA, 200 degrees hotend, 60 degrees bed" | "Double-tap to preheat" |
++| PETG row | "Preheat PETG, 240 degrees hotend, 80 degrees bed" | "Double-tap to preheat" |
++| ABS row | "Preheat ABS, 240 degrees hotend, 100 degrees bed" | "Double-tap to preheat" |
++| Cool Down | "Cool down, turn off heaters" | "Double-tap to cool down" |
++| Home All | "Home all axes" | "Double-tap to home printer" |
++| Home XY | "Home X and Y axes" | "Double-tap to home XY" |
++| Home Z | "Home Z axis" | "Double-tap to home Z" |
++| Axis picker | "Axis, currently \(axis)" | "Swipe to change axis" |
++| Step picker | "Step size, currently \(step) millimeters" | "Swipe to change step" |
++| Jog − | "Move \(axis) minus \(step) millimeters" | "Double-tap to jog" |
++| Jog + | "Move \(axis) plus \(step) millimeters" | "Double-tap to jog" |
++| Disabled control | "[label], unavailable during print" | — |
++
++### Implementation
++
++```swift
++.accessibilityLabel("Preheat PLA, 200 degrees hotend, 60 degrees bed")
++.accessibilityHint(isDisabled ? nil : "Double-tap to preheat")
++.accessibilityAddTraits(isDisabled ? .isStaticText : .isButton)
++```
++
++### Minimum Contrast Ratios
++
++All text meets WCAG 2.2 AA:
++- `pfTextPrimary` on `pfCard`: **7.2:1** (dark), **12.1:1** (light)
++- `pfTextSecondary` on `pfCard`: **4.6:1** (dark), **7.1:1** (light)
++- `pfTextTertiary` on `pfCard`: **3.8:1** — used only for disabled, meets accessibility exception
++
++### Color-Blind Friendly Disabled
++
++**Do not rely on color alone.** Disabled state uses:
++1. Reduced opacity (0.5)
++2. Tertiary text color
++3. **Lock icon** (`lock.fill`) — shape-based indicator
++
++---
++
++## HIG Compliance Checklist
++
++- [x] **Touch targets ≥44pt:** All buttons meet or exceed 44pt height
++  - Preheat rows: 44pt min height
++  - Home buttons: 60pt height
++  - Jog buttons: 56pt height
++  - Segmented pickers: native (≥44pt)
++- [x] **Dark Mode:** All colors use adaptive `pf*` tokens from `ThemeColors.swift`
++- [x] **Dynamic Type:** Use system font styles (`.headline`, `.subheadline`, `.caption`)
++- [x] **Haptics:** Use `UIImpactFeedbackGenerator(.medium)` on button press
++- [x] **Loading indicators:** Native `ProgressView()` for pending state
++
++---
++
++## File Structure
++
++```
++PrintFarmer/
++└── Views/
++    └── Components/
++        └── PrinterControls/           ← NEW DIRECTORY
++            ├── ControlsSection.swift   // Main section container
++            ├── PreheatSubgroup.swift   // Preheat list
++            ├── HomeSubgroup.swift      // Home buttons
++            └── JogSubgroup.swift       // Jog pickers + buttons
++```
++
++---
++
++## Implementation Notes
++
++1. **State management:** Add `@State` properties to `PrinterDetailViewModel`:
++   - `isPreheatPending: Bool`
++   - `pendingPreheatPreset: PreheatPreset?`
++   - `isHomePending: Bool`
++   - `isJogPending: Bool`
++   - `selectedJogAxis: Axis = .x`
++   - `selectedJogStep: Double = 10.0`
++
++2. **Print-state blocking:** Check `viewModel.isPrinting || viewModel.isPaused` (or expanded set per spike #279) to disable controls.
++
++3. **API calls:** Use existing `PrinterService` methods or add new ones for `/temps`, `/home`, `/move`.
++
++4. **SignalR updates:** No optimistic UI — wait for `printerupdated` to confirm temp changes.
++
++---
++
++## Appendix: ASCII Reference Layouts
++
++### Phone — Full Section
++
++```
++┌──────────────────────────────────────────┐
++│ Controls                                 │
++├──────────────────────────────────────────┤
++│ Preheat                                  │
++│ ┌──────────────────────────────────────┐ │
++│ │ 🔥 PLA                    200° / 60° │ │
++│ ├──────────────────────────────────────┤ │
++│ │ 🔥 PETG                  240° / 80°  │ │
++│ ├──────────────────────────────────────┤ │
++│ │ 🔥 ABS                   240° / 100° │ │
++│ ├──────────────────────────────────────┤ │
++│ │ ❄️ Cool Down               0° / 0°   │ │
++│ └──────────────────────────────────────┘ │
++│                                          │
++│ Home                                     │
++│ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
++│ │ Home All │ │ Home XY  │ │ Home Z   │   │
++│ │   🏠     │ │   ↔️     │ │   ↕️     │   │
++│ └──────────┘ └──────────┘ └──────────┘   │
++│                                          │
++│ Jog                                      │
++│ ┌──────────────────────────────────────┐ │
++│ │ Axis                                 │ │
++│ │ [ X ] [ Y ] [ Z ]                    │ │
++│ │                                      │ │
++│ │ Step (mm)                            │ │
++│ │ [0.1] [ 1 ] [10 ] [100]              │ │
++│ │                                      │ │
++│ │ ┌────────────┐ ┌────────────┐        │ │
++│ │ │     −      │ │     +      │        │ │
++│ │ │ Move X −10 │ │ Move X +10 │        │ │
++│ │ └────────────┘ └────────────┘        │ │
++│ └──────────────────────────────────────┘ │
++└──────────────────────────────────────────┘
++```
++
++### Disabled-While-Printing
++
++```
++┌──────────────────────────────────────────┐
++│ Controls                                 │
++├──────────────────────────────────────────┤
++│ Preheat                          [🔒]    │
++│ ┌──────────────────────────────────────┐ │
++│ │ 🔥 PLA            200° / 60°    🔒   │ │  ← dimmed, lock icon
++│ ├──────────────────────────────────────┤ │
++│ │ 🔥 PETG          240° / 80°     🔒   │ │
++│ ├──────────────────────────────────────┤ │
++│ │ ...                                  │ │
++│ └──────────────────────────────────────┘ │
++└──────────────────────────────────────────┘
++```
++
++---
++
++*End of specification.*

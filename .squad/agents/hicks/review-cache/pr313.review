@@ -1,0 +1,1 @@
+Verified the idle-only stale-printing discriminator in FailureDetectionMonitoringBadge.tsx and FailureDetectionMonitoringOverlay.tsx, and the new badge/overlay regression tests cover the unsupported-backend disabled path.

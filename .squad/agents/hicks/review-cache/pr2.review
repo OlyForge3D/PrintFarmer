@@ -1,0 +1,1 @@
+Bishop's decoder/fallback/test issues are fixed, and PRs #4 and #7 still have clean diffs. Still requesting changes because this PR also includes the unrelated #283 design-spec file at docs/design/printer-controls-section.md:1, so the #280 stack is not clean yet.
