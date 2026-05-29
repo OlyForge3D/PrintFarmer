@@ -921,3 +921,45 @@ All other errors use `error.localizedDescription`.
 | homeXY() happy path | `testHomeXY_happyPath` |
 | homeZ() happy path | `testHomeZ_happyPath` |
 | move() happy path | `testMove_happyPath` |
+# Decision: iOS Printer.progress canonical scale = 0–100
+
+**Author:** Dallas (Lead)
+**Date:** 2026-05-28
+**Status:** Decided
+**References:** OlyForge3D/PrintFarmerMobile#5 (bug), #8 (fix issue), #6 (pinning PR)
+
+---
+
+## Decision
+
+`Printer.progress` on iOS stores **0–100**, a passthrough of the backend wire value. Divide-by-100 happens **only at the SwiftUI render/binding site**, not at decode time.
+
+## Rationale
+
+The PFarm1 backend is unambiguously 0–100: every backend plugin (OctoPrint, Moonraker, FlashForge, SDCP, TestEmulator) normalizes to 0–100 before populating `PrinterStatusDto.Progress`. Code comments in `OctoPrintClient.cs` and `SdcpClient.cs` say "frontend expects 0–100." The `PrinterStatusDto` record carries `double? Progress` at that scale — no transformation before the JSON response.
+
+Normalizing to 0–1 at `Models.swift:266` is a **leaky normalization anti-pattern**: it silently changes the scale at the model boundary, forcing every downstream consumer (ViewModels, tests, formatters) to agree on the transformed value. This directly caused the `PrinterDetailViewModel:141` 100× bug: `PrinterStatusDetail.progress` (no custom decoder, raw 0–100) mixed with the normalized `Printer.progress` (0–1) on the fallback path.
+
+The correct pattern: model layer stores wire values; view/presentation layer applies display transforms.
+
+## Migration
+
+1. `Models.swift:266` — remove `/ 100.0` from `decodeIfPresent` map.
+2. `PrinterListViewModel.swift:46`, `PrinterDetailViewModel.swift:111`, `DashboardViewModel.swift:50` — remove `/ 100.0` from SignalR update handlers.
+3. Every `ProgressView` / `PrintProgressBar` binding — add `/ 100.0` at render site.
+4. Tests: `ModelDecodingTests:35` expected value `45.5` becomes correct again; `PrinterProgressContractTests` pinning expectations flip to 0–100.
+
+## Affected files
+
+- `PrintFarmer/Models/Models.swift:266`
+- `PrintFarmer/ViewModels/PrinterListViewModel.swift:46`
+- `PrintFarmer/ViewModels/PrinterDetailViewModel.swift:111,141`
+- `PrintFarmer/ViewModels/DashboardViewModel.swift:50`
+- All `ProgressView` / `PrintProgressBar` render sites
+- `PrintFarmerTests/Models/ModelDecodingTests.swift:35`
+- `PrintFarmerTests/Models/PrinterProgressContractTests.swift`
+
+## Squad assignment
+
+Ripley (iOS Dev) owns implementation. Issue #8 filed.
+
