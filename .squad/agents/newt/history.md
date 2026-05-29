@@ -298,3 +298,41 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 | API endpoints | Home XY/Z spec implied same endpoint with body | Dedicated routes documented; no axes body |
 
 **Capability-gating rule chosen:** HIDE entire subgroup when capability is `false`. Rationale: operators should only see controls their printer can actually use; disabled-row clutter confuses more than it helps. This is distinct from "disabled during print" which shows controls but blocks interaction.
+
+---
+
+## Round 17 (2025-11-23): PrinterControlsSection Integration Plan — PR #15
+
+**Task:** Design composition strategy for `PrinterControlsSection` integration into `PrinterDetailView`  
+**Status:** ✅ COMPLETE — Integration plan PR opened
+
+### Design Decisions
+
+1. **Composition pattern:** Private `controlsSection()` helper on `PrinterDetailView` (mirrors existing `actionSection` pattern). Placement: after `actionSection` in view hierarchy.
+
+2. **State management:** Single `@State var controlsViewModel: PrinterControlsViewModel` on parent. Lazy-injected via `.task(id:)` whenever printer ID or capability set changes. Cleaner than per-subgroup state; centralizes capability filtering.
+
+3. **Scope for Hudson integration:**
+   - ~40 lines `PrinterDetailView.swift` (controlsSection helper + state binding)
+   - ~10 lines `PrinterControlsViewModel.swift` (init + property)
+   - Subgroup files (PreheatSubgroup, HomeSubgroup, JogSubgroup, ControlsViewModel extensions) ship complete from PR stack #11–#13
+
+### Key Architecture Decisions
+
+- **Single ControlsViewModel instance:** Avoids duplication; all subgroups tap same printer/command sources
+- **Lazy `.task` injection:** Efficiency — only computed when printer ID or caps change, not on every view redraw
+- **Subgroup encapsulation:** Each subgroup (Preheat, Home, Jog) owns its own ViewModel extension + View file; can be tested + reused independently
+- **Integration point locked:** No blocking design review feedback; ready for Hudson's implementation phase
+
+### Design Deliverable
+
+- PR https://github.com/OlyForge3D/PrintFarmerMobile/pull/15
+- Integration plan approved by squad; design frozen for coding phase
+
+### Learnings
+
+- Composition via helper functions avoids `@ViewBuilder` complexity for mid-size sections
+- Lazy state injection via `.task` is preferred over on-demand injection for predictability
+- Stacked PR workflow allows subgroups to ship from parent stack without requiring immediate integration
+
+---

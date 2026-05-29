@@ -1186,3 +1186,21 @@ Scribe should flag in post-merge review:
    - When two-of-three reviewers APPROVE (with tiebreaker rationale documented), PR is approved.
    - Third dissent is honored but does not block if rationale falls outside project scope or misses established convention.
    - Document dissent in decision log and agent history for future reference.
+
+---
+
+## Decision: Round 17 — Newt PR #15 integration plan, Brett PR #14 snapshot spike
+
+**Date:** 2025-11-23
+**Authors:** Newt (iOS design/integration), Brett (research/snapshot strategy)
+**Status:** Prep PRs opened in PrintFarmerMobile
+
+### Summary
+
+- **Newt PR #15 (integration plan):** Composition strategy finalized — `controlsSection()` private helper on `PrinterDetailView` (matches `actionSection` convention), placed after `actionSection`. Single `@State var controlsViewModel: PrinterControlsViewModel`, lazy-injected via `.task` based on printer ID + caps. Hudson scope: ~40 lines `PrinterDetailView.swift` + ~10 lines `PrinterControlsViewModel.swift` additions; subgroup files (Preheat, Home, Jog) ship complete from #11–#13 stack. **PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/15
+- **Brett PR #14 (snapshot spike):** Recommends `swift-snapshot-testing` (pointfreeco) via SPM for snapshot regression tests. 8-snapshot matrix: Moonraker/FlashForge/SDCP × {blocked, in-flight, error, dark-mode, iPhone SE}. Biggest risk: simulator OS version drift — CI must pin simulator OS version to match baseline environment. **PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/14
+
+### Unblocked Decisions
+
+**Newt integration pattern locked:** `controlsSection()` composition allows independent subgroup testing + future component reuse. No blocking review feedback.
+**Brett snapshot strategy validated:** pointfreeco library meets framework requirements (Xcode/iOS 15+ compatible, SPM distribution). Recommend pinning simulator OS version in CI YAML.

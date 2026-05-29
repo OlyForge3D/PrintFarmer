@@ -193,3 +193,41 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 - All infill icons in OrcaSlicer are 24x24 SVGs in resources/images/param_*.svg
 - Lateral variants (lateral-honeycomb, lateral-lattice) have a unique 3D perspective corner-fold border treatment
 - There is no param_stars.svg in OrcaSlicer — the stars infill pattern may not be valid or goes by another name
+
+---
+
+## Round 17 (2025-11-23): PrinterControlsSection Snapshot Testing Spike — PR #14
+
+**Task:** Research and recommend snapshot testing strategy for PrinterControlsSection regression suite  
+**Status:** ✅ COMPLETE — Snapshot spike PR opened
+
+### Research Summary
+
+**Challenge:** PrinterControlsSection (Preheat, Home, Jog subgroups) ships as iOS native SwiftUI. Need regression protection against visual/layout drift across multiple printers, network states, and dark mode.
+
+**Recommendation:** `swift-snapshot-testing` (pointfreeco) via SPM
+- **Why:** Industry standard for SwiftUI regression testing; Xcode/iOS 15+ compatible; SPM distribution avoids CocoaPods; no third-party build tool dependencies
+- **Testing matrix:** 8 snapshots
+  - Backends: Moonraker, FlashForge, SDCP
+  - States: blocked (printing), in-flight (jog/preheat active), error, dark-mode, iPhone SE form factor
+- **Biggest risk:** Simulator OS version drift between CI runs. Baseline snapshots captured on e.g. iOS 18.1; if CI upgrades to iOS 18.2, all snapshots fail as false positives. **Mitigation:** Pin simulator OS version in CI YAML (e.g., `xcode-select-version: 15.4`, `simulator-os-version: 18.1`).
+
+### Architecture Decisions
+
+- **Per-backend snapshots:** Separate directories for Moonraker, FlashForge, SDCP to detect backend-specific layout regressions (e.g., SDCP capabilities subset affects button visibility)
+- **State variants:** Capture each state combo as separate snapshot file; makes diffs clear when state handling breaks
+- **Dark mode:** Automatic via `traitCollection` in test setup; one matrix entry captures all dark-mode variants
+
+### Key Learnings
+
+- Snapshot testing is fragile if simulator environment isn't pinned — requires CI discipline
+- Small form factors (iPhone SE) are critical for regression detection; larger phones can hide layout bugs
+- Backend-specific capability subsets must be tested separately; a Moonraker snapshot won't catch SDCP-specific failures
+
+### Deliverable
+
+- PR https://github.com/OlyForge3D/PrintFarmerMobile/pull/14
+- Research-grade spike; implementation deferred to coding phase
+- CI environment pinning strategy documented
+
+---
