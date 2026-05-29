@@ -303,3 +303,33 @@ Dependabot maintains 9 open PRs on PrintFarmer repo. All CI green. Triage catego
 - **GH Actions major bumps need inline review:** CI actions are infrastructure; behavior changes are not always backward-compatible. Document expected changes before landing.
 
 
+## 2026-05-29: dev→main Sync Protocol (Dependabot + 536 commits)
+
+**Role:** DevOps & Release Engineer
+**Status:** ⚠️ Blocked — push requires `workflow` scope (token lacks it); commit is local
+
+### What Was Done
+
+- Created `sync/dev-to-main-2026-05-29` off `origin/main`
+- Merged `origin/development` with `--no-commit --no-ff`
+- Resolved 16 conflicts: all `.squad/` modify/delete conflicts stripped, `.gitignore` and all real code conflicts resolved using development's version as source of truth
+- Stripped forbidden paths from index and working tree: `.squad/`, `.ai-team/`, `.ai-team-templates/`, `team-docs/`, `docs/proposals/`, plus 3 `.github/fact-checker-charter.md`-style misrouted squad templates
+- Confirmed `git diff --cached --name-only | grep -E "^\.squad/"` returned 0 hits
+- Committed: `d4d8b4a1e — chore: sync development → main (Dependabot fixes + accumulated work)`
+- Push failed: GitHub rejects workflow-file changes from OAuth tokens without `workflow` scope
+
+### Blocker Detail
+
+The merge includes changes to `.github/workflows/` (both application and squad workflows). GitHub's API returns "refusing to allow an OAuth App to create or update workflow" on any push touching that directory without `workflow` scope. The current `gh` token has `gist, read:org, repo` — missing `workflow`. SSH keys also not configured.
+
+**To unblock:** `gh auth refresh --scopes workflow` (browser auth required — device code appears interactively).
+
+### Learnings
+
+- **`workflow` scope is required to push any `.github/workflows/` change.** Even if the workflow file change is incidental (auto-merged from dev), GitHub blocks the entire push. Plan for this in every dev→main sync.
+- **dev→main sync must strip `.squad/` before committing**, not before pushing. The `git rm -rf --cached` approach works but the `modify/delete` conflicts (files deleted on main, modified on dev) still need explicit `git rm --cached` to resolve.
+- **File-location conflicts for `.squad/templates/*`** appear as `CONFLICT (file location): .squad/templates/X added ... inside a directory that was renamed in HEAD, suggesting it should perhaps be moved to .github/X`. These are git's directory-rename heuristic misfiring because `.squad/templates/` looks like it was renamed to `.github/` (it wasn't — main just never had `.squad/`). Remove these `.github/X` entries from the index before committing.
+- **Conflict resolution strategy for code files:** `git checkout --theirs <file>` for all application code and workflow files — development is the source of truth.
+- **The `release.sh` script does this same strip-and-push in a single command** (see `.squad/skills/release/SKILL.md`). For PRs (rather than direct push), the manual approach above is required.
+
+
