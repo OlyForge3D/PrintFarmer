@@ -1,3 +1,35 @@
+## Decision: Round 21 — Vasquez APPROVE #15; Hicks APPROVE #318 (re-review)
+
+**Date:** 2025-11-24
+**Authors:** Vasquez (iOS review), Hicks (backend re-review), Coordinator
+**Status:** PR #15 APPROVED (design/research prep complete), PR #318 APPROVED (real-transport tests verified)
+
+### Summary
+
+- **PR #15 APPROVE (Vasquez consensus):** `@State` lifecycle matches existing `PrinterDetailViewModel` 1:1 nav pattern; layout placement against main; no retain cycles verified. Non-blocking note: missing loading-state UI during initial capability fetch (handoff to Hudson). **Approved.**
+- **PR #318 APPROVE (Hicks re-review):** Real-transport behavior tests 14/14 pass locally (Kestrel WebSocket for SDCP, TcpListener for FlashForge). Full rejected-mutation → status-roundtrip → exception path verified end-to-end as required in Round 19 decision. All tests pass; `dotnet format --verify-no-changes` clean. **Approved.**
+
+### Status Snapshot
+
+**iOS Controls v1 Stack — Complete:**
+- P0/P1 PRs all APPROVED: #1, #3, #4, #7, #9, #10, #11, #12, #13 (HomeSubgroup, PreheatSubgroup, JogSubgroup, etc.)
+- Design/research prep approved: #14 (snapshot spike), #15 (capability research)
+
+**PFarm1 Backend:**
+- Approved & merged: #313 (error translation), #316 (firmware signals) — 2-vote consensus reached
+- PR #318 (real-transport tests): Now APPROVED (Hicks re-vote); merged
+- Blocked by Jeff merges: #287, #288, #289 (stack unblock pending)
+
+**Backlog Summary:**
+- iOS controls v1 ready for integration/merge (awaiting parent PR coordination)
+- Backend firmware-409 error propagation fully tested end-to-end
+- Next phase: stack merge coordination + capability research handoff (Hudson loading states)
+
+- Comment (Vasquez #15): https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570526326
+- Comment (Hicks #318): https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570558773
+
+---
+
 ## Decision: Round 20 — Bishop APPROVE #15; Lambert real-transport tests #318
 
 **Date:** 2025-11-24

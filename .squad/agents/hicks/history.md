@@ -77,3 +77,10 @@ _(append new learnings below this line)_
   - Project tooling threshold: Accept test-hooks as practical equivalent when ViewInspector/equivalent introspection library is unavailable.
   - **Durable lesson:** Second-voice value is real, but must respect available tooling and established convention. Do not require the impossible.
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570216262 (Vasquez tiebreaker, noting Hicks' dissent honored in log)
+
+### 2025-11-24: Round 21 — APPROVE PR #318 re-review (real-transport tests)
+- **Verdict:** ✅ APPROVE.
+- Real-transport behavior tests 14/14 pass locally (Kestrel WebSocket for SDCP, TcpListener for FlashForge).
+- Full rejected-mutation → status-roundtrip → exception path verified end-to-end as required in Round 19 decision.
+- All tests pass; `dotnet format --verify-no-changes` clean.
+- Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570558773
