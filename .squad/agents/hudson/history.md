@@ -46,8 +46,11 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - Role-gated UI: plain `if authViewModel.currentUserRole == "farm_admin" { ... }` conditional, not ViewModifier (Apple HIG: omit controls user can't use).
 - Injected via `@Environment(AuthViewModel.self)` from `PFarmApp`.
 
-## Key Files
-- Reusable components: `PrintFarmer/Views/Components/`
+### 2025-11-21: Round 10 — Cool Down label fix + Jog subgroup
+- PR #11 (Cool Down): Removed hardcoded "Off" ternary; standard format produces "0° / 0°" uniformly.
+- PR #13 (Jog subgroup): Axis picker, step picker (default 1mm per Newt), ±mm buttons, 15 tests.
+- xcodeproj UUID collision fix: HomeSubgroupTests UUID duplicated PushNotificationManager.swift fileRef; resolved before xcodebuild.
+
 - Controls: `PrintFarmer/Views/PrinterControls/`
 - Theme: `PrintFarmer/Theme/ThemeColors.swift`
 - ViewModels: `PrintFarmer/ViewModels/`

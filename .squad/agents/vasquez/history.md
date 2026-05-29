@@ -35,3 +35,13 @@ _(append new learnings below this line)_
 ### 2026-05-21: PR #301 review (preheat subgroup)
 - Verdict 💬 comment, no blockers. Four non-blocking findings: unused `previewSeedCapabilities(_:)`, iPad disabled-tap reveal gap (`.disabled` + `.help()` won't show on touch-only iPad), a11y-label localization gap, misnamed `unsafeBitCastedFallback()`.
 - Confirmed client-side capability gating respected (#279/#290) — `isVisible(capabilities:)` on view + re-validate at dispatch in `PrinterControlsViewModel.preheat`.
+
+### 2025-11-21: Round 10 — APPROVE HomeSubgroup (#12 PFarmerMobile)
+- **Verdict:** ✅ APPROVE
+- Verified: correct dispatch (homeAll/homeXY/homeZ), capability gating (whole + per-button), UX matches PreheatSubgroup, 60pt touch targets, VoiceOver labels, 15 tests, clean stacked diff.
+
+## Learnings
+
+- VoiceOver: `accessibilityLabel` + contextual `accessibilityHint` per button state
+- 15 tests cover: gating, dispatch, in-flight, blocking, 409 vs generic error, per-button cap rendering
+- Stacked PR cleanliness: diff only touches expected files (hudson history.md, xcodeproj, HomeSubgroup.swift, HomeSubgroupTests.swift) — no preheat duplication

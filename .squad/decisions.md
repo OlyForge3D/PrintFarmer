@@ -1,3 +1,16 @@
+## Decision: Round 10 — Cool Down Label & Jog Subgroup
+
+**Date:** 2025-11-21
+**Authors:** Hudson (iOS)
+**Status:** In Review (PR #11 merged, PR #13 open)
+
+### Summary
+
+Hudson resolved the Cool Down preset label inconsistency and implemented the Jog subgroup for PrinterControlsSection. Also detected and fixed a pre-existing xcodeproj UUID collision.
+
+- **Cool Down fix (PR #11):** Removed hardcoded "Off" ternary in `PreheatPreset.tempLabel`. Standard format string now produces "0° / 0°" uniformly.
+- **Jog subgroup (PR #13):** Axis picker (X/Y/Z), step picker (0.1/1/10/100 mm, **default 1mm per Newt's spec**), ±mm buttons. Feedrates 3000 XY / 600 Z owned by view, forwarded to `viewModel.move()`. 15 tests, stack: #7 → #11 → #12 → #13.
+- **xcodeproj fix:** Fixed pre-existing UUID collision (HomeSubgroupTests UUID = PushNotificationManager.swift fileRef) that broke xcodebuild.
 
 ---
 
