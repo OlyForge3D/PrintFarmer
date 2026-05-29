@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
@@ -22,10 +23,12 @@ namespace Farm.Web.Api.Controllers;
 [Authorize]
 public class CamerasController(
     ICameraService cameraService,
+    IPrinterCameraEndpointDetectionService cameraEndpointDetectionService,
     IStartupStatus startupStatus,
     ILogger<CamerasController> logger) : ControllerBase
 {
     private readonly ICameraService _cameraService = cameraService ?? throw new ArgumentNullException(nameof(cameraService));
+    private readonly IPrinterCameraEndpointDetectionService _cameraEndpointDetectionService = cameraEndpointDetectionService ?? throw new ArgumentNullException(nameof(cameraEndpointDetectionService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
     private readonly ILogger<CamerasController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -175,6 +178,7 @@ public class CamerasController(
                 CreatedAt = camera.CreatedAt,
                 UpdatedAt = camera.UpdatedAt,
                 PrinterId = camera.PrinterId,
+                PrinterName = camera.Printer?.Name,
                 Source = camera.Source,
                 CameraType = camera.CameraType,
                 HealthStatus = camera.HealthStatus,
@@ -226,6 +230,63 @@ public class CamerasController(
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetCamerasByPrinterAsync for PrinterId {PrinterId}: {Message}", printerId.ToString(), ex.Message);
             return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
+    }
+
+    /// <summary>
+    /// Detects camera stream and snapshot endpoints for a configured printer.
+    /// </summary>
+    /// <param name="request">Printer camera endpoint detection request</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Detected camera endpoint URLs, if supported and configured</returns>
+    /// <response code="200">Returns detection result; detected is false when unsupported or probing fails</response>
+    /// <response code="404">If the printer is not found</response>
+    /// <response code="503">If the system is still initializing</response>
+    [AllowAnonymous]
+    [HttpPost("detect-endpoints")]
+    [ProducesResponseType(typeof(CameraEndpointDetectionDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<CameraEndpointDetectionDto>> DetectCameraEndpointsAsync(DetectCameraEndpointsRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (!_startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+
+            if (request == null || request.PrinterId == Guid.Empty)
+            {
+                return BadRequest(new { message = "Printer ID is required" });
+            }
+
+            Farm.Infrastructure.Discovery.PrinterCameraProbeResult? result = await _cameraEndpointDetectionService.DetectAsync(request.PrinterId, ct);
+            if (result is null)
+            {
+                return NotFound(new { message = "Printer not found" });
+            }
+
+            return Ok(new CameraEndpointDetectionDto
+            {
+                StreamUrl = result.StreamUrl,
+                SnapshotUrl = result.SnapshotUrl,
+                Detected = result.Detected,
+                Source = result.Source
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "[CamerasController] Camera endpoint detection failed for printer {PrinterId}: {Message}", request?.PrinterId.ToString(), ex.Message);
+            return Ok(new CameraEndpointDetectionDto
+            {
+                Detected = false,
+                Source = "unknown"
+            });
         }
     }
 

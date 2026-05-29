@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Projects;
 using Farm.Infrastructure.Services.Queue;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,8 @@ public class PrintProjectService(
     AppDbContext db,
     ILogger<PrintProjectService> logger,
     IJobQueueService queueService,
-    ISpoolmanService spoolmanService) : IPrintProjectService
+    ISpoolmanService spoolmanService,
+    IPrinterGroupService printerGroupService) : IPrintProjectService
 {
     public async Task<IReadOnlyList<PrintProjectListDto>> GetProjectsAsync(
         PrintProjectStatus? status = null,
@@ -418,7 +420,7 @@ public class PrintProjectService(
         return MapToFileDto(projectFile);
     }
 
-    public async Task<QueueProjectResultDto?> QueueProjectAsync(Guid projectId, QueueProjectRequest request, CancellationToken ct = default)
+    public async Task<QueueProjectResultDto?> QueueProjectAsync(Guid projectId, QueueProjectRequest request, Guid? userId = null, CancellationToken ct = default)
     {
         var project = await db.PrintProjects
             .Include(p => p.Files)
@@ -459,6 +461,24 @@ public class PrintProjectService(
         // Smart ordering: group by material type, then by color
         var orderedFiles = OrderFilesForPrinting(pendingFiles, filamentLookup, request.GroupByMaterial, request.GroupByColor);
 
+        // Pre-validate ACL for all files before enqueueing any, to avoid partial enqueue + 403
+        if (userId.HasValue)
+        {
+            var groupIds = orderedFiles
+                .Where(f => f.GcodeFile?.PrinterGroupId.HasValue == true)
+                .Select(f => f.GcodeFile!.PrinterGroupId!.Value)
+                .Distinct();
+
+            foreach (var groupId in groupIds)
+            {
+                bool canSubmit = await printerGroupService.CanUserSubmitToGroupAsync(groupId, userId.Value, ct);
+                if (!canSubmit)
+                {
+                    throw new QueueGroupAccessDeniedException(groupId, userId.Value);
+                }
+            }
+        }
+
         var queuedFiles = new List<QueuedProjectFileDto>();
         var queueOrder = 0;
 
@@ -498,7 +518,7 @@ public class PrintProjectService(
                 ProjectFileId = file.Id,
             };
 
-            var job = await queueService.AddJobToQueueAsync(queueRequest, ct);
+            var job = await queueService.AddJobToQueueAsync(queueRequest, userId, ct);
             if (job is not null)
             {
                 queuedFiles.Add(new QueuedProjectFileDto(

@@ -1,6 +1,10 @@
 <Project>
 
   <PropertyGroup>
+    <RepoVersionRaw>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</RepoVersionRaw>
+    <RepoVersion>$([System.Text.RegularExpressions.Regex]::Replace('$(RepoVersionRaw)', '^v', ''))</RepoVersion>
+    <Version>$(RepoVersion)</Version>
+    <InformationalVersion>$(RepoVersion)</InformationalVersion>
     <!-- Disable Central Package Management - using per-project version management -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AnalysisMode>All</AnalysisMode>
@@ -120,14 +124,15 @@
   <ItemGroup>
     <PackageReference Include="IDisposableAnalyzers" Version="4.0.8" PrivateAssets="all" />
     <PackageReference Include="Microsoft.VisualStudio.Threading" Version="17.14.15" PrivateAssets="all" />
-    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.20.0.135146" PrivateAssets="all" />
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.24.0.138807" PrivateAssets="all" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556" PrivateAssets="all" />
     <!-- Global overrides for vulnerable transitive dependencies -->
     <!-- These fix high-severity vulnerabilities in packages pulled in by Refit, SignalR, etc. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Microsoft.AspNetCore.WebSockets" Version="2.3.9" />
     <PackageReference Include="System.Net.WebSockets.WebSocketProtocol" Version="5.1.3" />
-    <PackageReference Include="Refit" Version="10.0.1" />
+    <PackageReference Include="Refit" Version="10.1.6" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.7" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +14,7 @@ namespace Farm.Infrastructure.Services.Cameras;
 /// <summary>
 /// Background service that periodically probes camera URLs to monitor health status.
 /// Updates health metrics including status, last check time, and failure counts.
+/// Supports HTTP snapshot probing and RTSP OPTIONS handshake for stream-only cameras.
 /// </summary>
 public sealed class CameraHealthMonitorService(
     IServiceScopeFactory scopeFactory,
@@ -27,6 +30,9 @@ public sealed class CameraHealthMonitorService(
 
     // HTTP timeout for camera snapshot requests
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(10);
+
+    // TCP/RTSP timeout for stream probing
+    private static readonly TimeSpan RtspTimeout = TimeSpan.FromSeconds(10);
 
     // Failure thresholds for health status transitions
     private const int DegradedThreshold = 1; // 1-2 failures = Degraded
@@ -83,9 +89,9 @@ public sealed class CameraHealthMonitorService(
             using IServiceScope scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            // Get all enabled cameras with snapshot URLs
+            // Get all enabled cameras with a snapshot URL or a stream URL (RTSP cameras may have no snapshot URL)
             List<Camera> cameras = await dbContext.Cameras
-                .Where(c => c.IsEnabled && !string.IsNullOrEmpty(c.SnapshotUrl))
+                .Where(c => c.IsEnabled && (!string.IsNullOrEmpty(c.SnapshotUrl) || !string.IsNullOrEmpty(c.StreamUrl)))
                 .ToListAsync(cancellationToken);
 
             if (cameras.Count == 0)
@@ -145,23 +151,41 @@ public sealed class CameraHealthMonitorService(
 
     private async Task CheckCameraHealthAsync(Camera camera, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(camera.SnapshotUrl))
+        // Determine which URL to probe: prefer SnapshotUrl (HTTP), fall back to StreamUrl (RTSP)
+        string? probeUrl = !string.IsNullOrWhiteSpace(camera.SnapshotUrl)
+            ? camera.SnapshotUrl
+            : camera.StreamUrl;
+
+        if (string.IsNullOrWhiteSpace(probeUrl))
         {
             return;
         }
 
         // Validate URL before probing to prevent SSRF
-        if (!IsUrlSafeForProbing(camera.SnapshotUrl))
+        if (!IsUrlSafeForProbing(probeUrl))
         {
             _logger.LogWarning(
-                "Camera {CameraId} ({CameraName}) has an unsafe snapshot URL, skipping probe: {Url}",
-                camera.Id, camera.Name, camera.SnapshotUrl);
+                "Camera {CameraId} ({CameraName}) has an unsafe URL, skipping probe: {Url}",
+                camera.Id, camera.Name, probeUrl);
             camera.HealthStatus = CameraHealthStatus.Unhealthy;
             camera.LastHealthCheck = DateTime.UtcNow;
             camera.HealthMessage = "URL blocked by safety validation";
             return;
         }
 
+        // Route to the appropriate probe method based on scheme
+        if (Uri.TryCreate(probeUrl, UriKind.Absolute, out Uri? uri) && uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase))
+        {
+            await CheckRtspHealthAsync(camera, uri, cancellationToken);
+        }
+        else
+        {
+            await CheckHttpHealthAsync(camera, probeUrl, cancellationToken);
+        }
+    }
+
+    private async Task CheckHttpHealthAsync(Camera camera, string probeUrl, CancellationToken cancellationToken)
+    {
         CameraHealthStatus previousStatus = camera.HealthStatus;
         DateTime checkTime = DateTime.UtcNow;
 
@@ -171,19 +195,17 @@ public sealed class CameraHealthMonitorService(
             httpClient.Timeout = HttpTimeout;
 
             HttpResponseMessage response = await httpClient.GetAsync(
-                camera.SnapshotUrl,
+                probeUrl,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {
-                // Success - mark as healthy
                 camera.HealthStatus = CameraHealthStatus.Healthy;
                 camera.ConsecutiveFailures = 0;
                 camera.HealthMessage = null;
                 camera.LastHealthCheck = checkTime;
 
-                // Log transition from unhealthy/degraded to healthy
                 if (previousStatus != CameraHealthStatus.Healthy && previousStatus != CameraHealthStatus.Unknown)
                 {
                     _logger.LogInformation(
@@ -193,7 +215,6 @@ public sealed class CameraHealthMonitorService(
             }
             else
             {
-                // Non-200 response - increment failure count
                 HandleFailure(camera, checkTime, previousStatus,
                     $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
             }
@@ -213,56 +234,83 @@ public sealed class CameraHealthMonitorService(
     }
 
     /// <summary>
-    /// Validates a URL is safe to probe, blocking loopback, link-local, and non-HTTP schemes.
-    /// Private network IPs (10.x, 192.168.x, 172.16-31.x) are allowed since this is a local network app.
+    /// Probes an RTSP endpoint via TCP connect + RTSP OPTIONS handshake.
+    /// Sends "OPTIONS rtsp://{host}:{port}{path} RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+    /// and expects a response starting with "RTSP/1.0 200".
     /// </summary>
-    private bool IsUrlSafeForProbing(string url)
+    private async Task CheckRtspHealthAsync(Camera camera, Uri rtspUri, CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+        CameraHealthStatus previousStatus = camera.HealthStatus;
+        DateTime checkTime = DateTime.UtcNow;
+
+        try
         {
-            return false;
-        }
+            int port = rtspUri.Port > 0 ? rtspUri.Port : 554;
+            using var tcp = new TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(RtspTimeout);
 
-        // Block non-HTTP(S) schemes
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            return false;
-        }
+            await tcp.ConnectAsync(rtspUri.Host, port, cts.Token);
 
-        string host = uri.Host;
+            // Build RTSP OPTIONS request
+            string request = $"OPTIONS {rtspUri.AbsoluteUri} RTSP/1.0\r\nCSeq: 1\r\n\r\n";
+            byte[] requestBytes = Encoding.ASCII.GetBytes(request);
 
-        // Block loopback addresses
-        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(host, "127.0.0.1", StringComparison.Ordinal) ||
-            string.Equals(host, "::1", StringComparison.Ordinal) ||
-            string.Equals(host, "[::1]", StringComparison.Ordinal))
-        {
-            return false;
-        }
+            NetworkStream stream = tcp.GetStream();
+            await stream.WriteAsync(requestBytes, cts.Token);
 
-        // Check IP address ranges
-        if (IPAddress.TryParse(host, out IPAddress? ip))
-        {
-            byte[] bytes = ip.GetAddressBytes();
+            // Read response (just need the status line)
+            byte[] buffer = new byte[512];
+            int bytesRead = await stream.ReadAsync(buffer, cts.Token);
 
-            // Block IPv4 loopback range (127.0.0.0/8)
-            if (bytes.Length == 4 && bytes[0] == 127)
+            if (bytesRead > 0)
             {
-                return false;
-            }
+                string responseLine = Encoding.ASCII.GetString(buffer, 0, Math.Min(bytesRead, 256));
 
-            // Block link-local (169.254.x.x — cloud metadata endpoint range)
-            if (bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254)
+                if (responseLine.StartsWith("RTSP/1.0 200", StringComparison.OrdinalIgnoreCase))
+                {
+                    camera.HealthStatus = CameraHealthStatus.Healthy;
+                    camera.ConsecutiveFailures = 0;
+                    camera.HealthMessage = null;
+                    camera.LastHealthCheck = checkTime;
+
+                    if (previousStatus != CameraHealthStatus.Healthy && previousStatus != CameraHealthStatus.Unknown)
+                    {
+                        _logger.LogInformation(
+                            "Camera {CameraId} ({CameraName}) RTSP recovered: {PrevStatus} → Healthy",
+                            camera.Id, camera.Name, previousStatus);
+                    }
+                }
+                else
+                {
+                    // Extract the RTSP status code from response
+                    string statusLine = responseLine.Split(['\r', '\n'])[0];
+                    HandleFailure(camera, checkTime, previousStatus, $"RTSP error: {statusLine}");
+                }
+            }
+            else
             {
-                return false;
+                HandleFailure(camera, checkTime, previousStatus, "RTSP error: empty response");
             }
-
-            // Private IPs are ALLOWED: 10.x, 192.168.x, 172.16-31.x
-            // (this is a local network printer management app)
         }
-
-        return true;
+        catch (SocketException ex)
+        {
+            HandleFailure(camera, checkTime, previousStatus, $"RTSP connect failed: {ex.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            HandleFailure(camera, checkTime, previousStatus, "RTSP timeout");
+        }
+        catch (Exception ex)
+        {
+            HandleFailure(camera, checkTime, previousStatus, $"RTSP error: {ex.GetType().Name}");
+        }
     }
+
+    /// <summary>
+    /// Validates a URL is safe to probe, delegating to the shared <see cref="CameraUrlValidator"/>.
+    /// </summary>
+    private static bool IsUrlSafeForProbing(string url) => CameraUrlValidator.IsUrlSafeForProbing(url);
 
     private void HandleFailure(Camera camera, DateTime checkTime, CameraHealthStatus previousStatus, string errorMessage)
     {

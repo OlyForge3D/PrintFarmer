@@ -1,8 +1,12 @@
 ﻿using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Slicer.Module.Api.Controllers.Admin;
 
@@ -11,8 +15,9 @@ namespace Farm.Slicer.Module.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/slicer")]
-public partial class SlicerAdminController : ControllerBase
+public partial class SlicerAdminController(SlicerDbContext db) : ControllerBase
 {
+    private readonly SlicerDbContext _db = db;
     private static readonly ReadOnlyDictionary<string, string> SamplePlaceholders = new(new Dictionary<string, string>
     {
         ["{filename}"] = "test_model",
@@ -70,6 +75,62 @@ public partial class SlicerAdminController : ControllerBase
         result.IsValid = result.Issues.Count == 0;
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Gets global slicer settings.
+    /// </summary>
+    [HttpGet("settings")]
+    [Authorize(Roles = "farm_admin")]
+    public async Task<IActionResult> GetSettingsAsync(CancellationToken ct)
+    {
+        SlicerSettings? settings = await _db.SlicerSettings.FirstOrDefaultAsync(s => s.Id == 1, ct);
+        if (settings is null)
+        {
+            settings = new SlicerSettings { Id = 1 };
+            _db.SlicerSettings.Add(settings);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return Ok(new SlicerSettingsDto
+        {
+            Enabled = settings.Enabled,
+            JitterPercent = settings.JitterPercent,
+            PerEngineJson = settings.PerEngineJson,
+            UpdatedAt = settings.UpdatedAt,
+        });
+    }
+
+    /// <summary>
+    /// Updates global slicer settings.
+    /// </summary>
+    /// <param name="request">Updated settings values.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPut("settings")]
+    [Authorize(Roles = "farm_admin")]
+    public async Task<IActionResult> UpdateSettingsAsync([FromBody] UpdateSlicerSettingsRequest request, CancellationToken ct)
+    {
+        SlicerSettings? settings = await _db.SlicerSettings.FirstOrDefaultAsync(s => s.Id == 1, ct);
+        if (settings is null)
+        {
+            settings = new SlicerSettings { Id = 1 };
+            _db.SlicerSettings.Add(settings);
+        }
+
+        settings.Enabled = request.Enabled;
+        settings.JitterPercent = request.JitterPercent;
+        settings.PerEngineJson = request.PerEngineJson;
+        settings.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new SlicerSettingsDto
+        {
+            Enabled = settings.Enabled,
+            JitterPercent = settings.JitterPercent,
+            PerEngineJson = settings.PerEngineJson,
+            UpdatedAt = settings.UpdatedAt,
+        });
     }
 
     [GeneratedRegex(@"\{[a-z_]+\}")]

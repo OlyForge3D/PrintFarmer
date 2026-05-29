@@ -344,6 +344,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<double?>("DimensionZ")
                         .HasColumnType("double precision");
 
+                    b.Property<string>("ExtractedMetadataJson")
+                        .HasColumnType("text");
+
                     b.Property<int>("FileFormat")
                         .HasColumnType("integer");
 
@@ -570,6 +573,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<int?>("EstimatedPrintTimeSeconds")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal?>("FilamentUsedGrams")
                         .HasColumnType("numeric");
 
@@ -581,10 +587,19 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<string>("ModelFileTransformsJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("ModelFileUrlsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelTransformJson")
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uuid");

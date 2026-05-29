@@ -34,8 +34,10 @@ import {
   ExternalLinkIcon,
   AlertIcon,
   ClipboardListIcon,
+  ListIcon,
   PlayIcon,
   CalendarIcon,
+  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -109,8 +111,16 @@ const navigation: NavigationElement[] = [
   },
   {
     name: 'Slice',
-    href: '/jobs/new',
+    href: '/slicer',
     icon: BoxIcon,
+    requiredPermission: { resource: 'models', action: 'read' },
+    requiresSlicer: true,
+    requiresSlicingCapability: true
+  },
+  {
+    name: 'Slicer Profiles',
+    href: '/slicer-profiles',
+    icon: GearIcon,
     requiredPermission: { resource: 'models', action: 'read' },
     requiresSlicer: true,
     requiresSlicingCapability: true
@@ -213,9 +223,27 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
+    name: 'Bed Types',
+    href: '/admin/bed-types',
+    icon: LayersIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Custom Fields',
+    href: '/admin/custom-fields',
+    icon: ListIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
     name: 'Webhooks',
     href: '/admin/webhooks',
     icon: ExternalLinkIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Quotas',
+    href: '/admin/quotas',
+    icon: ClipboardListIcon,
     requiredRole: 'farm_admin'
   },
   {
@@ -226,14 +254,7 @@ const navigation: NavigationElement[] = [
     requiresSlicer: true,
     requiresSlicingCapability: true
   },
-  {
-    name: 'Slicer Profiles',
-    href: '/admin/slicer-profiles',
-    icon: SettingsIcon,
-    requiredRole: 'farm_admin',
-    requiresSlicer: true,
-    requiresSlicingCapability: true
-  },
+
   {
     name: 'System',
     href: '/admin/system',
@@ -250,6 +271,15 @@ const navigation: NavigationElement[] = [
     name: 'Settings',
     href: '/settings',
     icon: GearIcon,
+    requiredRole: 'farm_admin'
+  },
+
+  // — Security —
+  { name: 'Security', isSectionHeader: true, requiredRole: 'farm_admin' },
+  {
+    name: 'Login Audit',
+    href: '/admin/security/login-audit',
+    icon: ShieldIcon,
     requiredRole: 'farm_admin'
   },
 ];

@@ -239,7 +239,8 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
-            .Include(pj => pj.ToolheadUsages);
+            .Include(pj => pj.ToolheadUsages)
+            .Include(pj => pj.Tags);
 
         // Filter by statuses - default to completed/failed/cancelled if not specified
         if (statuses != null && statuses.Count > 0)

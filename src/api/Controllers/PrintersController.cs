@@ -52,6 +52,8 @@ public class PrintersController(
     ISettingsService settingsService,
     Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     IPrintFarmerTelemetryService telemetryService,
+    Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
+    Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader printerStatusCache,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -70,6 +72,8 @@ public class PrintersController(
     private readonly ISettingsService _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
+    private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _printerStatusCache = printerStatusCache;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -504,30 +508,58 @@ public class PrintersController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <param name="includeDisabled">Return disabled printers as well (admin-only).</param>
+    /// <param name="doneWithinMinutes">Only return printers estimated to finish within this many minutes.</param>
+    /// <param name="doneAfterMinutes">Only return printers estimated to finish after this many minutes.</param>
+    /// <param name="bedTypeId">Filter printers by bed type ID.</param>
     /// <returns>A complete list of all printers with configuration and live status merged.</returns>
     /// <response code="200">Returns the list of complete printer data with live status.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<CompletePrinterDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
+    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(
+        CancellationToken ct,
+        [FromQuery] bool includeDisabled = false,
+        [FromQuery] int? doneWithinMinutes = null,
+        [FromQuery] int? doneAfterMinutes = null,
+        [FromQuery] Guid? bedTypeId = null)
     {
         try
         {
             CompletePrinterDto[] dtos = await _printersService.GetAllCompleteDtosAsync(ct);
             bool isAdmin = User.IsInRole("farm_admin");
-            if (isAdmin)
+            IEnumerable<CompletePrinterDto> result = dtos;
+
+            if (!isAdmin)
             {
-                return Ok(dtos);
+                if (includeDisabled)
+                {
+                    return Forbid();
+                }
+
+                result = result.Where(p => p.IsEnabled);
             }
 
-            if (includeDisabled)
+            // Time-based availability filters
+            if (doneWithinMinutes.HasValue)
             {
-                return Forbid();
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(doneWithinMinutes.Value);
+                result = result.Where(p =>
+                    !p.EstimatedCompletionTimeUtc.HasValue || p.EstimatedCompletionTimeUtc.Value <= cutoff);
             }
 
-            // Filter to only enabled printers for normal users
-            List<CompletePrinterDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
-            return Ok(enabledDtos);
+            if (doneAfterMinutes.HasValue)
+            {
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(doneAfterMinutes.Value);
+                result = result.Where(p =>
+                    p.EstimatedCompletionTimeUtc.HasValue && p.EstimatedCompletionTimeUtc.Value > cutoff);
+            }
+
+            if (bedTypeId.HasValue)
+            {
+                result = result.Where(p => p.BedTypeId == bedTypeId.Value);
+            }
+
+            return Ok(result.ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -890,7 +922,13 @@ public class PrintersController(
             p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
             p.MachineHourlyRate,
-            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            p.ZOffsetMm,
+            p.LastZOffsetCalibrationAt,
+            p.UseModelDispatchDefaults,
+            p.BuddyCameraIp,
+            p.NozzleDiameter,
+            p.HasMmu);
     }
 
     /// <summary>
@@ -1590,6 +1628,30 @@ public class PrintersController(
             p.MachineHourlyRate = dto.MachineHourlyRate.Value;
         }
 
+        if (dto.ZOffsetMm.HasValue && dto.ZOffsetMm.Value != p.ZOffsetMm)
+        {
+            p.ZOffsetMm = dto.ZOffsetMm.Value;
+            p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        }
+
+        if (dto.BedTypeId.HasValue && dto.BedTypeId.Value != p.BedTypeId)
+        {
+            if (dto.BedTypeId.Value == Guid.Empty)
+            {
+                p.BedTypeId = null;
+            }
+            else
+            {
+                var bedType = await _bedTypeService.GetByIdAsync(dto.BedTypeId.Value, ct);
+                if (bedType is null)
+                {
+                    return BadRequest(new { error = $"Bed type '{dto.BedTypeId.Value}' not found" });
+                }
+
+                p.BedTypeId = dto.BedTypeId.Value;
+            }
+        }
+
         // Only update LastCapabilityUpdate if capability fields actually changed
         if (capabilityChanged)
         {
@@ -1600,6 +1662,11 @@ public class PrintersController(
             }
 
             p.ServiceState.LastCapabilityUpdate = DateTime.UtcNow;
+        }
+
+        if (dto.UseModelDispatchDefaults.HasValue)
+        {
+            p.UseModelDispatchDefaults = dto.UseModelDispatchDefaults.Value;
         }
 
         // Update toolheads if provided
@@ -1697,6 +1764,36 @@ public class PrintersController(
             modelName = mod?.Name;
         }
 
+        // Auto-create/update/remove Buddy camera when BuddyCameraIp changes
+        if (dto.BuddyCameraIp != null)
+        {
+            string ip = dto.BuddyCameraIp.Trim();
+
+            if (ip.Length == 0)
+            {
+                // Empty string = explicit clear request; skip validation and remove the camera.
+                await _printersService.SyncBuddyCameraAsync(p, ip, ct);
+            }
+            else
+            {
+                // Validate: must be a plain hostname or IP with no embedded separators or control chars
+                bool hasInvalidChar = ip.Any(c =>
+                    c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
+                    || char.IsControl(c) || char.IsWhiteSpace(c));
+
+                bool isValidHost = !hasInvalidChar &&
+                    (IPAddress.TryParse(ip, out _) ||
+                     Uri.CheckHostName(ip) == UriHostNameType.Dns);
+
+                if (!isValidHost)
+                {
+                    return BadRequest("Invalid BuddyCameraIp: must be a plain IP address or hostname.");
+                }
+
+                await _printersService.SyncBuddyCameraAsync(p, ip, ct);
+            }
+        }
+
         // Save all changes (printer + toolhead updates) with concurrency retry.
         // Background polling services may update the same printer row (e.g. status, temps),
         // which changes the RowVersion. The retry reloads the token and re-saves.
@@ -1729,7 +1826,8 @@ public class PrintersController(
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
-            ObicoEnabled: p.ObicoEnabled);
+            ObicoEnabled: p.ObicoEnabled,
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults);
 
         return Ok(dtoResponse);
     }
@@ -1891,13 +1989,21 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/home")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         bool ok = await _printersService.SendHomeAsync(id, ct);
         _telemetryService.RecordPrinterOperation("home_all", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
@@ -1911,13 +2017,21 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homexy")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         bool ok = await _printersService.HomeXYAsync(id, ct);
         _telemetryService.RecordPrinterOperation("home_xy", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
@@ -1931,13 +2045,21 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the Z-axis homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homez")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
         bool ok = await _printersService.HomeZAsync(id, ct);
         _telemetryService.RecordPrinterOperation("home_z", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
@@ -1947,6 +2069,8 @@ public class PrintersController(
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] Farm.Infrastructure.TempTargets targets, CancellationToken ct)
     {
@@ -1955,15 +2079,24 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
-        _telemetryService.RecordPrinterOperation("set_temperature", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
+        Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+            await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
+        _telemetryService.RecordPrinterOperation("set_temperature", id.ToString(), outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok);
+        return MapControlOutcome(outcome);
     }
 
     [HttpPost("{id:guid}/move")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> MoveAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
@@ -1972,15 +2105,24 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        _telemetryService.RecordPrinterOperation("move", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
+        Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+            await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        _telemetryService.RecordPrinterOperation("move", id.ToString(), outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok);
+        return MapControlOutcome(outcome);
     }
 
     [HttpPost("{id:guid}/moveto")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> MoveToAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
@@ -1989,9 +2131,51 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        _telemetryService.RecordPrinterOperation("move_to", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        ActionResult<CommandResult>? gate = await GatePrinterControlAsync(id, ct);
+        if (gate is not null)
+        {
+            return gate;
+        }
+
+        Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+            await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        _telemetryService.RecordPrinterOperation("move_to", id.ToString(), outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok);
+        return MapControlOutcome(outcome);
+    }
+
+    private async Task<ActionResult<CommandResult>?> GatePrinterControlAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        Farm.Infrastructure.PrinterStatusDto? status = _printerStatusCache.GetStatus(id);
+        if (Farm.Infrastructure.Services.Printers.PrinterControlGate.IsBusyForControl(status?.State))
+        {
+            return Conflict(new CommandResult(false, $"Printer is currently {status?.State?.ToLowerInvariant()}."));
+        }
+
+        return null;
+    }
+
+    private ActionResult<CommandResult> MapControlOutcome(Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome)
+    {
+        return outcome switch
+        {
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok =>
+                new CommandResult(true, null),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.NotFound =>
+                NotFound(new CommandResult(false, "Printer not found.")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendBusy =>
+                Conflict(new CommandResult(false, "Printer firmware refused the command (busy).")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnsupported =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend does not support this command.")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnreachable =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend unreachable or returned an error.")),
+            _ => StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Command failed.")),
+        };
     }
 
     [HttpPost("{id:guid}/pause")]
@@ -2184,6 +2368,68 @@ public class PrintersController(
         bool ok = await _printersService.SendGcodeAsync(id, request.Command.Trim(), ct);
         _telemetryService.RecordPrinterOperation("send_gcode", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    // Z-offset calibration endpoint
+
+    /// <summary>
+    /// Saves the calibrated Z-offset for a printer.
+    /// Persists the value to the database and optionally sends save commands to the printer firmware.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">The Z-offset save request containing the offset value.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure.</returns>
+    /// <response code="200">Z-offset saved successfully.</response>
+    /// <response code="400">If the offset value is out of range.</response>
+    /// <response code="404">If the printer was not found.</response>
+    [HttpPost("{id:guid}/z-offset")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> SaveZOffsetAsync(Guid id, [FromBody] ZOffsetSaveRequest request, CancellationToken ct)
+    {
+        if (request.OffsetMm is null)
+        {
+            return BadRequest(new CommandResult(false, "offsetMm is required"));
+        }
+
+        decimal offsetMm = request.OffsetMm.Value;
+        Printer? p = await _printersService.FindByIdAsync(id, ct);
+        if (p is null)
+        {
+            return NotFound();
+        }
+
+        // Send save commands to the printer firmware and verify success
+        if (request.SaveToFirmware)
+        {
+            PrinterBackend backend = (PrinterBackend)p.Backend;
+            string saveCommands = backend switch
+            {
+                PrinterBackend.Moonraker => $"SET_GCODE_OFFSET Z={offsetMm:F3}\nSAVE_CONFIG",
+                _ => $"M851 Z{offsetMm:F3}\nM500"
+            };
+
+            foreach (string cmd in saveCommands.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                bool sent = await _printersService.SendGcodeAsync(id, cmd.Trim(), ct);
+                if (!sent)
+                {
+                    _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), false);
+                    return BadRequest(new CommandResult(false, $"Firmware command failed: {cmd.Trim()}"));
+                }
+            }
+        }
+
+        // Persist the Z-offset to the database only after firmware success
+        p.ZOffsetMm = offsetMm;
+        p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        await _printersService.SaveChangesAsync(ct);
+
+        _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), true);
+        return new CommandResult(true, null);
     }
 
     // Filament control endpoints

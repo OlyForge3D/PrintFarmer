@@ -33,7 +33,53 @@ public abstract class HttpJobPollerService(
     private readonly ILogger<HttpJobPollerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWorkerStateService _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-    private readonly Guid _workerId = Guid.NewGuid();
+    private readonly Guid _workerId = ResolveWorkerId(configuration);
+    private readonly string? _workerApiKey = configuration["WorkerAuth:SharedApiKey"]
+                                              ?? configuration["WorkerAuth:SharedKey"]
+                                              ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+
+    private static Guid ResolveWorkerId(IConfiguration configuration)
+    {
+        string? instanceId = configuration["Worker:InstanceId"];
+        if (!string.IsNullOrWhiteSpace(instanceId) && Guid.TryParse(instanceId, out Guid parsed))
+        {
+            // For multi-worker deployments: combine instance ID with hostname
+            // so replicas sharing the same config get unique but deterministic IDs.
+            string hostname = Environment.MachineName;
+            string? workerId = configuration["Worker:WorkerId"];
+            if (!string.IsNullOrWhiteSpace(workerId) && workerId != "orcaslicer-worker-1")
+            {
+                // Worker has a distinct WorkerId — derive a unique GUID from base + discriminator
+                return DeriveGuid(parsed, workerId);
+            }
+
+            // Single worker or first replica — suffix with hostname for safety
+            string containerHostname = hostname ?? string.Empty;
+            if (!string.IsNullOrEmpty(containerHostname) && containerHostname.Length >= 8)
+            {
+                return DeriveGuid(parsed, containerHostname);
+            }
+
+            return parsed;
+        }
+
+        return Guid.NewGuid();
+    }
+
+    /// <summary>
+    /// Creates a deterministic GUID by hashing the base GUID with a discriminator string.
+    /// Ensures each replica gets a unique but stable ID across restarts.
+    /// </summary>
+    private static Guid DeriveGuid(Guid baseId, string discriminator)
+    {
+        byte[] input = [.. baseId.ToByteArray(), .. System.Text.Encoding.UTF8.GetBytes(discriminator)];
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(input);
+
+        // Use first 16 bytes of SHA256 as a v4-like GUID
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x40); // version 4
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // variant 1
+        return new Guid(hash.AsSpan(0, 16));
+    }
 
     /// <summary>
     /// Derived classes implement this to execute the slicing pipeline.
@@ -72,6 +118,11 @@ public abstract class HttpJobPollerService(
                 using HttpClient httpClient = _httpClientFactory.CreateClient();
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+                if (!string.IsNullOrWhiteSpace(_workerApiKey))
+                {
+                    httpClient.DefaultRequestHeaders.Add("X-Worker-Key", _workerApiKey);
+                }
 
                 // Attempt to claim a job
                 ClaimJobRequest claimRequest = new ClaimJobRequest
@@ -117,8 +168,14 @@ public abstract class HttpJobPollerService(
                     EngineType = engineEnum,
                     SlicerEngine = engineEnum.ToString(),
                     Status = SlicingJobStatus.Slicing, // in-progress mapping
-                    StartedAt = DateTime.UtcNow
+                    StartedAt = DateTime.UtcNow,
+                    ModelTransformJson = jobStatus.ModelTransformJson,
+                    ModelFileUrls = jobStatus.ModelFileUrls,
+                    ModelFileTransforms = jobStatus.ModelFileTransforms,
                 };
+
+                // Resolve profile names from SlicerProfileJson into full SlicerProfileDto
+                job.Profile = await ResolveProfileFromJsonAsync(jobStatus.SlicerProfileJson, stoppingToken);
 
                 _workerState.IncrementActiveJobs();
                 _logger.LogInformation("Claimed job {JobId}, starting processing", job.Id);
@@ -238,7 +295,8 @@ public abstract class HttpJobPollerService(
         {
             _logger.LogError(ex, "Job {JobId} failed: {Message}", job.Id, ex.Message);
 
-            // Job will timeout and be reassigned by the API's error recovery system
+            // Report failure to the API so the job doesn't sit in Processing until lease expires
+            await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
         }
         finally
         {
@@ -277,6 +335,25 @@ public abstract class HttpJobPollerService(
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to send progress update for job {JobId}", jobId);
+        }
+    }
+
+    private async Task TryReportFailureAsync(HttpClient client, Guid jobId, string errorMessage, CancellationToken ct)
+    {
+        try
+        {
+            string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
+            var failReq = new { errorMessage = truncated };
+
+            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/fail", failReq, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Fail report for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to report failure for job {JobId}", jobId);
         }
     }
 
@@ -341,5 +418,168 @@ public abstract class HttpJobPollerService(
         // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
         // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
+    }
+
+    /// <summary>
+    /// Resolves profile names from SlicerProfileJson into a full SlicerProfileDto
+    /// by looking up cached profiles from the ISlicerProfilesService and applying user overrides.
+    ///
+    /// Expected JSON format:
+    /// {
+    ///   "machineProfileName": "Phrozen Arco 0.4 nozzle (0.4mm)",
+    ///   "filamentProfileName": "Generic PLA @System",
+    ///   "processProfileName": "0.20mm Standard @Phrozen Arco",
+    ///   "overrides": { "sparse_infill_density": 30, "outer_wall_speed": 100 }
+    /// }
+    /// </summary>
+    private async Task<SlicerProfileDto?> ResolveProfileFromJsonAsync(string? slicerProfileJson, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(slicerProfileJson))
+        {
+            _logger.LogWarning("SlicerProfileJson is null or empty — cannot resolve profiles");
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(slicerProfileJson);
+            JsonElement root = doc.RootElement;
+
+            string machineProfileName = root.TryGetProperty("machineProfileName", out JsonElement machElem) ? machElem.GetString() ?? string.Empty : string.Empty;
+            string filamentProfileName = root.TryGetProperty("filamentProfileName", out JsonElement filElem) ? filElem.GetString() ?? string.Empty : string.Empty;
+            string processProfileName = root.TryGetProperty("processProfileName", out JsonElement procElem) ? procElem.GetString() ?? string.Empty : string.Empty;
+
+            if (string.IsNullOrEmpty(machineProfileName) && string.IsNullOrEmpty(filamentProfileName) && string.IsNullOrEmpty(processProfileName))
+            {
+                _logger.LogWarning("No profile names found in SlicerProfileJson — cannot resolve profiles");
+                return null;
+            }
+
+            ISlicerProfilesService? profilesService = _serviceProvider.GetService<ISlicerProfilesService>();
+            if (profilesService == null)
+            {
+                _logger.LogWarning("ISlicerProfilesService not available — cannot resolve profiles");
+                return null;
+            }
+
+            SlicerProfileDto profile = new();
+
+            // Resolve machine profile by name
+            if (!string.IsNullOrEmpty(machineProfileName))
+            {
+                IList<MachineProfileDto> machines = await profilesService.ListAvailableMachineProfilesAsync(ct);
+                profile.MachineProfile = machines.FirstOrDefault(m =>
+                    string.Equals(m.Name, machineProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile.MachineProfile == null)
+                {
+                    _logger.LogWarning("Machine profile '{MachineProfileName}' not found in {MachinesCount} cached profiles", machineProfileName, machines.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Resolved machine profile: {MachineName}", profile.MachineProfile.Name);
+                }
+            }
+
+            // Resolve filament profile by name
+            if (!string.IsNullOrEmpty(filamentProfileName))
+            {
+                IList<FilamentProfileDto> filaments = await profilesService.ListAvailableFilamentProfilesAsync(ct);
+                profile.FilamentProfile = filaments.FirstOrDefault(f =>
+                    string.Equals(f.Name, filamentProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile.FilamentProfile == null)
+                {
+                    _logger.LogWarning("Filament profile '{FilamentProfileName}' not found in {FilamentsCount} cached profiles", filamentProfileName, filaments.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Resolved filament profile: {FilamentName}", profile.FilamentProfile.Name);
+                }
+            }
+
+            // Resolve per-extruder filament profiles for multi-toolhead printers
+            if (root.TryGetProperty("extruderFilamentProfileNames", out JsonElement extruderNamesElem)
+                && extruderNamesElem.ValueKind == JsonValueKind.Array
+                && extruderNamesElem.GetArrayLength() > 0)
+            {
+                IList<FilamentProfileDto> filaments = await profilesService.ListAvailableFilamentProfilesAsync(ct);
+                var extruderProfiles = new List<FilamentProfileDto>();
+                int index = 0;
+                foreach (JsonElement nameElem in extruderNamesElem.EnumerateArray())
+                {
+                    string? name = nameElem.GetString();
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        _logger.LogError("Extruder {Index} has null/empty filament profile name — aborting multi-extruder resolution", index);
+                        extruderProfiles.Clear();
+                        break;
+                    }
+
+                    FilamentProfileDto? resolved = filaments.FirstOrDefault(f =>
+                        string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+                    if (resolved is null)
+                    {
+                        _logger.LogError("Extruder {Index} filament profile '{Name}' not found — aborting multi-extruder resolution", index, name);
+                        extruderProfiles.Clear();
+                        break;
+                    }
+
+                    extruderProfiles.Add(resolved);
+                    _logger.LogInformation("Resolved extruder {Index} filament profile: {Name}", index, resolved.Name);
+                    index++;
+                }
+
+                if (extruderProfiles.Count > 0)
+                {
+                    profile.ExtruderFilamentProfiles = extruderProfiles;
+
+                    // Use first extruder as the primary filament profile for backward compat
+                    profile.FilamentProfile ??= extruderProfiles[0];
+                }
+            }
+
+            // Resolve process profile by name
+            if (!string.IsNullOrEmpty(processProfileName))
+            {
+                IList<ProcessProfileDto> processes = await profilesService.ListAvailableProcessProfilesAsync(ct);
+                profile.ProcessProfile = processes.FirstOrDefault(p =>
+                    string.Equals(p.Name, processProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile.ProcessProfile == null)
+                {
+                    _logger.LogWarning("Process profile '{ProcessProfileName}' not found in {ProcessesCount} cached profiles", processProfileName, processes.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Resolved process profile: {ProcessName}", profile.ProcessProfile.Name);
+                }
+            }
+
+            // Apply user overrides — all keys are native snake_case, pass through directly
+            if (profile.ProcessProfile != null && root.TryGetProperty("overrides", out JsonElement overridesElem))
+            {
+                int applied = 0;
+                foreach (JsonProperty prop in overridesElem.EnumerateObject())
+                {
+                    // Store as properly-typed value, matching SerializeElementToDict format
+                    profile.ProcessProfile.Settings[prop.Name] = prop.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
+                        JsonValueKind.True => "1",
+                        JsonValueKind.False => "0",
+                        JsonValueKind.Number => prop.Value.GetRawText(),
+                        _ => (object)prop.Value.GetRawText()
+                    };
+                    applied++;
+                }
+
+                _logger.LogInformation("Applied {Applied} overrides to process profile", applied);
+            }
+
+            return profile;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to parse SlicerProfileJson: {SlicerProfileJson}", slicerProfileJson);
+            return null;
+        }
     }
 }

@@ -50,6 +50,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     private readonly IThumbnailGenerationService? _thumbnailService;
     private readonly IFolderManagementService _folderManagementService;
     private readonly IStoragePathService _storagePathService;
+    private readonly IThreeMfMetadataService? _threeMfMetadataService;
 
     public Model3DFileService(
         IModel3DFileRepository model3dFiles,
@@ -62,13 +63,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         IStoragePathService storagePathService,
         IStoredFileOperationsService fileOperations,
         IModelAnalysisService? analysisService = null,
-        IThumbnailGenerationService? thumbnailService = null)
+        IThumbnailGenerationService? thumbnailService = null,
+        IThreeMfMetadataService? threeMfMetadataService = null)
     {
         _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
         _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _analysisService = analysisService;
         _thumbnailService = thumbnailService;
+        _threeMfMetadataService = threeMfMetadataService;
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _folderManagementService = folderManagementService ?? throw new ArgumentNullException(nameof(folderManagementService));
@@ -193,7 +196,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             catch
             {
                 // Path doesn't exist — return empty results
-                return new Model3DListResponse([], 0, 0, page, pageSize, 0, 0);
+                return new Model3DListResponse(Models: [], TotalCount: 0, TotalSize: 0, Page: page, PageSize: pageSize, TotalPages: 0, TotalItems: 0);
             }
         }
 
@@ -222,8 +225,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 0;
 
         return new Model3DListResponse(
-            Files: entries,
-            TotalFiles: totalCount,
+            Models: entries,
+            TotalCount: totalCount,
             TotalSize: totalSize,
             Page: page,
             PageSize: pageSize,
@@ -253,15 +256,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Full filesystem path to the model file, or null if not found</returns>
     public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
     {
-        Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
+        // Use unfiltered query for file operations - files should be accessible regardless of validation status
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
         if (model == null)
         {
             return null;
         }
 
-        // Return relative path by combining FilePath (directory) with FileName (GUID filename)
-        // FilePath is the storage directory, FileName is the GUID-based filename
-        return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, string.Empty).TrimStart(Path.DirectorySeparatorChar, '/');
+        // Return absolute path using the configured storage directory
+        return Path.Combine(_modelsPath, model.FileName);
     }
 
     /// <summary>
@@ -272,8 +275,9 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Full filesystem path to thumbnail, or null if thumbnail not available</returns>
     public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
     {
-        Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
-        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(model.FilePath, model.ThumbnailFileName));
+        // Use unfiltered query for file operations - thumbnails should be accessible regardless of validation status
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
+        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(_modelsPath, model.ThumbnailFileName));
     }
 
     /// <summary>
@@ -334,7 +338,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <remarks>
     /// Validates:
     /// - File is not null or empty
-    /// - File extension is supported (.stl, .obj, .3mf)
+    /// - File extension is supported (.stl, .obj, .3mf, .step, .stp)
     /// - File size is within limits (max 100 MB)
     /// </remarks>
     public Model3DValidationResultDto ValidateModel(IFormFile modelFile)
@@ -389,6 +393,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         {
             throw new InvalidOperationException("Unsafe file path generated");
         }
+
+        _logger.LogInformation("Starting model upload: {FileName} ({FileSize} bytes), ID: {ModelId}", originalName, modelFile.Length, modelId);
 
         // Use temp file pattern for safety: write to temp, then move to final location
         string tempFileName = $"{modelId}.tmp{fileExtension}";
@@ -448,11 +454,36 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 // analysis is optional; resolve from DI if available via _analysisService
                 if (_analysisService != null)
                 {
+                    _logger.LogDebug("Analyzing model metadata for {ModelId}", modelId);
                     analysis = await _analysisService.AnalyzeModelAsync(tempFilePath, fileExtension, ct);
+                    _logger.LogDebug("Model analysis complete for {ModelId}: {DimensionX}x{DimensionY}x{DimensionZ}mm", modelId, analysis?.DimensionX, analysis?.DimensionY, analysis?.DimensionZ);
                 }
             }
-            catch
+            catch (Exception analysisEx)
             {
+                _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, analysisEx.Message);
+            }
+
+            // Step 2b: Extract 3MF metadata (best-effort)
+            ThreeMfMetadataDto? threeMfMetadata = null;
+            try
+            {
+                if (_threeMfMetadataService != null &&
+                    fileExtension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("Extracting 3MF metadata for {ModelId}", modelId);
+                    threeMfMetadata = await _threeMfMetadataService.ExtractMetadataAsync(tempFilePath, ct);
+                    if (threeMfMetadata != null)
+                    {
+                        _logger.LogDebug(
+                            "3MF metadata extracted for {ModelId}: Title={Title}, Designer={Designer}, AutoTags={TagCount}",
+                            modelId, threeMfMetadata.Title, threeMfMetadata.Designer, threeMfMetadata.AutoTags.Count);
+                    }
+                }
+            }
+            catch (Exception metadataEx)
+            {
+                _logger.LogWarning("3MF metadata extraction failed for {ModelId}: {Message}", modelId, metadataEx.Message);
             }
 
             // Step 3: Check for duplicates
@@ -546,17 +577,20 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 DimensionX = analysis?.DimensionX,
                 DimensionY = analysis?.DimensionY,
                 DimensionZ = analysis?.DimensionZ,
-                TriangleCount = analysis?.TriangleCount
+                TriangleCount = analysis?.TriangleCount,
+                ExtractedMetadataJson = threeMfMetadata != null ? System.Text.Json.JsonSerializer.Serialize(threeMfMetadata) : null
             };
 
             await _model3dFiles.AddAsync(model, ct);
             await _model3dFiles.SaveChangesAsync(ct);
+            _logger.LogInformation("Model record saved to database: {ModelId}", modelId);
 
             // Step 6: Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
             try
             {
                 if (_thumbnailService != null)
                 {
+                    _logger.LogDebug("Starting thumbnail generation for {ModelId}", modelId);
                     string thumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, _thumbnailService.ThumbnailFileExtension);
                     string thumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
 
@@ -577,7 +611,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
                             _logger.LogInformation("Thumbnail generated successfully for model {ModelId}", modelId);
                         }
+                        else
+                        {
+                            _logger.LogWarning("Thumbnail generation returned false for model {ModelId}", modelId);
+                        }
                     }
+                }
+                else
+                {
+                    _logger.LogDebug("Thumbnail service not available, skipping thumbnail generation for {ModelId}", modelId);
                 }
             }
             catch (Exception thumbnailEx)
@@ -587,6 +629,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 // Don't rethrow - upload should succeed even if thumbnail generation fails
             }
 
+            _logger.LogInformation("Model upload complete: {ModelId} ({FileName}). All post-processing finished.", modelId, fileName);
             return new Model3DUploadResultDto
             {
                 Id = modelId,
@@ -775,6 +818,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             .Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
             .ToArray();
 
+        ThreeMfMetadataDto? metadata = DeserializeMetadata(model.ExtractedMetadataJson);
+
         return new Model3DDto
         {
             Id = model.Id,
@@ -785,8 +830,27 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             UploadedAt = model.UploadedAt,
             Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
             ThumbnailUrl = thumbnailUrl,
-            Tags = tags
+            Tags = tags,
+            ExtractedMetadata = metadata,
+            AutoTags = metadata?.AutoTags?.ToArray()
         };
+    }
+
+    private static ThreeMfMetadataDto? DeserializeMetadata(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<ThreeMfMetadataDto>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -816,4 +880,125 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     }
 
     #endregion
+
+    /// <inheritdoc />
+    public async Task<GeometryUploadResultDto> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct)
+    {
+        if (geometryFile is null || geometryFile.Length == 0)
+        {
+            throw new ArgumentException("Geometry file is required", nameof(geometryFile));
+        }
+
+        const long maxFileSize = 200_000_000; // 200 MB
+        if (geometryFile.Length > maxFileSize)
+        {
+            throw new ArgumentException($"File exceeds maximum allowed size of {maxFileSize / 1_000_000} MB", nameof(geometryFile));
+        }
+
+        Guid modelId = Guid.NewGuid();
+        string fileName = $"{modelId}.stl";
+        string finalFilePath = Path.Combine(_modelsPath, fileName);
+
+        if (!_fileManagementService.IsSafePath(finalFilePath, _modelsPath))
+        {
+            throw new InvalidOperationException("Unsafe file path generated");
+        }
+
+        _logger.LogInformation("Geometry upload started: {ModelId} ({FileSize} bytes)", modelId, geometryFile.Length);
+
+        // Write file to a temp path, then move to final location
+        string tempFilePath = Path.Combine(_modelsPath, $"{modelId}.tmp.stl");
+        try
+        {
+            using (Stream dest = _fileSystem.OpenWrite(tempFilePath))
+            {
+                await geometryFile.CopyToAsync(dest, ct);
+            }
+
+            if (_fileSystem.FileExists(finalFilePath))
+            {
+                _fileSystem.DeleteFile(finalFilePath);
+            }
+
+            _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
+
+            if (!_fileSystem.FileExists(finalFilePath))
+            {
+                throw new InvalidOperationException("File move succeeded but verification failed");
+            }
+        }
+        catch
+        {
+            // Cleanup on failure
+            foreach (string path in new[] { tempFilePath, finalFilePath })
+            {
+                try
+                {
+                    if (_fileManagementService.IsSafePath(path, _modelsPath) && _fileSystem.FileExists(path))
+                    {
+                        _fileSystem.DeleteFile(path);
+                    }
+                }
+                catch
+                {
+                    // ignore cleanup errors
+                }
+            }
+
+            throw;
+        }
+
+        // Create minimal DB entry so the existing download endpoint can serve the file
+        FolderNode rootFolder = await _folderManagementService.GetOrCreateFolderAsync("/", "models", ct);
+
+        Model3D model = new()
+        {
+            Id = modelId,
+            Name = geometryFile.FileName ?? $"cut-geometry-{modelId:N}.stl",
+            FileName = fileName,
+            FolderId = rootFolder.Id,
+            FilePath = "/",
+            FileSizeBytes = geometryFile.Length,
+            FileHash = modelId.ToString("N"), // Use model ID as hash — no dedup for generated geometry
+            FileFormat = ModelFileFormat.STL,
+            UploadedAt = DateTime.UtcNow,
+            IsValid = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await _model3dFiles.AddAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // DB write failed — clean up the orphaned file on disk
+            try
+            {
+                if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
+                {
+                    _fileSystem.DeleteFile(finalFilePath);
+                }
+            }
+            catch
+            {
+                // ignore cleanup errors
+            }
+
+            throw;
+        }
+
+        string fileUrl = _fileOperations.BuildModel3DFileUrl(modelId, ModelFileFormat.STL);
+        _logger.LogInformation("Geometry upload complete: {ModelId}, URL: {FileUrl}", modelId, fileUrl);
+
+        return new GeometryUploadResultDto
+        {
+            Id = modelId,
+            FileName = fileName,
+            FileSize = geometryFile.Length,
+            FileUrl = fileUrl
+        };
+    }
 }

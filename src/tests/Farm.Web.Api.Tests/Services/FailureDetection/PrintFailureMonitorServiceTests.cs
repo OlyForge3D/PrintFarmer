@@ -85,6 +85,66 @@ public class PrintFailureMonitorServiceTests
         result.IdleReason.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("Printing")]
+    [InlineData("Heating")]
+    [InlineData("Pausing")]
+    [InlineData("Paused")]
+    [InlineData("Resuming")]
+    [InlineData("printing")] // case-insensitive guard
+    [InlineData("paused")]
+    public void EvaluateMonitoringWindow_WhenStateIsActivePrintingJob_ReturnsMonitoringReady(string state)
+    {
+        var status = new PrinterStatusDto(Guid.NewGuid(), true, state);
+
+        var result = PrintFailureMonitorService.EvaluateMonitoringWindow(
+            status,
+            activeJobStatus: null,
+            activeJobStartedAtUtc: null,
+            utcNow: DateTime.UtcNow);
+
+        result.ShouldMonitor.Should().BeTrue();
+        result.IdleReason.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Idle")]
+    [InlineData("Complete")]
+    [InlineData("Cancelled")]
+    [InlineData("Cancelling")]
+    [InlineData("Error")]
+    [InlineData("Offline")]
+    [InlineData("Shutdown")]
+    [InlineData("Disconnected")]
+    public void EvaluateMonitoringWindow_WhenStateIsNotActivePrintingJob_ReturnsIdle(string state)
+    {
+        var status = new PrinterStatusDto(Guid.NewGuid(), true, state);
+
+        var result = PrintFailureMonitorService.EvaluateMonitoringWindow(
+            status,
+            activeJobStatus: null,
+            activeJobStartedAtUtc: null,
+            utcNow: DateTime.UtcNow);
+
+        result.ShouldMonitor.Should().BeFalse();
+        result.IdleReason.Should().Be("Printer is not actively printing.");
+    }
+
+    [Fact]
+    public void EvaluateMonitoringWindow_WhenPrinterIsOffline_ReturnsIdleEvenIfStateIsPrinting()
+    {
+        var status = new PrinterStatusDto(Guid.NewGuid(), IsOnline: false, "Printing");
+
+        var result = PrintFailureMonitorService.EvaluateMonitoringWindow(
+            status,
+            activeJobStatus: null,
+            activeJobStartedAtUtc: null,
+            utcNow: DateTime.UtcNow);
+
+        result.ShouldMonitor.Should().BeFalse();
+        result.IdleReason.Should().Be("Printer is not actively printing.");
+    }
+
     [Fact]
     public void ResolveJobContext_WhenLiveStatusIncludesNormalizedNames_PrefersLiveStatus()
     {

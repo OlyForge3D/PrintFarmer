@@ -326,8 +326,8 @@ public interface IPrintersService
     /// <param name="hotend">Target hotend temperature in Celsius, or null to leave unchanged</param>
     /// <param name="bed">Target bed temperature in Celsius, or null to leave unchanged</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if temperature command succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
 
     /// <summary>
     /// Moves the print head by specified offsets from current position (relative movement).
@@ -338,8 +338,8 @@ public interface IPrintersService
     /// <param name="z">Z-axis offset in millimeters, or null to skip Z movement</param>
     /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if movement succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
 
     /// <summary>
     /// Moves the print head to specified absolute position coordinates.
@@ -350,8 +350,8 @@ public interface IPrintersService
     /// <param name="z">Target Z-axis position in millimeters, or null to skip Z movement</param>
     /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if positioning succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
 
     /// <summary>
     /// Pauses the currently running print job without canceling it.
@@ -496,6 +496,14 @@ public interface IPrintersService
     /// <param name="wasMultiMaterial">The previous value of MultiMaterial before the edit</param>
     /// <param name="mmuGateCount">Number of MMU gate slots (default 4)</param>
     void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4);
+
+    /// <summary>
+    /// Synchronizes the Buddy camera entity when BuddyCameraIp is set, changed, or cleared.
+    /// Creates a new Camera when an IP is set for the first time, updates the StreamUrl when
+    /// the IP changes, or removes the Camera entity when the IP is cleared (empty string).
+    /// Does NOT save changes — caller must call SaveChangesAsync.
+    /// </summary>
+    Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct);
 
     /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.

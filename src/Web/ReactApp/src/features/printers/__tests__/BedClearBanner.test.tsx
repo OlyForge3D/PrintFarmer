@@ -11,6 +11,7 @@ vi.mock('@/services/api', () => ({
     confirmAutoDispatchReady: vi.fn().mockResolvedValue({}),
     skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
     cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
+    dispatchJobToPrinter: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -47,6 +48,29 @@ vi.mock('@/common/hooks/useApi', () => ({
   queryKeys: {
     printers: ['printers'] as const,
     printer: (id: string) => ['printers', id] as const,
+  },
+}));
+
+// Mock SpoolValidationModal to render testable buttons
+vi.mock('@/features/queue/components/SpoolValidationModal', () => ({
+  SpoolValidationModal: (props: {
+    isOpen: boolean;
+    onClose: () => void;
+    onProceed: (jobId: string) => void;
+    context: { jobId: string; jobName: string } | null;
+  }) => {
+    if (!props.isOpen || !props.context) return null;
+    return (
+      <div data-testid="spool-validation-modal">
+        <span data-testid="modal-job-name">{props.context.jobName}</span>
+        <button data-testid="print-anyway-btn" onClick={() => props.onProceed(props.context!.jobId)}>
+          Print Anyway
+        </button>
+        <button data-testid="cancel-modal-btn" onClick={props.onClose}>
+          Cancel
+        </button>
+      </div>
+    );
   },
 }));
 
@@ -324,7 +348,7 @@ describe('BedClearBanner', () => {
     });
   });
 
-  it('warns on material mismatch without dispatching', async () => {
+  it('shows SpoolValidationModal on material mismatch instead of toast', async () => {
     vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
@@ -332,10 +356,48 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(toast.warning).toHaveBeenCalledWith(
-        expect.stringContaining('Material mismatch'),
-        expect.objectContaining({ duration: 8000 }),
+      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('modal-job-name')).toHaveTextContent('part.gcode');
+    // Should NOT show a toast warning
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('dispatches job when user clicks Print Anyway on material mismatch', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
+    vi.mocked(apiClient.dispatchJobToPrinter).mockResolvedValueOnce({} as never);
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('print-anyway-btn'));
+    await waitFor(() => {
+      expect(apiClient.dispatchJobToPrinter).toHaveBeenCalledWith('job-2', 'printer-1');
+    });
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringContaining('material override'),
       );
+    });
+  });
+
+  it('closes modal when user cancels material mismatch', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('cancel-modal-btn'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('spool-validation-modal')).not.toBeInTheDocument();
     });
   });
 

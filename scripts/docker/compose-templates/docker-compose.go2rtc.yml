@@ -1,0 +1,37 @@
+# go2rtc RTSP-to-WebRTC/HLS/MSE Transcoding Sidecar
+# Enables browser playback of RTSP camera feeds (e.g., Prusa Buddy 3D Camera)
+# This service is conditionally included via compose-generator.sh when --include-go2rtc is passed
+#
+# Architecture:
+#   Browser ──WebRTC/MSE──▸ go2rtc (:1984) ──RTSP──▸ Camera (:554)
+#
+# Environment Variables:
+#   GO2RTC_PORT       - Host port for go2rtc API/WebRTC (default: 1984)
+#   GO2RTC_RTSP_PORT  - Host port for RTSP relay (default: 8554)
+#   GO2RTC_IMAGE      - Container image (default: alexxit/go2rtc:1.9.8)
+
+services:
+  go2rtc:
+    image: ${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
+    container_name: printfarmer-go2rtc
+    restart: unless-stopped
+    ports:
+      - "${GO2RTC_PORT:-1984}:1984"       # API + WebRTC
+      - "${GO2RTC_RTSP_PORT:-8554}:8554"  # RTSP relay (optional)
+    environment:
+      - TZ=${TZ:-UTC}
+    networks:
+      printfarmer-network:
+        aliases:
+          - go2rtc
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:1984/api"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  printfarmer-network:
+    name: printfarmer-network
+    driver: bridge

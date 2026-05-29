@@ -95,6 +95,12 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.Status = status;
         job.UpdatedAt = DateTime.UtcNow;
 
+        // Set CompletedAt for terminal states
+        if (status is SliceJobStatus.Completed or SliceJobStatus.Failed or SliceJobStatus.Cancelled)
+        {
+            job.CompletedAt ??= DateTime.UtcNow;
+        }
+
         if (progressMessage != null)
         {
             job.ProgressMessage = progressMessage;
@@ -333,6 +339,66 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             job.QueuedAt = DateTime.UtcNow;
         }
 
+        await SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<int> CountAsync(string? status = null, CancellationToken ct = default)
+    {
+        IQueryable<SliceJob> query = _db.SliceJobs;
+        if (!string.IsNullOrEmpty(status))
+        {
+            query = query.Where(j => j.Status == status);
+        }
+
+        return await query.CountAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SliceJob>> GetPagedAsync(int page, int pageSize, string? status = null, string? sortBy = null, string? sortDir = null, CancellationToken ct = default)
+    {
+        IQueryable<SliceJob> query = _db.SliceJobs;
+        if (!string.IsNullOrEmpty(status))
+        {
+            query = query.Where(j => j.Status == status);
+        }
+
+        bool descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        query = sortBy?.ToLowerInvariant() switch
+        {
+            "completedat" => descending
+                ? query.OrderByDescending(j => j.CompletedAt ?? DateTime.MaxValue).ThenByDescending(j => j.CreatedAt)
+                : query.OrderBy(j => j.CompletedAt ?? DateTime.MinValue).ThenBy(j => j.CreatedAt),
+            _ => descending ? query.OrderByDescending(j => j.CreatedAt) : query.OrderBy(j => j.CreatedAt),
+        };
+
+        return await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task RetryJobAsync(Guid jobId, CancellationToken ct = default)
+    {
+        SliceJob? job = await GetByIdAsync(jobId, ct);
+        if (job is null)
+        {
+            return;
+        }
+
+        job.Status = SliceJobStatus.Queued;
+        job.QueuedAt = DateTime.UtcNow;
+        job.WorkerId = null;
+        job.ClaimedAt = null;
+        job.LeaseExpiresAt = null;
+        job.ErrorMessage = null;
+        job.StartedAt = null;
+        job.CompletedAt = null;
+        job.ProgressPercent = 0;
+        job.ProgressMessage = null;
+        job.RetryCount = 0;
+        job.UpdatedAt = DateTime.UtcNow;
         await SaveChangesAsync(ct);
     }
 

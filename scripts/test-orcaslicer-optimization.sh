@@ -4,7 +4,7 @@
 
 set -e
 
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.2}
 
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
 DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}

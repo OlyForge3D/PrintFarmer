@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useTransition, useCallback, useRef } from 'react';
+import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
   FilterIcon,
   RefreshIcon,
@@ -63,10 +64,38 @@ export function FilamentsTab() {
   useEffect(() => {
     localStorage.setItem('filaments-view-mode', viewMode);
   }, [viewMode]);
-  const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', color: '', search: '' });
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [page, setPage] = useState(1);
+
+  const {
+    search: urlSearch,
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    sortField: urlSortField,
+    sortDir: urlSortDir,
+    page: urlPage,
+    setSearch,
+    setMany,
+    resetAll,
+    hasActiveFilters: urlHasActiveFilters,
+  } = useUrlFilterState({
+    search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
+    material: { key: 'material', type: 'string', defaultValue: '' },
+    vendor: { key: 'vendor', type: 'string', defaultValue: '' },
+    color: { key: 'color', type: 'string', defaultValue: '' },
+    sortField: { key: 'sort', type: 'string', defaultValue: 'name', filterable: false },
+    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc', filterable: false },
+    page: { key: 'page', type: 'number', defaultValue: 1, filterable: false },
+  });
+
+  const filters: FilterState = {
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    search: urlSearch,
+  };
+  const sortField = urlSortField as SortField;
+  const sortDir = urlSortDir as 'asc' | 'desc';
+  const page = urlPage as number;
   const [pageSize, setPageSize] = useState<number>(() => {
     const saved = localStorage.getItem('filaments-page-size');
     return saved ? Number(saved) : 50;
@@ -182,8 +211,8 @@ export function FilamentsTab() {
     setDragColId(null);
   };
 
-  const hasActiveFilters = filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.search !== '';
-  const resetFilters = () => setFilters({ material: '', vendor: '', color: '', search: '' });
+  const hasActiveFilters = urlHasActiveFilters;
+  const resetFilters = () => resetAll();
 
   // Load filaments on mount
   const loadFilaments = useCallback(async () => {
@@ -238,17 +267,17 @@ export function FilamentsTab() {
 
   const filteredFilaments = useMemo(() => {
     let result = filaments;
-    if (filters.material) {
-      result = result.filter(f => f.material?.toLowerCase() === filters.material.toLowerCase());
+    if (urlMaterial) {
+      result = result.filter(f => f.material?.toLowerCase() === urlMaterial.toLowerCase());
     }
-    if (filters.vendor) {
-      result = result.filter(f => f.vendor?.toLowerCase() === filters.vendor.toLowerCase());
+    if (urlVendor) {
+      result = result.filter(f => f.vendor?.toLowerCase() === urlVendor.toLowerCase());
     }
-    if (filters.color) {
-      result = result.filter(f => classifyColor(f.colorHex) === filters.color);
+    if (urlColor) {
+      result = result.filter(f => classifyColor(f.colorHex) === urlColor);
     }
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
+    if (urlSearch) {
+      const q = (urlSearch as string).toLowerCase();
       result = result.filter(f =>
         (f.name || '').toLowerCase().includes(q) ||
         (f.vendor || '').toLowerCase().includes(q) ||
@@ -257,7 +286,7 @@ export function FilamentsTab() {
       );
     }
     return result;
-  }, [filaments, filters]);
+  }, [filaments, urlMaterial, urlVendor, urlColor, urlSearch]);
 
   const sortedFilaments = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -291,7 +320,14 @@ export function FilamentsTab() {
   }, [sortedFilaments, page, pageSize]);
 
   // Reset page when filters or sort change
-  useEffect(() => { setPage(1); }, [filters, sortField, sortDir]);
+  const filterKey = `${urlSearch}|${urlMaterial}|${urlVendor}|${urlColor}|${sortField}|${sortDir}`;
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current !== filterKey) {
+      prevFilterKey.current = filterKey;
+      setMany({ page: 1 });
+    }
+  }, [filterKey, setMany]);
 
   // Persist page size preference
   useEffect(() => { localStorage.setItem('filaments-page-size', String(pageSize)); }, [pageSize]);
@@ -568,7 +604,7 @@ export function FilamentsTab() {
                 id="filament-search"
                 type="search"
                 value={filters.search}
-                onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                onChange={e => setSearch(e.target.value)}
                 placeholder="Name, vendor, material..."
                 className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
                 aria-label="Search filaments"
@@ -579,7 +615,7 @@ export function FilamentsTab() {
               <Select
                 aria-label="Filter by material"
                 value={filters.material}
-                onChange={e => setFilters(prev => ({ ...prev, material: e.target.value }))}
+                onChange={e => setMany({ material: e.target.value, page: 1 })}
                 className="w-40"
               >
                 <option value="">All Materials</option>
@@ -593,7 +629,7 @@ export function FilamentsTab() {
               <Select
                 aria-label="Filter by vendor"
                 value={filters.vendor}
-                onChange={e => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
+                onChange={e => setMany({ vendor: e.target.value, page: 1 })}
                 className="w-40"
               >
                 <option value="">All Vendors</option>
@@ -606,7 +642,7 @@ export function FilamentsTab() {
               <label className="text-xs text-pf-text-secondary">Color</label>
               <ColorFamilySelect
                 value={filters.color}
-                onChange={val => setFilters(prev => ({ ...prev, color: val }))}
+                onChange={val => setMany({ color: val, page: 1 })}
                 options={colorFamilyOptions}
                 placeholder="All Colors"
               />
@@ -619,7 +655,7 @@ export function FilamentsTab() {
                     id="filament-sort"
                     aria-label="Sort field"
                     value={sortField}
-                    onChange={e => setSortField(e.target.value as SortField)}
+                    onChange={e => setMany({ sortField: e.target.value })}
                     className="w-40"
                   >
                     <option value="name">Name</option>
@@ -635,7 +671,7 @@ export function FilamentsTab() {
                     size="sm"
                     variant="subtle"
                     aria-label="Toggle sort direction"
-                    onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    onClick={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })}
                     iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
                   />
                 </div>
@@ -648,7 +684,7 @@ export function FilamentsTab() {
                   id="filament-page-size"
                   aria-label="Page size"
                   value={String(pageSize)}
-                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setPage(1); }}
+                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
                   className="w-20"
                 >
                   <option value="10">10</option>
@@ -731,7 +767,7 @@ export function FilamentsTab() {
           tableColumns={tableColumns}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
-          onSort={(field, dir) => { setSortField(field as SortField); setSortDir(dir); }}
+          onSort={(field, dir) => setMany({ sortField: field, sortDir: dir })}
           onEdit={f => setEditingFilament(f)}
           onClone={f => setCloningFilament(f)}
           onDelete={f => setDeleteConfirm({ type: 'single', filament: f })}
@@ -745,7 +781,7 @@ export function FilamentsTab() {
             variant="secondary"
             size="sm"
             disabled={page <= 1}
-            onClick={() => setPage(p => Math.max(1, p - 1))}
+            onClick={() => setMany({ page: Math.max(1, page - 1) })}
             aria-label="Previous page"
           >
             ← Prev
@@ -757,7 +793,7 @@ export function FilamentsTab() {
             variant="secondary"
             size="sm"
             disabled={page >= totalPages}
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            onClick={() => setMany({ page: Math.min(totalPages, page + 1) })}
             aria-label="Next page"
           >
             Next →

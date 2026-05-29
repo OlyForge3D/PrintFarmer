@@ -16,7 +16,7 @@ public interface IOrcaBinaryDetector
 
 public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
 {
-    private const string BinaryPath = "/usr/local/bin/orcaslicer";
+    private const string BinaryPath = "/opt/orcaslicer/bin/orca-slicer";
 
     public bool IsRealBinaryPresent()
     {
@@ -30,7 +30,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
             FileInfo fi = new FileInfo(BinaryPath);
             if (fi.Length < 2048)
             {
-                return false; // heuristic stub threshold
+                return false;
             }
 
             using Process? proc = Process.Start(new ProcessStartInfo

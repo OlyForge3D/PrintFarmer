@@ -130,7 +130,7 @@ export const ModelsPage: React.FC = () => {
             onSelectionChange={setSelectedModelIds}
             onOpenModel={setViewerModel}
             onSliceModel={(model) => {
-              window.location.assign(`/jobs/new?modelId=${model.id}`);
+              window.location.assign(`/slicer?modelId=${model.id}`);
             }}
             onShowTagModal={() => setShowBulkTagModal(true)}
             onShowSingleTagModal={(model) => {
@@ -163,11 +163,11 @@ export const ModelsPage: React.FC = () => {
                     />
                   }
                 >
-                  {viewerModel.url && viewerModel.fileType && (
+                  {(viewerModel.url || viewerModel.id) && viewerModel.fileType && (
                     <ModelViewer
-                      modelUrl={viewerModel.url}
+                      modelUrl={viewerModel.url || `/api/3d-models/file/${viewerModel.id}`}
                       fileType={viewerModel.fileType}
-                      showGrid={false}
+                      showGrid={true}
                       className="h-128 w-full"
                     />
                   )}

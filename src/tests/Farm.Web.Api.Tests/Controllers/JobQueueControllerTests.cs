@@ -1,10 +1,12 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -43,6 +45,15 @@ public class JobQueueControllerTests
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
             _loggerMock.Object);
+
+        // Set up authenticated user with valid GUID claim for ACL enforcement
+        var userId = Guid.NewGuid();
+        var claims = new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) };
+        var identity = new ClaimsIdentity(claims, "TestAuth");
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
     }
 
     [Fact]
@@ -146,7 +157,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobDto);
 
         // Act
@@ -170,7 +181,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
         // Act

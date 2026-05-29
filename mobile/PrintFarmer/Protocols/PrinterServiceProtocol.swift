@@ -24,6 +24,16 @@ protocol PrinterServiceProtocol: Sendable {
     func loadFilament(printerId: UUID) async throws -> CommandResult
     func unloadFilament(printerId: UUID) async throws -> CommandResult
     func changeFilament(printerId: UUID) async throws -> CommandResult
+
+    // Capabilities
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities
+
+    // Temperature & Motion Controls
+    func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws
+    func home(printerId: UUID, axes: [String]) async throws
+    func homeXY(printerId: UUID) async throws
+    func homeZ(printerId: UUID) async throws
+    func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws
 }
 
 // Convenience overload

@@ -177,8 +177,17 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
+        // Material equivalence clusters
+        _ = services.AddScoped<Farm.Infrastructure.Services.MaterialClusters.IMaterialClusterService, Farm.Infrastructure.Services.MaterialClusters.MaterialClusterService>();
+
         // Printer group service
         _ = services.AddScoped<Farm.Infrastructure.Services.PrinterGroups.IPrinterGroupService, Farm.Infrastructure.Services.PrinterGroups.PrinterGroupService>();
+
+        // Bed type service
+        _ = services.AddScoped<Farm.Infrastructure.Services.BedTypes.IBedTypeService, Farm.Infrastructure.Services.BedTypes.BedTypeService>();
+
+        // Custom field service
+        _ = services.AddScoped<Farm.Infrastructure.Services.CustomFields.ICustomFieldService, Farm.Infrastructure.Services.CustomFields.CustomFieldService>();
 
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
@@ -376,6 +385,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.PasswordPolicy.IPasswordPolicyService, Farm.Infrastructure.Services.PasswordPolicy.PasswordPolicyService>();
         _ = services.AddScoped<IAccountLockoutService, Farm.Infrastructure.Services.Authentication.AccountLockoutService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ILoginAuditService, Farm.Infrastructure.Services.Authentication.LoginAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
@@ -526,7 +536,19 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Locations.ILocationService, Farm.Infrastructure.Services.Locations.LocationService>();
 
         // Register CameraService from Infrastructure layer - standalone camera management service
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Cameras.ICameraRepository, Farm.Infrastructure.Repositories.Cameras.EfCameraRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
+        _ = services.AddScoped<Farm.Infrastructure.Discovery.IPrinterCameraEndpointDetectionService, Farm.Infrastructure.Discovery.PrinterCameraEndpointDetectionService>();
+
+        // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IGo2RtcService, Farm.Infrastructure.Services.Cameras.Go2RtcService>();
+
+        // Register camera snapshot service - captures snapshots on print events
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraSnapshotService, Farm.Infrastructure.Services.Cameras.CameraSnapshotService>();
+        _ = services.AddHttpClient("CameraSnapshot", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
 
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
@@ -593,6 +615,9 @@ public static class ServiceCollectionExtensions
         // Gcode upload settings and quota - use persisted settings from ISettingsService
         _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
         _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
+
+        // Print quotas and user balances
+        _ = services.AddScoped<Farm.Infrastructure.Services.PrintQuotas.IPrintQuotaService, Farm.Infrastructure.Services.PrintQuotas.PrintQuotaService>();
     }
 
     #endregion

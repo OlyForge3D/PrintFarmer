@@ -38,9 +38,13 @@ public class Model3DFilesController(
             return BadRequest("No file uploaded or file is empty.");
         }
 
+        _logger.LogInformation("Upload request received: {FileName} ({FileSize} bytes)", modelFile.FileName, modelFile.Length);
+
         try
         {
             Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
+
+            _logger.LogInformation("Upload complete, returning response: {ModelId}", result.Id);
             return Created($"/api/models/{result.Id}", result);
         }
         catch (ArgumentException ex)
@@ -339,6 +343,42 @@ public class Model3DFilesController(
     }
 
     /// <summary>
+    /// Uploads raw geometry data (e.g., STL from the Cut Model tool) with minimal processing.
+    /// Skips thumbnail generation, model analysis, and deduplication.
+    /// Returns a server-accessible URL that the slicer worker can fetch.
+    /// </summary>
+    /// <param name="geometryFile">The STL geometry file to upload.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("upload-geometry")]
+    [ProducesResponseType(typeof(GeometryUploadResultDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [RequestSizeLimit(200_000_000)] // 200 MB
+    public async Task<IActionResult> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct)
+    {
+        if (geometryFile is null || geometryFile.Length == 0)
+        {
+            return BadRequest("No file uploaded or file is empty.");
+        }
+
+        try
+        {
+            GeometryUploadResultDto result = await _modelService.UploadGeometryAsync(geometryFile, ct);
+            _logger.LogInformation("Geometry upload complete: {ModelId}", result.Id);
+            return Created($"/api/3d-models/file/{result.Id}", result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Geometry upload validation failed: {Message}", ex.Message);
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload geometry");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload geometry");
+        }
+    }
+
+    /// <summary>
     /// Queries 3D models with filtering, sorting, and pagination.
     /// </summary>
     /// <param name="request">Search and filter parameters.</param>
@@ -456,6 +496,25 @@ public class Model3DFilesController(
             AffectedCount = moved,
             Message = $"Moved {moved} of {request.Ids.Count} models (errors: {errors})"
         });
+    }
+
+    /// <summary>
+    /// Gets extracted 3MF metadata for a model.
+    /// </summary>
+    /// <param name="id">The model's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("{id:guid}/metadata")]
+    [ProducesResponseType(typeof(ThreeMfMetadataDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetModelMetadataAsync(Guid id, CancellationToken ct)
+    {
+        Model3DDto? model = await _modelService.GetModelAsync(id, ct);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(model.ExtractedMetadata);
     }
 
     /// <summary>

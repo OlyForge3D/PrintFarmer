@@ -52,6 +52,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Initializes a new instance of the PrintersService with all required dependencies.
 /// </remarks>
 /// <param name="unitOfWork">Unit of Work for database operations</param>
+/// <param name="db">Application DbContext used for snapshot pre-deletion</param>
 /// <param name="backendFactory">Factory for creating backend clients</param>
 /// <param name="capabilityFactory">Factory for checking backend capabilities</param>
 /// <param name="catalogService">Service for manufacturer/model lookups</param>
@@ -64,9 +65,11 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="locationService">Service for location management</param>
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
+/// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
+    AppDbContext db,
     IBackendClientFactory backendFactory,
     IBackendCapabilityFactory capabilityFactory,
     Catalog.ICatalogService catalogService,
@@ -78,9 +81,11 @@ public class PrintersService(
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
-    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService) : IPrintersService
+    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
+    Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
     private readonly IBackendClientFactory _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
@@ -93,6 +98,7 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
+    private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -850,7 +856,12 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
             catch (Exception ex)
             {
@@ -896,7 +907,11 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
         }
 
@@ -1251,6 +1266,10 @@ public class PrintersService(
             ["lastUpdated"] = p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             ["maxBedTemp"] = p.MaxBedTemp,
 
+            // Z-offset calibration
+            ["zOffsetMm"] = p.ZOffsetMm,
+            ["lastZOffsetCalibrationAt"] = p.LastZOffsetCalibrationAt,
+
             // All toolheads as array (supports multi-toolhead printers)
             ["toolheads"] = p.Toolheads?.Select(t => new Dictionary<string, object?>
             {
@@ -1315,7 +1334,8 @@ public class PrintersService(
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
-            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults);
     }
 
     /// <summary>
@@ -1529,7 +1549,12 @@ public class PrintersService(
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
-            MachineHourlyRate = dto.MachineHourlyRate
+            MachineHourlyRate = dto.MachineHourlyRate,
+
+            // Inherit auto-dispatch defaults from model template
+            AutoDispatchEnabled = modelTemplate?.DefaultAutoDispatchState != null
+                && modelTemplate.DefaultAutoDispatchState != AutoDispatchState.None,
+            UseModelDispatchDefaults = true
         };
 
         // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
@@ -2031,12 +2056,12 @@ public class PrintersService(
     /// Pass null for heater to skip temperature change (e.g., hotend=210, bed=null sets only hotend).
     /// Temperatures clamped to safe ranges by backend firmware (typically 0-300°C hotend, 0-120°C bed).
     /// </remarks>
-    public async Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
+    public async Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2065,25 +2090,31 @@ public class PrintersService(
                         success = success && hotendSuccess;
                     }
 
-                    return success;
+                    return success ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
                 }
 
-                return false;
+                return PrinterControlOutcome.BackendUnsupported;
             }
 
             // Moonraker, PrusaLink, SDCP: use generic temperature control
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused temperature command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to set temperatures on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2103,12 +2134,12 @@ public class PrintersService(
     /// At least one axis parameter should be provided; null values are ignored.
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2119,15 +2150,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                bool ok = await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused move command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2148,12 +2185,12 @@ public class PrintersService(
     /// Coordinates are typically limited to printer build volume (e.g., 0-250mm for Prusa).
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2164,15 +2201,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused moveto command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move to position on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2689,7 +2732,7 @@ public class PrintersService(
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2774,7 +2817,7 @@ public class PrintersService(
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2931,7 +2974,9 @@ public class PrintersService(
             mmuGateCount, printer.Name, printer.Id);
 
         var gates = new List<Toolhead>();
-        for (int i = 1; i < mmuGateCount; i++)
+
+        // Indices 1..mmuGateCount: T0 is the physical hotend, T1..Tn are AMS gates.
+        for (int i = 1; i <= mmuGateCount; i++)
         {
             gates.Add(new Toolhead
             {
@@ -4059,6 +4104,97 @@ public class PrintersService(
         PrinterBackend.FlashForge => CameraSource.FlashForge,
         _ => CameraSource.Standalone,
     };
+
+    /// <inheritdoc/>
+    public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)
+    {
+        string trimmedIp = buddyCameraIp.Trim();
+
+        // Find existing Buddy camera (PrusaLink source with RTSP stream URL)
+        Domain.Camera? existing = printer.Cameras?.FirstOrDefault(c => c.Source == CameraSource.PrusaLink
+            && !string.IsNullOrEmpty(c.StreamUrl) && c.StreamUrl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrEmpty(trimmedIp))
+        {
+            // Clear: remove BuddyCameraIp and delete the camera entity
+            printer.BuddyCameraIp = null;
+            if (existing != null)
+            {
+                await _go2RtcService.RemoveStreamAsync(existing.Id, ct);
+
+                // Pre-delete snapshot rows before removing the camera entity.
+                // Camera→CameraSnapshot FK is Restrict, so SaveChanges would throw
+                // if any snapshot rows still reference this camera when it is removed.
+                List<Domain.CameraSnapshot> snapshots = await _db.CameraSnapshots
+                    .Where(s => s.CameraId == existing.Id)
+                    .ToListAsync(ct);
+                if (snapshots.Count > 0)
+                {
+                    _db.CameraSnapshots.RemoveRange(snapshots);
+                    _logger.LogInformation(
+                        "[BuddyCamera] Removing {Count} snapshot records for camera {CameraId} before deletion",
+                        snapshots.Count, existing.Id);
+                }
+
+                _unitOfWork.Cameras.Remove(existing);
+                _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+            }
+
+            return;
+        }
+
+        string rtspUrl = $"rtsp://{trimmedIp}:554/live/";
+        printer.BuddyCameraIp = trimmedIp;
+
+        if (existing != null)
+        {
+            // Update existing camera's stream URL if IP changed
+            if (existing.StreamUrl != rtspUrl)
+            {
+                existing.StreamUrl = rtspUrl;
+                existing.HealthStatus = CameraHealthStatus.Unknown;
+                existing.ConsecutiveFailures = 0;
+                existing.HealthMessage = null;
+
+                // Re-register stream in go2rtc with updated URL
+                string? snapshotUrl = await _go2RtcService.AddStreamAsync(existing.Id, rtspUrl, ct);
+                if (snapshotUrl != null)
+                {
+                    existing.SnapshotUrl = snapshotUrl;
+                }
+
+                _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, rtspUrl);
+            }
+        }
+        else
+        {
+            // Create new Buddy camera
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"{printer.Name} Buddy Camera",
+                StreamUrl = rtspUrl,
+                SnapshotUrl = null,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = CameraSource.PrusaLink,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Unknown,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            // Register stream in go2rtc and derive snapshot URL
+            string? snapshot = await _go2RtcService.AddStreamAsync(camera.Id, rtspUrl, ct);
+            if (snapshot != null)
+            {
+                camera.SnapshotUrl = snapshot;
+            }
+
+            _unitOfWork.Cameras.Add(camera);
+            _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, printer.Name, rtspUrl);
+        }
+    }
 
     /// <summary>
     /// Resolves camera URLs from the Cameras table for a given printer.

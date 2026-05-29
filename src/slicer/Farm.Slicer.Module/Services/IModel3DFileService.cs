@@ -84,4 +84,12 @@ public interface IModel3DFileService
     /// <param name="path">Relative path to the file within model storage.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct);
+
+    /// <summary>
+    /// Uploads raw geometry (e.g., STL from the Cut Model tool) with minimal processing.
+    /// Skips thumbnail generation, model analysis, and deduplication.
+    /// </summary>
+    /// <param name="geometryFile">The STL geometry file to store.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<GeometryUploadResultDto> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct);
 }

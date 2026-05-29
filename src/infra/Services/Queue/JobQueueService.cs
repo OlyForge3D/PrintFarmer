@@ -7,6 +7,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.Extensions.Logging;
@@ -37,6 +38,7 @@ public class JobQueueService : IJobQueueService
     private readonly IPrintCostCalculator? _costCalculator;
     private readonly IAutoDispatchTrigger? _dispatchTrigger;
     private readonly IAutoDispatchService? _autoDispatchService;
+    private readonly IPrinterGroupService? _printerGroupService;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -47,6 +49,7 @@ public class JobQueueService : IJobQueueService
     /// <param name="costCalculator">Optional cost calculator for estimating job costs from Spoolman data</param>
     /// <param name="dispatchTrigger">Optional dispatch trigger for notifying the auto-dispatch service</param>
     /// <param name="autoDispatchService">Optional auto-dispatch ready-gate service for triggering bed-clear confirmation on idle printers</param>
+    /// <param name="printerGroupService">Optional printer group service for ACL checks on queue submission</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -54,7 +57,8 @@ public class JobQueueService : IJobQueueService
         ILogger<JobQueueService> logger,
         IPrintCostCalculator? costCalculator = null,
         IAutoDispatchTrigger? dispatchTrigger = null,
-        IAutoDispatchService? autoDispatchService = null)
+        IAutoDispatchService? autoDispatchService = null,
+        IPrinterGroupService? printerGroupService = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -65,6 +69,7 @@ public class JobQueueService : IJobQueueService
         _costCalculator = costCalculator;
         _dispatchTrigger = dispatchTrigger;
         _autoDispatchService = autoDispatchService;
+        _printerGroupService = printerGroupService;
     }
 
     /// <summary>
@@ -226,6 +231,7 @@ public class JobQueueService : IJobQueueService
     /// Adds a new print job to the queue, assigning it to a printer and calculating queue position.
     /// </summary>
     /// <param name="request">Queue job request containing gcode file ID, assigned printer, and job requirements (nozzle diameter, material type)</param>
+    /// <param name="userId">Optional user ID for ACL enforcement. Null bypasses the check (trusted/system callers).</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>JobQueuePrintJobDto with assigned printer and queue position on success; null if gcode file not found or no suitable printer available</returns>
     /// <remarks>
@@ -234,7 +240,7 @@ public class JobQueueService : IJobQueueService
     /// If no compatible printer is available, the operation returns null. The job is assigned a queue position based on
     /// the next available position for its assigned printer. Job status defaults to Queued.
     /// </remarks>
-    public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, CancellationToken ct)
+    public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -242,6 +248,16 @@ public class JobQueueService : IJobQueueService
         if (gcode == null)
         {
             return null;
+        }
+
+        // Enforce printer group ACL when a userId is provided
+        if (userId.HasValue && gcode.PrinterGroupId.HasValue && _printerGroupService is not null)
+        {
+            bool canSubmit = await _printerGroupService.CanUserSubmitToGroupAsync(gcode.PrinterGroupId.Value, userId.Value, ct);
+            if (!canSubmit)
+            {
+                throw new QueueGroupAccessDeniedException(gcode.PrinterGroupId.Value, userId.Value);
+            }
         }
 
         // Merge request values with G-code file metadata (request takes precedence, G-code as fallback)

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Dtos;
 
@@ -38,13 +39,29 @@ public static class PrinterExpressionParser
         try
         {
             List<string> matchingMachines = [];
+            List<string> errors = [];
 
             foreach (MachineProfileDto machine in availableMachines)
             {
-                if (EvaluateExpression(condition, machine))
+                try
                 {
-                    matchingMachines.Add(machine.Name ?? string.Empty);
+                    if (EvaluateExpression(condition, machine))
+                    {
+                        matchingMachines.Add(machine.Name ?? string.Empty);
+                    }
                 }
+                catch (Exception ex)
+                {
+                    errors.Add($"Machine '{machine.Name}': {ex.Message}");
+                }
+            }
+
+            // Log errors at trace level for debugging
+            if (errors.Count > 0 && matchingMachines.Count == 0)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "Expression evaluation failed for all {0} machines. Condition: '{1}'. First error: {2}",
+                    availableMachines.Count, condition, errors[0]);
             }
 
             return matchingMachines.Count > 0 ? matchingMachines : null;
@@ -90,8 +107,14 @@ public static class PrinterExpressionParser
         {
             bool left = ParseAnd();
 
-            while (PeekKeyword("or"))
+            while (true)
             {
+                SkipWhitespace();
+                if (!PeekKeyword("or"))
+                {
+                    break;
+                }
+
                 ConsumeKeyword("or");
                 SkipWhitespace();
                 bool right = ParseAnd();
@@ -105,8 +128,14 @@ public static class PrinterExpressionParser
         {
             bool left = ParseComparison();
 
-            while (PeekKeyword("and"))
+            while (true)
             {
+                SkipWhitespace();
+                if (!PeekKeyword("and"))
+                {
+                    break;
+                }
+
                 ConsumeKeyword("and");
                 SkipWhitespace();
                 bool right = ParseComparison();
@@ -133,6 +162,15 @@ public static class PrinterExpressionParser
                 SkipWhitespace();
                 string pattern = ParseRegexPattern();
                 return EvaluateRegexMatch(property, pattern);
+            }
+
+            if (Peek("!~"))
+            {
+                Consume('!');
+                Consume('~');
+                SkipWhitespace();
+                string pattern = ParseRegexPattern();
+                return !EvaluateRegexMatch(property, pattern);
             }
 
             // Check for equality: ==
@@ -358,6 +396,11 @@ public static class PrinterExpressionParser
                 // Try settings
                 if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out object? nozzle))
                 {
+                    if (nozzle is IList<string> nozzleList && index.Value < nozzleList.Count)
+                    {
+                        return nozzleList[index.Value];
+                    }
+
                     if (index == 0 && nozzle != null)
                     {
                         return nozzle.ToString();
@@ -376,7 +419,25 @@ public static class PrinterExpressionParser
 
         private static string? ExtractPrinterNotes(MachineProfileDto machine)
         {
-            return machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes) ? notes?.ToString() : null;
+            if (machine.Settings == null || !machine.Settings.TryGetValue("printer_notes", out object? notes))
+            {
+                return null;
+            }
+
+            return notes switch
+            {
+                null => null,
+                string value => value,
+                IEnumerable<string> values => string.Join('\n', values),
+                JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+                JsonElement { ValueKind: JsonValueKind.Array } element => string.Join('\n', element.EnumerateArray().Select(ReadJsonElementValue)),
+                _ => notes.ToString()
+            };
+        }
+
+        private static string ReadJsonElementValue(JsonElement element)
+        {
+            return element.ValueKind == JsonValueKind.String ? element.GetString() ?? string.Empty : element.GetRawText();
         }
 
         private static string? ExtractNozzleDiameterFromName(string? machineName)

@@ -96,6 +96,9 @@ deploy/nginx/certs/
 .playwright-mcp/
 .playwright-cli/
 
+# Local parity capture artifacts
+simplyprint-*
+
 # Dotnet installer duplicates
 dotnet-install.sh.*
 
@@ -112,6 +115,12 @@ tools/installer/dist/
 # Beads / Dolt files (added by bd init)
 .dolt/
 .beads-credential-key
+*.png
+!src/Web/ReactApp/public/assets/orcaslicer/**/*.png
 
-# C# Language Server cache
-*.csproj.lscache
+# C# devkit generated cache files
+*.lscache
+
+# Local camera snapshot storage (runtime output)
+src/api/snapshots/
+snapshots/ 

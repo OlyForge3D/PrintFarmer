@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -9,6 +10,7 @@ using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
@@ -57,18 +59,84 @@ public class SliceJobController(
             return StatusCode(429, new { error = "Rate limit exceeded.", retryAfterSeconds = rateLimitResult.RetryAfterSeconds });
         }
 
+        // Resolve relative model file URLs to absolute so workers can download them
+        string modelFileUrl = request.ModelFileUrl;
+        if (!string.IsNullOrEmpty(modelFileUrl) && modelFileUrl.StartsWith('/'))
+        {
+            string scheme = HttpContext.Request.Scheme;
+            string host = HttpContext.Request.Host.ToString();
+            modelFileUrl = $"{scheme}://{host}{modelFileUrl}";
+        }
+
+        // Validate per-model transforms require model URLs
+        if (request.ModelFileTransforms is { Count: > 0 }
+            && request.ModelFileUrls is not { Count: > 0 })
+        {
+            return BadRequest("ModelFileTransforms requires ModelFileUrls to be provided.");
+        }
+
+        // Validate per-model transforms length matches model URLs
+        if (request.ModelFileTransforms is { Count: > 0 }
+            && request.ModelFileUrls is { Count: > 0 }
+            && request.ModelFileTransforms.Count != request.ModelFileUrls.Count)
+        {
+            return BadRequest($"ModelFileTransforms length ({request.ModelFileTransforms.Count}) must match ModelFileUrls length ({request.ModelFileUrls.Count}).");
+        }
+
+        // Resolve and validate multi-model URLs
+        List<string>? resolvedModelUrls = null;
+        if (request.ModelFileUrls is { Count: > 0 })
+        {
+            const int maxModelFiles = 20;
+            if (request.ModelFileUrls.Count > maxModelFiles)
+            {
+                return BadRequest($"Too many model files. Maximum is {maxModelFiles}.");
+            }
+
+            string scheme = HttpContext.Request.Scheme;
+            string host = HttpContext.Request.Host.ToString();
+            resolvedModelUrls = [];
+            foreach (string url in request.ModelFileUrls)
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    return BadRequest("Model file URLs must not contain empty entries.");
+                }
+
+                string resolved = url.StartsWith('/') ? $"{scheme}://{host}{url}" : url;
+
+                if (!Uri.TryCreate(resolved, UriKind.Absolute, out Uri? parsedUri)
+                    || (parsedUri.Scheme != "http" && parsedUri.Scheme != "https"))
+                {
+                    return BadRequest($"Invalid model file URL: must be an absolute HTTP(S) URL. Got: '{url}'");
+                }
+
+                resolvedModelUrls.Add(resolved);
+            }
+        }
+
         var job = new SliceJob
         {
             Id = Guid.NewGuid(),
             UserId = Guid.TryParse(userId, out Guid uid) ? uid : Guid.Empty,
             PrinterId = request.PrinterId,
-            ModelFileUrl = request.ModelFileUrl,
+            ModelFileUrl = modelFileUrl,
             ModelFileName = request.ModelFileName,
             SlicerEngine = request.SlicerEngine,
-            SlicerProfileJson = request.SlicerProfileJson,
+            SlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames),
             SlicerProfileId = request.SlicerProfileId,
             RequiredCapabilitiesJson = request.RequiredCapabilitiesJson,
             Priority = request.Priority,
+            ModelTransformJson = request.ModelTransformJson,
+            ExtruderFilamentProfileNamesJson = request.ExtruderFilamentProfileNames is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.ExtruderFilamentProfileNames)
+                : null,
+            ModelFileUrlsJson = resolvedModelUrls is { Count: > 0 }
+                ? JsonSerializer.Serialize(resolvedModelUrls)
+                : null,
+            ModelFileTransformsJson = request.ModelFileTransforms is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.ModelFileTransforms)
+                : null,
             Status = SliceJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -102,25 +170,67 @@ public class SliceJobController(
     }
 
     /// <summary>
-    /// Lists slice jobs, optionally filtered.
+    /// Gets the current user's slice jobs.
     /// </summary>
-    /// <param name="status">Optional status filter.</param>
-    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="limit">Maximum number of jobs to return (default 100).</param>
+    /// <param name="offset">Number of jobs to skip (default 0).</param>
     /// <param name="ct">Cancellation token.</param>
-    [HttpGet]
-    public async Task<IActionResult> ListAsync([FromQuery] string? status, [FromQuery] int limit = 50, CancellationToken ct = default)
+    [HttpGet("my-jobs")]
+    public async Task<IActionResult> GetMyJobsAsync(
+        [FromQuery] int limit = 100,
+        [FromQuery] int offset = 0,
+        CancellationToken ct = default)
     {
-        IReadOnlyList<SliceJob> jobs;
-        if (!string.IsNullOrEmpty(status))
+        string userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (string.IsNullOrEmpty(userId))
         {
-            jobs = await _jobRepository.GetByStatusAsync(status, limit, ct);
-        }
-        else
-        {
-            jobs = await _jobRepository.GetQueuedJobsAsync(limit, ct);
+            return Unauthorized();
         }
 
+        if (!Guid.TryParse(userId, out Guid userGuid))
+        {
+            return BadRequest("Invalid user ID.");
+        }
+
+        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetByUserIdAsync(userGuid, limit, offset, ct);
         return Ok(jobs.Select(MapToStatusResponse).ToList());
+    }
+
+    /// <summary>
+    /// Lists slice jobs with pagination and optional filtering.
+    /// </summary>
+    /// <param name="page">Page number (1-based, default 1).</param>
+    /// <param name="pageSize">Items per page (default 20, max 100).</param>
+    /// <param name="status">Optional status filter.</param>
+    /// <param name="sortBy">Sort field: CreatedAt (default) or CompletedAt.</param>
+    /// <param name="sortDir">Sort direction: asc or desc (default desc).</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet]
+    public async Task<IActionResult> ListAsync(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? status = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = "desc",
+        CancellationToken ct = default)
+    {
+        if (page < 1)
+        {
+            page = 1;
+        }
+
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        int totalCount = await _jobRepository.CountAsync(status, ct);
+        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetPagedAsync(page, pageSize, status, sortBy, sortDir, ct);
+        int totalPages = totalCount == 0 ? 1 : (int)Math.Ceiling((double)totalCount / pageSize);
+
+        return Ok(new PagedResult<SliceJobStatusResponse>(
+            jobs.Select(MapToStatusResponse).ToList(),
+            totalCount,
+            page,
+            pageSize,
+            totalPages));
     }
 
     /// <summary>
@@ -358,6 +468,43 @@ public class SliceJobController(
     }
 
     /// <summary>
+    /// Retries a failed slice job by requeuing it.
+    /// </summary>
+    /// <param name="id">The job ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("{id}/retry")]
+    [Authorize]
+    public async Task<IActionResult> RetryAsync(Guid id, CancellationToken ct)
+    {
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is null)
+        {
+            return NotFound();
+        }
+
+        string currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (!Guid.TryParse(currentUserId, out Guid userId) || job.UserId != userId)
+        {
+            return Forbid();
+        }
+
+        if (job.Status is not SliceJobStatus.Failed)
+        {
+            return BadRequest(new { error = $"Only failed jobs can be retried. Current status: {job.Status}" });
+        }
+
+        await _jobRepository.RetryJobAsync(id, ct);
+
+        job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is not null)
+        {
+            await _eventService.NotifyJobQueuedAsync(job, ct);
+        }
+
+        return Ok(job is not null ? MapToStatusResponse(job) : null);
+    }
+
+    /// <summary>
     /// Gets worker circuit breaker states.
     /// </summary>
     [HttpGet("circuit-breakers")]
@@ -373,25 +520,91 @@ public class SliceJobController(
         return Ok(new { enabled = true });
     }
 
-    private static SliceJobStatusResponse MapToStatusResponse(SliceJob job) => new()
+    private static SliceJobStatusResponse MapToStatusResponse(SliceJob job)
     {
-        Id = job.Id,
-        Status = job.Status,
-        ProgressPercent = job.ProgressPercent,
-        ProgressMessage = job.ProgressMessage,
-        QueuedAt = job.QueuedAt,
-        StartedAt = job.StartedAt,
-        CompletedAt = job.CompletedAt,
-        ResultFileUrl = job.ResultFileUrl,
-        ErrorMessage = job.ErrorMessage,
-        EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-        FilamentUsedGrams = job.FilamentUsedGrams,
-        WorkerId = job.WorkerId,
-        ModelFileUrl = job.ModelFileUrl,
-        ModelFileName = job.ModelFileName,
-        SlicerEngine = job.SlicerEngine,
-        SlicerProfileJson = job.SlicerProfileJson,
-    };
+        List<string>? modelUrls = null;
+        if (!string.IsNullOrEmpty(job.ModelFileUrlsJson))
+        {
+            try
+            {
+                modelUrls = JsonSerializer.Deserialize<List<string>>(job.ModelFileUrlsJson);
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed JSON; fall back to single URL
+            }
+        }
+
+        List<string?>? modelTransforms = null;
+        if (!string.IsNullOrEmpty(job.ModelFileTransformsJson))
+        {
+            try
+            {
+                modelTransforms = JsonSerializer.Deserialize<List<string?>>(job.ModelFileTransformsJson);
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed JSON
+            }
+        }
+
+        return new()
+        {
+            Id = job.Id,
+            Status = job.Status,
+            ProgressPercent = job.ProgressPercent,
+            ProgressMessage = job.ProgressMessage,
+            QueuedAt = job.QueuedAt,
+            StartedAt = job.StartedAt,
+            CompletedAt = job.CompletedAt,
+            ResultFileUrl = job.ResultFileUrl,
+            ErrorMessage = job.ErrorMessage,
+            EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+            FilamentUsedGrams = job.FilamentUsedGrams,
+            WorkerId = job.WorkerId,
+            ModelFileUrl = job.ModelFileUrl,
+            ModelFileName = job.ModelFileName,
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson,
+            ModelTransformJson = job.ModelTransformJson,
+            ModelFileUrls = modelUrls,
+            ModelFileTransforms = modelTransforms,
+        };
+    }
+
+    /// <summary>
+    /// Ensures the <c>extruderFilamentProfileNames</c> array is present inside SlicerProfileJson
+    /// so workers can resolve per-extruder filament profiles from a single JSON blob.
+    /// </summary>
+    private static string? EmbedExtruderFilamentNames(string? slicerProfileJson, List<string>? names)
+    {
+        if (names is not { Count: > 0 })
+        {
+            return slicerProfileJson;
+        }
+
+        if (string.IsNullOrWhiteSpace(slicerProfileJson))
+        {
+            return JsonSerializer.Serialize(new { extruderFilamentProfileNames = names });
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(slicerProfileJson);
+            if (doc.RootElement.TryGetProperty("extruderFilamentProfileNames", out _))
+            {
+                return slicerProfileJson;
+            }
+
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(slicerProfileJson) ?? [];
+            dict["extruderFilamentProfileNames"] = JsonSerializer.SerializeToElement(names);
+            return JsonSerializer.Serialize(dict);
+        }
+        catch (JsonException)
+        {
+            return slicerProfileJson;
+        }
+    }
 }
 
 /// <summary>Request body for reporting a failed slice job.</summary>

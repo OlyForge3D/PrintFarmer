@@ -285,21 +285,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     return true;
   };
 
-  const nextFromNetwork = async () => {
+  const nextFromNetwork = () => {
     if (!validateNetwork()) return;
     setNetworkErrors(null);
-    try {
-      // Compose payload for API (settings class)
-      if (!networkDiscoverySettings) return;
-      const netPayload: import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings = {
-        ...networkDiscoverySettings,
-        discoverySubnets: networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim()).map((r: string) => r.trim()),
-      };
-      await apiClient.saveSettings('NetworkDiscovery', netPayload);
-      setStep(2);
-    } catch (e) {
-      setNetworkErrors(e instanceof Error ? e.message : 'Failed to save network settings');
-    }
+    // Settings are saved in finalizeSetup after admin account creation
+    setStep(2);
   };
 
   // Spoolman

@@ -189,7 +189,7 @@ public class OctoPrintCompatController : ControllerBase
                     enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
                     enqueueReq.RequiredMaterialType ?? "(any)");
 
-                JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, HttpContext.RequestAborted);
+                JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, null, HttpContext.RequestAborted);
                 if (job is null)
                 {
                     _logger.LogInformation(

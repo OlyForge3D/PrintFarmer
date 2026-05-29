@@ -107,6 +107,9 @@ import {
   mdiClipboardListOutline,
   mdiShield,
   mdiCloudDownload,
+  mdiBarcodeScan,
+  mdiRuler,
+  mdiFormatText,
 } from '@mdi/js';
 
 interface IconProps {
@@ -3052,6 +3055,99 @@ export function CloudDownloadIcon({ className = 'w-4 h-4', ariaLabel = 'Cloud do
       role="img"
     >
       <path fill="currentColor" d={mdiCloudDownload} />
+    </svg>
+  );
+}
+
+/**
+ * Barcode scan icon
+ *
+ * Material Design icon component for barcode/QR scanning actions.
+ *
+ * @preview ![barcode-scan](https://unpkg.com/@mdi/svg@7.4.47/svg/barcode-scan.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/barcode-scan.svg
+ * @example
+ * ```tsx
+ * <BarcodeScanIcon className="w-5 h-5" ariaLabel="Scan barcode" />
+ * ```
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function BarcodeScanIcon({ className = 'w-4 h-4', ariaLabel = 'Scan barcode' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiBarcodeScan} />
+    </svg>
+  );
+}
+
+/**
+ * Ruler icon — measurement tool in 3D viewer
+ *
+ * @preview ![ruler](https://unpkg.com/@mdi/svg@7.4.47/svg/ruler.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/ruler.svg
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function RulerIcon({ className = 'w-4 h-4', ariaLabel = 'Measure' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiRuler} />
+    </svg>
+  );
+}
+
+/**
+ * Simplify / Decimate mesh icon (hexagonal wireframe)
+ *
+ * @component
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ */
+export function SimplifyIcon({ className = 'w-4 h-4', ariaLabel = 'Simplify Mesh' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path
+        fill="currentColor"
+        d="M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L5,8.09V15.91L12,19.85L19,15.91V8.09L12,4.15Z"
+      />
+    </svg>
+  );
+}
+
+/**
+ * 3D Text tool icon
+ *
+ * Material Design icon component for adding 3D text annotations.
+ *
+ * @component
+ * @preview ![format-text](https://unpkg.com/@mdi/svg@7.4.47/svg/format-text.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/format-text.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <TextToolIcon className="w-5 h-5" ariaLabel="3D Text" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function TextToolIcon({ className = 'w-4 h-4', ariaLabel = '3D Text' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFormatText} />
     </svg>
   );
 }

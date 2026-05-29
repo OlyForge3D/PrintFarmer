@@ -25,7 +25,7 @@ export function CameraCard({
   const state = p.state ?? '';
   const isPrinting = state.toLowerCase().includes('printing');
 
-  // Camera URL handling
+  // Camera source handling
   const cameraSnapshotUrl = p.cameraSnapshotUrl;
   const cameraStreamUrl = p.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
@@ -86,14 +86,14 @@ export function CameraCard({
           <img
             src={activeUrl ?? ''}
             alt={`${p.name} camera feed`}
-            className={`object-cover ${mediaClassName}`}
+            className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">{hasCameraUrls ? 'Camera unavailable' : 'No camera configured'}</span>
+            <span className="text-sm">{hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.FeatureFlags;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -93,12 +94,19 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
 
+// Feature flag service for phased rollout control
+builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
+
 // Slicer integration shim: loads Farm.Slicer.Module + Farm.Slicer.Module.Api DLLs at runtime
 // from Slicer:PluginsPath. No compile-time reference to EF Core, SignalR hubs, or OrcaSlicer.
 // All slicer registrations delegated to runtime-discovered ISlicerModule implementations.
-// In microservices mode, the slicer module runs in a separate slicer-host process.
-// The user-facing SlicerSettings.Enabled is set dynamically when a worker registers.
-bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+// In microservices mode, the slicer module runs in a separate slicer-host process —
+// the API does not load slicer DLLs, but the platform still reports slicing as available
+// so the frontend can route requests to the slicer-host via nginx.
+string? deployType = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+                   ?? builder.Configuration.GetValue<string>("DEPLOYMENT_TYPE");
+bool isMicroservices = deployType == "microservices";
+bool slicerModuleEnabled = !isMicroservices;
 
 // Platform-aware capability checks: auto-disable native x86-only features on ARM64 (Raspberry Pi)
 // unless explicitly overridden via configuration. Affects lib3mf, AssimpNetter, and slicer integration.
@@ -106,6 +114,10 @@ var arch = RuntimeInformation.ProcessArchitecture;
 bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
 bool modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
 bool thumbnailEnabled = builder.Configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
+
+// slicerEnabled = platform capability flag reported to the frontend.
+// In microservices mode this starts as true (slicer-host provides the service).
+bool slicerEnabled = true;
 
 if (isArm)
 {
@@ -121,6 +133,7 @@ if (isArm)
     if (slicerExplicit is null)
     {
         slicerEnabled = false;
+        slicerModuleEnabled = false;
     }
 
     if (thumbnailExplicit is null)
@@ -132,7 +145,8 @@ else
 {
     // On x86/x64, respect configuration flags
     bool slicerConfigEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
-    slicerEnabled = slicerEnabled && slicerConfigEnabled;
+    slicerEnabled = slicerConfigEnabled;
+    slicerModuleEnabled = slicerModuleEnabled && slicerConfigEnabled;
     modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
 }
 
@@ -172,7 +186,7 @@ catch
 // Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 
-if (slicerEnabled)
+if (slicerModuleEnabled)
 {
     // Load slicer DLLs, register their services, and add their controllers as ApplicationParts.
     builder.Services.AddSlicerIntegration(mvcBuilder, builder.Configuration);
@@ -286,13 +300,14 @@ if (isArm && (!modelFilesEnabled || !slicerEnabled))
 }
 
 app.Logger.LogInformation(
-    "Platform capabilities: Architecture={Architecture}, SlicingEnabled={SlicingEnabled}, ModelFilesEnabled={ModelFilesEnabled}",
+    "Platform capabilities: Architecture={Architecture}, SlicingEnabled={SlicingEnabled}, SlicerModuleLoaded={SlicerModuleLoaded}, ModelFilesEnabled={ModelFilesEnabled}",
     arch,
     slicerEnabled,
+    slicerModuleEnabled,
     modelFilesEnabled);
 
 // Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
-if (slicerEnabled)
+if (slicerModuleEnabled)
 {
     app.UseSlicerIntegration();
 }
@@ -413,15 +428,18 @@ app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
-if (slicerEnabled)
+if (slicerModuleEnabled)
 {
     app.MapSlicerIntegrationHubs();
 }
 else
 {
-    // When slicer is disabled, the slicer controllers are not loaded.
-    // Map stub endpoints for list routes the frontend expects (empty results
-    // instead of 404s) and a catch-all for all other slicer routes.
+    // When slicer module is not loaded in this process (e.g. microservices mode),
+    // the slicer controllers are absent. Map stub endpoints for list routes the
+    // frontend expects (empty results instead of 404s) and a catch-all for all
+    // other slicer routes.
+    // In microservices mode, nginx routes slicer paths to the slicer-host,
+    // so these stubs are only hit if nginx misconfiguration falls through to the API.
     app.MapGet("/api/3d-models", () => Results.Ok(Array.Empty<object>()))
         .RequireAuthorization();
     app.MapGet("/api/3d-models/folders", () => Results.Ok(Array.Empty<object>()))
@@ -534,6 +552,34 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+
+// Build version endpoint (uses /api/system/version to avoid conflict with OctoPrint-compat /api/version)
+app.MapGet("/api/system/version", () =>
+{
+    var asm = System.Reflection.Assembly.GetEntryAssembly();
+    string? infoVersion = (asm is not null
+        ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+            as System.Reflection.AssemblyInformationalVersionAttribute
+        : null)?.InformationalVersion;
+    string version = "0.0.0";
+    string? commit = null;
+    if (infoVersion != null)
+    {
+        string[] parts = infoVersion.Split('+', 2);
+        version = parts[0];
+        commit = parts.Length > 1 ? parts[1] : null;
+    }
+
+    return Results.Ok(new
+    {
+        service = "Farm.Web.Api",
+        version,
+        commit,
+        environment = app.Environment.EnvironmentName,
+        runtime = RuntimeInformation.FrameworkDescription,
+        timestamp = DateTime.UtcNow,
+    });
+});
 
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
 

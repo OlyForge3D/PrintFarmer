@@ -217,3 +217,65 @@ works without a specific printer backend.
 - The existing `SlicerPluginAttribute` and `ISlicerLibrary` pattern in `Farm.Slicers.OrcaSlicer.v2_3_1` is a starting point but is limited to library/profile metadata. The new system extends this to full lifecycle management (DI, controllers, hubs, background services).
 - Worker projects (`orcaslicer-worker`, `prusaslicer-worker`) remain separate deployable services. The plugin system manages the API-side integration, not the worker process itself.
 - This pattern can be replicated for other feature modules (notifications, file library, etc.) in the future.
+
+## SimplyPrint Parity Gap Inventory (PFarm1-zlbo.13)
+
+Scope and evidence used:
+- SimplyPrint artifacts: [simplyprint-dialog-text.txt](../simplyprint-dialog-text.txt), [simplyprint-live-slicer.yml](../simplyprint-live-slicer.yml), [simplyprint-canvas-inspection.json](../simplyprint-canvas-inspection.json)
+- Current PFarm1 slicer UI: [src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx](../src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx), [src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx](../src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx), [src/Web/ReactApp/src/features/slicer/components/settings/MachineProfileEditor.tsx](../src/Web/ReactApp/src/features/slicer/components/settings/MachineProfileEditor.tsx), [src/Web/ReactApp/src/features/slicer/components/settings/FilamentProfileEditor.tsx](../src/Web/ReactApp/src/features/slicer/components/settings/FilamentProfileEditor.tsx), [src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx](../src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx), [src/Web/ReactApp/src/features/slicer/components/viewer/SlicerToolbar.tsx](../src/Web/ReactApp/src/features/slicer/components/viewer/SlicerToolbar.tsx), [src/Web/ReactApp/src/features/slicer/components/viewer/SlicerLeftTools.tsx](../src/Web/ReactApp/src/features/slicer/components/viewer/SlicerLeftTools.tsx)
+- Bead metadata for PFarm1-zlbo.13/.14/.15/.16/.5 was not found in local issue snapshots; mapping below is implementation guidance and must be validated against live bead text (Needs live confirm).
+
+### Side-by-Side Gap Inventory
+
+| Area | SimplyPrint observed | PFarm1 current | Gap inventory | Priority | Evidence |
+|---|---|---|---|---|---|
+| Process | Basic/Simple/Advanced + category tabs; extensive quality stack including Wall generator, Walls and surfaces, Flow ratio, Bridging, Overhangs. | Core structure exists with Basic/Simple/Advanced and tabs. Several sections implemented (Layer height, Line width, Seam, Precision, Speed, Support, Temperature/Retraction/Cooling/Ironing). | 1) Multimaterial is placeholder only. 2) Explicit first-class groups/controls for Wall generator, Walls and surfaces, Flow ratio, Bridging, Overhangs are missing in typed UI. 3) Settings search field parity is missing. | P0 (multimaterial + missing core groups), P1 (search UX) | [simplyprint-dialog-text.txt](../simplyprint-dialog-text.txt), [src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx#L903](../src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx#L903), [src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx#L430](../src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx#L430) |
+| Machine | Machine profile select + explicit edit affordance in slicer dialog. | Machine profile select + edit button + machine editor modal exists. | No high-confidence P0 machine blocker from provided artifacts. Remaining machine-depth parity against SimplyPrint internals cannot be validated from current artifact set (Needs live confirm). | P2 | [simplyprint-live-slicer.yml#L65](../simplyprint-live-slicer.yml#L65), [src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx#L1025](../src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx#L1025), [src/Web/ReactApp/src/features/slicer/components/settings/MachineProfileEditor.tsx](../src/Web/ReactApp/src/features/slicer/components/settings/MachineProfileEditor.tsx) |
+| Filament | Filaments panel includes add extruder (+), active extruder context, add filament flow, quick temp context, and profile edit path. | Filament flow is material + profile select, with edit modal support. | Missing multi-extruder filament lane UX (add extruder / per-extruder active profile context) in the primary slicer page flow. | P0 | [simplyprint-dialog-text.txt](../simplyprint-dialog-text.txt), [simplyprint-live-slicer.yml#L82](../simplyprint-live-slicer.yml#L82), [src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx#L1062](../src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx#L1062), [src/Web/ReactApp/src/features/slicer/components/settings/FilamentProfileEditor.tsx](../src/Web/ReactApp/src/features/slicer/components/settings/FilamentProfileEditor.tsx) |
+| Workspace | WebGL canvas workspace + broad tool rail: Add object, Add plate, Arrange, Lay on side, Color painting, Support painting, Seam painting, Fuzzy skin painting, Add text, Measure distance, Smart rotate, Show history, Snap settings. | Slicer workspace exists with WebGL bed and tooling, but left tool rail is limited to move/rotate/scale/layers and top toolbar only covers a subset of actions. Workspace is STL-only in NewSliceJobPage path. | 1) Missing workspace tools: Add plate, Color painting, Fuzzy skin painting, Add text, Smart rotate, Show history, Snap settings. 2) Workspace not available for non-STL model types in slice flow. | P0 (tooling parity), P1 (non-STL workspace parity) | [simplyprint-live-slicer.yml#L105](../simplyprint-live-slicer.yml#L105), [simplyprint-canvas-inspection.json#L15](../simplyprint-canvas-inspection.json#L15), [src/Web/ReactApp/src/features/slicer/components/viewer/SlicerLeftTools.tsx#L14](../src/Web/ReactApp/src/features/slicer/components/viewer/SlicerLeftTools.tsx#L14), [src/Web/ReactApp/src/features/slicer/components/viewer/SlicerToolbar.tsx](../src/Web/ReactApp/src/features/slicer/components/viewer/SlicerToolbar.tsx), [src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx#L879](../src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx#L879) |
+
+### Priority Ranking (P0/P1/P2)
+
+| Priority | Missing groups / controls |
+|---|---|
+| P0 | Process: Multimaterial implementation and typed parity for Wall generator / Walls and surfaces / Flow ratio / Bridging / Overhangs. Filament: multi-extruder lane UX (+ add extruder + per-extruder profile context). Workspace: missing major tools (Add plate, Color painting, Fuzzy skin painting, Add text, Smart rotate, Show history, Snap settings). |
+| P1 | Process: settings search UX parity. Workspace: non-STL route should stay in slicer workspace path for operational consistency. |
+| P2 | Machine-depth parity verification and any remaining machine-specific controls not visible in current artifact set (Needs live confirm). |
+
+### Gap-to-Bead Mapping (.14/.15/.16 + dependency .5)
+
+Bead details were not resolvable in local issue snapshots; map below is the recommended implementation split and should be reconciled to live bead text (Needs live confirm).
+
+| Bead | Implement first | Why first |
+|---|---|---|
+| PFarm1-zlbo.14 | Process + Filament P0: Multimaterial tab implementation; typed Process sections for Wall generator/Walls+surfaces/Flow ratio/Bridging/Overhangs; multi-extruder filament lane UI (+ add extruder, per-lane profile/temp context). | Highest user-visible settings parity blockers in current flow. |
+| PFarm1-zlbo.15 | Workspace P0: add missing toolchain (Add plate, Color/Fuzzy/Seam paint parity, Add text, Smart rotate, history/snap settings hooks) and align toolbar/left-tool behavior with slicer expectations. | Core operator ergonomics and day-to-day slicing throughput. |
+| PFarm1-zlbo.16 | P1/P2 hardening: settings search UX, non-STL workspace parity path, cross-flow integration polish, QA and acceptance pass. | Consolidates remaining parity and reduces regression risk before close. |
+| PFarm1-zlbo.5 (dependency) | Baseline contracts/data model support required by .14/.15/.16 (exact dependency scope Needs live confirm). | Prevents UI work from outrunning backend/config contracts. |
+
+### Definition of Done (Per Bead)
+
+#### PFarm1-zlbo.14 DoD
+- [ ] Multimaterial tab is functional (not placeholder) in [src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx](../src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx).
+- [ ] Process sections exist as first-class typed controls for Wall generator, Walls and surfaces, Flow ratio, Bridging, Overhangs.
+- [ ] Filament area supports multi-extruder lanes (add extruder + per-lane profile context) in [src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx](../src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx).
+- [ ] Process + filament selections persist and serialize correctly in submit payload.
+- [ ] No regressions in existing profile edit flows (machine/filament/process).
+
+#### PFarm1-zlbo.15 DoD
+- [ ] Workspace includes parity-critical tools from inventory (Add plate, Color/Fuzzy/Seam paint, Add text, Smart rotate, history/snap controls) with visible affordances.
+- [ ] Tool actions are wired or clearly marked as unavailable with explicit UX messaging (no silent no-op).
+- [ ] Existing tools (move/rotate/scale/layers/support/seam paint) remain functional.
+- [ ] Workspace visual behavior remains stable with WebGL-enabled canvas path.
+
+#### PFarm1-zlbo.16 DoD
+- [ ] Settings search is available and filters process settings groups/rows.
+- [ ] Non-STL model flow has parity behavior plan implemented (or explicitly documented and accepted) instead of workspace bypass.
+- [ ] End-to-end slice path validated across Process/Machine/Filament/Workspace with no blocker parity gaps.
+- [ ] Final acceptance notes reference evidence files and close open “Needs live confirm” items.
+
+### Suggested PFarm1-zlbo.13 Update Note (paste-ready)
+
+Suggested command text (syntax may vary by local bd version, Needs live confirm):
+
+`bd comment PFarm1-zlbo.13 "Added SimplyPrint parity gap inventory to devnotes/Slicer-Module-Refactor-Plan2.md with side-by-side Process/Machine/Filament/Workspace analysis, P0/P1/P2 ranking, and implementation mapping: .14 = Process+Filament P0, .15 = Workspace P0, .16 = P1/P2 hardening. Marked unresolved bead metadata/dependency specifics as Needs live confirm."`

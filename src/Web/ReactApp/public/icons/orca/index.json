@@ -1,0 +1,718 @@
+{
+  "$comment": "Auto-generated icon index for OrcaSlicer section/tab icons. Do not edit manually.",
+  "totalCount": 118,
+  "cssVariables": {
+    "--orca-icon-secondary": "#949494 (structural lines, borders)",
+    "--orca-icon-accent": "#009688 (teal accent, highlighted elements)"
+  },
+  "icons": {
+    "advanced": {
+      "file": "advanced.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_advanced": {
+      "file": "custom-gcode_advanced.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_cooling_fan": {
+      "file": "custom-gcode_cooling_fan.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_extruder": {
+      "file": "custom-gcode_extruder.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_filament": {
+      "file": "custom-gcode_filament.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_gcode": {
+      "file": "custom-gcode_gcode.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_measure": {
+      "file": "custom-gcode_measure.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_motion": {
+      "file": "custom-gcode_motion.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_multi_material": {
+      "file": "custom-gcode_multi_material.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_note": {
+      "file": "custom-gcode_note.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_object-info": {
+      "file": "custom-gcode_object-info.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_other": {
+      "file": "custom-gcode_other.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_quality": {
+      "file": "custom-gcode_quality.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_setting_override": {
+      "file": "custom-gcode_setting_override.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_single": {
+      "file": "custom-gcode_single.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_slicing-state": {
+      "file": "custom-gcode_slicing-state.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_slicing-state_global": {
+      "file": "custom-gcode_slicing-state_global.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_speed": {
+      "file": "custom-gcode_speed.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_stats": {
+      "file": "custom-gcode_stats.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_strength": {
+      "file": "custom-gcode_strength.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_support": {
+      "file": "custom-gcode_support.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_temperature": {
+      "file": "custom-gcode_temperature.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_time": {
+      "file": "custom-gcode_time.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_vector-index": {
+      "file": "custom-gcode_vector-index.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "custom-gcode_vector": {
+      "file": "custom-gcode_vector.svg",
+      "viewBox": "0 0 16 16",
+      "width": 16,
+      "height": 16
+    },
+    "fuzzy_skin": {
+      "file": "fuzzy_skin.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "note": {
+      "file": "note.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_3dhoneycomb": {
+      "file": "param_3dhoneycomb.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_acceleration": {
+      "file": "param_acceleration.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_accessory": {
+      "file": "param_accessory.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_adaptive_mesh": {
+      "file": "param_adaptive_mesh.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_adaptivecubic": {
+      "file": "param_adaptivecubic.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_adhension": {
+      "file": "param_adhension.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_advanced": {
+      "file": "param_advanced.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_alignedrectilinear": {
+      "file": "param_alignedrectilinear.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_archimedeanchords": {
+      "file": "param_archimedeanchords.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_bed_temp": {
+      "file": "param_bed_temp.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_bridge": {
+      "file": "param_bridge.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_chamber_temp": {
+      "file": "param_chamber_temp.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_concentric": {
+      "file": "param_concentric.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_cooling": {
+      "file": "param_cooling.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_cooling_aux_fan": {
+      "file": "param_cooling_aux_fan.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_cooling_exhaust": {
+      "file": "param_cooling_exhaust.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_cooling_fan": {
+      "file": "param_cooling_fan.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_cooling_part_fan": {
+      "file": "param_cooling_part_fan.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_cooling_specific_layer": {
+      "file": "param_cooling_specific_layer.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_crosshatch": {
+      "file": "param_crosshatch.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_crosszag": {
+      "file": "param_crosszag.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_cubic": {
+      "file": "param_cubic.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_dependencies_presets": {
+      "file": "param_dependencies_presets.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_dependencies_printers": {
+      "file": "param_dependencies_printers.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_extruder_clearance": {
+      "file": "param_extruder_clearance.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_extruder_lift_enforcement": {
+      "file": "param_extruder_lift_enforcement.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_extruder_size": {
+      "file": "param_extruder_size.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_extruder_temp": {
+      "file": "param_extruder_temp.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_filament_for_features": {
+      "file": "param_filament_for_features.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_flow_ratio_and_pressure_advance": {
+      "file": "param_flow_ratio_and_pressure_advance.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_flush": {
+      "file": "param_flush.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_gcode": {
+      "file": "param_gcode.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_grid": {
+      "file": "param_grid.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_gyroid": {
+      "file": "param_gyroid.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_hilbertcurve": {
+      "file": "param_hilbertcurve.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_hollow": {
+      "file": "param_hollow.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_honeycomb": {
+      "file": "param_honeycomb.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_infill": {
+      "file": "param_infill.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_information": {
+      "file": "param_information.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_ironing": {
+      "file": "param_ironing.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_jerk": {
+      "file": "param_jerk.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_lateral-honeycomb": {
+      "file": "param_lateral-honeycomb.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_lateral-lattice": {
+      "file": "param_lateral-lattice.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_layer_height": {
+      "file": "param_layer_height.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_lightning": {
+      "file": "param_lightning.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_line": {
+      "file": "param_line.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_line_width": {
+      "file": "param_line_width.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_lockedzag": {
+      "file": "param_lockedzag.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_monotonic": {
+      "file": "param_monotonic.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_monotonicline": {
+      "file": "param_monotonicline.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_multi_material": {
+      "file": "param_multi_material.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_octagramspiral": {
+      "file": "param_octagramspiral.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_ooze_prevention": {
+      "file": "param_ooze_prevention.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_overhang": {
+      "file": "param_overhang.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_overhang_speed": {
+      "file": "param_overhang_speed.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_position": {
+      "file": "param_position.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_precision": {
+      "file": "param_precision.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_printable_space": {
+      "file": "param_printable_space.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_quartercubic": {
+      "file": "param_quartercubic.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_raft": {
+      "file": "param_raft.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_rectilinear-grid": {
+      "file": "param_rectilinear-grid.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_rectilinear": {
+      "file": "param_rectilinear.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_rectilinear_interlaced": {
+      "file": "param_rectilinear_interlaced.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_resonance_avoidance": {
+      "file": "param_resonance_avoidance.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_retraction": {
+      "file": "param_retraction.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_retraction_material_change": {
+      "file": "param_retraction_material_change.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_seam": {
+      "file": "param_seam.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_settings": {
+      "file": "param_settings.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_shell": {
+      "file": "param_shell.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_skirt": {
+      "file": "param_skirt.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_special": {
+      "file": "param_special.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_speed": {
+      "file": "param_speed.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_speed_first": {
+      "file": "param_speed_first.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_support": {
+      "file": "param_support.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_support_filament": {
+      "file": "param_support_filament.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_support_tree": {
+      "file": "param_support_tree.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_supportcubic": {
+      "file": "param_supportcubic.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_temperature": {
+      "file": "param_temperature.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_toolchange": {
+      "file": "param_toolchange.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_toolchange_multi_extruder": {
+      "file": "param_toolchange_multi_extruder.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_tower": {
+      "file": "param_tower.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_tpmsd": {
+      "file": "param_tpmsd.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_tpmsfk": {
+      "file": "param_tpmsfk.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_travel_speed": {
+      "file": "param_travel_speed.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_tri-hexagon": {
+      "file": "param_tri-hexagon.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_triangles": {
+      "file": "param_triangles.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    },
+    "param_volumetric_speed": {
+      "file": "param_volumetric_speed.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_wall": {
+      "file": "param_wall.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_wall_generator": {
+      "file": "param_wall_generator.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_wall_surface": {
+      "file": "param_wall_surface.svg",
+      "viewBox": "0 0 18 18",
+      "width": 18,
+      "height": 18
+    },
+    "param_zigzag": {
+      "file": "param_zigzag.svg",
+      "viewBox": "0 0 24 24",
+      "width": 24,
+      "height": 24
+    }
+  }
+}

@@ -13,6 +13,8 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// </summary>
 public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDisposable
 {
+    private const string CacheCompatibilityVersion = "3";
+
     private readonly OrcaProfilesService _innerService;
     private readonly ProfileCacheDb _cacheDb;
     private readonly ILogger<CachedOrcaProfilesService> _logger;
@@ -67,8 +69,8 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
 
             await _cacheDb.InitializeAsync(ct);
 
-            // Calculate hash of profile directory to detect changes
-            string profilesHash = CalculateProfilesHash();
+            // Include parser/cache compatibility so expression-parser fixes invalidate stale compatibility data.
+            string profilesHash = $"{CacheCompatibilityVersion}:{CalculateProfilesHash()}";
 
             if (await _cacheDb.IsCacheValidAsync(profilesHash, ct))
             {

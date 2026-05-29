@@ -74,7 +74,8 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 HotendTemp: status.HotendTemp,
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
-                BedTarget: status.BedTarget);
+                BedTarget: status.BedTarget,
+                PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
         }
         catch (OperationCanceledException)
         {

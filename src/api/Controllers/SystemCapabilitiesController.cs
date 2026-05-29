@@ -1,5 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.FeatureFlags;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -11,9 +13,11 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/system")]
 public class SystemCapabilitiesController(
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    IFeatureFlagService featureFlagService) : ControllerBase
 {
     private readonly IConfiguration _configuration = configuration;
+    private readonly IFeatureFlagService _featureFlagService = featureFlagService;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -27,10 +31,23 @@ public class SystemCapabilitiesController(
         var arch = RuntimeInformation.ProcessArchitecture;
         bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
 
-        // Read resolved values — Program.cs writes these after applying ARM + DEPLOYMENT_MODE logic
         bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
         bool slicerEnabled = _configuration.GetValue("Slicer:Enabled", true);
         bool thumbnailEnabled = _configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
+
+        // In microservices mode the slicer module is NOT loaded in this API process,
+        // but the standalone slicer-host provides the capability. Report slicing as
+        // available so the frontend shows the slicer UI (nginx routes slicer paths
+        // to the slicer-host container).
+        bool isMicroservices = string.Equals(
+            _configuration.GetValue<string>("DEPLOYMENT_MODE"),
+            "microservices",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (isMicroservices && !isArm)
+        {
+            slicerEnabled = true;
+        }
 
         string? platformNote = isArm && (!modelFilesEnabled || !slicerEnabled || !thumbnailEnabled)
             ? "Running on ARM64 — 3D model and slicing features are disabled"
@@ -47,5 +64,19 @@ public class SystemCapabilitiesController(
         };
 
         return Ok(dto);
+    }
+
+    /// <summary>
+    /// Returns all feature flags for phased rollout control.
+    /// </summary>
+    /// <returns>Dictionary of feature keys and their enabled states.</returns>
+    [HttpGet("feature-flags")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 300)]
+    [ProducesResponseType(typeof(Dictionary<string, bool>), StatusCodes.Status200OK)]
+    public ActionResult<Dictionary<string, bool>> GetFeatureFlags()
+    {
+        var flags = _featureFlagService.GetAllFlags();
+        return Ok(flags);
     }
 }

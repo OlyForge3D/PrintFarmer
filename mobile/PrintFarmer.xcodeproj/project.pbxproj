@@ -24,6 +24,7 @@
 		05882F81ABFBD68C96376608 /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D49DAAAE1D5A8AC05429321 /* MockAuthService.swift */; };
 		137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */; };
 		14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */; };
+		BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */; };
 		174F8F2B2DBC083C8D2425E9 /* ServiceError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */; };
 		1D1B7EDF3FD6B2A17D268882 /* PrinterServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288048764D1B47272B433307 /* PrinterServiceProtocol.swift */; };
 		1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574F629AF29665D4872351E8 /* LoginView.swift */; };
@@ -46,6 +47,7 @@
 		4097E554D29B3551A59C943D /* AppDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83CE3867D23C7CA26C423AB /* AppDestination.swift */; };
 		14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */; };
 		42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8D7C5C4CE62E9F3684E5B1F /* Models.swift */; };
+		A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */; };
 		4AF7E845E7195CD9D93A7CA3 /* JobService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAA04408A2539F908022484D /* JobService.swift */; };
 		4BF27ADE0992B441FDBEAD6E /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B45A5C9AA17194A8ED47D1F /* MockURLProtocol.swift */; };
 		4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6208E685EEDD0498124C143A /* SignalRModels.swift */; };
@@ -90,6 +92,11 @@
 		A7F6E5D4C3B2A1F2E1D0C9B8 /* MockQRSpoolScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1F2A3B4C5D6E7 /* MockQRSpoolScannerService.swift */; };
 		AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62BAD7F52A9EFEE471AA461C /* RequestModels.swift */; };
 		AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */; };
+		A1C5DEF1234567890ABC0001 /* PrinterControlsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0002 /* PrinterControlsViewModel.swift */; };
+		A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */; };
+		A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */; };
+		A1C5DEF1234567890ABC0011 /* PreheatSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0010 /* PreheatSubgroup.swift */; };
+		A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E7287000000000000000A1 /* PrinterControlsSection.swift */; };
 		B1C2D3E4F5A6B7C8D9E0F1A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* AppDelegate.swift */; };
 		B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */; };
 		B8A7F6E5D4C3B2A1F2E1D0C9 /* NFCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */; };
@@ -116,12 +123,16 @@
 		DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CD7956B1ACA5B4B641B1E2 /* TestProtocols.swift */; };
 		DFD4294EC690BF7D5A4E695F /* DashboardViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A79AB745B0C9E1AF64A943D /* DashboardViewModelTests.swift */; };
 		E0411324A6C10BFCD5EAB595 /* PrinterDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281DF848F7722BE9E0E28A2A /* PrinterDetailViewModelTests.swift */; };
+		A1C5DEF1234567890ABC0003 /* PrinterControlsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0004 /* PrinterControlsViewModelTests.swift */; };
+		A1C5DEF1234567890ABC0021 /* PreheatSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0020 /* PreheatSubgroupTests.swift */; };
 		E1A1B2C3D4E5F6A7B8C9D0E1 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F6A7B8C9D0E1F2 /* QRScannerView.swift */; };
 		E1C3D4E5F6A7B8C9D0E1F2A3 /* NFCScanButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D4E5F6A7B8C9D0E1F2A3B4 /* NFCScanButton.swift */; };
 		E1D0C9B8A7F6E5D4C3B2A1F2 /* QRCodeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* QRCodeParser.swift */; };
 		E1E5F6A7B8C9D0E1F2A3B4C5 /* NFCWriteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F6A7B8C9D0E1F2A3B4C5D6 /* NFCWriteView.swift */; };
 		E46139D1458EC8E0E1D8E832 /* NotificationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */; };
 		EA1637E6E57AC07CE7EBCF2D /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A04E921C5D66B7F4B5F80B3C /* KeychainSwift */; };
+		D1A6C200000000000000F001 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D1A6C200000000000000F005 /* SnapshotTesting */; };
+		D1A6C200000000000000F002 /* PrinterControlsSectionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */; };
 		ED545B8192219C8947CF7F73 /* MockJobService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B199518AF445724CE1C3213 /* MockJobService.swift */; };
 		EF380A83B48A16EAB8906C70 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D5770CC799908B9483AE95 /* ThemeManager.swift */; };
 		F1A1B2C3D4E5F6A7B8C9D0E1 /* QRCodeParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F6A7B8C9D0E1F2 /* QRCodeParserTests.swift */; };
@@ -190,6 +201,9 @@
 		06290C51382B80A7269F5807 /* DemoSignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 647C4A6609FCEA4362C65F32 /* DemoSignalRService.swift */; };
 		20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1813AB98B7AEA3A598863F /* DemoMode.swift */; };
 		82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */; };
+		A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000A1 /* JogSubgroup.swift */; };
+		A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000B1 /* JogSubgroupTests.swift */; };
+		A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -235,6 +249,8 @@
 		264B18486158F15238D0788D /* JobListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobListViewModelTests.swift; sourceTree = "<group>"; };
 		277D5F88316714ECC4B60E5C /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		281DF848F7722BE9E0E28A2A /* PrinterDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailViewModelTests.swift; sourceTree = "<group>"; };
+		A1C5DEF1234567890ABC0004 /* PrinterControlsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsViewModelTests.swift; sourceTree = "<group>"; };
+		A1C5DEF1234567890ABC0020 /* PreheatSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreheatSubgroupTests.swift; sourceTree = "<group>"; };
 		288048764D1B47272B433307 /* PrinterServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterServiceProtocol.swift; sourceTree = "<group>"; };
 		2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceError.swift; sourceTree = "<group>"; };
 		319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
@@ -246,6 +262,11 @@
 		44789FEC15B2FCE4E3A02174 /* PrintProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintProgressBar.swift; sourceTree = "<group>"; };
 		45FDB4137FE34914C387AE17 /* SignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRService.swift; sourceTree = "<group>"; };
 		4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailViewModel.swift; sourceTree = "<group>"; };
+		A1C5DEF1234567890ABC0002 /* PrinterControlsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsViewModel.swift; sourceTree = "<group>"; };
+		A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroup.swift; sourceTree = "<group>"; };
+		A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroupTests.swift; sourceTree = "<group>"; };
+		A1C5DEF1234567890ABC0010 /* PreheatSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreheatSubgroup.swift; sourceTree = "<group>"; };
+		A3E7287000000000000000A1 /* PrinterControlsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSection.swift; sourceTree = "<group>"; };
 		4B4E2EE087E92C131271B37F /* FilamentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentModels.swift; sourceTree = "<group>"; };
 		4E45A19848758E2DB8543C2A /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModel.swift; sourceTree = "<group>"; };
@@ -264,6 +285,7 @@
 		6B199518AF445724CE1C3213 /* MockJobService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockJobService.swift; sourceTree = "<group>"; };
 		6E4E6FB4888EBB6541E982BC /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
+		FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterProgressContractTests.swift; sourceTree = "<group>"; };
 		809149B9D7E0B339296A7E1E /* SignalRServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRServiceProtocol.swift; sourceTree = "<group>"; };
 		820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceProtocol.swift; sourceTree = "<group>"; };
 		8A79AB745B0C9E1AF64A943D /* DashboardViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModelTests.swift; sourceTree = "<group>"; };
@@ -292,6 +314,7 @@
 		B23554EB41DA88AD092EB5C1 /* LocationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationListView.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* QRCodeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeParser.swift; sourceTree = "<group>"; };
 		B8D7C5C4CE62E9F3684E5B1F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilities.swift; sourceTree = "<group>"; };
 		BA0262E35EBDB310533C010A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BF23D467957EDEE89DB0A90A /* SpoolService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolService.swift; sourceTree = "<group>"; };
 		C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManager.swift; sourceTree = "<group>"; };
@@ -389,6 +412,10 @@
 		647C4A6609FCEA4362C65F32 /* DemoSignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSignalRService.swift; sourceTree = "<group>"; };
 		5F1813AB98B7AEA3A598863F /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMode.swift; sourceTree = "<group>"; };
 		94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeBanner.swift; sourceTree = "<group>"; };
+		A2B6286100000000000000A1 /* JogSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroup.swift; sourceTree = "<group>"; };
+		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
+		A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisabledControlStyle.swift; sourceTree = "<group>"; };
+		D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSectionSnapshotTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -404,6 +431,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D1A6C200000000000000F001 /* SnapshotTesting in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -503,9 +531,20 @@
 				D7EABE37D6B7E8A44802BE1A /* Services */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* Utilities */,
 				4D7DEC203F06522448F70C97 /* ViewModels */,
+				A2B6286100000000000000D1 /* Views */,
+				A2D4EF0123456789ABCD0006 /* Views */,
+				A1C5DEF1234567890ABC0022 /* Views */,
 				CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */,
 			);
 			path = PrintFarmerTests;
+			sourceTree = "<group>";
+		};
+		A2D4EF0123456789ABCD0006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		2A991A21494BE0619C801F85 /* Models */ = {
@@ -513,6 +552,7 @@
 			children = (
 				4B4E2EE087E92C131271B37F /* FilamentModels.swift */,
 				B8D7C5C4CE62E9F3684E5B1F /* Models.swift */,
+				A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */,
 				62BAD7F52A9EFEE471AA461C /* RequestModels.swift */,
 				6208E685EEDD0498124C143A /* SignalRModels.swift */,
 				B7D1020247C4116936C828DD /* AutoDispatchModels.swift */,
@@ -567,6 +607,7 @@
 				016588B049630508F9B77403 /* LoginViewModelTests.swift */,
 				C832D8E0EECDD622BBEB9A68 /* NotificationsViewModelTests.swift */,
 				281DF848F7722BE9E0E28A2A /* PrinterDetailViewModelTests.swift */,
+				A1C5DEF1234567890ABC0004 /* PrinterControlsViewModelTests.swift */,
 				A59E2A16E7C0B2D793C038A6 /* PrinterListViewModelTests.swift */,
 				F1B8C9D0E1F2A3B4C5D6E7F8 /* SpoolPickerViewModelScanTests.swift */,
 				F2D1E2F3A4B5C6D7E8F9A0B1 /* SpoolInventoryViewModelTests.swift */,
@@ -590,6 +631,30 @@
 				6B82175969F41E18F12CE414 /* PredictiveInsightsView.swift */,
 			);
 			path = Printers;
+			sourceTree = "<group>";
+		};
+		A2D4EF0123456789ABCD0003 /* PrinterControls */ = {
+			isa = PBXGroup;
+			children = (
+				A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */,
+			);
+			path = PrinterControls;
+			sourceTree = "<group>";
+		};
+		A1C5DEF1234567890ABC0012 /* PrinterControls */ = {
+			isa = PBXGroup;
+			children = (
+				A1C5DEF1234567890ABC0010 /* PreheatSubgroup.swift */,
+			);
+			path = PrinterControls;
+			sourceTree = "<group>";
+		};
+		A1C5DEF1234567890ABC0022 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A1C5DEF1234567890ABC0020 /* PreheatSubgroupTests.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		5C999E731352905727541C3C = {
@@ -649,7 +714,10 @@
 				4CDE928BC4B813AB90009605 /* Locations */,
 				0F7FA49FF64B34C211841EF0 /* Maintenance */,
 				771CDF6A20CC0E555A100EEE /* Notifications */,
+				A2B6286100000000000000C1 /* PrinterControls */,
 				549E659961D3A9E494F5ADEF /* Printers */,
+				A2D4EF0123456789ABCD0003 /* PrinterControls */,
+				A1C5DEF1234567890ABC0012 /* PrinterControls */,
 				CBAC88193AFA3F2403893113 /* Settings */,
 				255B7030A4CC2759FC7FC79B /* ContentView.swift */,
 				C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */,
@@ -697,6 +765,25 @@
 				BA0262E35EBDB310533C010A /* SettingsView.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		A2B6286100000000000000C1 /* PrinterControls */ = {
+			isa = PBXGroup;
+			children = (
+				A2B6286100000000000000A1 /* JogSubgroup.swift */,
+				A3E7287000000000000000A1 /* PrinterControlsSection.swift */,
+				A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */,
+			);
+			path = PrinterControls;
+			sourceTree = "<group>";
+		};
+		A2B6286100000000000000D1 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2B6286100000000000000B1 /* JogSubgroupTests.swift */,
+				D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		CC3B7B4670D1DE3829893360 /* Dashboard */ = {
@@ -769,6 +856,7 @@
 				C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */,
 				E61A5AAA3D1E4BAD9CA3FE7D /* PendingReadyMonitor.swift */,
 				4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */,
+				A1C5DEF1234567890ABC0002 /* PrinterControlsViewModel.swift */,
 				4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */,
 				C2510EA192FD0D4DA2159C88 /* SpoolInventoryViewModel.swift */,
 				03EF6ADCC3760C1BFE7D60FB /* SpoolPickerViewModel.swift */,
@@ -787,6 +875,7 @@
 			isa = PBXGroup;
 			children = (
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
+				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -858,6 +947,9 @@
 				6B13A1FE16AAC0FD5736C6C3 /* PBXTargetDependency */,
 			);
 			name = PrintFarmerTests;
+			packageProductDependencies = (
+				D1A6C200000000000000F005 /* SnapshotTesting */,
+			);
 			productName = PrintFarmerTests;
 			productReference = DBF8A7CD5FCE695B24F4AD00 /* PrintFarmerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -956,12 +1048,18 @@
 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
+				BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
 				DFD4294EC690BF7D5A4E695F /* DashboardViewModelTests.swift in Sources */,
 				814473DF28A49641B79766BA /* LoginViewModelTests.swift in Sources */,
 				E0411324A6C10BFCD5EAB595 /* PrinterDetailViewModelTests.swift in Sources */,
+				A1C5DEF1234567890ABC0003 /* PrinterControlsViewModelTests.swift in Sources */,
+				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
+				A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */,
+				A1C5DEF1234567890ABC0021 /* PreheatSubgroupTests.swift in Sources */,
+				D1A6C200000000000000F002 /* PrinterControlsSectionSnapshotTests.swift in Sources */,
 				709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */,
 				9496A75515E3FA0FAF3DEB95 /* AuthViewModelTests.swift in Sources */,
 				BD4B3C1A942D0E9675E2B73A /* JobListViewModelTests.swift in Sources */,
@@ -1006,6 +1104,7 @@
 				8ED9E2039EB36A33F0B9850D /* Formatting+Extensions.swift in Sources */,
 				660DA45F179749438845EEE1 /* SpoolmanSpool+ColorName.swift in Sources */,
 				42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */,
+				A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */,
 				AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */,
 				4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */,
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
@@ -1035,6 +1134,10 @@
 				4F679582C671B972DF8C69C5 /* NotificationsViewModel.swift in Sources */,
 				0D7D6FE112414AE495990773 /* PendingReadyMonitor.swift in Sources */,
 				AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */,
+				A1C5DEF1234567890ABC0001 /* PrinterControlsViewModel.swift in Sources */,
+				A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */,
+				A1C5DEF1234567890ABC0011 /* PreheatSubgroup.swift in Sources */,
+				A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */,
 				69BA22247633D68EB315F6C3 /* PrinterListViewModel.swift in Sources */,
 				5E141422FB3849E6169FA79E /* ContentView.swift in Sources */,
 				1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */,
@@ -1118,6 +1221,8 @@
 				DADAA45CEF6DEBFEFF5B983D /* UptimeView.swift in Sources */,
 				6B8B43A62528D0D7D70BD718 /* AutoDispatchSection.swift in Sources */,
 				D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */,
+				A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */,
+				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1370,6 +1475,14 @@
 				minimumVersion = 24.0.0;
 			};
 		};
+		D1A6C200000000000000F004 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.18.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1377,6 +1490,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 2AFD394787A3655B48DC756A /* XCRemoteSwiftPackageReference "keychain-swift" */;
 			productName = KeychainSwift;
+		};
+		D1A6C200000000000000F005 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D1A6C200000000000000F004 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

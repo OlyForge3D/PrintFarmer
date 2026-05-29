@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useMemo } from 'react';
-import { HierarchicalProfilesResponse } from '@/services/slicerProfilesService';
+import type { HierarchicalProfilesResponse, ProcessProfileListItem } from '@/services/slicerProfilesService';
 
 interface ProfileSelectorProps {
   hierarchyData?: HierarchicalProfilesResponse;
@@ -10,8 +10,15 @@ interface ProfileSelectorProps {
   className?: string;
 }
 
+interface ProfileOption {
+  id: string;
+  name: string;
+  isSystem: boolean;
+}
+
 /**
- * Profile selector component that displays profiles organized by manufacturer and model hierarchy
+ * Profile selector component that displays profiles grouped by User/System presets.
+ * User presets appear first, system presets second. Within each group, order is preserved.
  */
 export const ProfileSelector: React.FC<ProfileSelectorProps> = ({
   hierarchyData,
@@ -20,75 +27,62 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({
   disabled = false,
   className
 }) => {
-  // Flatten all process profiles with hierarchy context for display
-  const profileOptions = useMemo(() => {
+  // Flatten all process profiles from the hierarchy
+  const allProfiles = useMemo(() => {
     if (!hierarchyData?.byHierarchy) return [];
 
-    const options: Array<{
-      id: string;
-      name: string;
-      label: string;
-      manufacturer: string;
-      model: string;
-    }> = [];
+    const profiles: ProfileOption[] = [];
 
-    // Walk through manufacturer → model → profiles hierarchy
-    for (const [manufacturer, mfgData] of Object.entries(hierarchyData.byHierarchy)) {
+    for (const mfgData of Object.values(hierarchyData.byHierarchy)) {
       for (const modelData of Object.values(mfgData.models)) {
         for (const profile of modelData.processProfiles) {
-          options.push({
+          profiles.push({
             id: profile.id,
             name: profile.name,
-            label: `${manufacturer} › ${modelData.name} › ${profile.name}`,
-            manufacturer,
-            model: modelData.name,
+            isSystem: (profile as ProcessProfileListItem).isSystem ?? true,
           });
         }
       }
     }
 
-    return options;
+    return profiles;
   }, [hierarchyData]);
 
-  // Group options by manufacturer and model for optgroup rendering
-  const groupedOptions = useMemo(() => {
-    const groups: Record<string, Record<string, typeof profileOptions>> = {};
-
-    for (const option of profileOptions) {
-      if (!groups[option.manufacturer]) {
-        groups[option.manufacturer] = {};
-      }
-      if (!groups[option.manufacturer][option.model]) {
-        groups[option.manufacturer][option.model] = [];
-      }
-      groups[option.manufacturer][option.model].push(option);
+  // Split into User and System groups
+  const { user, system } = useMemo(() => {
+    const u: ProfileOption[] = [];
+    const s: ProfileOption[] = [];
+    for (const p of allProfiles) {
+      (p.isSystem ? s : u).push(p);
     }
-
-    return groups;
-  }, [profileOptions]);
+    return { user: u, system: s };
+  }, [allProfiles]);
 
   return (
     <select
+      aria-label="Process Profile"
+      title="Process Profile"
       value={selectedProfileId}
       onChange={e => onChange(e.target.value)}
       disabled={disabled}
       className={`w-full ${className ?? ''}`}
     >
       <option value="">-- Select Process Profile --</option>
-      
-      {Object.entries(groupedOptions).map(([manufacturer, models]) => (
-        <optgroup key={manufacturer} label={manufacturer}>
-          {Object.entries(models).map(([modelName, profiles]) => (
-            <optgroup key={`${manufacturer}-${modelName}`} label={`  ${modelName}`}>
-              {profiles.map(profile => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </optgroup>
+
+      {user.length > 0 && (
+        <optgroup label="User Presets">
+          {user.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </optgroup>
-      ))}
+      )}
+      {system.length > 0 && (
+        <optgroup label="System Presets">
+          {system.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </optgroup>
+      )}
     </select>
   );
 };

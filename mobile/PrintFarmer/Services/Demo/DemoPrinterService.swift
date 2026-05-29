@@ -29,6 +29,7 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             x: p.x, y: p.y, z: p.z,
             hotendTemp: p.hotendTemp, bedTemp: p.bedTemp,
             hotendTarget: p.hotendTarget, bedTarget: p.bedTarget,
+            homedAxes: p.homedAxes,
             spoolInfo: p.spoolInfo, mmuStatus: nil)
     }
 
@@ -103,5 +104,30 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func changeFilament(printerId: UUID) async throws -> CommandResult {
         CommandResult(success: true, message: "Filament changed (demo)")
+    }
+
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        let backend = printers.first(where: { $0.id == printerId })?.backend ?? .moonraker
+        return PrinterBackendCapabilities.fallback(for: backend)
+    }
+
+    func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        // Demo no-op
+    }
+
+    func home(printerId: UUID, axes: [String]) async throws {
+        // Demo no-op
+    }
+
+    func homeXY(printerId: UUID) async throws {
+        // Demo no-op
+    }
+
+    func homeZ(printerId: UUID) async throws {
+        // Demo no-op
+    }
+
+    func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
+        // Demo no-op
     }
 }

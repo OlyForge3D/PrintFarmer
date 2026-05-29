@@ -4,7 +4,7 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Web.Api.Controllers.Requests;
 
 public record UpdateModelRequest(
-    string Name,
+    string? Name,
     MotionType? MotionType,
     double? MaxX,
     double? MaxY,
@@ -27,6 +27,10 @@ public record UpdateModelRequest(
     // Cost/energy defaults
     decimal? DefaultWattage = null,
     decimal? DefaultHourlyRate = null,
+
+    // Auto-dispatch defaults for new printers of this model
+    AutoDispatchState? DefaultAutoDispatchState = null,
+    StartBehavior? DefaultStartBehavior = null,
 
     // Toolhead templates (contains nozzle diameter and max hotend temp)
     PrinterModelToolheadDto[]? Toolheads = null);

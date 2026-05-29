@@ -9,13 +9,16 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
+import { ZOffsetCalibrationWizard } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
@@ -36,6 +39,7 @@ import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/u
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -93,6 +97,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
+  const [showZOffsetWizard, setShowZOffsetWizard] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
   const [movementActionPending, setMovementActionPending] = useState(false);
@@ -172,7 +177,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
   const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
-  // Camera URL handling
+  // Camera source handling
   const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
   const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
@@ -475,7 +480,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               disabled={!hasCameraUrls || !isEnabled}
               className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
+              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>
@@ -576,6 +581,19 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
       )}
 
+      {/* Offline troubleshooting guide */}
+      {!isOnline && (
+        <div className="mb-4">
+          <OfflineTroubleshootingGuide
+            printerBackend={printer.backend}
+            printerIp={printer.ipAddress}
+            serverUrl={printer.serverUrl ?? printer.backendUrl}
+            frontendUrl={printer.frontendUrl}
+            variant="full"
+          />
+        </div>
+      )}
+
       {/* Progress bar — always visible to prevent layout shift */}
       <div className="mb-4">
         <PrintProgressBar
@@ -587,6 +605,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           showTemperatures={false}
         />
       </div>
+
+      {(isPrinting || isPaused) && (printer.estimatedCompletionTimeUtc || printer.printTimeLeftSeconds != null) && (
+        <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} className="mb-3" />
+      )}
 
       {(isPrinting || isPaused) && (
         <FailureDetectionMonitoringSummary
@@ -668,10 +690,36 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     onFilamentAction={handleFilamentAction}
                   />
                 )}
+                {support.supportsMovement && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!isOnline || isPrinting}
+                    onClick={() => setShowZOffsetWizard(true)}
+                  >
+                    Calibrate Z-Offset
+                  </Button>
+                )}
               </div>
             }
           />
       </div>
+
+      {/* AMS/MMU Slot Visualization - Compact view for card */}
+      {(() => {
+        const toolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
+          ? printerDetails.toolheads
+          : printer.mmuStatus?.gates && printer.mmuStatus.gates.length > 0
+            ? mmuGatesToToolheads(printer.mmuStatus.gates)
+            : undefined;
+        if (!toolheads) return null;
+        return (
+          <div className="mb-2">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
+            <AmsSlotVisualization toolheads={toolheads} compact printerId={printer.id} />
+          </div>
+        );
+      })()}
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
       {(spoolmanReady || printer.spoolInfo) && (() => {
@@ -800,6 +848,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             setSpoolActionPending(false);
           }
         }}
+      />
+
+      <ZOffsetCalibrationWizard
+        isOpen={showZOffsetWizard}
+        onClose={() => setShowZOffsetWizard(false)}
+        printer={printer}
+        bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
+        bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
       />
     </div>
   );

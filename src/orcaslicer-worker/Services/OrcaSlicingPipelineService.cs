@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Dtos;
@@ -27,7 +29,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _storageEndpoint = configuration["SlicerApi:BaseUrl"]
                           ?? configuration["Worker:StorageEndpoint"]
                           ?? "http://api:5245";
-        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/usr/local/bin/orcaslicer";
+        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
         if (!Directory.Exists(_workingDirectory))
         {
             _ = Directory.CreateDirectory(_workingDirectory);
@@ -42,14 +44,32 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         try
         {
             _logger.LogInformation("Starting slicing pipeline for job {JobId}", job.Id);
-            await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
-            string stlFilePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
+
+            // Download model file(s)
+            List<string> modelFilePaths;
+            if (job.ModelFileUrls is { Count: > 0 })
+            {
+                await _progressReporter.ReportProgressAsync(job.Id, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
+                modelFilePaths = await FetchMultipleModelsAsync(job.ModelFileUrls, jobWorkDir, cancellationToken);
+                job.InputFileSizeBytes = modelFilePaths.Sum(p => new FileInfo(p).Length);
+                _logger.LogInformation("Downloaded {Count} model files for job {JobId}", modelFilePaths.Count, job.Id);
+            }
+            else
+            {
+                await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
+                string singlePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
+                modelFilePaths = [singlePath];
+            }
+
             await _progressReporter.ReportProgressAsync(job.Id, 20, "Preparing slicer configuration", cancellationToken);
-            string configFilePath = await PrepareSlicerConfigAsync(job, jobWorkDir, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 30, "Running OrcaSlicer", cancellationToken);
-            string gcodeFilePath = await RunOrcaSlicerAsync(stlFilePath, configFilePath, jobWorkDir, job, cancellationToken);
+            string gcodeFilePath = await RunOrcaSlicerAsync(modelFilePaths, jobWorkDir, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
+
+            // Rename gcode to descriptive filename: {model}_{printer}_{material}_{time}.gcode
+            gcodeFilePath = RenameGcodeFile(gcodeFilePath, job, metadata);
+
             await _progressReporter.ReportProgressAsync(job.Id, 90, "Uploading G-code", cancellationToken);
             string gcodeUrl = await UploadGcodeAsync(gcodeFilePath, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
@@ -65,17 +85,35 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             result.Metadata["SlicerVersion"] = "OrcaSlicer 1.8.0";
             result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
             result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
+            if (modelFilePaths.Count > 1)
+            {
+                result.Metadata["ModelCount"] = modelFilePaths.Count.ToString(CultureInfo.InvariantCulture);
+            }
+
             return result;
         }
         finally
         {
-            try
+            // Keep temp files on failure for debugging; only clean up on success
+            if (Directory.Exists(jobWorkDir))
             {
-                Directory.Delete(jobWorkDir, recursive: true);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
+                string outputDir = Path.Combine(jobWorkDir, "output");
+                bool succeeded = Directory.Exists(outputDir) && Directory.GetFiles(outputDir, "*.gcode").Length > 0;
+                if (succeeded)
+                {
+                    try
+                    {
+                        Directory.Delete(jobWorkDir, recursive: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Keeping temp dir for debugging: {JobWorkDir}", jobWorkDir);
+                }
             }
         }
     }
@@ -91,16 +129,48 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return stlFilePath;
     }
 
-#pragma warning disable S1172 // Unused parameters are required by interface
-#pragma warning disable CS1998 // Method marked async but lacks await operators
-    private static async Task<string> PrepareSlicerConfigAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
+    private async Task<List<string>> FetchMultipleModelsAsync(List<string> modelUrls, string workDir, CancellationToken cancellationToken)
     {
-        // Deprecated: profiles are now generated directly from database JSON in RunOrcaSlicerAsync
-        // This method is kept for backward compatibility with the interface
-        return workDir;
+        List<string> downloadedPaths = new(modelUrls.Count);
+        for (int i = 0; i < modelUrls.Count; i++)
+        {
+            string url = modelUrls[i];
+
+            // Safely extract filename — Uri.LocalPath throws on relative URIs
+            string fileName;
+            if (Uri.TryCreate(url, UriKind.Absolute, out Uri? parsedUri))
+            {
+                fileName = Path.GetFileName(parsedUri.LocalPath);
+            }
+            else
+            {
+                fileName = string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(fileName))
+            {
+                fileName = $"model_{i}{(url.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase) ? ".3mf" : url.EndsWith(".step", StringComparison.OrdinalIgnoreCase) ? ".step" : url.EndsWith(".stp", StringComparison.OrdinalIgnoreCase) ? ".stp" : ".stl")}";
+            }
+
+            // Ensure unique filenames when multiple models share the same name
+            string destPath = Path.Combine(workDir, fileName);
+            if (File.Exists(destPath))
+            {
+                string baseName = Path.GetFileNameWithoutExtension(fileName);
+                string ext = Path.GetExtension(fileName);
+                destPath = Path.Combine(workDir, $"{baseName}_{i}{ext}");
+            }
+
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
+            _ = response.EnsureSuccessStatusCode();
+            await using FileStream fileStream = File.Create(destPath);
+            await response.Content.CopyToAsync(fileStream, cancellationToken);
+            downloadedPaths.Add(destPath);
+            _logger.LogInformation("Downloaded model {Index}/{Total}: {Path}", i + 1, modelUrls.Count, destPath);
+        }
+
+        return downloadedPaths;
     }
-#pragma warning restore CS1998
-#pragma warning restore S1172
 
     private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
     {
@@ -111,27 +181,49 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         string machineJsonPath = Path.Combine(workDir, "machine.json");
         string processJsonPath = Path.Combine(workDir, "process.json");
-        string filamentJsonPath = Path.Combine(workDir, "filament.json");
 
         // Write the profiles directly as JSON - they should already contain complete settings from the database
-        string machineJson = JsonSerializer.Serialize(profile.MachineProfile, new JsonSerializerOptions { WriteIndented = true });
-        string processJson = JsonSerializer.Serialize(profile.ProcessProfile, new JsonSerializerOptions { WriteIndented = true });
-        string filamentJson = JsonSerializer.Serialize(profile.FilamentProfile, new JsonSerializerOptions { WriteIndented = true });
+        // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
+        // The Settings dictionary stores raw JSON text per key (from GetRawText()),
+        // so we reconstruct proper JSON by writing the raw values directly.
+        string machineJson = SettingsDictToNativeJson(profile.MachineProfile?.Settings);
+        string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
-        await File.WriteAllTextAsync(filamentJsonPath, filamentJson, cancellationToken);
 
-        return new Dictionary<string, string>
+        var result = new Dictionary<string, string>
         {
             { "machine", machineJsonPath },
-            { "process", processJsonPath },
-            { "filament", filamentJsonPath }
+            { "process", processJsonPath }
         };
+
+        // Multi-extruder: write one filament JSON per extruder, semicolon-separated for --load-filaments
+        if (profile.ExtruderFilamentProfiles is { Count: > 1 })
+        {
+            var filamentPaths = new List<string>();
+            for (int i = 0; i < profile.ExtruderFilamentProfiles.Count; i++)
+            {
+                string path = Path.Combine(workDir, $"filament_{i}.json");
+                string json = SettingsDictToNativeJson(profile.ExtruderFilamentProfiles[i].Settings);
+                await File.WriteAllTextAsync(path, json, cancellationToken);
+                filamentPaths.Add(path);
+            }
+
+            result["filament"] = string.Join(";", filamentPaths);
+        }
+        else
+        {
+            string filamentJsonPath = Path.Combine(workDir, "filament.json");
+            string filamentJson = SettingsDictToNativeJson(profile.FilamentProfile?.Settings);
+            await File.WriteAllTextAsync(filamentJsonPath, filamentJson, cancellationToken);
+            result["filament"] = filamentJsonPath;
+        }
+
+        return result;
     }
 
-#pragma warning disable S1172 // configPath is kept for method signature compatibility
-    private async Task<string> RunOrcaSlicerAsync(string stlPath, string configPath, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
+    private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         string gcodeOutputDir = Path.Combine(workDir, "output");
         _ = Directory.CreateDirectory(gcodeOutputDir);
@@ -149,14 +241,111 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Build command line: --slice 0 --load-settings "machine.json;process.json" --load-filaments "filament.json" --allow-newer-file --outputdir "/tmp/slice-XYZ/output" /tmp/slice-XYZ/input/uploaded-file.stl
-        string arguments = $"--slice 0 --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+        // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
+        // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
+        // --ensure-on-bed: lift objects partially below Z=0
+        //
+        // Per-model transforms: for multi-model jobs with ModelFileTransforms, use the first
+        // entry as the primary model transform. If any model has a custom position, disable
+        // auto-arrange to preserve the user's layout.
+        //
+        // When additional models (2..N) also carry transforms, embed all models in a 3MF
+        // project file so OrcaSlicer applies every transform instead of auto-arranging.
+        string? primaryTransformJson = job.ModelTransformJson;
+        bool anyModelHasPosition = false;
+        bool useThreeMfProject = false;
+
+        if (job.ModelFileTransforms is { Count: > 0 } && modelPaths.Count > 1)
+        {
+            primaryTransformJson = job.ModelFileTransforms[0];
+            foreach (string? t in job.ModelFileTransforms)
+            {
+                TransformResult check = BuildTransformFlags(t);
+                if (check.HasCustomPosition)
+                {
+                    anyModelHasPosition = true;
+                    break;
+                }
+            }
+
+            if (job.ModelFileTransforms.Count > 1
+                && job.ModelFileTransforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t)))
+            {
+                useThreeMfProject = true;
+            }
+        }
+
+        string arrangeFlag;
+        string transformFlags;
+        List<string> effectiveModelPaths;
+
+        bool allStl = modelPaths.All(p => p.EndsWith(".stl", StringComparison.OrdinalIgnoreCase));
+
+        if (useThreeMfProject && allStl)
+        {
+            _logger.LogInformation(
+                "Job {JobId}: using 3MF project workflow to embed transforms for {Count} models",
+                job.Id, modelPaths.Count);
+
+            var entries = new List<ThreeMfProjectBuilder.ModelEntry>(modelPaths.Count);
+            for (int i = 0; i < modelPaths.Count; i++)
+            {
+                string? tfJson = i < job.ModelFileTransforms!.Count ? job.ModelFileTransforms[i] : null;
+                entries.Add(new ThreeMfProjectBuilder.ModelEntry(modelPaths[i], tfJson));
+            }
+
+            string threeMfPath = ThreeMfProjectBuilder.Build(entries, workDir);
+            effectiveModelPaths = [threeMfPath];
+            arrangeFlag = "--arrange 0";
+            transformFlags = string.Empty;
+        }
+        else
+        {
+            if (useThreeMfProject)
+            {
+                _logger.LogWarning(
+                    "Job {JobId}: 3MF project workflow skipped — not all inputs are STL files. Falling back to CLI flags.",
+                    job.Id);
+                useThreeMfProject = false;
+            }
+
+            effectiveModelPaths = modelPaths;
+            TransformResult transform = BuildTransformFlags(primaryTransformJson);
+            arrangeFlag = (transform.HasCustomPosition || anyModelHasPosition) ? "--arrange 0" : "--arrange 1";
+            transformFlags = transform.Flags;
+        }
+
+        // Create a named pipe for real-time progress from OrcaSlicer
+        string pipePath = Path.Combine(workDir, "progress.pipe");
+        bool pipeCreated = TryCreateNamedPipe(pipePath);
+        string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
+
+        // Build model arguments: first model is positional, additional models use --load
+        string primaryModel = $"\"{effectiveModelPaths[0]}\"";
+        string additionalModels = string.Empty;
+        if (effectiveModelPaths.Count > 1)
+        {
+            additionalModels = " " + string.Join(" ", effectiveModelPaths.Skip(1).Select(p => $"--load \"{p}\""));
+        }
+
+        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
+
+        // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
+        string binaryPath = _orcaSlicerBinaryPath;
+        bool useXvfb = File.Exists("/usr/bin/xvfb-run");
+        if (useXvfb)
+        {
+            arguments = $"-a {_orcaSlicerBinaryPath} {arguments}";
+            binaryPath = "/usr/bin/xvfb-run";
+        }
+
+        _logger.LogInformation("Launching OrcaSlicer: {BinaryPath} {Arguments}", binaryPath, arguments);
 
         using Process process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = _orcaSlicerBinaryPath,
+                FileName = binaryPath,
                 Arguments = arguments,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -167,23 +356,227 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         };
         _ = process.Start();
 #pragma warning disable CA2025 // progressTask references process but completes before disposal (awaited explicitly)
-        Task progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
+        Task progressTask = pipeCreated
+            ? MonitorSlicingProgressViaPipeAsync(job.Id, pipePath, process, cancellationToken)
+            : MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
 #pragma warning restore CA2025
         Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         await progressTask;
-        string error = await errorTask; // output ignored for brevity
-        if (process.ExitCode != 0)
+        string output = await outputTask;
+        string error = await errorTask;
+
+        _logger.LogInformation(
+            "OrcaSlicer exited with code {ExitCode}. Stdout length={StdoutLen}, Stderr length={StderrLen}",
+            process.ExitCode,
+            output.Length,
+            error.Length);
+
+        if (!string.IsNullOrWhiteSpace(output))
         {
-            throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
+            _logger.LogInformation("OrcaSlicer stdout: {Output}", output.Length > 2000 ? output[..2000] : output);
         }
 
-        return !File.Exists(gcodeFilePath)
-            ? throw new InvalidOperationException("OrcaSlicer completed but no G-code produced")
-            : gcodeFilePath;
+        if (process.ExitCode != 0)
+        {
+            _logger.LogError("OrcaSlicer stderr: {Error}", error);
+
+            // Parse stdout for [error] lines — OrcaSlicer writes diagnostics to stdout, not stderr
+            string detail = ExtractOrcaErrorDetail(output, error);
+
+            throw new InvalidOperationException(
+                $"OrcaSlicer failed with exit code {process.ExitCode}: {detail}");
+        }
+
+        // OrcaSlicer CLI always outputs plate_1.gcode (not {modelname}.gcode)
+        if (!File.Exists(gcodeFilePath))
+        {
+            // Look for plate_1.gcode or any .gcode file in the output dir
+            string plate1Path = Path.Combine(gcodeOutputDir, "plate_1.gcode");
+            if (File.Exists(plate1Path))
+            {
+                gcodeFilePath = plate1Path;
+            }
+            else
+            {
+                string[] gcodeFiles = Directory.GetFiles(gcodeOutputDir, "*.gcode");
+                gcodeFilePath = gcodeFiles.Length > 0
+                    ? gcodeFiles[0]
+                    : throw new InvalidOperationException("OrcaSlicer completed but no G-code produced");
+            }
+        }
+
+        return gcodeFilePath;
     }
-#pragma warning restore S1172
+
+    private static string ExtractOrcaErrorDetail(string stdout, string stderr)
+    {
+        // OrcaSlicer writes errors to stdout as "[error] <message>" lines
+        var errorLines = stdout
+            .Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.Contains("[error]", StringComparison.OrdinalIgnoreCase))
+            .Select(l =>
+            {
+                // Strip timestamp prefix: "[2026-04-13 ...] [0x...] [error]   message"
+                int idx = l.IndexOf("[error]", StringComparison.OrdinalIgnoreCase);
+                return idx >= 0 ? l[(idx + 7)..].TrimStart(':', ' ') : l;
+            })
+            .Where(l => l.Length > 0)
+            .ToList();
+
+        if (errorLines.Count > 0)
+        {
+            return string.Join("; ", errorLines);
+        }
+
+        // Fall back to stderr if no [error] lines in stdout
+        if (!string.IsNullOrWhiteSpace(stderr))
+        {
+            return stderr.Length > 500 ? stderr[..500] : stderr;
+        }
+
+        // Last resort: grab lines containing "error" or "fail" from stdout
+        string fallback = stdout
+            .Split('\n')
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.Contains("error", StringComparison.OrdinalIgnoreCase)
+                              || l.Contains("fail", StringComparison.OrdinalIgnoreCase))
+            ?? string.Empty;
+
+        return fallback.Length > 500 ? fallback[..500] : fallback;
+    }
+
+    private static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)
+    {
+        string modelName = Path.GetFileNameWithoutExtension(job.ModelFileName);
+        string printerModel = job.Profile?.MachineProfile?.PrinterModel
+                           ?? job.Profile?.MachineProfile?.Name
+                           ?? "Unknown";
+        string material = job.Profile?.ExtruderFilamentProfiles is { Count: > 1 }
+            ? string.Join("+", job.Profile.ExtruderFilamentProfiles.Select(f => f.Material ?? "PLA"))
+            : job.Profile?.FilamentProfile?.Material ?? "PLA";
+        string printTime = FormatPrintTime(metadata.PrintTimeSeconds);
+
+        string newName = SanitizeFileName($"{modelName}_{printerModel}_{material}_{printTime}.gcode");
+        string newPath = Path.Combine(Path.GetDirectoryName(gcodeFilePath)!, newName);
+
+        if (string.Equals(gcodeFilePath, newPath, StringComparison.Ordinal))
+        {
+            return gcodeFilePath;
+        }
+
+        File.Move(gcodeFilePath, newPath);
+        return newPath;
+    }
+
+    private static string FormatPrintTime(double totalSeconds)
+    {
+        if (totalSeconds <= 0)
+        {
+            return "unknown";
+        }
+
+        TimeSpan ts = TimeSpan.FromSeconds(totalSeconds);
+        return ts.TotalHours >= 1
+            ? $"{(int)ts.TotalHours}h{ts.Minutes}m"
+            : $"{ts.Minutes}m";
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        return new string(name.Select(c => invalid.Contains(c) || c == ' ' ? '_' : c).ToArray());
+    }
+
+    private async Task MonitorSlicingProgressViaPipeAsync(
+        Guid jobId,
+        string pipePath,
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Open the pipe for reading — blocks until OrcaSlicer opens it for writing.
+            // Use a timeout so we fall back to time-based if OrcaSlicer never opens the pipe.
+            using CancellationTokenSource pipeOpenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            pipeOpenCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            FileStream? pipeStream = null;
+            try
+            {
+                // FileStream.Open on a FIFO blocks until a writer opens it.
+                // Run in a thread pool thread to avoid blocking the async context.
+                pipeStream = await Task.Run(
+                    () => new FileStream(pipePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite),
+                    pipeOpenCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Pipe open timed out for job {JobId}, falling back to time-based progress", jobId);
+                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to open progress pipe for job {JobId}, falling back to time-based progress", jobId);
+                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                return;
+            }
+
+            using (pipeStream)
+            using (StreamReader reader = new StreamReader(pipeStream, Encoding.UTF8))
+            {
+                while (!process.HasExited && !cancellationToken.IsCancellationRequested)
+                {
+                    string? line = await reader.ReadLineAsync(cancellationToken);
+                    if (line is null)
+                    {
+                        break; // Writer closed the pipe
+                    }
+
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        using JsonDocument doc = JsonDocument.Parse(line);
+                        JsonElement root = doc.RootElement;
+
+                        int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp) ? tp.GetInt32() : -1;
+                        string message = root.TryGetProperty("message", out JsonElement msg) ? msg.GetString() ?? "Slicing..." : "Slicing...";
+
+                        if (root.TryGetProperty("warning", out JsonElement warn))
+                        {
+                            _logger.LogWarning("OrcaSlicer warning for job {JobId}: {Warning}", jobId, warn.GetString());
+                        }
+
+                        if (totalPercent >= 0)
+                        {
+                            // Map OrcaSlicer's 0-100 to our 30-70 range
+                            int mapped = 30 + (int)(totalPercent * 0.4);
+                            mapped = Math.Clamp(mapped, 30, 70);
+                            await _progressReporter.ReportProgressAsync(jobId, mapped, message, cancellationToken);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // Non-JSON line — ignore
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error reading progress pipe for job {JobId}", jobId);
+        }
+    }
 
     private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
     {
@@ -215,6 +608,46 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error monitoring slicing progress for job {JobId}", jobId);
+        }
+    }
+
+    private bool TryCreateNamedPipe(string pipePath)
+    {
+        try
+        {
+            if (File.Exists(pipePath))
+            {
+                File.Delete(pipePath);
+            }
+
+            using Process mkfifo = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "mkfifo",
+                    Arguments = $"\"{pipePath}\"",
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            _ = mkfifo.Start();
+            mkfifo.WaitForExit(5000);
+
+            if (mkfifo.ExitCode != 0)
+            {
+                string err = mkfifo.StandardError.ReadToEnd();
+                _logger.LogWarning("mkfifo failed (exit {ExitCode}): {Error}", mkfifo.ExitCode, err);
+                return false;
+            }
+
+            _logger.LogDebug("Created progress pipe at {PipePath}", pipePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create named pipe at {PipePath}", pipePath);
+            return false;
         }
     }
 
@@ -313,4 +746,230 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     [GeneratedRegex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex MyRegex();
+
+    /// <summary>
+    /// Parsed transform result: CLI flags and whether a custom position was specified.
+    /// When <see cref="HasCustomPosition"/> is true, callers should use --arrange 0
+    /// instead of --arrange 1 so OrcaSlicer respects the explicit placement.
+    /// </summary>
+    internal readonly record struct TransformResult(string Flags, bool HasCustomPosition);
+
+    /// <summary>
+    /// Parse model transform JSON from the UI and build OrcaSlicer CLI transform flags.
+    /// Input: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz],"position":[px,py,pz]}
+    ///   — radians for rotation, Y-up coordinate system (Three.js/R3F).
+    /// Output: OrcaSlicer flags in degrees, Z-up.
+    /// Axis mapping (rotation): R3F X → --rotate-x, R3F Y (up) → --rotate (Z), R3F Z → --rotate-y.
+    /// Axis mapping (position):  R3F X → OrcaSlicer X, R3F Z → OrcaSlicer Y (bed plane).
+    /// </summary>
+    internal static TransformResult BuildTransformFlags(string? modelTransformJson)
+    {
+        if (string.IsNullOrWhiteSpace(modelTransformJson))
+        {
+            return new TransformResult(string.Empty, false);
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(modelTransformJson);
+            JsonElement root = doc.RootElement;
+            StringBuilder flags = new();
+            bool hasCustomPosition = false;
+
+            if (root.TryGetProperty("rotation", out JsonElement rotEl) && rotEl.ValueKind == JsonValueKind.Array)
+            {
+                double[] rot = new double[3];
+                int i = 0;
+                foreach (JsonElement el in rotEl.EnumerateArray())
+                {
+                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
+                    {
+                        double v = el.GetDouble();
+                        rot[i++] = double.IsFinite(v) ? v : 0;
+                    }
+                }
+
+                const double radToDeg = 180.0 / Math.PI;
+                const double epsilon = 0.001;
+
+                // Workspace is Z-up with XY bed plane (camera.up = [0,0,1]).
+                // rotation[0]=X, rotation[1]=Y, rotation[2]=Z — same axes as OrcaSlicer.
+                double rotXDeg = rot[0] * radToDeg;
+                if (Math.Abs(rotXDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
+                }
+
+                double rotYDeg = rot[1] * radToDeg;
+                if (Math.Abs(rotYDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-y {rotYDeg:F2}");
+                }
+
+                // Z-rotation (around up axis) = OrcaSlicer --rotate (yaw)
+                double rotZDeg = rot[2] * radToDeg;
+                if (Math.Abs(rotZDeg) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
+                }
+            }
+
+            if (root.TryGetProperty("scale", out JsonElement scaleEl) && scaleEl.ValueKind == JsonValueKind.Array)
+            {
+                double[] scale = new double[3] { 1, 1, 1 };
+                int i = 0;
+                foreach (JsonElement el in scaleEl.EnumerateArray())
+                {
+                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
+                    {
+                        double v = el.GetDouble();
+                        scale[i++] = double.IsFinite(v) ? v : 1;
+                    }
+                }
+
+                // Use uniform scale (first component). 1.0 = no change.
+                const double epsilon = 0.001;
+                if (Math.Abs(scale[0] - 1.0) > epsilon)
+                {
+                    flags.Append(CultureInfo.InvariantCulture, $" --scale {scale[0]:F4}");
+                }
+            }
+
+            // Workspace is Z-up with XY bed plane — same as OrcaSlicer.
+            // position[0]=X (bed), position[1]=Y (bed), position[2]=Z (height, ignored for --center).
+            if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
+            {
+                double[] pos = new double[3];
+                int i = 0;
+                foreach (JsonElement el in posEl.EnumerateArray())
+                {
+                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
+                    {
+                        double v = el.GetDouble();
+                        pos[i++] = double.IsFinite(v) ? v : 0;
+                    }
+                }
+
+                const double epsilon = 0.001;
+                double bedX = pos[0]; // X bed axis → OrcaSlicer X
+                double bedY = pos[1]; // Y bed axis → OrcaSlicer Y
+
+                if (Math.Abs(bedX) > epsilon || Math.Abs(bedY) > epsilon)
+                {
+                    hasCustomPosition = true;
+                    flags.Append(CultureInfo.InvariantCulture, $" --center {bedX:F2},{bedY:F2}");
+                }
+            }
+
+            return new TransformResult(flags.ToString(), hasCustomPosition);
+        }
+        catch (JsonException)
+        {
+            return new TransformResult(string.Empty, false);
+        }
+    }
+
+    /// <summary>
+    /// Converts a Settings dictionary to JSON for OrcaSlicer --load-settings.
+    /// All scalars are written as JSON strings. Values that look like JSON arrays
+    /// (start with '[') are written as native arrays.
+    /// Keys with values that would fail OrcaSlicer's CLI validator are sanitized.
+    /// </summary>
+    internal static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
+    {
+        if (settings == null || settings.Count == 0)
+        {
+            return "{}";
+        }
+
+        // OrcaSlicer --load-settings has stricter range checks than the profile format.
+        // Clamp known speed/rate fields that use 0="auto" in profiles but require ≥1 in CLI.
+        SanitizeForCli(settings);
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            foreach (KeyValuePair<string, object> kvp in settings)
+            {
+                writer.WritePropertyName(kvp.Key);
+
+                // List<string> values — write as native JSON array
+                if (kvp.Value is IList<string> list)
+                {
+                    writer.WriteStartArray();
+                    foreach (string item in list)
+                    {
+                        writer.WriteStringValue(item);
+                    }
+
+                    writer.WriteEndArray();
+                    continue;
+                }
+
+                string value = kvp.Value?.ToString() ?? string.Empty;
+
+                // Legacy: raw JSON array text (e.g. "[\"0.4\"]") — write as native array
+                if (value.Length > 0 && value[0] == '[')
+                {
+                    try
+                    {
+                        using JsonDocument arr = JsonDocument.Parse(value);
+                        arr.RootElement.WriteTo(writer);
+                        continue;
+                    }
+                    catch (JsonException)
+                    {
+                        // Not valid JSON array — fall through to string
+                    }
+                }
+
+                // OrcaSlicer CLI (both 2.3.1 and 2.3.2) expects all scalar values as
+                // JSON strings — matching the native profile format. Arrays are the
+                // only exception (written as native JSON arrays above).
+                writer.WriteStringValue(value);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// Clamp values that OrcaSlicer profiles store as 0 (meaning "auto/disabled")
+    /// but the --load-settings CLI validator rejects as out of range.
+    /// Also injects defaults for fields required by OrcaSlicer 2.3.2+ CLI
+    /// that weren't present in older profiles.
+    /// </summary>
+    private static void SanitizeForCli(Dictionary<string, object> settings)
+    {
+        // Speed fields: 0 means "auto" in profiles but CLI requires ≥ 1
+        string[] speedKeys =
+        [
+            "scarf_joint_speed",
+            "skirt_speed",
+        ];
+
+        foreach (string key in speedKeys)
+        {
+            if (settings.TryGetValue(key, out object? val) && val?.ToString() == "0")
+            {
+                settings[key] = "1";
+            }
+        }
+
+        // OrcaSlicer 2.3.2 requires extruder_type and nozzle_volume_type for
+        // update_values_to_printer_extruders. Without them the CLI segfaults
+        // (exit 139) when looking up extruder defaults.
+        if (!settings.ContainsKey("extruder_type"))
+        {
+            settings["extruder_type"] = new List<string> { "Direct Drive" };
+        }
+
+        if (!settings.ContainsKey("nozzle_volume_type"))
+        {
+            settings["nozzle_volume_type"] = new List<string> { "Standard" };
+        }
+    }
 }

@@ -13,22 +13,8 @@ enum PrinterBackend: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .unknown
-            case 1: self = .moonraker
-            case 2: self = .prusaLink
-            case 3: self = .sdcp
-            case 4: self = .octoPrint
-            case 5: self = .flashForge
-            default: self = .unknown
-            }
-        } else {
-            self = .unknown
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
     }
 }
 
@@ -40,19 +26,8 @@ enum MotionType: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .cartesian
-            case 1: self = .coreXY
-            case 2: self = .delta
-            default: self = .unknown
-            }
-        } else {
-            self = .unknown
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
     }
 }
 
@@ -68,24 +43,8 @@ enum PrintJobStatus: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .queued
-            case 1: self = .assigned
-            case 2: self = .starting
-            case 3: self = .printing
-            case 4: self = .paused
-            case 5: self = .completed
-            case 6: self = .failed
-            case 7: self = .cancelled
-            default: self = .queued
-            }
-        } else {
-            self = .queued
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .queued
     }
 }
 
@@ -97,23 +56,14 @@ enum PrintJobPriority: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .low
-            case 1: self = .normal
-            case 2: self = .high
-            case 3: self = .urgent
-            default: self = .normal
-            }
-        } else {
-            self = .normal
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .normal
     }
 
     /// Maps the backend integer priority value to the enum.
+    /// PrintJobDto serializes `priority` as a raw `int`, not as a `JsonStringEnumConverter` enum,
+    /// so callers that consume that field continue to use this helper.
+
     static func from(intValue: Int) -> PrintJobPriority? {
         switch intValue {
         case 0: .low
@@ -133,20 +83,8 @@ enum AutoDispatchState: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .none
-            case 1: self = .pendingReady
-            case 2: self = .ready
-            case 3: self = .dismissed
-            default: self = .none
-            }
-        } else {
-            self = .none
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .none
     }
 }
 
@@ -262,8 +200,12 @@ struct Printer: Codable, Identifiable, Sendable {
 
         isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
         state = try c.decodeIfPresent(String.self, forKey: .state)
-        // Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
-        progress = try c.decodeIfPresent(Double.self, forKey: .progress).map { $0 / 100.0 }
+        // Backend contract: progress is 0–100 (percent). iOS internal scale is 0–1.0
+        // (PrintProgressBar / SwiftUI ProgressView consumers). Clamp out-of-range backend
+        // values to [0, 100] before normalizing so drift never produces UI > 100% or < 0%.
+        // See PrinterProgressContractTests for the pin (issue #277).
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress)
+            .map { min(max($0, 0), 100) / 100.0 }
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
@@ -357,8 +299,50 @@ struct PrinterStatusDetail: Codable, Sendable {
     let bedTemp: Double?
     let hotendTarget: Double?
     let bedTarget: Double?
+    // Compact axis homing string from backend, e.g. "xyz", "xy", "" or nil. Mirrors `Printer.homedAxes`.
+    let homedAxes: String?
     let spoolInfo: PrinterSpoolInfo?
     let mmuStatus: MmuStatus?
+
+    init(
+        id: UUID,
+        isOnline: Bool,
+        state: String?,
+        progress: Double?,
+        jobName: String?,
+        thumbnailUrl: String?,
+        cameraStreamUrl: String?,
+        cameraSnapshotUrl: String?,
+        x: Double?,
+        y: Double?,
+        z: Double?,
+        hotendTemp: Double?,
+        bedTemp: Double?,
+        hotendTarget: Double?,
+        bedTarget: Double?,
+        homedAxes: String? = nil,
+        spoolInfo: PrinterSpoolInfo?,
+        mmuStatus: MmuStatus?
+    ) {
+        self.id = id
+        self.isOnline = isOnline
+        self.state = state
+        self.progress = progress
+        self.jobName = jobName
+        self.thumbnailUrl = thumbnailUrl
+        self.cameraStreamUrl = cameraStreamUrl
+        self.cameraSnapshotUrl = cameraSnapshotUrl
+        self.x = x
+        self.y = y
+        self.z = z
+        self.hotendTemp = hotendTemp
+        self.bedTemp = bedTemp
+        self.hotendTarget = hotendTarget
+        self.bedTarget = bedTarget
+        self.homedAxes = homedAxes
+        self.spoolInfo = spoolInfo
+        self.mmuStatus = mmuStatus
+    }
 }
 
 // MARK: - MMU Status (matches MmuStatusDto)

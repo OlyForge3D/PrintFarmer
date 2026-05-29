@@ -26,6 +26,7 @@ public record UpdatePrinterDto(
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,
+    string? BuddyCameraIp = null,
 
     // Printer capabilities
     double? NozzleDiameter = null,
@@ -52,6 +53,15 @@ public record UpdatePrinterDto(
 
     // Obico AI failure detection opt-in
     bool? ObicoEnabled = null,
+
+    // Z-offset calibration
+    decimal? ZOffsetMm = null,
+
+    // Bed surface type
+    Guid? BedTypeId = null,
+
+    // Auto-dispatch model defaults opt-out
+    bool? UseModelDispatchDefaults = null,
 
     // Toolheads - for updating individual toolhead settings
     UpdateToolheadDto[]? Toolheads = null);

@@ -198,6 +198,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             double? progress = null;
             string? jobName = null;
             string? thumb = null;
+            double? printDuration = null;
 
             if (result.TryGetProperty("status", out JsonElement statusEl))
             {
@@ -216,10 +217,23 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
 
-                if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
-                    ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                if (statusEl.TryGetProperty("print_stats", out JsonElement ps))
                 {
-                    jobName = fn.GetString();
+                    if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                    {
+                        jobName = fn.GetString();
+                    }
+
+                    if (ps.TryGetProperty("print_duration", out JsonElement pd) && pd.ValueKind == JsonValueKind.Number)
+                    {
+                        try
+                        {
+                            printDuration = pd.GetDouble();
+                        }
+                        catch
+                        {
+                        }
+                    }
                 }
             }
 
@@ -269,7 +283,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                 }
             }
 
-            return new PrinterJob(state, progress, jobName, thumb);
+            return new PrinterJob(state, progress, jobName, thumb, printDuration);
         }
         catch
         {
@@ -541,7 +555,15 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             snap = snapshotUrl;
         }
 
-        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
+        // Calculate estimated time remaining from progress and elapsed print duration
+        double? printTimeLeftSeconds = null;
+        if (job?.Progress is > 0 and < 100 && job.PrintDurationSeconds is > 0)
+        {
+            double progressFraction = job.Progress.Value / 100.0;
+            printTimeLeftSeconds = job.PrintDurationSeconds.Value * (1.0 - progressFraction) / progressFraction;
+        }
+
+        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT, PrintTimeLeftSeconds: printTimeLeftSeconds);
     }
 
     public Task<PrinterDto> CreatePrinterDtoAsync(
@@ -805,12 +827,75 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             Uri baseUri4 = new(baseUrl);
             Uri scriptUri = new(baseUri4, "printer/gcode/script");
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
+
+            // Secondary defense (#317): translate firmware-level busy signals to PrinterBackendBusyException
+            // so the controller returns HTTP 409 Conflict to the caller.
+            //
+            // 409 Conflict — Moonraker/firmware explicitly blocked the command (gcode queue locked).
+            //   Always treat as printer-busy-printing.
+            //
+            // 503 Service Unavailable — Moonraker returns this when Klippy is unavailable
+            //   (disconnected, shutdown, or error state), NOT when the printer is actively printing.
+            //   Inspect the JSON body: only raise PrinterBackendBusyException when the message
+            //   contains printer-busy keywords (e.g. "printing", "busy"); otherwise treat as a
+            //   transient backend-unavailable condition and return false.
+            //   This narrows the overly-broad "503 = busy" rule from #317 (Bishop's review #318).
+            if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                throw new PrinterBackendBusyException(
+                    $"Moonraker refused gcode (409 Conflict) at {baseUrl}.");
+            }
+
+            if (resp.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                string errorBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                if (IsMoonrakerBusyPrintingBody(errorBody))
+                {
+                    throw new PrinterBackendBusyException(
+                        $"Moonraker refused gcode (503 printing-busy) at {baseUrl}.");
+                }
+
+                // Klippy unavailable / error state — not a printer-busy signal.
+                return false;
+            }
+
             return resp.IsSuccessStatusCode;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            throw;
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns true when a Moonraker 503 error body indicates the printer is actively printing
+    /// (as opposed to Klippy being disconnected or in a shutdown/error state).
+    /// Moonraker 503 bodies are JSON: <c>{"error": "WebRequestError", "message": "..."}</c>.
+    ///
+    /// Phrase allowlist (case-insensitive) — only unambiguous printer-job-busy signals:
+    ///   "printer is printing"           — gcode rejected while a job is active
+    ///   "printer is currently printing" — Klipper firmware variant
+    ///   "printer is busy"               — firmware variant
+    ///   "printer busy"                  — older firmware variant
+    ///   "sd busy"                       — SD-card busy variant
+    ///
+    /// Bare "busy" and bare "printing" are intentionally excluded: they over-match Klippy
+    /// startup states (e.g. "Klippy is busy initializing") and error messages that mention
+    /// "printing" in a non-job-busy context. Prefer false negatives over false positives —
+    /// a miss returns false (backend unavailable), not a wrong 409.
+    /// </summary>
+    private static bool IsMoonrakerBusyPrintingBody(string body)
+    {
+        string lower = body.ToLowerInvariant();
+        return lower.Contains("printer is printing")
+            || lower.Contains("printer is currently printing")
+            || lower.Contains("printer is busy")
+            || lower.Contains("printer busy")
+            || lower.Contains("sd busy");
     }
 
     // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback

@@ -19,6 +19,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrinterGroup> PrinterGroups => Set<PrinterGroup>();
 
+    public DbSet<PrinterGroupAccess> PrinterGroupAccesses => Set<PrinterGroupAccess>();
+
+    public DbSet<BedType> BedTypes => Set<BedType>();
+
     public DbSet<Location> Locations => Set<Location>();
 
     public DbSet<Spool> Spools => Set<Spool>();
@@ -34,6 +38,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
 
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
+
+    // Tags
+    public DbSet<Tag> Tags => Set<Tag>();
 
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
@@ -119,6 +126,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
 
+    // Login attempt audit log (focused admin-facing security view)
+    public DbSet<LoginAuditEntry> LoginAuditEntries => Set<LoginAuditEntry>();
+
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
 
     // API Keys for OctoPrint API
@@ -156,6 +166,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();
 
+    // Camera snapshots (captured on print events)
+    public DbSet<CameraSnapshot> CameraSnapshots => Set<CameraSnapshot>();
+
     // NFC Devices (ESP32 + PN532 filament spool readers)
     public DbSet<NfcDevice> NfcDevices => Set<NfcDevice>();
 
@@ -174,6 +187,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     // Catalog version tracking for update detection
     public DbSet<CatalogVersion> CatalogVersions => Set<CatalogVersion>();
+
+    // Material equivalence clusters for auto-matching
+    public DbSet<MaterialCluster> MaterialClusters => Set<MaterialCluster>();
+
+    public DbSet<MaterialClusterMember> MaterialClusterMembers => Set<MaterialClusterMember>();
+
+    // Print quotas and user balances
+    public DbSet<PrintQuota> PrintQuotas => Set<PrintQuota>();
+
+    public DbSet<UserBalance> UserBalances => Set<UserBalance>();
+
+    public DbSet<BalanceTransaction> BalanceTransactions => Set<BalanceTransaction>();
+
+    // Quota group memberships (user ↔ named group associations)
+    public DbSet<UserQuotaGroupMembership> UserQuotaGroupMemberships => Set<UserQuotaGroupMembership>();
+
+    // Custom fields (extensible metadata for Printers and Users)
+    public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
+
+    public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

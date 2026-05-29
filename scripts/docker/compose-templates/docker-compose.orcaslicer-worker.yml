@@ -13,7 +13,7 @@ x-orcaslicer-build: &orcaslicer-build
     NODE_TAG: ${NODE_TAG}
     NGINX_TAG: ${NGINX_TAG}
     UBUNTU_TAG: ${UBUNTU_TAG}
-    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.2}
     ALLOW_STUB: ${ALLOW_STUB:-0}
     ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}
     _SKIP_ORCA_BINARY_BUILD: ${_SKIP_ORCA_BINARY_BUILD:-0}
@@ -56,11 +56,12 @@ services:
       - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
     volumes: *worker-volumes
     depends_on:
       api:

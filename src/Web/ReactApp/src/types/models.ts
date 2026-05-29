@@ -13,7 +13,7 @@ export interface Model {
   name: string;
   fileName: string;
   fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
+  fileType: 'stl' | '3mf' | 'obj' | 'ply' | 'step' | 'stp';
   uploadedAt: string;
   url?: string;
   thumbnailUrl?: string;
@@ -22,6 +22,22 @@ export interface Model {
     name: string;
     color?: string;
   }>;
+  extractedMetadata?: ThreeMfMetadata | null;
+  autoTags?: string[];
+}
+
+/**
+ * Metadata extracted from a 3MF file
+ */
+export interface ThreeMfMetadata {
+  title: string | null;
+  designer: string | null;
+  description: string | null;
+  application: string | null;
+  creationDate: string | null;
+  modificationDate: string | null;
+  materials: string[];
+  autoTags: string[];
 }
 
 /**
@@ -55,4 +71,15 @@ export interface Model3DSearchResponse {
   page: number;
   pageSize: number;
   totalPages: number;
+}
+
+/**
+ * Response from POST /api/3d-models/upload-geometry
+ * Used when uploading STL geometry blobs (e.g. cut model pieces).
+ */
+export interface GeometryUploadResultDto {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileUrl: string;
 }

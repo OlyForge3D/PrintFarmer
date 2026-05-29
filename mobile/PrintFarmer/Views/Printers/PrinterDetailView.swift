@@ -3,6 +3,7 @@ import SwiftUI
 struct PrinterDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var viewModel: PrinterDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
@@ -270,6 +271,7 @@ struct PrinterDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     headerSection(printer)
                     temperatureSection(printer)
+                    PrinterControlsSection(printer: printer, printerService: services.printerService)
 
                     if let jobName = printer.fileName ?? printer.jobName,
                        let state = printer.state?.lowercased(),
@@ -317,6 +319,7 @@ struct PrinterDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 headerSection(printer)
                 temperatureSection(printer)
+                PrinterControlsSection(printer: printer, printerService: services.printerService)
                 filamentSection(printer)
                 AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
 
@@ -442,6 +445,10 @@ struct PrinterDetailView: View {
                             .background(.black.opacity(0.3), in: Capsule())
                             .foregroundStyle(.white)
                     }
+
+                    if let homedAxes = printer.homedAxes ?? viewModel.statusDetail?.homedAxes {
+                        homedAxesBadges(homedAxes)
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -472,6 +479,30 @@ struct PrinterDetailView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(baseColor.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    // MARK: - Homed Axes
+
+    /// Compact X/Y/Z badges showing which axes have been homed. Hidden entirely when
+    /// the backend doesn't supply the field (older backend or unsupported printer).
+    @ViewBuilder
+    private func homedAxesBadges(_ homedAxes: String) -> some View {
+        let normalized = homedAxes.lowercased()
+        HStack(spacing: 4) {
+            ForEach(["x", "y", "z"], id: \.self) { axis in
+                let isHomed = normalized.contains(axis)
+                Text(axis.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        isHomed ? Color.green.opacity(0.85) : Color.black.opacity(0.3),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Temperatures
@@ -834,21 +865,23 @@ struct PrinterDetailView: View {
                     .disabled(viewModel.isPerformingAction)
                 }
 
-                // Maintenance toggle
-                Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    let task = Task { await viewModel.toggleMaintenance() }
-                    activeTasks.append(task)
-                } label: {
-                    Label(
-                        printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
-                        systemImage: "wrench.and.screwdriver"
-                    )
-                    .fullWidthActionButton()
+                // Maintenance toggle (admin only)
+                if authViewModel.currentUserRole == "farm_admin" {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let task = Task { await viewModel.toggleMaintenance() }
+                        activeTasks.append(task)
+                    } label: {
+                        Label(
+                            printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
+                            systemImage: "wrench.and.screwdriver"
+                        )
+                        .fullWidthActionButton()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
+                    .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
                 }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
-                .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
 
                 #if canImport(UIKit)
                 // Write NFC printer tag

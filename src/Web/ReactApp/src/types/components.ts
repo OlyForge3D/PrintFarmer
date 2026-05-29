@@ -225,11 +225,6 @@ export interface CloneProfilesModalProps {
   onSuccess?: () => void;
 }
 
-export interface SlicerJobStatusProps {
-  jobId: string;
-  onComplete?: (result: SliceCompleteResult) => void;
-}
-
 export interface SlicerConfigModalProps {
   isOpen: boolean;
   onClose: () => void;

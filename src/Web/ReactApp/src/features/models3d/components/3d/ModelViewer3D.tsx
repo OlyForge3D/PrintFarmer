@@ -1,25 +1,27 @@
-import React, { Suspense, useRef, useState, useEffect, MutableRefObject } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useCallback, MutableRefObject } from 'react';
 // (renderUnknown not required here)
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import {
   OrbitControls,
-  Grid,
   useProgress,
   Html,
-  GizmoHelper,
-  GizmoViewport,
   Environment
 } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
 import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
-import { PerspectiveIcon, OrthographicIcon, RecenterIcon } from '../../../../common/components/icons/MdiIcons';
+import { PerspectiveIcon, OrthographicIcon, RecenterIcon, RulerIcon, SimplifyIcon } from '../../../../common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
+import { MeasurementTool } from './MeasurementTool';
+import { MeasurementOverlay } from './MeasurementOverlay';
+import { DecimationPanel } from './DecimationPanel';
+import { decimateGeometry, type DecimationResult } from '../../utils/meshDecimation';
+import { exportSTL } from '../../utils/stlExporter';
 
 export interface ModelViewerProps {
   modelUrl: string;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
+  fileType: 'stl' | '3mf' | 'obj' | 'ply' | 'step' | 'stp';
   showGrid?: boolean;
   showAxes?: boolean;
   autoRotate?: boolean;
@@ -198,11 +200,119 @@ function PrintBed({
   );
 }
 
-function STLModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChange }: { 
+/**
+ * Simple axis indicator lines at the origin (X=red, Y=green, Z=blue)
+ */
+function SimpleAxisIndicators({ size = 30 }: { size?: number }) {
+  return (
+    <group position={[0, 0, 0.1]}>
+      <line>
+        <bufferGeometry attach="geometry">
+          <float32BufferAttribute attach="attributes-position" args={[new Float32Array([0, 0, 0, size, 0, 0]), 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#ff0000" linewidth={3} />
+      </line>
+      <line>
+        <bufferGeometry attach="geometry">
+          <float32BufferAttribute attach="attributes-position" args={[new Float32Array([0, 0, 0, 0, size, 0]), 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#00ff00" linewidth={3} />
+      </line>
+      <line>
+        <bufferGeometry attach="geometry">
+          <float32BufferAttribute attach="attributes-position" args={[new Float32Array([0, 0, 0, 0, 0, size]), 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#0088ff" linewidth={3} />
+      </line>
+    </group>
+  );
+}
+
+/**
+ * Mock print bed with line-based grid for the model viewer.
+ * Since we don't know the target printer, the bed is sized based on the model
+ * dimensions with padding, snapped to the nearest 10mm grid.
+ */
+function MockPrintBed({ modelDimensions }: { modelDimensions: ModelDimensions | null }) {
+  const { cellLines, sectionLines, bedWidth, bedDepth } = React.useMemo(() => {
+    // Minimum 300x300 bed, square, sized to fit model + padding snapped to 10mm
+    const mw = modelDimensions?.width ?? 200;
+    const md = modelDimensions?.depth ?? 200;
+    const side = Math.ceil(Math.max(mw * 1.5, md * 1.5, 300) / 10) * 10;
+    const w = side;
+    const d = side;
+
+    const halfW = w / 2;
+    const halfD = d / 2;
+    const cellSize = 10;
+    const sectionSize = 50;
+    const cellVerts: number[] = [];
+    const sectionVerts: number[] = [];
+
+    for (let x = -halfW; x <= halfW + 0.01; x += cellSize) {
+      const rounded = Math.round(x / cellSize) * cellSize;
+      const isSection = Math.abs(rounded % sectionSize) < 0.01;
+      const target = isSection ? sectionVerts : cellVerts;
+      target.push(rounded, -halfD, 0, rounded, halfD, 0);
+    }
+    for (let y = -halfD; y <= halfD + 0.01; y += cellSize) {
+      const rounded = Math.round(y / cellSize) * cellSize;
+      const isSection = Math.abs(rounded % sectionSize) < 0.01;
+      const target = isSection ? sectionVerts : cellVerts;
+      target.push(-halfW, rounded, 0, halfW, rounded, 0);
+    }
+
+    return {
+      cellLines: new Float32Array(cellVerts),
+      sectionLines: new Float32Array(sectionVerts),
+      bedWidth: w,
+      bedDepth: d,
+    };
+  }, [modelDimensions]);
+
+  const thickness = 1;
+
+  return (
+    <group>
+      {/* Bed surface */}
+      <mesh position={[0, 0, -thickness / 2]} receiveShadow userData={{ isBed: true }}>
+        <boxGeometry args={[bedWidth, bedDepth, thickness]} />
+        <meshStandardMaterial color="#1a1a2e" metalness={0.2} roughness={0.6} />
+      </mesh>
+
+      {/* Bed edge outline */}
+      <lineSegments position={[0, 0, 0.01]}>
+        <edgesGeometry attach="geometry">
+          <planeGeometry args={[bedWidth, bedDepth]} />
+        </edgesGeometry>
+        <lineBasicMaterial color="#4a4a6a" linewidth={2} />
+      </lineSegments>
+
+      {/* Grid lines */}
+      <group position={[0, 0, 0.05]}>
+        <lineSegments>
+          <bufferGeometry>
+            <float32BufferAttribute attach="attributes-position" args={[cellLines, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial color="#555577" transparent opacity={0.4} />
+        </lineSegments>
+        <lineSegments>
+          <bufferGeometry>
+            <float32BufferAttribute attach="attributes-position" args={[sectionLines, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial color="#7777aa" transparent opacity={0.6} />
+        </lineSegments>
+      </group>
+    </group>
+  );
+}
+
+function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange, onGeometryLoaded }: { 
   url: string; 
   color?: string;
   viewMode?: ViewMode;
   onDimensionsChange?: (dimensions: ModelDimensions) => void;
+  onGeometryLoaded?: (geometry: THREE.BufferGeometry) => void;
 }) {
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
@@ -235,8 +345,12 @@ function STLModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChan
       if (onDimensionsChange) {
         onDimensionsChange({ width, depth, height, volume });
       }
+
+      if (onGeometryLoaded) {
+        onGeometryLoaded(geometry.clone());
+      }
     }
-  }, [geometry, onDimensionsChange]);
+  }, [geometry, onDimensionsChange, onGeometryLoaded]);
 
   // Render material based on view mode
   const renderMaterial = () => {
@@ -288,11 +402,13 @@ function CameraFitter() {
   const { camera, scene } = useThree();
 
   useEffect(() => {
-    // Compute bounding box of all visible objects
+    // Compute bounding box of model meshes only (exclude bed/grid helpers)
     const box = new THREE.Box3();
 
     scene.traverse((object: THREE.Object3D) => {
       if (object instanceof THREE.Mesh && object.geometry) {
+        // Skip bed meshes (tagged with userData.isBed) and non-model geometry
+        if (object.userData?.isBed) return;
         const geom = object.geometry as THREE.BufferGeometry;
         geom.computeBoundingBox();
         if (geom.boundingBox) {
@@ -311,47 +427,40 @@ function CameraFitter() {
     const center = box.getCenter(new THREE.Vector3());
 
     // Calculate camera distance based on the full bounding box diagonal
-    // This ensures the entire model is visible regardless of proportions
-    const boundingBoxDiagonal = size.length(); // 3D diagonal of the bounding box
+    const boundingBoxDiagonal = size.length();
     
-    // Handle both PerspectiveCamera and OrthographicCamera
-    let cameraDistance = 150; // default optimized for ~100mm models
+    let cameraDistance = 150;
     if ('fov' in camera && camera instanceof THREE.PerspectiveCamera) {
-      const fov = camera.fov * (Math.PI / 180); // convert vertical FOV to radians
-      // Use the bounding box diagonal to ensure entire model fits
+      const fov = camera.fov * (Math.PI / 180);
       cameraDistance = Math.abs(boundingBoxDiagonal / Math.tan(fov / 2));
-      
-      // Remove restrictive clamping to allow proper viewing of all model sizes
       cameraDistance = Math.max(20, Math.min(2000, cameraDistance));
     }
 
-    // Add padding based on model size - more consistent padding
-    const paddingFactor = 1.5; // Consistent 50% padding for all models
+    const paddingFactor = 1.5;
     cameraDistance *= paddingFactor;
 
-    // Position camera with Z pointing up (isometric view from front-right-top)
-    // Adjust camera height based on model height for better framing
-    const heightOffset = Math.max(0.3, size.z / boundingBoxDiagonal); // Proportional height offset
-    const direction = new THREE.Vector3(1, -1, heightOffset).normalize();
+    // Position camera for Z-up 3D printing view (isometric from front-right)
+    const heightRatio = Math.max(0.5, size.z / boundingBoxDiagonal);
+    const direction = new THREE.Vector3(1, -1, heightRatio).normalize();
     camera.position.copy(center).addScaledVector(direction, cameraDistance);
-    
-    // Look at the geometric center of the model
+    camera.up.set(0, 0, 1);
     camera.lookAt(center);
 
-    // Update near/far clipping planes to handle wider range of model sizes
+    // Generous near/far clipping planes to prevent model clipping
     // eslint-disable-next-line react-hooks/immutability -- Three.js requires direct camera property mutations
-    camera.near = Math.max(0.1, cameraDistance / 500);
-    camera.far = cameraDistance * 10;
+    camera.near = 0.1;
+    camera.far = cameraDistance * 20;
     camera.updateProjectionMatrix();
   }, [camera, scene]);
 
   return null;
 }
-function PLYModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChange }: { 
+function PLYModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange, onGeometryLoaded }: { 
   url: string; 
   color?: string;
   viewMode?: ViewMode;
   onDimensionsChange?: (dimensions: ModelDimensions) => void;
+  onGeometryLoaded?: (geometry: THREE.BufferGeometry) => void;
 }) {
   const geometry = useLoader(PLYLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
@@ -384,8 +493,12 @@ function PLYModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChan
       if (onDimensionsChange) {
         onDimensionsChange({ width, depth, height, volume });
       }
+
+      if (onGeometryLoaded) {
+        onGeometryLoaded(geometry.clone());
+      }
     }
-  }, [geometry, onDimensionsChange]);
+  }, [geometry, onDimensionsChange, onGeometryLoaded]);
 
   // Render material based on view mode
   const renderMaterial = () => {
@@ -442,14 +555,15 @@ function CameraController({
     if (!viewDirection) return;
 
     const distance = 100;
+    // Z-up coordinate system: X=right, Y=back, Z=up
     const positions: Record<string, [number, number, number]> = {
-      top: [0, 0, distance],
-      bottom: [0, 0, -distance],
-      front: [0, -distance, 0],
-      back: [0, distance, 0],
-      left: [-distance, 0, 0],
-      right: [distance, 0, 0],
-      iso: [distance * 0.7, -distance * 0.7, distance * 0.7],
+      top: [0, 0, distance],        // Looking straight down at bed
+      bottom: [0, 0, -distance],    // Looking up from below
+      front: [0, -distance, 0],     // Looking at front edge of bed
+      back: [0, distance, 0],       // Looking at back edge of bed
+      left: [-distance, 0, 0],      // Looking from left side
+      right: [distance, 0, 0],      // Looking from right side
+      iso: [distance * 0.7, -distance * 0.7, distance * 0.5], // Isometric: slightly above
     };
 
     const targetPosition = positions[viewDirection];
@@ -470,6 +584,7 @@ function CameraController({
       camera.position.y = startPos.y + (targetPosition[1] - startPos.y) * easeT;
       camera.position.z = startPos.z + (targetPosition[2] - startPos.z) * easeT;
 
+      camera.up.set(0, 0, 1); // Maintain Z-up during animation
       camera.lookAt(0, 0, 0);
 
       if (t < 1) {
@@ -495,7 +610,7 @@ function CameraController({
       
       perspectiveCamera.position.copy(currentCamera.position);
       perspectiveCamera.lookAt(0, 0, 0);
-      perspectiveCamera.up.set(0, 0, 1);
+      perspectiveCamera.up.set(0, 0, 1); // Z-up for 3D printing
       
       // This would require changing the camera reference which is complex in R3F
       if (window.PrintFarmerDebug?.models3d) {
@@ -579,6 +694,13 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   const [isPerspective, setIsPerspective] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('solid');
   const [isGridVisible, setIsGridVisible] = useState(showGrid);
+  const [measurementActive, setMeasurementActive] = useState(false);
+  const [lastDistance, setLastDistance] = useState<number | null>(null);
+  const [measurementKey, setMeasurementKey] = useState(0);
+  const [decimationActive, setDecimationActive] = useState(false);
+  const [decimationResult, setDecimationResult] = useState<DecimationResult | null>(null);
+  const [originalGeometry, setOriginalGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [isDecimating, setIsDecimating] = useState(false);
   // orbitControlsRef holds the R3F OrbitControls instance. Use `any` here to avoid importing three internals.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orbitControlsRef = useRef<any>(null) as MutableRefObject<any>;
@@ -612,20 +734,141 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
     setIsGridVisible(!isGridVisible);
   };
 
+  const handleToggleMeasurement = () => {
+    setMeasurementActive((prev) => {
+      if (!prev) {
+        setMeasurementKey((k) => k + 1);
+      }
+      setLastDistance(null);
+      return !prev;
+    });
+  };
+
+  const handleMeasurement = useCallback((distance: number | null) => {
+    setLastDistance(distance);
+  }, []);
+
+  const handleClearMeasurement = useCallback(() => {
+    setLastDistance(null);
+  }, []);
+
+  const handleGeometryLoaded = useCallback((geo: THREE.BufferGeometry) => {
+    setOriginalGeometry(geo);
+  }, []);
+
+  // Reset decimation state when model changes
+  useEffect(() => {
+    setDecimationActive(false);
+    setDecimationResult((prev) => {
+      prev?.geometry.dispose();
+      return null;
+    });
+  }, [modelUrl, fileType]);
+
+  // Dispose GPU geometry on unmount
+  useEffect(() => {
+    return () => {
+      decimationResult?.geometry.dispose();
+      originalGeometry?.dispose();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDecimationPreview = useCallback((reduction: number) => {
+    if (!originalGeometry) return;
+    setIsDecimating(true);
+    requestAnimationFrame(() => {
+      const result = decimateGeometry(originalGeometry, reduction);
+      setDecimationResult((prev) => {
+        prev?.geometry.dispose();
+        return result;
+      });
+      setIsDecimating(false);
+    });
+  }, [originalGeometry]);
+
+  const handleDecimationApply = useCallback(() => {
+    if (!decimationResult) return;
+    const filename = modelUrl.split('/').pop() ?? 'model';
+    exportSTL(decimationResult.geometry, filename);
+  }, [decimationResult, modelUrl]);
+
+  const handleDecimationReset = useCallback(() => {
+    setDecimationResult((prev) => {
+      prev?.geometry.dispose();
+      return null;
+    });
+  }, []);
+
+  const handleToggleDecimation = useCallback(() => {
+    setDecimationActive((prev) => {
+      if (prev) {
+        // Turning off: clear and dispose decimation result
+        setDecimationResult((old) => {
+          old?.geometry.dispose();
+          return null;
+        });
+      }
+      return !prev;
+    });
+  }, []);
+
+  // Compute face/vertex counts from the original geometry for the panel
+  const originalFaces = originalGeometry
+    ? (originalGeometry.index
+        ? originalGeometry.index.count / 3
+        : originalGeometry.getAttribute('position').count / 3)
+    : 0;
+  const originalVertices = originalGeometry
+    ? originalGeometry.getAttribute('position').count
+    : 0;
+
   const renderModel = () => {
+    // When decimation preview is active, render the decimated geometry directly
+    if (decimationResult) {
+      return (
+        <mesh
+          geometry={decimationResult.geometry}
+          position={[0, 0, 0]}
+          castShadow={viewMode === 'solid'}
+          receiveShadow={viewMode === 'solid'}
+        >
+          <meshStandardMaterial
+            color="#0969da"
+            metalness={0.3}
+            roughness={0.4}
+            wireframe={viewMode === 'wireframe'}
+            transparent={viewMode === 'xray'}
+            opacity={viewMode === 'xray' ? 0.3 : 1}
+            side={viewMode === 'xray' ? THREE.DoubleSide : THREE.FrontSide}
+          />
+        </mesh>
+      );
+    }
+
     switch (fileType) {
       case 'stl':
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       case 'ply':
-        return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       case '3mf':
-        // 3MF files will be converted to STL by backend service
-        // Frontend treats them as STL after conversion
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       default:
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
     }
   };
+
+  // STEP/STP files are supported for slicing but cannot be previewed in browser (Three.js has no STEP loader)
+  if (fileType === 'step' || fileType === 'stp') {
+    return (
+      <div className={`${className} flex items-center justify-center bg-pf-bg-1 rounded-lg border border-pf-border`}>
+        <div className="text-center">
+          <p className="text-pf-text-secondary font-medium">Preview not available for STEP files</p>
+          <p className="text-pf-text-tertiary text-sm mt-1">STEP files can still be sliced by OrcaSlicer and PrusaSlicer</p>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -642,9 +885,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
     <div className={`${className} border border-pf-border rounded-lg overflow-hidden relative`} style={{ backgroundColor: '#2d3748' }}>
       <Canvas
         camera={{ 
-          position: [100, -100, 80], // Z-up isometric view from front-right-above
+          position: [150, -150, 120], // Isometric view looking at the XY bed plane
           fov: 45,
-          up: [0, 0, 1] // Set Z as up axis for correct orientation
+          up: [0, 0, 1] // Z-up: standard 3D printing convention (Z = height)
         }}
         shadows
         style={{ backgroundColor: '#2d3748' }} // Darker gray background
@@ -702,18 +945,21 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         {/* Auto-fit camera to model bounds */}
         <CameraFitter />
 
+        {/* Measurement tool (inside Canvas for raycasting) */}
+        <MeasurementTool key={measurementKey} active={measurementActive} onMeasurement={handleMeasurement} />
+
         {/* Enhanced controls with full 360° rotation and zoom limits */}
         <OrbitControls
           ref={orbitControlsRef}
           enableDamping
           dampingFactor={0.05}
-          autoRotate={autoRotate}
+          autoRotate={autoRotate && !measurementActive}
           autoRotateSpeed={0.5}
-          target={[0, 0, 0]} // Orbit around model center
+          target={[0, 0, 0]}
           enablePan={true}
           enableZoom={true}
-          minDistance={10}  // Prevent zooming too close
-          maxDistance={800} // Prevent zooming too far (model disappearing)
+          minDistance={10}
+          maxDistance={800}
         />
 
         {/* Camera Controller for view animations */}
@@ -722,37 +968,45 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           isPerspective={isPerspective}
         />
 
-        {/* Grid properly positioned on XY plane (slightly below Z=0) */}
+        {/* Mock print bed with grid lines on XY plane */}
         {isGridVisible && (
-          <Grid 
-            infiniteGrid
-            cellSize={5} // 5mm squares - standard for 3D printing
-            cellThickness={0.5}
-            cellColor="#cbd5e0" // Light gray for contrast with dark background
-            sectionSize={50} // 50mm major grid lines  
-            sectionThickness={2.5} // Bolder 50mm major grid lines
-            sectionColor="#e2e8f0" // Lighter gray for major grid lines
-            fadeDistance={1000} // Increased fade distance for better visibility
-            fadeStrength={0.5}  // Reduced fade strength to keep grid more visible
-            followCamera={false}
-            position={[0, 0, -0.1]} // Position slightly below Z=0 to avoid z-fighting
-            rotation={[Math.PI / 2, 0, 0]} // Rotate to lie flat on XY plane with normal facing up
-          />
+          <MockPrintBed modelDimensions={modelDimensions} />
         )}
 
-        {showAxes && (
-          <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-            <GizmoViewport
-              axisColors={['#ff2060', '#20df80', '#2080ff']} // X=Red, Y=Green, Z=Blue
-              labelColor="white"
-              axisHeadScale={1.2}
-            />
-          </GizmoHelper>
-        )}
+        {showAxes && <SimpleAxisIndicators size={modelDimensions ? Math.max(modelDimensions.width, modelDimensions.depth) * 0.2 : 30} />}
       </Canvas>
+
+      {/* Measurement overlay (outside Canvas) */}
+      <MeasurementOverlay
+        active={measurementActive}
+        distance={lastDistance}
+        onClear={handleClearMeasurement}
+        onDeactivate={handleToggleMeasurement}
+      />
 
       {/* Camera Controls */}
       <div className="absolute top-4 right-4 flex gap-2">
+        <Button
+          onClick={handleToggleDecimation}
+          variant="subtle"
+          size="sm"
+          className={`${decimationActive ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          title={decimationActive ? "Close Simplifier" : "Simplify Mesh"}
+          disabled={!originalGeometry}
+        >
+          <SimplifyIcon className="w-5 h-5 text-pf-text-primary" />
+        </Button>
+
+        <Button
+          onClick={handleToggleMeasurement}
+          variant="subtle"
+          size="sm"
+          className={`${measurementActive ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          title={measurementActive ? "Disable Measurement" : "Measure Distance"}
+        >
+          <RulerIcon className="w-5 h-5 text-pf-text-primary" />
+        </Button>
+
         <Button
           onClick={handleToggleGrid}
           variant="subtle"
@@ -802,33 +1056,29 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         </Button>
       </div>
 
-      {/* Model Information Panel */}
-      <div className="absolute top-4 left-4 bg-pf-bg-2/95 backdrop-blur-sm px-3 py-2 rounded-lg text-sm border border-pf-border space-y-1">
-        <div className="font-medium text-pf-text-primary">{fileType.toUpperCase()} Model</div>
-        <div className="text-pf-text-secondary text-xs">
-          Click and drag to rotate • Scroll to zoom • {isPerspective ? 'Perspective' : 'Orthographic'} • {viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} view{isGridVisible ? ' • Grid on' : ''}
+      {/* Decimation panel */}
+      {decimationActive && originalGeometry && (
+        <DecimationPanel
+          originalFaces={originalFaces}
+          originalVertices={originalVertices}
+          onPreview={handleDecimationPreview}
+          onApply={handleDecimationApply}
+          onReset={handleDecimationReset}
+          previewResult={decimationResult ? {
+            resultFaces: decimationResult.resultFaces,
+            resultVertices: decimationResult.resultVertices,
+            reductionPercent: decimationResult.reductionPercent,
+          } : undefined}
+          isProcessing={isDecimating}
+        />
+      )}
+
+      {/* Model dimensions badge — shift right when decimation panel is open */}
+      {modelDimensions && !decimationActive && (
+        <div className="absolute bottom-3 left-3 bg-pf-bg-2/90 backdrop-blur-sm px-2 py-1 rounded text-xs border border-pf-border text-pf-text-secondary">
+          {modelDimensions.width.toFixed(1)} × {modelDimensions.depth.toFixed(1)} × {modelDimensions.height.toFixed(1)} mm
         </div>
-        
-        {/* Model dimensions display */}
-        {modelDimensions && (
-          <div className="text-xs text-pf-text-muted border-t border-pf-border/30 pt-1 mt-1">
-            <div className="font-medium text-pf-text-secondary">Model Size:</div>
-            <div>{modelDimensions.width.toFixed(1)} × {modelDimensions.depth.toFixed(1)} × {modelDimensions.height.toFixed(1)} mm</div>
-            {modelDimensions.volume && (
-              <div className="text-xs opacity-75">~{(modelDimensions.volume / 1000).toFixed(1)} cm³</div>
-            )}
-          </div>
-        )}
-        
-        {/* Print bed dimensions */}
-        {bedDimensions && (
-          <div className="text-xs text-pf-text-muted border-t border-pf-border/30 pt-1">
-            <div className="font-medium text-pf-text-secondary">Print Bed:</div>
-            <div>{bedDimensions.width} × {bedDimensions.depth} mm</div>
-            <div className="text-xs opacity-75">Grid: 5mm squares at Z=0</div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };

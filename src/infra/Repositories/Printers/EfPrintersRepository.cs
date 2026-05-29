@@ -30,6 +30,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             .Include(p => p.Model)
             .Include(p => p.Location)
             .Include(p => p.ServiceState)
+            .Include(p => p.BedType)
             .AsSplitQuery()
             .ToListAsync(ct);
         printers.ForEach(PopulateCredential);
@@ -90,6 +91,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)
             .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
+            .Include(p => p.BedType)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
 
         if (printer != null)

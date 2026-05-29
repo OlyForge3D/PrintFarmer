@@ -28,6 +28,32 @@ public class SubmitSliceJobRequest
     public string? RequiredCapabilitiesJson { get; set; }
 
     public int Priority { get; set; } = 1;
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// Format: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} (radians, Y-up).
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// Per-extruder filament profile names for multi-toolhead printers.
+    /// Index corresponds to extruder index. Null or empty for single-toolhead printers.
+    /// </summary>
+    public List<string>? ExtruderFilamentProfileNames { get; set; }
+
+    /// <summary>
+    /// Multiple model file URLs for multi-model slice jobs.
+    /// When provided, the worker downloads all listed models and slices them together.
+    /// Falls back to <see cref="ModelFileUrl"/> for single-model jobs.
+    /// </summary>
+    public List<string>? ModelFileUrls { get; set; }
+
+    /// <summary>
+    /// Per-model transforms for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
+    /// Format per entry: JSON string with rotation/scale/position arrays.
+    /// </summary>
+    public List<string?>? ModelFileTransforms { get; set; }
 }
 
 /// <summary>
@@ -81,6 +107,24 @@ public class SliceJobStatusResponse
     public int SlicerEngine { get; set; }
 
     public string? SlicerProfileJson { get; set; }
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// Multiple model file URLs for multi-model slice jobs.
+    /// When populated, the worker should download all listed models.
+    /// Empty or null for single-model jobs (use <see cref="ModelFileUrl"/>).
+    /// </summary>
+    public List<string>? ModelFileUrls { get; set; }
+
+    /// <summary>
+    /// Per-model transforms for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
+    /// </summary>
+    public List<string?>? ModelFileTransforms { get; set; }
 }
 
 /// <summary>

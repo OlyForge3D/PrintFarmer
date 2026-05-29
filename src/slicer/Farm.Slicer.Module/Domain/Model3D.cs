@@ -24,4 +24,7 @@ public class Model3D : StoredFileBase
 
     /// <summary>Soft reference to the user who uploaded this model (no FK constraint).</summary>
     public Guid? UploadedByUserId { get; set; }
+
+    /// <summary>JSON-serialized 3MF metadata extracted during upload.</summary>
+    public string? ExtractedMetadataJson { get; set; }
 }

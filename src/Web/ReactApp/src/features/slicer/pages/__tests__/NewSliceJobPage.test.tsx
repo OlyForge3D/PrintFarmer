@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -125,6 +125,12 @@ const mockProcessProfiles: OrcaProcessProfile[] = [
   }
 ];
 
+const mockProfilesSummary = {
+  machineProfiles: mockMachineProfiles,
+  filamentProfiles: mockFilamentProfiles,
+  processProfiles: mockProcessProfiles,
+};
+
 const mockSlicers = [
   { id: '1', name: 'orcaslicer-worker-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
   { id: '2', name: 'prusaslicer-worker-1', slicerType: 'PrusaSlicer', version: '2.7.0' }
@@ -147,6 +153,7 @@ vi.mock('@/services/api', () => ({
 // Mock slicer profiles service
 vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
+    listExtended: vi.fn(() => Promise.resolve(mockProfilesSummary)),
     getMachineProfilesForModel: vi.fn(() => Promise.resolve(mockMachineProfiles)),
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve(mockFilamentProfiles)),
     getProcessProfilesForMachines: vi.fn(() => Promise.resolve(mockProcessProfiles)),
@@ -164,7 +171,7 @@ vi.mock('@/services/slicerRegistry', () => ({
 // Mock slice job service
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
-    submit: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
+    submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
   }
 }));
 
@@ -193,10 +200,12 @@ vi.mock('../../components/job', () => ({
     printers, 
     selectedPrinterId, 
     onPrinterChange,
+    accessory,
   }: { 
     printers: typeof mockPrinters; 
     selectedPrinterId: string; 
     onPrinterChange: (id: string) => void;
+    accessory?: React.ReactNode;
   }) => (
     <div data-testid="printer-slicer-selector">
       <select
@@ -210,8 +219,16 @@ vi.mock('../../components/job', () => ({
           <option key={p.id} value={p.id}>{p.name}</option>
         ))}
       </select>
+      {accessory && <div data-testid="printer-selector-accessory">{accessory}</div>}
     </div>
-  )
+  ),
+  SlicerSelector: ({ onSlicerChange }: { selectedSlicerId: string; onSlicerChange: (id: string) => void }) => (
+    <div data-testid="slicer-selector">
+      <select data-testid="slicer-select" aria-label="Select slicer" onChange={(e) => onSlicerChange(e.target.value)}>
+        <option value="orcaslicer">OrcaSlicer</option>
+      </select>
+    </div>
+  ),
 }));
 
 // Mock 3D viewer
@@ -231,30 +248,12 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
 
 // Mock CloneProfilesModal
 vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
-  CloneProfilesModal: () => null
+  CloneProfilesModal: ({ isOpen }: { isOpen: boolean }) => isOpen ? <div data-testid="clone-profiles-modal" /> : null
 }));
 
 // Mock SlicerSettingsPanel
 vi.mock('@/features/slicer/components/settings', () => ({
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
-  DEFAULT_BASIC_SETTINGS: {
-    layerHeight: 0.2,
-    infillDensity: 15,
-    supportEnabled: false,
-    supportStyle: 'normal',
-    brimEnabled: false,
-    brimWidth: 5,
-    wallLoops: 2,
-    topLayers: 4,
-    bottomLayers: 4,
-    infillPattern: 'grid',
-    printSpeed: 50,
-    outerWallSpeed: 25,
-    innerWallSpeed: 40,
-    infillSpeed: 80,
-    supportSpeed: 40,
-    travelSpeed: 150,
-  },
 }));
 
 // Mock useSTLFile hook
@@ -274,7 +273,7 @@ const createTestQueryClient = () => new QueryClient({
   },
 });
 
-const renderWithProviders = (ui: React.ReactElement, { route = '/slice/new' } = {}) => {
+const renderWithProviders = (ui: React.ReactElement, { route = '/slicer' } = {}) => {
   const queryClient = createTestQueryClient();
   
   return {
@@ -283,7 +282,7 @@ const renderWithProviders = (ui: React.ReactElement, { route = '/slice/new' } = 
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <Routes>
-              <Route path="/slice/new" element={ui} />
+              <Route path="/slicer" element={ui} />
             </Routes>
           </AuthProvider>
         </QueryClientProvider>
@@ -420,6 +419,78 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(slicerProfilesService.getMachineProfilesForModel).toHaveBeenCalled();
       }, { timeout: 2000 });
+    });
+
+    it('should filter machine profiles by selected nozzle diameter', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      const nozzleFilter = await screen.findByLabelText('Nozzle');
+      const machineProfileSelect = await screen.findByLabelText('Machine profile');
+
+      await waitFor(() => {
+        expect(nozzleFilter).toHaveValue('0.4');
+        expect(machineProfileSelect).toHaveValue('Prusa MK4 0.4 nozzle');
+      });
+
+      expect(screen.getByRole('option', { name: /Prusa MK4 0\.4 nozzle/ })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /Prusa MK4 0\.6 nozzle/ })).not.toBeInTheDocument();
+
+      fireEvent.change(nozzleFilter, { target: { value: '0.6' } });
+
+      await waitFor(() => {
+        expect(machineProfileSelect).toHaveValue('Prusa MK4 0.6 nozzle');
+      });
+
+      expect(screen.getByRole('option', { name: /Prusa MK4 0\.6 nozzle/ })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /Prusa MK4 0\.4 nozzle/ })).not.toBeInTheDocument();
+    });
+
+    it('should keep custom machine profiles selectable when system profiles are unavailable', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValueOnce([]);
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValueOnce({
+        profiles: [
+          {
+            id: 'custom-machine-1',
+            name: 'Custom MK4 0.8 nozzle',
+            profileType: 'machine',
+            isSystem: false,
+            createdAt: '2026-04-28T00:00:00Z',
+            rawJson: JSON.stringify({ printer_model: 'MK4', nozzle_diameter: [0.8] }),
+          },
+        ],
+        totalCount: 1,
+        machineProfileCount: 1,
+        processProfileCount: 0,
+        filamentProfileCount: 0,
+      });
+
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      const machineProfileSelect = await screen.findByLabelText('Machine profile');
+
+      await waitFor(() => {
+        expect(machineProfileSelect).toHaveValue('Custom MK4 0.8 nozzle');
+      });
+
+      expect(screen.getByRole('option', { name: /Custom MK4 0\.8 nozzle/ })).toBeInTheDocument();
+      expect(screen.queryByText(/No machine profiles available/)).not.toBeInTheDocument();
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      });
+      expect(screen.queryByTestId('clone-profiles-modal')).not.toBeInTheDocument();
     });
   });
 
@@ -562,7 +633,7 @@ describe('NewSliceJobPage', () => {
 
   describe('URL Parameters', () => {
     it('should support model selection from URL parameter', async () => {
-      renderWithProviders(<NewSliceJobPage />, { route: '/slice/new?modelId=model-3d-1' });
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
       
       await waitFor(() => {
         expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();

@@ -16,7 +16,9 @@ import { PrintProgressBar } from '@/features/printers/components/PrintProgressBa
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
+import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
@@ -42,6 +44,46 @@ interface CompactPrinterCardProps {
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
+}
+
+function BedTypeBadge({ name, color }: { name: string; color?: string | null }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.backgroundColor = color ? `${color}33` : 'rgba(0,0,0,0.3)';
+    ref.current.style.borderColor = color ? `${color}66` : 'rgba(255,255,255,0.1)';
+  }, [color]);
+
+  return (
+    <span
+      ref={ref}
+      className="text-xs px-1.5 py-0.5 rounded-full border text-pf-text-secondary"
+      title={`Bed type: ${name}`}
+    >
+      {name}
+    </span>
+  );
+}
+
+function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: string; tooltip: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.backgroundColor = isLoaded ? color : 'transparent';
+    ref.current.style.borderStyle = isLoaded ? 'solid' : 'dashed';
+    ref.current.style.opacity = isLoaded ? '1' : '0.4';
+  }, [color, isLoaded]);
+
+  return (
+    <span
+      ref={ref}
+      className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
+      title={tooltip}
+      aria-label={tooltip}
+    />
+  );
 }
 
 export function CompactPrinterCard({
@@ -142,7 +184,7 @@ export function CompactPrinterCard({
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
-  // Check if printer has camera URLs - just verify if URLs have values from database
+  // Check if this printer has a camera source available for preview.
   const cameraSnapshotUrl = printer.cameraSnapshotUrl;
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
@@ -196,9 +238,12 @@ export function CompactPrinterCard({
             </span>
           )}
         </div>
-        {/* Tags row */}
-        {printerTags.length > 0 && (
+        {/* Tags row + bed type badge */}
+        {(printerTags.length > 0 || printer.bedTypeName) && (
           <div className="flex flex-wrap gap-1 mt-1.5">
+            {printer.bedTypeName && (
+              <BedTypeBadge name={printer.bedTypeName} color={printer.bedTypeColor} />
+            )}
             {printerTags.map(tag => (
               <span
                 key={tag.id}
@@ -234,6 +279,10 @@ export function CompactPrinterCard({
             />
           </div>
 
+          {(isPrinting || isPaused) && (printer.estimatedCompletionTimeUtc || printer.printTimeLeftSeconds != null) && (
+            <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} />
+          )}
+
           {(isPrinting || isPaused) && (
             <FailureDetectionMonitoringSummary
               enabled={!!printer.obicoEnabled}
@@ -254,6 +303,17 @@ export function CompactPrinterCard({
               cameraSnapshotUrl={cameraSnapshotUrl}
               isPrinting={isPrinting}
               className="mt-2"
+            />
+          )}
+
+          {/* Offline troubleshooting guide */}
+          {!isOnline && (
+            <OfflineTroubleshootingGuide
+              printerBackend={printer.backend}
+              printerIp={printer.ipAddress}
+              serverUrl={printer.serverUrl ?? printer.backendUrl}
+              frontendUrl={printer.frontendUrl}
+              variant="compact"
             />
           )}
 
@@ -283,7 +343,7 @@ export function CompactPrinterCard({
             disabled={!hasCameraUrls || !isEnabled}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
+            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
           <Button
@@ -323,16 +383,11 @@ export function CompactPrinterCard({
                         ? `T${gate.index}: ${gate.filamentName ?? gate.material ?? 'Unknown'}`
                         : `T${gate.index}: Empty`;
                       return (
-                        <span
+                        <MmuGateDot
                           key={gate.index}
-                          className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
-                          title={tooltip}
-                          aria-label={tooltip}
-                          style={{
-                            backgroundColor: isLoaded ? color : 'transparent',
-                            borderStyle: isLoaded ? 'solid' : 'dashed',
-                            opacity: isLoaded ? 1 : 0.4,
-                          }}
+                          isLoaded={isLoaded}
+                          color={color}
+                          tooltip={tooltip}
                         />
                       );
                     })}

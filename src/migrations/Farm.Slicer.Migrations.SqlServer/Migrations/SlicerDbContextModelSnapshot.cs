@@ -347,6 +347,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<double?>("DimensionZ")
                         .HasColumnType("float");
 
+                    b.Property<string>("ExtractedMetadataJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("FileFormat")
                         .HasColumnType("int");
 
@@ -575,6 +578,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<int?>("EstimatedPrintTimeSeconds")
                         .HasColumnType("int");
 
+                    b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal?>("FilamentUsedGrams")
                         .HasColumnType("decimal(18,2)");
 
@@ -586,10 +592,19 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<string>("ModelFileTransformsJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("ModelFileUrlsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelTransformJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uniqueidentifier");

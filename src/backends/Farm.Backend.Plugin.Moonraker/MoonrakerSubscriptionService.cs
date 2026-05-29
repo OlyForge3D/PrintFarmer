@@ -840,9 +840,6 @@ public sealed class MoonrakerSubscriptionService(
             using JsonDocument doc = JsonDocument.Parse(message);
             JsonElement root = doc.RootElement;
 
-            // Reset parse error count on successful JSON parsing - this indicates WebSocket connection is healthy
-            _ = _parseErrorCounts.TryRemove(printer.Id, out _);
-
             // Check if this is a JSON-RPC response (has "id" field)
             if (root.TryGetProperty("id", out _))
             {
@@ -913,6 +910,9 @@ public sealed class MoonrakerSubscriptionService(
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
                 await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.BackendUrl, null, null, ct);
             }
+
+            // Reset parse error count on successful (non-error) JSON-RPC response
+            _ = _parseErrorCounts.TryRemove(printer.Id, out _);
         }
         catch (JsonException ex)
         {
@@ -1016,16 +1016,18 @@ public sealed class MoonrakerSubscriptionService(
 
         _logger.LogDebug("Processing status update for printer {PrinterId}. Raw status: {StatusObjGetRawText}", printerId, statusObj.GetRawText());
 
-        // Initialize klippy ready state from webhooks if not yet set
-        // This handles the initial subscription response which contains the current klippy state
-        if (!_klippyReadyState.ContainsKey(printerId) &&
-            statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
-            wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
+        // Moonraker may omit the webhooks object from subscription payloads on some Klipper setups.
+        // Any successful printer-object status still proves Klippy is reachable; only an explicit
+        // webhooks state should mark it not-ready/offline.
+        bool? resolvedReady = MoonrakerOnlineStatusClassifier.ResolveKlippyReady(statusObj);
+        if (resolvedReady.HasValue)
         {
-            string? webhooksState = ws.GetString();
-            bool isReady = webhooksState == "ready";
-            _klippyReadyState[printerId] = isReady;
-            _logger.LogInformation("Initialized klippyReadyState for printer {PrinterId}: {IsReady} (webhooks.state={WebhooksState})", printerId, isReady, webhooksState);
+            bool previousReady = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready;
+            _klippyReadyState[printerId] = resolvedReady.Value;
+            if (previousReady != resolvedReady.Value)
+            {
+                _logger.LogInformation("Updated klippyReadyState for printer {PrinterId}: {IsReady}", printerId, resolvedReady.Value);
+            }
         }
 
         // Process each object type separately by dispatching to handler methods
@@ -2070,7 +2072,7 @@ public sealed class MoonrakerSubscriptionService(
             }
         }
 
-        // Print stats (state, filename)
+        // Print stats (state, filename, print_duration)
         string? printStatsState = null;
         if (statusObj.TryGetProperty("print_stats", out JsonElement ps))
         {
@@ -2082,6 +2084,17 @@ public sealed class MoonrakerSubscriptionService(
             if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
             {
                 jobName = fn.GetString();
+            }
+
+            if (ps.TryGetProperty("print_duration", out JsonElement pd) && pd.ValueKind == JsonValueKind.Number)
+            {
+                try
+                {
+                    state.PrintDuration = pd.GetDouble();
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -2190,6 +2203,14 @@ public sealed class MoonrakerSubscriptionService(
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
             // Update cache before broadcasting to clients
+            // Calculate estimated time remaining from progress and elapsed print duration
+            double? printTimeLeftSeconds = null;
+            if (state.Progress is > 0 and < 100 && state.PrintDuration is > 0)
+            {
+                double progressFraction = state.Progress.Value / 100.0;
+                printTimeLeftSeconds = state.PrintDuration.Value * (1.0 - progressFraction) / progressFraction;
+            }
+
             PrinterStatusDto cacheUpdate = new PrinterStatusDto(
                 Id: printerId,
                 IsOnline: isOnline,
@@ -2207,7 +2228,8 @@ public sealed class MoonrakerSubscriptionService(
                 HotendTarget: state.HotendTarget,
                 BedTarget: state.BedTarget,
                 SpoolInfo: spoolInfo,
-                MmuStatus: mmuStatus);
+                MmuStatus: mmuStatus,
+                PrintTimeLeftSeconds: printTimeLeftSeconds);
             _statusCacheWriter.UpdateStatus(cacheUpdate);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
@@ -2309,6 +2331,25 @@ public sealed class MoonrakerSubscriptionService(
                 null, null, null, null,
                 HomedAxes: null,
                 SpoolInfo: null);
+
+            PrinterStatusDto shutdownCacheUpdate = new(
+                Id: printerId,
+                IsOnline: false,
+                State: PrinterStateNormalizer.NormalizeState("Shutdown"),
+                Progress: null,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null,
+                X: null,
+                Y: null,
+                Z: null,
+                HotendTemp: null,
+                BedTemp: null,
+                HotendTarget: null,
+                BedTarget: null,
+                SpoolInfo: null);
+            _statusCacheWriter.UpdateStatus(shutdownCacheUpdate);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
             await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
@@ -2636,6 +2677,27 @@ public sealed class MoonrakerSubscriptionService(
                         _logger.LogError("Hub context is null in HTTP polling fallback for printer {PrinterName}", printer.Name);
                         return;
                     }
+
+                    PrinterStatusDto cacheUpdate = new(
+                        Id: printer.Id,
+                        IsOnline: compositeStatus.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(compositeStatus.State),
+                        Progress: compositeStatus.Progress,
+                        JobName: compositeStatus.JobName,
+                        ThumbnailUrl: compositeStatus.ThumbnailUrl,
+                        CameraStreamUrl: compositeStatus.CameraStreamUrl,
+                        CameraSnapshotUrl: compositeStatus.CameraSnapshotUrl,
+                        X: compositeStatus.X,
+                        Y: compositeStatus.Y,
+                        Z: compositeStatus.Z,
+                        HotendTemp: compositeStatus.HotendTemp,
+                        BedTemp: compositeStatus.BedTemp,
+                        HotendTarget: compositeStatus.HotendTarget,
+                        BedTarget: compositeStatus.BedTarget,
+                        SpoolInfo: spoolInfo,
+                        PrintTimeLeftSeconds: compositeStatus.PrintTimeLeftSeconds);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 
                     await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
 

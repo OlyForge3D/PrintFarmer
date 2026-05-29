@@ -18,18 +18,7 @@ import React, { useState, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Alert } from '@/common/components/ui';
-import { FilamentProfileEditor } from '@/features/slicer/components/settings/FilamentProfileEditor';
-import { 
-  DEFAULT_BASIC_FILAMENT_SETTINGS, 
-  type BasicFilamentSettings, 
-  type AdvancedFilamentSettings 
-} from '@/features/slicer/components/settings/filamentSettingsTypes';
-import { MachineProfileEditor } from '@/features/slicer/components/settings/MachineProfileEditor';
-import { 
-  DEFAULT_BASIC_MACHINE_SETTINGS, 
-  type BasicMachineSettings, 
-  type AdvancedMachineSettings 
-} from '@/features/slicer/components/settings/machineSettingsTypes';
+import { MetadataProfileEditor } from '@/features/slicer/components/settings/MetadataProfileRenderer';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
 
@@ -56,6 +45,16 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
   return `${baseName} (Custom)`;
 }
 
+/**
+ * Extract settings from a profile DTO.
+ * The backend now returns properly-typed values (arrays as List<string>,
+ * scalars as strings) so no frontend coercion is needed.
+ */
+function extractSettings(profile: OrcaMachineProfile | OrcaFilamentProfile | null): Record<string, unknown> {
+  if (!profile) return {};
+  return { ...(profile.settings ?? {}) };
+}
+
 export function ProfileEditorModal({
   isOpen,
   onClose,
@@ -70,9 +69,9 @@ export function ProfileEditorModal({
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   
-  // Settings state for each profile type
-  const [machineSettings, setMachineSettings] = useState<BasicMachineSettings | AdvancedMachineSettings>(DEFAULT_BASIC_MACHINE_SETTINGS);
-  const [filamentSettings, setFilamentSettings] = useState<BasicFilamentSettings | AdvancedFilamentSettings>(DEFAULT_BASIC_FILAMENT_SETTINGS);
+  // Unified settings state — works for all profile types
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [originalSettings, setOriginalSettings] = useState<Record<string, unknown>>({});
   
   // Track if settings have been modified
   const [hasChanges, setHasChanges] = useState(false);
@@ -84,28 +83,21 @@ export function ProfileEditorModal({
       setShowSaveForm(false);
       setSaveError(null);
       setHasChanges(false);
-      // Reset settings to defaults
-      setMachineSettings(DEFAULT_BASIC_MACHINE_SETTINGS);
-      setFilamentSettings(DEFAULT_BASIC_FILAMENT_SETTINGS);
+      const extracted = extractSettings(originalProfile);
+      setSettings(extracted);
+      setOriginalSettings(extracted);
     }
   }, [isOpen, profileType, originalProfile]);
   
-  // Get current settings based on profile type
-  const getCurrentSettings = React.useCallback(() => {
-    switch (profileType) {
-      case 'machine':
-        return machineSettings;
-      case 'filament':
-        return filamentSettings;
-      default:
-        return {};
-    }
-  }, [profileType, machineSettings, filamentSettings]);
+  // Handle individual setting updates
+  const handleUpdate = React.useCallback((key: string, value: unknown) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+    setHasChanges(true);
+  }, []);
   
   // Save mutation using uploadProfile
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const settings = getCurrentSettings();
       const response = await slicerProfilesService.uploadProfile({
         name: profileName.trim(),
         profileType,
@@ -165,8 +157,8 @@ export function ProfileEditorModal({
       isOpen={isOpen}
       onClose={onClose}
       title={modalTitle}
-      size="xl"
-      maxHeight="max-h-[85vh]"
+      width="max-w-5xl"
+      maxHeight="max-h-[95vh]"
       footer={
         <div className="flex items-center justify-between w-full">
           <div className="text-sm text-pf-text-muted">
@@ -226,29 +218,14 @@ export function ProfileEditorModal({
         </div>
       )}
       
-      {/* Profile Editor Content */}
-      <div className="min-h-[400px]">
-        {profileType === 'machine' && (
-          <MachineProfileEditor
-            settings={machineSettings}
-            onChange={(settings) => {
-              setMachineSettings(settings);
-              setHasChanges(true);
-            }}
-            initialViewMode="basic"
-          />
-        )}
-        
-        {profileType === 'filament' && (
-          <FilamentProfileEditor
-            settings={filamentSettings}
-            onChange={(settings) => {
-              setFilamentSettings(settings);
-              setHasChanges(true);
-            }}
-            initialViewMode="basic"
-          />
-        )}
+      {/* Profile Editor Content — metadata-driven, all profile types */}
+      <div className="flex flex-col h-[calc(95vh-200px)]">
+        <MetadataProfileEditor
+          profileType={profileType}
+          settings={settings}
+          originalSettings={originalSettings}
+          onUpdate={handleUpdate}
+        />
       </div>
     </Modal>
   );

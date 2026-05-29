@@ -10,15 +10,14 @@ using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.Catalog.Caching;
 
-public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOptions> options, IServiceProvider services) : ICatalogCacheProvider
+public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOptions> options, IServiceScopeFactory scopeFactory) : ICatalogCacheProvider
 {
     private const string ManufacturersKey = "catalog:mfglst";
     private const string ModelsAllKey = "catalog:models:all";
 
     private readonly IMemoryCache _cache = cache;
     private readonly CatalogCacheOptions _options = options.Value;
-    private readonly IServiceProvider _services = services;
-    private IDbContextFactory<AppDbContext>? _dbFactory;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
 
     private static string ModelsKey(Guid id) => $"catalog:models:{id}";
 
@@ -29,11 +28,8 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
             return cached;
         }
 
-        // Resolve the IDbContextFactory lazily from the service provider. Some test
-        // scenarios register or mutate DbContextFactory registration at test-host
-        // build time; resolving lazily avoids forcing the factory to exist during
-        // singleton validation/build-time checks.
-        IDbContextFactory<AppDbContext> dbFactory = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IDbContextFactory<AppDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory.CreateDbContext();
         List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
             .Select(m => new ManufacturerDto(m.Id, m.Name, m.Url, m.Description)).ToListAsync(ct);
@@ -52,7 +48,8 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
             return cached;
         }
 
-        IDbContextFactory<AppDbContext> dbFactory2 = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IDbContextFactory<AppDbContext> dbFactory2 = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory2.CreateDbContext();
 
         IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking()
@@ -97,6 +94,10 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
 
                 // Default machine hourly rate
                 DefaultHourlyRate: m.DefaultHourlyRate,
+
+                // Auto-dispatch defaults
+                DefaultAutoDispatchState: m.DefaultAutoDispatchState,
+                DefaultStartBehavior: m.DefaultStartBehavior,
 
                 // Toolheads
                 m.Toolheads.OrderBy(t => t.Index).Select(t => new PrinterModelToolheadDto(

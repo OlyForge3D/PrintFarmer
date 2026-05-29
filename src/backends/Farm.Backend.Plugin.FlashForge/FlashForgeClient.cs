@@ -292,8 +292,35 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 return true;
             }
 
+            // Secondary defense (#317): when the firmware rejects a print-start command, check the
+            // current machine status via ~M119 to distinguish "printer is already printing" from
+            // other failure reasons and propagate as PrinterBackendBusyException.
+            // TODO(#317-followup): identify the exact FlashForge firmware error string returned for
+            // a busy/building rejection so the M119 round-trip can be avoided.
+            try
+            {
+                string statusResponse = await SendCommandAsync(host, port, "~M119", ct).ConfigureAwait(false);
+                if (IsBuildingStatus(statusResponse))
+                {
+                    throw new PrinterBackendBusyException(
+                        $"FlashForge at {baseUrl} rejected print start — printer is currently printing.");
+                }
+            }
+            catch (PrinterBackendBusyException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
+            {
+                // Status check failure is non-fatal; fall through and log the original rejection.
+            }
+
             _logger.LogWarning("FlashForge start print rejected for {RemotePath}: {Response}", remotePath, response);
             return false;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
@@ -366,6 +393,10 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     /// <inheritdoc />
     public async Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
+        // TODO(#317-followup): FlashForge firmware typically accepts M104/M140 temperature changes
+        // while printing (user-initiated adjustments during a job are normal). No firmware-level
+        // busy signal is returned for temperature mutations. The controller-level GatePrinterControlAsync
+        // is the primary defense for this backend on temp operations.
         try
         {
             (string host, int port) = ParseHostPort(baseUrl);
@@ -419,6 +450,13 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     #endregion
 
     #region Helpers
+
+    /// <summary>
+    /// Returns true when the ~M119 response reports an actively-printing machine status
+    /// (BUILDING_FROM_SD or BUILDING). Used by the secondary firmware-409 defense (#317).
+    /// </summary>
+    internal static bool IsBuildingStatus(string m119Response) =>
+        string.Equals(ParseMachineStatus(m119Response), "Printing", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Sends a simple command with handshake and returns whether it succeeded.

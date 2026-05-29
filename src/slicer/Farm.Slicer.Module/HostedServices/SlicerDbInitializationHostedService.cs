@@ -1,5 +1,7 @@
 ﻿using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,14 +10,16 @@ namespace Farm.Slicer.Module.HostedServices;
 
 /// <summary>
 /// One-shot hosted service that ensures the slicer database schema exists on startup.
-/// Uses <c>EnsureCreatedAsync</c> for SQLite (development)
-/// and <c>MigrateAsync</c> for providers
-/// with migration assemblies (PostgreSQL, SQL Server).
+/// Uses <c>CreateTablesAsync</c> for SQLite (development) because the main FarmDbContext
+/// may have already called <c>EnsureCreated</c> on the shared database file, which makes
+/// a second <c>EnsureCreated</c> from SlicerDbContext a no-op (tables would be missing).
+/// Uses <c>MigrateAsync</c> for providers with migration assemblies (PostgreSQL, SQL Server).
 /// </summary>
 public sealed class SlicerDbInitializationHostedService(
     IServiceProvider serviceProvider,
     ILogger<SlicerDbInitializationHostedService> logger) : IHostedService
 {
+    /// <inheritdoc/>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         try
@@ -28,9 +32,26 @@ public sealed class SlicerDbInitializationHostedService(
 
             if (isSqlite)
             {
-                // SQLite: no migration assemblies, use EnsureCreated for rapid development
+                // Ensure the database file exists
                 _ = await db.Database.EnsureCreatedAsync(cancellationToken);
-                logger.LogInformation("[Slicer] Database schema ensured (SQLite/EnsureCreated)");
+
+                // CreateTables adds any tables from this context's model that don't
+                // already exist — unlike EnsureCreated which is a no-op when the DB exists.
+                try
+                {
+                    IRelationalDatabaseCreator creator = db.Database.GetService<IRelationalDatabaseCreator>();
+                    await creator.CreateTablesAsync(cancellationToken);
+                }
+                catch (DbUpdateException)
+                {
+                    // Tables already exist — safe to ignore
+                }
+                catch (Microsoft.Data.Sqlite.SqliteException)
+                {
+                    // Tables already exist — safe to ignore
+                }
+
+                logger.LogInformation("[Slicer] Database schema ensured (SQLite/CreateTables)");
             }
             else
             {
@@ -45,5 +66,6 @@ public sealed class SlicerDbInitializationHostedService(
         }
     }
 
+    /// <inheritdoc/>
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -67,7 +67,9 @@ import {
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
+import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldHideToolheadSpoolPicker';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
+import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 
 // Animation styles
@@ -1155,25 +1157,35 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         )}
 
-        {/* Spool Section - Show when Spoolman is configured (all backends) */}
+        {/* AMS/MMU Slot Visualization - prefer live MMU gates when available */}
+        {(() => {
+          const hasLiveMmuGates = !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
+          const toolheads = hasLiveMmuGates
+            ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
+            : printerDetails?.toolheads && printerDetails.toolheads.length > 1
+              ? printerDetails.toolheads
+              : undefined;
+          if (!toolheads) return null;
+          return (
+            <CollapsibleSection title="Material Slots" expanded={true}>
+              <AmsSlotVisualization toolheads={toolheads} printerId={printerId ?? undefined} />
+            </CollapsibleSection>
+          );
+        })()}
+
+        {/* Spool Section - hide for live MMU printers and AMS-served toolheads to avoid duplicate assignment UIs */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
+          if (shouldHideToolheadSpoolPicker(displayPrinter?.mmuStatus?.gates, printerDetails?.toolheads)) return null;
+
           // Physical multi-toolhead (e.g., Snapmaker U1): toolheads stored in config DB
           const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-          // MMU multi-material (e.g., QidiBox, HappyHare, AFC): gates from live SignalR status
-          const hasMmuGates = !hasMultipleToolheads
-            && displayPrinter?.mmuStatus?.gates
-            && displayPrinter.mmuStatus.gates.length > 0;
-          const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
+          const hasMultipleSpoolSources = hasMultipleToolheads;
           const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
 
-          // For multi-spool mode, determine the toolheads to display.
-          // Prefer printerDetails.toolheads (includes virtual MmuGate entries after backend sync).
-          // Fall back to converting live mmuStatus.gates for MMU printers without synced toolheads.
+          // For multi-spool mode on physical multi-tool printers, use config DB toolheads.
           const effectiveToolheads = hasMultipleToolheads
             ? printerDetails!.toolheads!
-            : hasMmuGates
-              ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
-              : undefined;
+            : undefined;
           
           return (
             <CollapsibleSection

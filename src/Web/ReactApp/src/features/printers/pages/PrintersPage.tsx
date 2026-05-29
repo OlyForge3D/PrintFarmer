@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities } from '@/common/hooks/useApi';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -37,6 +37,7 @@ import { HelpButton } from '@/common/components/HelpButton';
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
 type PrinterSortMode = 'state' | 'name' | 'backend';
+type AvailabilityFilter = 'all' | '1' | '2' | '4' | '8' | '12' | '24';
 
 /** State priority for sorting: lower number = higher in list */
 function getStateSortPriority(printer: Printer, pendingIds: Set<string>): number {
@@ -64,6 +65,8 @@ export function PrintersPage() {
     isLoading,
     refetch: refetchPrinters
   } = usePrinters();
+
+  const { data: bedTypes = [] } = useBedTypes();
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
@@ -159,6 +162,8 @@ export function PrintersPage() {
   // Filter state
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
+  const [bedTypeFilter, setBedTypeFilter] = useState<string>('all');
   const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
     const saved = localStorage.getItem('printerSortMode');
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
@@ -178,6 +183,17 @@ export function PrintersPage() {
     return map;
   }, [printers]);
 
+  // Hours value for availability filter — cutoff is derived dynamically so it never goes stale
+  const [availabilityHours, setAvailabilityHours] = useState<number | null>(null);
+
+  // Ticking now value for availability filter — updates every 30s so filter stays fresh
+  const [filterNow, setFilterNow] = useState(Date.now);
+  useEffect(() => {
+    if (availabilityHours === null) return;
+    const id = setInterval(() => setFilterNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [availabilityHours]);
+
   // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
     let filtered = optimisticPrinters || [];
@@ -195,6 +211,18 @@ export function PrintersPage() {
     // Backend filter
     if (backendFilter !== 'all') {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
+    }
+    // Availability filter — show printers available within N hours (idle printers are always available)
+    if (availabilityHours !== null) {
+      const cutoffMs = filterNow + availabilityHours * 60 * 60 * 1000;
+      filtered = filtered.filter(p => {
+        if (!p.estimatedCompletionTimeUtc) return true; // idle = already available
+        return new Date(p.estimatedCompletionTimeUtc).getTime() <= cutoffMs;
+      });
+    }
+    // Bed type filter
+    if (bedTypeFilter !== 'all') {
+      filtered = filtered.filter(p => p.bedTypeId === bedTypeFilter);
     }
     // Sort based on selected mode
     filtered.sort((a, b) => {
@@ -217,7 +245,7 @@ export function PrintersPage() {
       return 0;
     });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter, sortMode, pendingPrinterIds]);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -413,6 +441,49 @@ export function PrintersPage() {
                     <option value="FlashForge">FlashForge</option>
                   </Select>
                 </div>
+
+                {/* Availability Filter */}
+                <div className="flex items-center gap-2">
+                  <label htmlFor="availability-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Done in:</label>
+                  <Select
+                    id="availability-filter"
+                    value={availabilityFilter}
+                    onChange={e => {
+                      const val = e.target.value as AvailabilityFilter;
+                      setAvailabilityFilter(val);
+                      setAvailabilityHours(val !== 'all' ? parseInt(val, 10) : null);
+                    }}
+                    aria-label="Filter by estimated completion time"
+                    className="min-w-0"
+                  >
+                    <option value="all">Any Time</option>
+                    <option value="1">≤ 1 hour</option>
+                    <option value="2">≤ 2 hours</option>
+                    <option value="4">≤ 4 hours</option>
+                    <option value="8">≤ 8 hours</option>
+                    <option value="12">≤ 12 hours</option>
+                    <option value="24">≤ 24 hours</option>
+                  </Select>
+                </div>
+
+                {/* Bed Type Filter */}
+                {bedTypes.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="bed-type-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Bed:</label>
+                    <Select
+                      id="bed-type-filter"
+                      value={bedTypeFilter}
+                      onChange={e => setBedTypeFilter(e.target.value)}
+                      aria-label="Filter by bed type"
+                      className="min-w-0"
+                    >
+                      <option value="all">All Beds</option>
+                      {bedTypes.map(bt => (
+                        <option key={bt.id} value={bt.id}>{bt.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
 
                 {/* Sort Order */}
                 <div className="flex items-center gap-2">

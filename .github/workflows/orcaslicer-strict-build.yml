@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        orca_version: ["2.3.1"]
+        orca_version: ["2.3.2"]
         allow_stub: [false] # Can extend later with true for a soft-mode build
     steps:
       - name: Checkout

@@ -139,6 +139,8 @@ export interface PrinterMetadata {
   notes?: string;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Whether this printer inherits dispatch settings from its model. */
+  useModelDispatchDefaults?: boolean;
   /** True when the printer's linked catalog model has been updated since the last template sync. */
   hasCatalogUpdate?: boolean;
   /** Manufacturer ID (foreign key) */
@@ -149,6 +151,16 @@ export interface PrinterMetadata {
   modelId?: string;
   /** Model name (e.g., "MK4", "Ender 3") */
   modelName?: string;
+  /** Calibrated Z-offset in mm. Negative values move the nozzle closer to the bed. */
+  zOffsetMm?: number;
+  /** ISO datetime of last Z-offset calibration. */
+  lastZOffsetCalibrationAt?: string;
+  /** Bed type ID (foreign key) */
+  bedTypeId?: string;
+  /** Bed type display name (e.g., "PEI Smooth", "Glass") */
+  bedTypeName?: string;
+  /** Hex color code for bed type badge (e.g., "#E67E22") */
+  bedTypeColor?: string;
 }
 
 /**
@@ -209,10 +221,16 @@ export interface PrinterJobInfo {
   fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
+  /** Speed multiplier percentage (0-999, 100 = normal speed). PrusaLink only. */
+  speedMultiplier?: number;
   /** Active spool identifier persisted in the PrintFarmer database */
   currentSpoolId?: number;
   /** Active spool/filament information */
   spoolInfo?: PrinterSpoolInfo;
+  /** Estimated UTC timestamp when the current print will complete */
+  estimatedCompletionTimeUtc?: string;
+  /** Seconds remaining for the current print (from backend status) */
+  printTimeLeftSeconds?: number;
 }
 
 /**
@@ -688,6 +706,8 @@ export interface UpdatePrinterDto {
   cameraSnapshotUrl?: string;
   /** Optional Obico ML monitoring opt-in. When true, the app auto-assigns a healthy server. */
   obicoEnabled?: boolean;
+  /** Whether this printer inherits dispatch settings from its model. */
+  useModelDispatchDefaults?: boolean;
   // Printer capabilities
   nozzleDiameter?: number;
   supportedMaterials?: string[];
@@ -709,6 +729,13 @@ export interface UpdatePrinterDto {
   wattage?: number;
   /** Per-printer machine hourly rate override for cost tracking. */
   machineHourlyRate?: number;
+  /** IP address or hostname of a Prusa Buddy camera. Server auto-creates/removes a Camera entity. */
+  buddyCameraIp?: string;
+  // Z-offset calibration
+  /** Calibrated Z-offset in mm. Negative values move the nozzle closer to the bed. */
+  zOffsetMm?: number;
+  /** Bed surface type ID. Set to empty string to clear. */
+  bedTypeId?: string;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1113,6 +1140,11 @@ export interface PrinterModelDto {
   /** Default machine hourly rate for cost calculations. */
   defaultHourlyRate?: number;
 
+  /** Default auto-dispatch state for new printers of this model. */
+  defaultAutoDispatchState?: AutoDispatchState;
+  /** Default start behavior for new printers of this model. */
+  defaultStartBehavior?: StartBehavior;
+
   // Toolhead templates for multi-toolhead printers
   toolheads?: PrinterModelToolheadDto[];
 }
@@ -1224,6 +1256,10 @@ export interface PrinterDetails {
   machineHourlyRate?: number;
   /** True when the printer's linked catalog model has been updated since the last template sync. */
   hasCatalogUpdate?: boolean;
+  /** Whether this printer inherits dispatch settings from its model. */
+  useModelDispatchDefaults?: boolean;
+  /** IP address or hostname of a Prusa Buddy camera associated with this printer. */
+  buddyCameraIp?: string;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }
@@ -1338,6 +1374,34 @@ export interface UpdateFilamentTypeRequest {
   defaultPricePerKg?: number | null;
   /** Default material density in g/cm³ for weight-based cost calculation. */
   defaultDensity?: number | null;
+}
+
+// ============ Material Cluster Types ============
+
+export interface MaterialClusterMemberDto {
+  filamentTypeId: string;
+  filamentTypeName: string;
+  addedAt: string;
+}
+
+export interface MaterialClusterDto {
+  id: string;
+  name: string;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  members: MaterialClusterMemberDto[];
+}
+
+export interface CreateMaterialClusterRequest {
+  name: string;
+  description?: string | null;
+  filamentTypeIds?: string[];
+}
+
+export interface UpdateMaterialClusterRequest {
+  name: string;
+  description?: string | null;
 }
 
 export interface SpoolmanFilamentImportResult {
@@ -1488,6 +1552,10 @@ export interface UpdateModelRequest {
   maxPrintSpeed?: number;
   defaultWattage?: number;
   defaultHourlyRate?: number;
+
+  // Auto-dispatch defaults
+  defaultAutoDispatchState?: AutoDispatchState;
+  defaultStartBehavior?: StartBehavior;
 
   // Toolhead templates
   toolheads?: PrinterModelToolheadDto[];
@@ -1993,6 +2061,14 @@ export interface CommandResult {
   message?: string;
 }
 
+/** Request payload for saving a calibrated Z-offset. */
+export interface ZOffsetSaveRequest {
+  /** The Z-offset value in millimeters. Negative values move the nozzle closer to the bed. */
+  offsetMm: number;
+  /** Whether to also send save commands to the printer firmware. */
+  saveToFirmware?: boolean;
+}
+
 // Failure detail for an individual file during multi-upload.
 export interface MultiUploadFailure {
   fileName: string;
@@ -2476,6 +2552,18 @@ export interface UpdateCameraDto {
   cameraType?: CameraType;
 }
 
+export interface DetectCameraEndpointsRequest {
+  printerId: string;
+}
+
+export interface DetectCameraEndpointsResponse {
+  streamUrl?: string;
+  snapshotUrl?: string;
+  source?: CameraSource;
+  cameraType?: CameraType;
+  message?: string;
+}
+
 export interface ToggleCameraDto {
   isEnabled: boolean;
 }
@@ -2801,6 +2889,13 @@ export interface SpoolmanSpool {
   remainingPercent?: number | null;
   price?: number | null;
   comment?: string | null;
+}
+
+/** Distinct material, vendor, and location values across all spools. */
+export interface SpoolFilterOptions {
+  materials: string[];
+  vendors: string[];
+  locations: string[];
 }
 
 /**
@@ -3129,6 +3224,18 @@ export interface WebhookDelivery {
 
 export type AutoDispatchState = 'None' | 'PendingReady' | 'Ready';
 
+export type StartBehavior = 'Manual' | 'AutoStart' | 'WaitForConfirmation';
+
+export interface SetModelDispatchDefaultsRequest {
+  defaultAutoDispatchState: AutoDispatchState;
+  defaultStartBehavior?: StartBehavior;
+}
+
+export interface ApplyModelDefaultsResult {
+  updatedCount: number;
+  skippedCount: number;
+}
+
 export interface AutoDispatchStatus {
   printerId: string;
   enabled: boolean;
@@ -3220,6 +3327,89 @@ export interface CreatePrinterGroupRequest {
 export interface UpdatePrinterGroupRequest {
   name: string;
   description?: string;
+}
+
+// ============ Printer Group Access Control ============
+
+/**
+ * Access levels for printer group operations.
+ * Higher values imply all lower-level permissions.
+ */
+export enum PrinterGroupAccessLevel {
+  View = 'View',
+  Submit = 'Submit',
+  Manage = 'Manage',
+}
+
+/**
+ * A single access rule for a printer group
+ */
+export interface PrinterGroupAccessRule {
+  id: string;
+  roleId: string;
+  roleName: string;
+  accessLevel: PrinterGroupAccessLevel;
+  createdDate: string;
+}
+
+/**
+ * Request item for setting access rules
+ */
+export interface SetAccessRuleItem {
+  roleId: string;
+  accessLevel: PrinterGroupAccessLevel;
+}
+
+/**
+ * Request DTO for setting access rules on a printer group
+ */
+export interface SetAccessRulesRequest {
+  rules: SetAccessRuleItem[];
+}
+
+/**
+ * Role DTO for access control UI
+ */
+export interface RoleDto {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  isSystemRole: boolean;
+  isActive: boolean;
+}
+
+// ============ Bed Type Types ============
+
+/**
+ * Bed surface type DTO
+ */
+export interface BedType {
+  id: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  color?: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
+/**
+ * Request DTO for creating a bed type
+ */
+export interface CreateBedTypeRequest {
+  name: string;
+  description?: string;
+  color?: string;
+}
+
+/**
+ * Request DTO for updating a bed type
+ */
+export interface UpdateBedTypeRequest {
+  name: string;
+  description?: string;
+  color?: string;
 }
 
 /**
@@ -3575,4 +3765,280 @@ export interface TimezoneInfo {
   id: string;
   displayName: string;
   offset: string;
+}
+
+// ── Slicer Profile DTOs ──────────────────────────────────────────────────
+
+export interface MachineProfileDto {
+  name: string;
+  manufacturer: string;
+  description?: string;
+  printer_model?: string;
+  printerVariant?: string;
+  instantiation: boolean;
+  inherits?: string;
+  nozzleDiameter?: number;
+  nozzleType?: string;
+  buildVolumeX?: number;
+  buildVolumeY?: number;
+  buildVolumeZ?: number;
+  printableArea?: string;
+  maxPrintSpeed?: number;
+  motionType?: string;
+  gcodeDialect?: string;
+  hasHeatedBed?: boolean;
+  hasHeatedChamber?: boolean;
+  maxBedTemperature?: number;
+  maxHotendTemperature?: number;
+  extruderCount: number;
+  supportMultiMaterial?: boolean;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  retractionLiftZ?: number;
+  detractionSpeed?: number;
+  bedType?: string;
+  bedShape?: string;
+  startGcode?: string;
+  endGcode?: string;
+  maxAccelerationX?: number;
+  maxAccelerationY?: number;
+  maxFeedrateX?: number;
+  maxFeedrateY?: number;
+  settings: Record<string, unknown>;
+}
+
+export interface FilamentProfileDto {
+  name: string;
+  material: string;
+  manufacturer?: string;
+  description?: string;
+  color?: string;
+  compatible_printers: string[];
+  instantiation: boolean;
+  inherits?: string;
+  nozzleTemperature: number;
+  bedTemperature: number;
+  firstLayerNozzleTemperature?: number;
+  firstLayerBedTemperature?: number;
+  chamberTemperature?: number;
+  maxVolumetricSpeed?: number;
+  flowRatio?: number;
+  printSpeed: number;
+  enablePressureAdvance?: boolean;
+  pressureAdvance?: number;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  detractionSpeed?: number;
+  enableFanCooling?: boolean;
+  minFanSpeed?: number;
+  maxFanSpeed?: number;
+  bridgeFanSpeed?: number;
+  density?: number;
+  cost?: number;
+  startGcode?: string;
+  endGcode?: string;
+  settings: Record<string, unknown>;
+}
+
+export interface ProcessProfileDto {
+  name: string;
+  quality: string;
+  description?: string;
+  compatible_printers: string[];
+  instantiation: boolean;
+  inherits?: string;
+  layerHeight: number;
+  firstLayerHeight: number;
+  topLayers: number;
+  bottomLayers: number;
+  wallCount: number;
+  infillPercentage: number;
+  infillPattern?: string;
+  printSpeed: number;
+  firstLayerPrintSpeed: number;
+  outerWallSpeed?: number;
+  innerWallSpeed?: number;
+  infillSpeed?: number;
+  topSurfaceSpeed?: number;
+  travelSpeed?: number;
+  bedAdhesion?: string;
+  supports: boolean;
+  supportType?: string;
+  supportDensity?: number;
+  supportAngle?: number;
+  seamPosition?: string;
+  enableIroning?: boolean;
+  nozzleTemp?: number;
+  bedTemp?: number;
+  firstLayerNozzleTemp?: number;
+  firstLayerBedTemp?: number;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  lineWidthDefault?: number;
+  lineWidthOuterWall?: number;
+  lineWidthInnerWall?: number;
+  defaultAcceleration?: number;
+  outerWallAcceleration?: number;
+  settings: Record<string, unknown>;
+}
+
+// ── Profile Schema Types (schema-driven settings editor) ─────────────────
+
+export interface ProfileFieldMetadata {
+  key: string;
+  label: string;
+  fieldType: 'number' | 'integer' | 'boolean' | 'string' | 'enum';
+  category: string;
+  description?: string;
+  defaultValue?: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  options?: EnumOption[];
+  isAdvanced: boolean;
+}
+
+export interface EnumOption {
+  value: string;
+  label: string;
+}
+
+export interface ProfileTypeSchema {
+  profileType: string;
+  categories: string[];
+  fields: ProfileFieldMetadata[];
+}
+
+export interface ProfileSchemasResponse {
+  process: ProfileTypeSchema;
+  machine: ProfileTypeSchema;
+  filament: ProfileTypeSchema;
+}
+
+// ── Print Quotas & User Balances ─────────────────────────────────────────
+
+export type QuotaType = 'Cost' | 'Count' | 'Weight';
+export type QuotaPeriodType = 'Daily' | 'Weekly' | 'Monthly' | 'Semester' | 'Manual';
+export type BalanceTransactionType = 'Credit' | 'Debit' | 'Refund' | 'JobCharge';
+
+export interface QuotaDto {
+  id: string;
+  userId: string | null;
+  groupName: string | null;
+  quotaType: QuotaType;
+  limitAmount: number;
+  usedAmount: number;
+  periodType: QuotaPeriodType;
+  resetAt: string | null;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateQuotaRequest {
+  userId?: string;
+  groupName?: string;
+  quotaType: QuotaType;
+  limitAmount: number;
+  periodType: QuotaPeriodType;
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface UpdateQuotaRequest {
+  limitAmount?: number;
+  periodType?: QuotaPeriodType;
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface CheckQuotaRequest {
+  userId: string;
+  estimatedCost?: number;
+  jobCount?: number;
+  estimatedWeightGrams?: number;
+}
+
+export interface QuotaCheckResult {
+  allowed: boolean;
+  deniedReason: string | null;
+  quotaId: string | null;
+}
+
+export interface UserBalanceDto {
+  id: string;
+  userId: string;
+  balanceAmount: number;
+  currency: string;
+  lastUpdated: string;
+}
+
+export interface BalanceTransactionDto {
+  id: string;
+  transactionType: BalanceTransactionType;
+  amount: number;
+  printJobId: string | null;
+  description: string | null;
+  performedBy: string | null;
+  createdAt: string;
+}
+
+export interface BalanceAdjustRequest {
+  amount: number;
+  description?: string;
+}
+
+// ============ Custom Field Types ============
+
+export type CustomFieldEntityType = 'Printer' | 'User';
+export type CustomFieldType = 'Text' | 'Number' | 'Boolean' | 'Date' | 'Select';
+
+export interface CustomFieldDefinition {
+  id: string;
+  entityType: CustomFieldEntityType;
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  options?: string;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+  defaultValue?: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
+export interface CreateCustomFieldDefinitionRequest {
+  entityType: CustomFieldEntityType;
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  options?: string;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+  defaultValue?: string;
+}
+
+export interface UpdateCustomFieldDefinitionRequest {
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  options?: string;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+  defaultValue?: string;
+}
+
+export interface CustomFieldValue {
+  definitionId: string;
+  fieldName: string;
+  fieldKey: string;
+  fieldType: CustomFieldType;
+  value?: string;
+  options?: string;
+  isRequired: boolean;
 }

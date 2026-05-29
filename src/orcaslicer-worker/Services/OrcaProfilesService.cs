@@ -43,6 +43,11 @@ public class OrcaProfilesService : ISlicerProfilesService
     private readonly Dictionary<string, Dictionary<string, string>> _profilePathLookupCache = new();
     private readonly Lock _pathLookupCacheLock = new();
 
+    // Cache for filesystem-based profile lookups (fallback when manifest doesn't contain the parent)
+    // Key: manufacturer directory path, Value: dictionary of profile name → full file path
+    private readonly Dictionary<string, Dictionary<string, string>> _filesystemLookupCache = new();
+    private readonly Lock _filesystemLookupCacheLock = new();
+
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
     private List<MachineModelProfileDto>? _allMachineModelProfilesCache;
     private List<MachineProfileDto>? _allMachineProfilesCache;
@@ -379,7 +384,14 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 FilamentProfileDto? profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
                                 if (profile != null)
                                 {
-                                    profile.Manufacturer = folderName;
+                                    // Use folder name only if manufacturer wasn't extracted from filament_vendor
+                                    if (string.IsNullOrEmpty(profile.Manufacturer))
+                                    {
+                                        profile.Manufacturer = folderName;
+                                    }
+
+                                    // Normalize vendor names to match OrcaSlicer UI conventions
+                                    profile.Manufacturer = NormalizeFilamentVendor(profile.Manufacturer);
 
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
@@ -512,6 +524,19 @@ public class OrcaProfilesService : ISlicerProfilesService
                                         {
                                             profile.CompatiblePrinters = matchedMachines;
                                         }
+                                        else
+                                        {
+                                            _logger.LogDebug(
+                                                "Expression evaluation returned no matches for process profile '{ProfileName}' (condition: '{Condition}', evaluated against {MachineCount} machines from '{FolderName}')",
+                                                profile.Name, profile.CompatiblePrintersCondition, manufacturerMachines.Count, folderName);
+                                        }
+                                    }
+                                    else if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
+                                             !string.IsNullOrEmpty(profile.CompatiblePrintersCondition))
+                                    {
+                                        _logger.LogWarning(
+                                            "Process profile '{ProfileName}' has compatible_printers_condition but no machines available for manufacturer '{FolderName}' to evaluate against",
+                                            profile.Name, folderName);
                                     }
 
                                     profiles.Add(profile);
@@ -821,7 +846,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     /// <summary>
     /// Find a parent profile by looking up its name in the manufacturer's manifest file.
-    /// The {Manufacturer}.json file contains name → sub_path mappings for all profiles.
+    /// Falls back to filesystem scan within the manufacturer directory, then across all manufacturers.
     /// </summary>
     private string? FindParentProfile(string childFilePath, string parentProfileName)
     {
@@ -835,22 +860,101 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         string manufacturerName = Path.GetFileName(manufacturerDir);
 
-        // Build or retrieve the profile path lookup for this manufacturer
+        // 1. Look up in the manufacturer's manifest (fast path - most profiles are here)
         Dictionary<string, string>? lookup = GetOrBuildProfilePathLookup(manufacturerName, manufacturerDir);
-        if (lookup == null)
-        {
-            _logger.LogDebug("No manifest found for manufacturer '{ManufacturerName}'", manufacturerName);
-            return null;
-        }
-
-        // Look up the parent profile name in the manifest
-        if (lookup.TryGetValue(parentProfileName, out string? parentPath))
+        if (lookup != null && lookup.TryGetValue(parentProfileName, out string? parentPath))
         {
             return parentPath;
         }
 
-        // Not found in manifest - this is expected for some base profiles that may be shared
-        _logger.LogDebug("Parent profile '{ParentProfileName}' not found in {ManufacturerName} manifest", parentProfileName, manufacturerName);
+        // 2. Fallback: scan the manufacturer's directory recursively for a matching .json file
+        //    Handles profiles on disk but not listed in the manifest
+        Dictionary<string, string> fsLookup = GetOrBuildFilesystemLookup(manufacturerDir);
+        if (fsLookup.TryGetValue(parentProfileName, out string? fsPath))
+        {
+            _logger.LogDebug("Found parent profile '{ParentProfileName}' via filesystem scan in {ManufacturerName}", parentProfileName, manufacturerName);
+            return fsPath;
+        }
+
+        // 3. Fallback: search across ALL manufacturer directories
+        //    Handles cross-manufacturer inheritance (e.g., Elegoo inheriting fdm_filament_tpu from BBL)
+        string? crossMfgPath = FindParentProfileAcrossManufacturers(parentProfileName, manufacturerDir);
+        if (crossMfgPath != null)
+        {
+            _logger.LogDebug("Found parent profile '{ParentProfileName}' in different manufacturer directory: {Path}", parentProfileName, crossMfgPath);
+            return crossMfgPath;
+        }
+
+        _logger.LogDebug("Parent profile '{ParentProfileName}' not found in {ManufacturerName} or any other manufacturer", parentProfileName, manufacturerName);
+        return null;
+    }
+
+    /// <summary>
+    /// Build or retrieve a filesystem-based lookup for a manufacturer directory.
+    /// Scans all .json files recursively and maps filename (without extension) → full path.
+    /// </summary>
+    private Dictionary<string, string> GetOrBuildFilesystemLookup(string manufacturerDir)
+    {
+        lock (_filesystemLookupCacheLock)
+        {
+            if (_filesystemLookupCache.TryGetValue(manufacturerDir, out Dictionary<string, string>? cached))
+            {
+                return cached;
+            }
+        }
+
+        Dictionary<string, string> lookup = new(StringComparer.Ordinal);
+
+        try
+        {
+            foreach (string filePath in Directory.EnumerateFiles(manufacturerDir, "*.json", SearchOption.AllDirectories))
+            {
+                string profileName = Path.GetFileNameWithoutExtension(filePath);
+
+                // First occurrence wins (avoids overwriting with duplicates)
+                lookup.TryAdd(profileName, filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Failed to scan manufacturer directory {Dir}: {Message}", manufacturerDir, ex.Message);
+        }
+
+        lock (_filesystemLookupCacheLock)
+        {
+            _filesystemLookupCache[manufacturerDir] = lookup;
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// Search across all manufacturer directories for a parent profile by filename.
+    /// Skips the specified manufacturer directory (already searched).
+    /// </summary>
+    private string? FindParentProfileAcrossManufacturers(string parentProfileName, string excludeManufacturerDir)
+    {
+        try
+        {
+            foreach (string mfgDir in Directory.EnumerateDirectories(_orcaProfilesPath))
+            {
+                if (string.Equals(Path.GetFullPath(mfgDir), Path.GetFullPath(excludeManufacturerDir), StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> fsLookup = GetOrBuildFilesystemLookup(mfgDir);
+                if (fsLookup.TryGetValue(parentProfileName, out string? path))
+                {
+                    return path;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Failed to search across manufacturer directories: {Message}", ex.Message);
+        }
+
         return null;
     }
 
@@ -972,6 +1076,11 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.PrinterModel = printerModelElem.GetString();
         }
 
+        if (root.TryGetProperty("printer_variant", out JsonElement variantElem))
+        {
+            profile.PrinterVariant = ParseStringValue(variantElem);
+        }
+
         // Extract nozzle diameter from settings - REQUIRED property
         // nozzle_diameter is typically an array like ["0.4"], get the first value
         if (root.TryGetProperty("nozzle_diameter", out JsonElement nozzleElem))
@@ -992,10 +1101,137 @@ public class OrcaProfilesService : ISlicerProfilesService
             return null; // Reject profiles without nozzle_diameter
         }
 
+        // ── Nozzle type ────────────────────────────────────────────────────
+        if (root.TryGetProperty("nozzle_type", out JsonElement nozzleTypeElem))
+        {
+            profile.NozzleType = ParseStringValue(nozzleTypeElem);
+        }
+
+        // ── Build volume ───────────────────────────────────────────────────
+        ExtractBuildVolume(root, profile);
+
+        // ── Capabilities ───────────────────────────────────────────────────
+        profile.MaxPrintSpeed = ParseOptionalInt(root, "machine_max_speed_z")
+            ?? ParseOptionalInt(root, "max_print_speed");
+
+        if (root.TryGetProperty("printer_type", out JsonElement typeElem))
+        {
+            profile.MotionType = ParseStringValue(typeElem);
+        }
+        else if (root.TryGetProperty("machine_type", out JsonElement machTypeElem))
+        {
+            profile.MotionType = ParseStringValue(machTypeElem);
+        }
+
+        if (root.TryGetProperty("gcode_flavor", out JsonElement gcodeElem))
+        {
+            profile.GcodeDialect = ParseStringValue(gcodeElem);
+        }
+
+        profile.HasHeatedBed = ParseOptionalBool(root, "has_heated_bed")
+            ?? (root.TryGetProperty("bed_custom_texture", out _) ? true : null);
+        profile.HasHeatedChamber = ParseOptionalBool(root, "has_heated_chamber");
+        profile.MaxBedTemperature = ParseOptionalInt(root, "max_bed_temp")
+            ?? ParseOptionalInt(root, "bed_temperature_limit");
+        profile.MaxHotendTemperature = ParseOptionalInt(root, "max_hotend_temp")
+            ?? ParseOptionalInt(root, "nozzle_temperature_range_high");
+        profile.SupportMultiMaterial = ParseOptionalBool(root, "single_extruder_multi_material");
+
+        // Extruder count from extruder arrays or explicit property
+        if (root.TryGetProperty("extruder_count", out JsonElement extCountElem))
+        {
+            profile.ExtruderCount = ParseIntValue(extCountElem) ?? 1;
+        }
+        else if (root.TryGetProperty("nozzle_diameter", out JsonElement nozzleArrayElem)
+            && nozzleArrayElem.ValueKind == JsonValueKind.Array)
+        {
+            profile.ExtruderCount = nozzleArrayElem.GetArrayLength();
+        }
+
+        // ── Retraction ─────────────────────────────────────────────────────
+        profile.RetractionLength = ParseOptionalDouble(root, "retraction_length")
+            ?? ParseOptionalDouble(root, "retract_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "retraction_speed")
+            ?? ParseOptionalDouble(root, "retract_speed");
+        profile.RetractionLiftZ = ParseOptionalDouble(root, "retract_lift_above")
+            ?? ParseOptionalDouble(root, "retraction_minimum_travel");
+        profile.DetractionSpeed = ParseOptionalDouble(root, "deretraction_speed")
+            ?? ParseOptionalDouble(root, "deretract_speed");
+
+        // ── Bed ────────────────────────────────────────────────────────────
+        if (root.TryGetProperty("curr_bed_type", out JsonElement bedTypeElem))
+        {
+            profile.BedType = ParseStringValue(bedTypeElem);
+        }
+
+        if (root.TryGetProperty("bed_shape", out JsonElement bedShapeElem))
+        {
+            profile.BedShape = ParseStringValue(bedShapeElem);
+        }
+
+        // ── G-code ─────────────────────────────────────────────────────────
+        if (root.TryGetProperty("machine_start_gcode", out JsonElement startGcodeElem))
+        {
+            profile.StartGcode = ParseStringValue(startGcodeElem);
+        }
+
+        if (root.TryGetProperty("machine_end_gcode", out JsonElement endGcodeElem))
+        {
+            profile.EndGcode = ParseStringValue(endGcodeElem);
+        }
+
+        // ── Motion limits ──────────────────────────────────────────────────
+        profile.MaxAccelerationX = ParseOptionalDouble(root, "machine_max_acceleration_x");
+        profile.MaxAccelerationY = ParseOptionalDouble(root, "machine_max_acceleration_y");
+        profile.MaxFeedrateX = ParseOptionalDouble(root, "machine_max_speed_x");
+        profile.MaxFeedrateY = ParseOptionalDouble(root, "machine_max_speed_y");
+
         // Store all settings as raw JSON for flexibility
         profile.Settings = SerializeElementToDict(root);
 
         return profile;
+    }
+
+    private static void ExtractBuildVolume(JsonElement root, MachineProfileDto profile)
+    {
+        // OrcaSlicer stores build volume as printable_area polygon or explicit dimensions
+        if (root.TryGetProperty("printable_area", out JsonElement areaElem))
+        {
+            profile.PrintableArea = ParseStringValue(areaElem);
+
+            // Parse dimensions from printable_area like "0x0,220x0,220x220,0x220"
+            string? area = profile.PrintableArea;
+            if (!string.IsNullOrEmpty(area))
+            {
+                string[] points = area.Split(',');
+                if (points.Length >= 3)
+                {
+                    // Third point typically has max X and Y
+                    string[] maxPoint = points[2].Split('x');
+                    if (maxPoint.Length == 2)
+                    {
+                        if (double.TryParse(maxPoint[0], System.Globalization.CultureInfo.InvariantCulture, out double x))
+                        {
+                            profile.BuildVolumeX = x;
+                        }
+
+                        if (double.TryParse(maxPoint[1], System.Globalization.CultureInfo.InvariantCulture, out double y))
+                        {
+                            profile.BuildVolumeY = y;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (root.TryGetProperty("printable_height", out JsonElement heightElem))
+        {
+            profile.BuildVolumeZ = ParseDoubleValue(heightElem);
+        }
+        else if (root.TryGetProperty("max_print_height", out JsonElement maxHeightElem))
+        {
+            profile.BuildVolumeZ = ParseDoubleValue(maxHeightElem);
+        }
     }
 
 #pragma warning disable S1172 // Unused parameters are required by interface
@@ -1006,6 +1242,20 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty("name", out JsonElement nameElem))
         {
             profile.Name = nameElem.GetString() ?? string.Empty;
+        }
+
+        // Extract manufacturer from filament_vendor JSON field (OrcaSlicer stores this as a string array)
+        // e.g., "filament_vendor": ["Bambu Lab"] → "Bambu Lab"
+        if (root.TryGetProperty("filament_vendor", out JsonElement vendorElem))
+        {
+            if (vendorElem.ValueKind == JsonValueKind.Array && vendorElem.GetArrayLength() > 0)
+            {
+                profile.Manufacturer = vendorElem[0].GetString();
+            }
+            else if (vendorElem.ValueKind == JsonValueKind.String)
+            {
+                profile.Manufacturer = vendorElem.GetString();
+            }
         }
 
         // Extract material type from multiple sources:
@@ -1053,6 +1303,57 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
         }
 
+        // ── Extended temperature ───────────────────────────────────────────
+        profile.FirstLayerNozzleTemperature = ParseOptionalInt(root, "nozzle_temperature_initial_layer")
+            ?? ParseOptionalInt(root, "first_layer_temperature");
+        profile.FirstLayerBedTemperature = ParseOptionalInt(root, "hot_plate_temp_initial_layer")
+            ?? ParseOptionalInt(root, "first_layer_bed_temperature");
+        profile.ChamberTemperature = ParseOptionalInt(root, "chamber_temperature")
+            ?? ParseOptionalInt(root, "chamber_temp");
+        profile.MaxVolumetricSpeed = ParseOptionalDouble(root, "filament_max_volumetric_speed");
+
+        // ── Flow ───────────────────────────────────────────────────────────
+        profile.FlowRatio = ParseOptionalDouble(root, "filament_flow_ratio");
+        profile.EnablePressureAdvance = ParseOptionalBool(root, "enable_pressure_advance");
+        profile.PressureAdvance = ParseOptionalDouble(root, "pressure_advance");
+
+        // ── Retraction ─────────────────────────────────────────────────────
+        profile.RetractionLength = ParseOptionalDouble(root, "filament_retraction_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "filament_retraction_speed")
+            ?? ParseOptionalDouble(root, "filament_retract_speed");
+        profile.DetractionSpeed = ParseOptionalDouble(root, "filament_deretraction_speed")
+            ?? ParseOptionalDouble(root, "filament_deretract_speed");
+
+        // ── Cooling ────────────────────────────────────────────────────────
+        profile.EnableFanCooling = ParseOptionalBool(root, "fan_cooling");
+        profile.MinFanSpeed = ParseOptionalInt(root, "fan_min_speed");
+        profile.MaxFanSpeed = ParseOptionalInt(root, "fan_max_speed");
+        profile.BridgeFanSpeed = ParseOptionalInt(root, "overhang_fan_speed");
+
+        // ── Physical properties ────────────────────────────────────────────
+        profile.Density = ParseOptionalDouble(root, "filament_density");
+        profile.Cost = ParseOptionalDouble(root, "filament_cost");
+
+        if (root.TryGetProperty("default_filament_colour", out JsonElement colorElem))
+        {
+            profile.Color = ParseStringValue(colorElem);
+        }
+        else if (root.TryGetProperty("filament_colour", out JsonElement colorElem2))
+        {
+            profile.Color = ParseStringValue(colorElem2);
+        }
+
+        // ── G-code ─────────────────────────────────────────────────────────
+        if (root.TryGetProperty("filament_start_gcode", out JsonElement startGcodeElem))
+        {
+            profile.StartGcode = ParseStringValue(startGcodeElem);
+        }
+
+        if (root.TryGetProperty("filament_end_gcode", out JsonElement endGcodeElem))
+        {
+            profile.EndGcode = ParseStringValue(endGcodeElem);
+        }
+
         // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out JsonElement compatibleElem))
         {
@@ -1091,20 +1392,99 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.LayerHeight = ParseDoubleValue(layerElem) ?? 0.2;
         }
 
-        if (root.TryGetProperty("fill_density", out JsonElement infillElem))
-        {
-            profile.InfillPercentage = ParseIntValue(infillElem) ?? 20;
-        }
+        // Try sparse_infill_density first (primary key), fallback to fill_density
+        profile.InfillPercentage = ParseOptionalInt(root, "sparse_infill_density")
+            ?? ParseOptionalInt(root, "fill_density")
+            ?? 20;
 
-        if (root.TryGetProperty("wall_loops", out JsonElement speedElem))
-        {
-            profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
-        }
+        profile.PrintSpeed = ParseProcessPrintSpeed(root, 50);
+        profile.FirstLayerHeight = ParseFirstLayerHeight(root, profile.LayerHeight);
+        profile.FirstLayerPrintSpeed = ParseFirstLayerSpeed(root, profile.PrintSpeed);
 
         if (root.TryGetProperty("enable_support", out JsonElement supportsElem))
         {
             profile.Supports = ParseBoolValue(supportsElem);
         }
+
+        // ── Layers ─────────────────────────────────────────────────────────
+        profile.TopLayers = ParseOptionalInt(root, "top_shell_layers") ?? 4;
+        profile.BottomLayers = ParseOptionalInt(root, "bottom_shell_layers") ?? 3;
+
+        // ── Walls ──────────────────────────────────────────────────────────
+        profile.WallCount = ParseOptionalInt(root, "wall_loops") ?? 3;
+
+        // ── Infill ─────────────────────────────────────────────────────────
+        // Try sparse_infill_pattern first (primary key), fallback to fill_pattern
+        profile.InfillPattern = ParseOptionalString(root, "sparse_infill_pattern")
+            ?? ParseOptionalString(root, "fill_pattern");
+
+        // ── Speed (per-feature) ────────────────────────────────────────────
+        // OrcaSlicer uses snake_case property names
+        profile.OuterWallSpeed = ParseOptionalInt(root, "outer_wall_speed")
+            ?? ParseOptionalInt(root, "external_perimeter_speed");
+        profile.InnerWallSpeed = ParseOptionalInt(root, "inner_wall_speed")
+            ?? ParseOptionalInt(root, "perimeter_speed");
+        profile.InfillSpeed = ParseOptionalInt(root, "sparse_infill_speed")
+            ?? ParseOptionalInt(root, "infill_speed");
+        profile.TopSurfaceSpeed = ParseOptionalInt(root, "top_surface_speed");
+        profile.TravelSpeed = ParseOptionalInt(root, "travel_speed");
+
+        // ── Adhesion ───────────────────────────────────────────────────────
+        if (root.TryGetProperty("skirt_type", out JsonElement adhesionElem))
+        {
+            profile.BedAdhesion = ParseStringValue(adhesionElem);
+        }
+        else if (root.TryGetProperty("brim_type", out JsonElement brimElem))
+        {
+            string? brimVal = ParseStringValue(brimElem);
+            if (!string.IsNullOrEmpty(brimVal) && brimVal != "no_brim")
+            {
+                profile.BedAdhesion = "brim";
+            }
+        }
+
+        // ── Support details ────────────────────────────────────────────────
+        if (root.TryGetProperty("support_type", out JsonElement supportTypeElem))
+        {
+            profile.SupportType = ParseStringValue(supportTypeElem);
+        }
+
+        profile.SupportDensity = ParseOptionalInt(root, "support_base_pattern_spacing")
+            is not null ? ParseOptionalInt(root, "support_threshold_angle") : null;
+        profile.SupportAngle = ParseOptionalInt(root, "support_threshold_angle");
+
+        // ── Seam ───────────────────────────────────────────────────────────
+        if (root.TryGetProperty("seam_position", out JsonElement seamElem))
+        {
+            profile.SeamPosition = ParseStringValue(seamElem);
+        }
+
+        // ── Ironing ────────────────────────────────────────────────────────
+        profile.EnableIroning = ParseOptionalBool(root, "ironing_type") is not null
+            ? ParseOptionalBool(root, "ironing_type") : ParseOptionalBool(root, "enable_ironing");
+
+        // ── Temperature ────────────────────────────────────────────────────
+        profile.NozzleTemp = ParseOptionalInt(root, "nozzle_temperature");
+        profile.BedTemp = ParseOptionalInt(root, "bed_temperature")
+            ?? ParseOptionalInt(root, "hot_plate_temp");
+        profile.FirstLayerNozzleTemp = ParseOptionalInt(root, "nozzle_temperature_initial_layer");
+        profile.FirstLayerBedTemp = ParseOptionalInt(root, "hot_plate_temp_initial_layer")
+            ?? ParseOptionalInt(root, "first_layer_bed_temperature");
+
+        // ── Retraction ─────────────────────────────────────────────────────
+        profile.RetractionLength = ParseOptionalDouble(root, "retraction_length")
+            ?? ParseOptionalDouble(root, "retract_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "retraction_speed")
+            ?? ParseOptionalDouble(root, "retract_speed");
+
+        // ── Line widths ────────────────────────────────────────────────────
+        profile.LineWidthDefault = ParseOptionalDouble(root, "line_width");
+        profile.LineWidthOuterWall = ParseOptionalDouble(root, "outer_wall_line_width");
+        profile.LineWidthInnerWall = ParseOptionalDouble(root, "inner_wall_line_width");
+
+        // ── Acceleration ───────────────────────────────────────────────────
+        profile.DefaultAcceleration = ParseOptionalInt(root, "default_acceleration");
+        profile.OuterWallAcceleration = ParseOptionalInt(root, "outer_wall_acceleration");
 
         // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out JsonElement compatibleElem))
@@ -1142,6 +1522,63 @@ public class OrcaProfilesService : ISlicerProfilesService
         return profile;
     }
 #pragma warning restore S1172
+
+    private static int ParseProcessPrintSpeed(JsonElement root, int fallback)
+    {
+        string[] speedKeys = ["print_speed", "inner_wall_speed", "outer_wall_speed", "sparse_infill_speed"];
+
+        foreach (string key in speedKeys)
+        {
+            if (root.TryGetProperty(key, out JsonElement speedElem))
+            {
+                int? parsed = ParseIntValue(speedElem);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    private static double ParseFirstLayerHeight(JsonElement root, double fallback)
+    {
+        string[] firstLayerHeightKeys = ["initial_layer_print_height", "first_layer_height"];
+
+        foreach (string key in firstLayerHeightKeys)
+        {
+            if (root.TryGetProperty(key, out JsonElement valueElem))
+            {
+                double? parsed = ParseDoubleValue(valueElem);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    private static int ParseFirstLayerSpeed(JsonElement root, int fallback)
+    {
+        string[] firstLayerSpeedKeys = ["initial_layer_speed", "first_layer_speed", "initial_layer_print_speed"];
+
+        foreach (string key in firstLayerSpeedKeys)
+        {
+            if (root.TryGetProperty(key, out JsonElement valueElem))
+            {
+                int? parsed = ParseIntValue(valueElem);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
+            }
+        }
+
+        return fallback;
+    }
 
     private static int? ParseIntValue(JsonElement elem)
     {
@@ -1217,7 +1654,47 @@ public class OrcaProfilesService : ISlicerProfilesService
         return false;
     }
 
-    private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
+    private static int? ParseOptionalInt(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseIntValue(elem);
+        }
+
+        return null;
+    }
+
+    private static double? ParseOptionalDouble(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseDoubleValue(elem);
+        }
+
+        return null;
+    }
+
+    private static bool? ParseOptionalBool(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseBoolValue(elem);
+        }
+
+        return null;
+    }
+
+    private static string? ParseOptionalString(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseStringValue(elem);
+        }
+
+        return null;
+    }
+
+    internal static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
         Dictionary<string, object> dict = [];
         try
@@ -1226,7 +1703,19 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 foreach (JsonProperty prop in elem.EnumerateObject())
                 {
-                    dict[prop.Name] = prop.Value.GetRawText();
+                    dict[prop.Name] = prop.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
+                        JsonValueKind.True => "1",
+                        JsonValueKind.False => "0",
+                        JsonValueKind.Number => prop.Value.GetRawText(),
+
+                        // Arrays: deserialize to List<string> so they serialize as proper JSON arrays
+                        JsonValueKind.Array => DeserializeJsonArray(prop.Value),
+
+                        // Objects: store as raw JSON text
+                        _ => prop.Value.GetRawText()
+                    };
                 }
             }
         }
@@ -1236,6 +1725,25 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         return dict;
+    }
+
+    /// <summary>
+    /// Converts a JSON array element to a <see cref="List{T}"/> of strings.
+    /// OrcaSlicer profile arrays always contain string or numeric elements.
+    /// </summary>
+    private static List<string> DeserializeJsonArray(JsonElement arrayElem)
+    {
+        var list = new List<string>();
+        foreach (JsonElement item in arrayElem.EnumerateArray())
+        {
+            list.Add(item.ValueKind switch
+            {
+                JsonValueKind.String => item.GetString() ?? string.Empty,
+                _ => item.GetRawText()
+            });
+        }
+
+        return list;
     }
 
     private static void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)
@@ -1387,6 +1895,29 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// <summary>
     /// Extracts material type from profile name like "Generic ABS @System" -> "ABS".
     /// </summary>
+    /// <summary>
+    /// Extracts the manufacturer name from a filament profile name.
+    /// OrcaSlicer filament names follow the pattern: "Manufacturer Material @Variant"
+    /// </summary>
+    /// <summary>
+    /// Normalizes filament vendor names to match OrcaSlicer UI conventions.
+    /// For example, "Bambu Lab" becomes "Bambu", "OrcaFilamentLibrary" becomes "Generic".
+    /// </summary>
+    private static string NormalizeFilamentVendor(string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor))
+        {
+            return "Generic";
+        }
+
+        return vendor.Trim() switch
+        {
+            "Bambu Lab" => "Bambu",
+            "OrcaFilamentLibrary" => "Generic",
+            _ => vendor.Trim()
+        };
+    }
+
     private static string? ExtractMaterialFromName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))

@@ -167,6 +167,34 @@ public class SliceJob
     /// Number of times this job has been retried after timing out or failing.
     /// </summary>
     public int RetryCount { get; set; }
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// Format: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz]} (radians, Y-up).
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// JSON array of per-extruder filament profile names for multi-toolhead printers.
+    /// Stored as e.g. ["Generic PLA @System","Generic PETG @System"].
+    /// Null for single-extruder jobs.
+    /// </summary>
+    public string? ExtruderFilamentProfileNamesJson { get; set; }
+
+    /// <summary>
+    /// JSON array of model file URLs for multi-model slice jobs.
+    /// When populated, the worker downloads all listed models and passes them to the slicer CLI.
+    /// Null or empty for single-model jobs (falls back to <see cref="ModelFileUrl"/>).
+    /// </summary>
+    public string? ModelFileUrlsJson { get; set; }
+
+    /// <summary>
+    /// JSON array of per-model transform strings for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrlsJson"/>.
+    /// Format per entry: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz],"position":[px,py,pz]}.
+    /// Null for single-model jobs (falls back to <see cref="ModelTransformJson"/>).
+    /// </summary>
+    public string? ModelFileTransformsJson { get; set; }
 }
 
 /// <summary>

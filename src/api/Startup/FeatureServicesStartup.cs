@@ -42,6 +42,9 @@ public static class FeatureServicesStartup
         // Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
 
+        // Auto-tag service for completed print jobs
+        services.AddScoped<Farm.Infrastructure.Services.AutoTagging.IAutoTagService, Farm.Infrastructure.Services.AutoTagging.AutoTagService>();
+
         // Print Cost Calculator (calculates job costs from Spoolman spool price and filament usage)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintCostCalculator, Farm.Infrastructure.Services.Printers.PrintCostCalculator>();
 

@@ -2,9 +2,10 @@
  * OrcaSlicer-Style Slice Job Page
  * A full-screen slicer interface matching OrcaSlicer's layout
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as THREE from 'three';
 import { sliceJobService, type SubmitSliceJobRequest, SlicerEngine } from '@/services/sliceJobService';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { workersService } from '@/services/workersService';
@@ -15,13 +16,15 @@ import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
-import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
+import type { PlateManagerState } from '@/features/slicer/utils/plateManager';
+import { SlicerSettingsPanel, type OrcaProcessSettings } from '@/features/slicer/components/settings';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import type { MaterialType, MaterialPreset } from '@/types/slicer';
 import type { ModelListItem } from '@/types/models';
 import { Button, Alert, Select } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { toast } from 'sonner';
 
 const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
   'PLA': { name: 'PLA', nozzleTemp: 210, bedTemp: 60 },
@@ -51,7 +54,8 @@ export const OrcaSlicerPage: React.FC = () => {
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
-  const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
+  const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
+  const originalProcessSettings = useMemo<Record<string, unknown>>(() => ({}), []);
   const [loadedModels, setLoadedModels] = useState<LoadedModel[]>([]);
   const [selectedLoadedModelId, setSelectedLoadedModelId] = useState<string | null>(null);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -60,6 +64,11 @@ export const OrcaSlicerPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [slicing, setSlicing] = useState(false);
+  const plateStateRef = useRef<PlateManagerState | null>(null);
+
+  const handlePlateStateChange = useCallback((state: PlateManagerState) => {
+    plateStateRef.current = state;
+  }, []);
 
   // === Queries ===
   const { data: availableWorkers = [] } = useQuery<WorkerResponse[], Error>({
@@ -153,6 +162,9 @@ export const OrcaSlicerPage: React.FC = () => {
           config.textureUrl = asset.bedTexture;
           config.textureFormat = asset.bedTextureFormat as 'svg' | 'png' | undefined;
         }
+        if (asset?.bedModel) {
+          config.bedModelUrl = asset.bedModel;
+        }
       }
 
       return config;
@@ -188,7 +200,7 @@ export const OrcaSlicerPage: React.FC = () => {
           id: model.id,
           url: `${apiBase}/3d-models/file/${model.id}`,
           fileName: model.originalFileName || model.fileName,
-          fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : 'stl',
+          fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : ext === 'step' || ext === 'stp' ? 'step' : 'stl',
           position: [0, 0, 0],
           rotation: [0, 0, 0],
           scale: [1, 1, 1],
@@ -221,7 +233,7 @@ export const OrcaSlicerPage: React.FC = () => {
   });
 
   // === Handlers ===
-  const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings) => {
+  const handleSlicerSettingsChange = useCallback((newSettings: OrcaProcessSettings) => {
     setSlicerSettings(newSettings);
   }, []);
 
@@ -230,7 +242,7 @@ export const OrcaSlicerPage: React.FC = () => {
     // For now, just toggle a simple file input
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.stl,.3mf,.ply,.obj';
+    input.accept = '.stl,.3mf,.ply,.obj,.step,.stp';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
@@ -247,7 +259,7 @@ export const OrcaSlicerPage: React.FC = () => {
             id: uploaded.id,
             url: `${apiBase}/3d-models/file/${uploaded.id}`,
             fileName: file.name,
-            fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : 'stl',
+            fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : ext === 'step' || ext === 'stp' ? 'step' : 'stl',
             position: [0, 0, 0],
             rotation: [0, 0, 0],
             scale: [1, 1, 1],
@@ -267,13 +279,61 @@ export const OrcaSlicerPage: React.FC = () => {
     setSelectedLoadedModelId(modelId);
   }, []);
 
+  const handleModelTransform = useCallback(
+    (modelId: string, newPosition: [number, number, number], newRotation: [number, number, number], newScale: [number, number, number]) => {
+      setLoadedModels(prev =>
+        prev.map(model =>
+          model.id === modelId
+            ? { ...model, position: newPosition, rotation: newRotation, scale: newScale }
+            : model
+        )
+      );
+    },
+    []
+  );
+
+  // C1: Handle model replacement (e.g., after cut operation)
+  const handleModelsReplace = useCallback((removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => {
+    setLoadedModels(prev => {
+      const filtered = prev.filter(m => m.id !== removedId);
+      const additions: LoadedModel[] = newModels.map((nm, i) => ({
+        id: `${removedId}-cut-${i}-${Date.now()}`,
+        url: nm.url,
+        fileName: nm.fileName,
+        fileType: 'stl' as const,
+        position: nm.position ?? [0, 0, 0] as [number, number, number],
+        rotation: nm.rotation ?? [0, 0, 0] as [number, number, number],
+        scale: nm.scale ?? [1, 1, 1] as [number, number, number],
+        geometry: nm.geometry,
+      }));
+
+      // If all replacement models have blob URLs (upload failures), warn the user
+      const serverModel = newModels.find(m => m.url && !m.url.startsWith('blob:'));
+      if (!serverModel && newModels.length > 0) {
+        toast.warning('Cut pieces could not be uploaded to server. Please retry or re-add a model to slice.');
+      }
+
+      return [...filtered, ...additions];
+    });
+    setSelectedLoadedModelId(null);
+  }, []);
+
   const handleSettingsProfiles = useCallback(() => {
     setShowSettingsPanel(prev => !prev);
   }, []);
 
   const handleSlice = useCallback(() => {
-    if (loadedModels.length === 0) {
-      setError('Please add a model to slice');
+    // Determine which models belong to the active plate
+    const ps = plateStateRef.current;
+    const activePlateModelIds = ps
+      ? new Set(ps.plates.find(p => p.id === ps.activePlateId)?.modelIds ?? [])
+      : null;
+    const plateModels = activePlateModelIds
+      ? loadedModels.filter(m => activePlateModelIds.has(m.id))
+      : loadedModels;
+
+    if (plateModels.length === 0) {
+      setError('Please add a model to the active plate to slice');
       return;
     }
     if (!user?.id) {
@@ -281,7 +341,14 @@ export const OrcaSlicerPage: React.FC = () => {
       return;
     }
 
-    const model = loadedModels[0]; // For now, slice first model
+    // Find first model with a valid server URL (not a blob URL from a failed upload)
+    const model = plateModels.find(m => m.url && !m.url.startsWith('blob:')) ?? plateModels[0];
+    if (model.url.startsWith('blob:')) {
+      setError('No uploadable model available — all models have local-only blob URLs. Please re-add a model.');
+      toast.warning('Cannot slice: model files were not uploaded to server.');
+      return;
+    }
+
     const slicerEngine = selectedSlicerId === 1 ? SlicerEngine.PrusaSlicer : SlicerEngine.OrcaSlicer;
     const capabilities = [selectedSlicerId === 1 ? 'prusaslicer' : 'orcaslicer'];
     
@@ -295,12 +362,25 @@ export const OrcaSlicerPage: React.FC = () => {
       slicerProfileId: selectedProcessPresetId || undefined,
       requiredCapabilitiesJson: JSON.stringify(capabilities),
       priority,
+      // Multi-model support: collect all server-hosted model URLs for the active plate.
+      // NOTE (v1 limitation): Models created via the Text Tool use blob: URLs and are
+      // excluded here. A future version should upload text STLs as temp models first.
+      modelFileUrls: plateModels.length > 1
+        ? plateModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
+        : undefined,
+      // Per-model transforms: send each model's transform alongside its URL
+      modelFileTransforms: plateModels.length > 1
+        ? plateModels
+            .filter(m => m.url && !m.url.startsWith('blob:'))
+            .map(m => JSON.stringify({ rotation: m.rotation, scale: m.scale, position: m.position }))
+        : undefined,
     };
     
     submitMutation.mutate(request);
   }, [loadedModels, user, selectedSlicerId, selectedPrinterId, slicerSettings, selectedProcessPresetId, priority, submitMutation]);
 
-  const canSlice = loadedModels.length > 0 && !!selectedWorkerId;
+  const hasSubmittableModel = loadedModels.some(m => m.url && !m.url.startsWith('blob:'));
+  const canSlice = loadedModels.length > 0 && hasSubmittableModel && !!selectedWorkerId;
 
   return (
     <div className="h-screen flex flex-col bg-pf-bg-0">
@@ -417,7 +497,7 @@ export const OrcaSlicerPage: React.FC = () => {
               <SlicerSettingsPanel
                 settings={slicerSettings}
                 onChange={handleSlicerSettingsChange}
-                initialViewMode="basic"
+                originalSettings={originalProcessSettings}
               />
             </div>
 
@@ -441,6 +521,7 @@ export const OrcaSlicerPage: React.FC = () => {
             models={loadedModels}
             selectedModelId={selectedLoadedModelId || undefined}
             onModelSelect={handleModelSelect}
+            onModelTransform={handleModelTransform}
             onAddModel={handleAddModel}
             onSettingsProfiles={handleSettingsProfiles}
             onSlice={handleSlice}
@@ -448,6 +529,8 @@ export const OrcaSlicerPage: React.FC = () => {
             canSlice={canSlice}
             slicesRemaining={30}
             slicesTotal={30}
+            onModelsReplace={handleModelsReplace}
+            onPlateStateChange={handlePlateStateChange}
           />
         </div>
       </div>

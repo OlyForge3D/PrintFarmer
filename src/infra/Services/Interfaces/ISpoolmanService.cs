@@ -185,4 +185,10 @@ public interface ISpoolmanService
     /// falling back to client-side aggregation if the endpoint is not available.
     /// </summary>
     Task<IReadOnlyList<string>> GetAvailableMaterialsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Returns distinct material, vendor, and location values across all spools.
+    /// Fetches all spools with a large page size and extracts unique non-empty values.
+    /// </summary>
+    Task<SpoolFilterOptionsDto> GetFilterOptionsAsync(CancellationToken ct);
 }

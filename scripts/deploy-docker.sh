@@ -203,7 +203,7 @@ DOCKER_BUILDKIT_IMAGE="docker/dockerfile:1"
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
 DOCKER_LOCAL_IMAGES=(
-    "orcaslicer-binaries:2.3.1"
+    "orcaslicer-binaries:2.3.2"
 )
 
 # Derived arrays from DOCKER_IMAGES_CONFIG (for backward compatibility with existing code)
@@ -855,6 +855,11 @@ generate_deployment_config() {
     # Add Spoolman container if user chose to deploy it
     if [ "${DEPLOY_SPOOLMAN_CONTAINER:-no}" = "yes" ]; then
         generator_args+=("--include-spoolman")
+    fi
+    
+    # Add go2rtc sidecar if user chose to deploy it
+    if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
+        generator_args+=("--include-go2rtc")
     fi
     
     # Add worker configuration
@@ -1606,12 +1611,12 @@ build_base_images() {
     # Build OrcaSlicer binary layer
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    # Check if orcaslicer-binaries:2.3.1 already exists locally
-    if docker image inspect "orcaslicer-binaries:2.3.1" >/dev/null 2>&1; then
-        print_success "✓ orcaslicer-binaries:2.3.1 already exists locally (skipping rebuild)"
+    # Check if orcaslicer-binaries:2.3.2 already exists locally
+    if docker image inspect "orcaslicer-binaries:2.3.2" >/dev/null 2>&1; then
+        print_success "✓ orcaslicer-binaries:2.3.2 already exists locally (skipping rebuild)"
         ((successful++))
     else
-        print_info "Building: orcaslicer-binaries:2.3.1"
+        print_info "Building: orcaslicer-binaries:2.3.2"
         print_info "  Extracts OrcaSlicer Linux AppImage for caching"
         print_info "  Dockerfile: Dockerfile.base-orcaslicer-binaries"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1619,9 +1624,9 @@ build_base_images() {
         # Prepare build args - include ORCA_ASSET_PATH if available for offline builds
         local build_args=(
             -f "$docker_dir/Dockerfile.base-orcaslicer-binaries"
-            -t "orcaslicer-binaries:2.3.1"
+            -t "orcaslicer-binaries:2.3.2"
             --label="printfarmer-precache=true"
-            --build-arg ORCASLICER_VERSION=2.3.1
+            --build-arg ORCASLICER_VERSION=2.3.2
             --build-arg "CACHE_BUST=$cache_bust"
         )
         
@@ -1640,10 +1645,10 @@ build_base_images() {
         
         if docker build "${build_args[@]}" > /dev/null 2>&1; then
             
-            print_success "✓ Build successful: orcaslicer-binaries:2.3.1"
+            print_success "✓ Build successful: orcaslicer-binaries:2.3.2"
             ((successful++))
         else
-            print_warning "⚠ Build failed: orcaslicer-binaries:2.3.1 (optional, continuing)"
+            print_warning "⚠ Build failed: orcaslicer-binaries:2.3.2 (optional, continuing)"
             # Don't count as failure - OrcaSlicer binaries are optional
         fi
     fi
@@ -2327,6 +2332,7 @@ COMPOSE GENERATOR OPTIONS:
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
         --include-discovery Include network printer discovery service
+        --include-go2rtc    Include go2rtc RTSP-to-WebRTC bridge for camera streams
         --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
@@ -2695,7 +2701,7 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.2}
 
 EOF
 
@@ -2729,6 +2735,15 @@ Jwt__Audience=${Jwt__Audience:-PrintFarmer}
 EOF
     fi
 
+    # Save worker shared API key alongside JWT key
+    if [ -n "${WORKER_SHARED_API_KEY:-}" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# Worker Shared API Key (slicer-host ↔ worker job claim auth)
+WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY
+EOF
+    fi
+
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
 
@@ -2753,6 +2768,20 @@ PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
 EOF
     else
         echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no\nDEPLOY_SPOOLMAN_CONTAINER=no" >> "$CONFIG_FILE"
+    fi
+
+    # go2rtc config
+    if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# go2rtc Camera Streaming
+DEPLOY_GO2RTC=yes
+GO2RTC_PORT=${GO2RTC_PORT:-1984}
+GO2RTC_RTSP_PORT=${GO2RTC_RTSP_PORT:-8554}
+GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
+EOF
+    else
+        echo -e "\n# go2rtc Camera Streaming\nDEPLOY_GO2RTC=no" >> "$CONFIG_FILE"
     fi
 
     # Save external storage configuration (P0 Data Persistence)
@@ -3280,7 +3309,7 @@ configure_slicing() {
         # Default to 'no' to avoid accidental enabling when slicer work is paused
         prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
+            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.2}" "ORCASLICER_VERSION"
             prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
         else
             ORCA_WORKER_COUNT=0
@@ -3750,6 +3779,22 @@ configure_additional() {
             SPOOLMAN_PORT=""
             ;;
     esac
+
+    # go2rtc RTSP-to-WebRTC bridge
+    echo
+    echo -e "${BLUE}go2rtc Camera Streaming${NC}"
+    echo "go2rtc provides RTSP-to-WebRTC bridging for low-latency camera streams."
+    if [ "${CLI_INCLUDE_GO2RTC:-}" = "true" ]; then
+        print_info "go2rtc enabled via CLI flag"
+        DEPLOY_GO2RTC=yes
+    else
+        prompt_yes_no "Deploy go2rtc sidecar for camera streaming?" "no" "DEPLOY_GO2RTC_ANSWER"
+        if [ "$DEPLOY_GO2RTC_ANSWER" = "yes" ]; then
+            DEPLOY_GO2RTC=yes
+        else
+            DEPLOY_GO2RTC=no
+        fi
+    fi
 }
 
 # Generate and manage slicer worker API keys
@@ -4048,7 +4093,7 @@ PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" ||
 DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Slicer Versions
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.2}
 
 # Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
 # If not set by config file, these defaults are used
@@ -4071,6 +4116,12 @@ DEPLOY_SPOOLMAN_CONTAINER=${DEPLOY_SPOOLMAN_CONTAINER:-no}
 SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
 SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
 SPOOLMAN_IMAGE=${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}
+
+# go2rtc Camera Streaming
+DEPLOY_GO2RTC=${DEPLOY_GO2RTC:-no}
+GO2RTC_PORT=${GO2RTC_PORT:-1984}
+GO2RTC_RTSP_PORT=${GO2RTC_RTSP_PORT:-8554}
+GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
 
 # Application Settings - PFARM Configuration
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}
@@ -4108,6 +4159,17 @@ PFARM__Platform__ThumbnailGenerationEnabled=false
 PFARM__Platform__Architecture=${SYSTEM_ARCH}
 EOF
         print_info "ARM platform overrides written to .env"
+    fi
+
+    # Append go2rtc API integration settings when the sidecar is enabled
+    if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
+        cat >> "$ENV_FILE" << EOF
+
+# go2rtc API Integration
+PFARM__Go2Rtc__Enabled=true
+PFARM__Go2Rtc__BaseUrl=http://go2rtc:1984
+EOF
+        print_info "go2rtc API integration settings written to .env"
     fi
 
     # Small summary for generated environment file: show which sensitive values were included
@@ -4196,7 +4258,27 @@ Jwt__Key=$Jwt__Key
 Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
 Jwt__Audience=${Jwt__Audience:-PrintFarmer}
 EOF
-    
+
+    # Generate Worker Shared API Key for slicer-host ↔ worker job claim auth
+    # Preserved across redeploys so in-flight workers keep working
+    if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
+        if [ -f "$CONFIG_FILE" ]; then
+            WORKER_SHARED_API_KEY=$(get_kv_from_file "$CONFIG_FILE" "WORKER_SHARED_API_KEY" || true)
+        fi
+        if [ -z "${WORKER_SHARED_API_KEY:-}" ] && [ -f "$ENV_FILE" ]; then
+            WORKER_SHARED_API_KEY=$(get_kv_from_file "$ENV_FILE" "WORKER_SHARED_API_KEY" || true)
+        fi
+        if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
+            WORKER_SHARED_API_KEY=$(generate_slicer_api_key)
+            print_info "Generated new worker shared API key for job claim auth"
+        else
+            print_info "Using existing worker shared API key (preserved)"
+        fi
+    fi
+    echo "" >> "$ENV_FILE"
+    echo "# Worker Shared API Key (slicer-host ↔ worker job claim/progress/complete auth)" >> "$ENV_FILE"
+    echo "WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY" >> "$ENV_FILE"
+
     # Generate and export slicer worker API keys (if workers are enabled)
     # This ensures workers can authenticate with the API during registration
     generate_slicer_worker_api_keys
@@ -4560,7 +4642,7 @@ EOF
             ENABLE_ORCA_WORKER="no"
         fi
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
+            ORCA_VERSION="${ORCASLICER_VERSION:-2.3.2}"
             print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching via Dockerfile.multistage)..."
             
             # Build binary layer with automatic download and extraction
@@ -5532,7 +5614,7 @@ prepare_external_storage_directories() {
             if ! mkdir -p "$parent_dir" 2>/dev/null; then
                 print_error "Failed to create parent directory: $parent_dir"
                 print_info "  Reason: Permission denied or invalid path"
-                print_info "  Try: mkdir -p '$parent_dir' && chmod 755 '$parent_dir'"
+                print_info "  Try: mkdir -p '$parent_dir' && chmod 775 '$parent_dir'"
                 ((paths_failed++))
                 continue
             fi
@@ -5552,9 +5634,9 @@ prepare_external_storage_directories() {
             print_info "Directory already exists: [$desc] $path"
         fi
         
-        # Fix permissions to 755 (rwxr-xr-x) so appuser (any process) can read/write
-        # This is critical: if directory is 700 (rwx------), processes from other UIDs cannot access it
-        if ! chmod 755 "$path" 2>/dev/null; then
+        # Fix permissions to 775 (rwxrwxr-x) so both the host user and container appuser
+        # can write when they share a common group (for example gid 1001 / docker).
+        if ! chmod 775 "$path" 2>/dev/null; then
             print_warning "Could not set permissions on $path - may have restricted access"
             ((paths_failed++))
             continue
@@ -5564,13 +5646,13 @@ prepare_external_storage_directories() {
         local current_owner
         current_owner=$(ls -ld "$path" | awk '{print $3":"$4}')
         print_info "  Current ownership: $current_owner"
-        print_info "  Permissions set to: 755 (rwxr-xr-x)"
+        print_info "  Permissions set to: 775 (rwxrwxr-x)"
         
         # Verify permissions are now correct
         local perms
         perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
-        if [ "$perms" != "755" ] && [ "$perms" != "unknown" ]; then
-            print_warning "Permission verification returned: $perms (expected 755)"
+        if [ "$perms" != "775" ] && [ "$perms" != "unknown" ]; then
+            print_warning "Permission verification returned: $perms (expected 775)"
         else
             print_success "  Permissions verified ✓"
         fi
@@ -5584,7 +5666,7 @@ prepare_external_storage_directories() {
         print_warning "Failed to create/prepare: $paths_failed directories"
         print_warning "⚠️  Some storage directories may not be accessible. Docker will attempt to create them as root."
         print_info "If containers fail to start or report permission errors:"
-        echo "  1. Fix the paths manually: mkdir -p <path> && chmod 755 <path>"
+        echo "  1. Fix the paths manually: mkdir -p <path> && chmod 775 <path>"
         echo "  2. Or re-run: ./scripts/deploy-docker.sh (will retry pre-creation)"
         return 1
     else
@@ -5597,7 +5679,7 @@ prepare_external_storage_directories() {
             if [ -d "$path" ]; then
                 local owner
                 owner=$(ls -ld "$path" 2>/dev/null | awk '{print $3}')
-                echo "  [$desc] $path - owned by $owner, perms 755 ✓"
+                echo "  [$desc] $path - owned by $owner, perms 775 ✓"
             fi
         done
         return 0
@@ -5782,7 +5864,7 @@ validate_external_storage_permissions() {
         
         if [ ! -w "$path" ]; then
             print_error "✗ [$desc] Directory not writable: $path"
-            print_info "   Run: sudo chmod 755 '$path' to fix permissions"
+            print_info "   Run: sudo chmod 775 '$path' to fix permissions"
             ((invalid_dirs++))
             validation_passed=false
             continue
@@ -5792,7 +5874,7 @@ validate_external_storage_permissions() {
         local perms
         perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
         
-        # Acceptable permissions: 755 (optimal), 777 (permissive), 775 (group-writable)
+        # Acceptable permissions: 775 (optimal), 755 (owner-only write), 777 (permissive)
         if [[ "$perms" =~ ^(755|777|775)$ ]]; then
             local owner
             owner=$(ls -ld "$path" 2>/dev/null | awk '{print $3}')
@@ -5801,11 +5883,11 @@ validate_external_storage_permissions() {
             ((valid_dirs++))
         else
             print_warning "⚠ [$desc] Unexpected permissions: $path"
-            echo "    Expected: 755, 775, or 777 (at least rw-r--r--)"
+            echo "    Expected: 775, 755, or 777"
             local perms_octal
             perms_octal=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%OLp' "$path" 2>/dev/null | tail -c 4 || echo "unknown")
             echo "    Current: $perms_octal"
-            print_info "   Run: sudo chmod 755 '$path' to fix permissions"
+            print_info "   Run: sudo chmod 775 '$path' to fix permissions"
             ((invalid_dirs++))
             validation_passed=false
         fi
@@ -5824,8 +5906,8 @@ validate_external_storage_permissions() {
         print_error "✗ Some external storage directories have permission issues"
         echo
         print_warning "Fix permission issues before deployment:"
-        echo "  • For user-owned directories: chmod 755 <path>"
-        echo "  • For root-owned directories: sudo chmod 755 <path>"
+        echo "  • For user-owned directories: chmod 775 <path>"
+        echo "  • For root-owned directories: sudo chmod 775 <path>"
         echo "  • Or re-run: ./scripts/deploy-docker.sh (will attempt to fix)"
         return 1
     fi
@@ -6789,6 +6871,11 @@ while [ $# -gt 0 ]; do
             ;;
         --include-registry)
             CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --include-go2rtc)
+            CLI_INCLUDE_GO2RTC=true
+            DEPLOY_GO2RTC=yes
             shift
             ;;
         --use-registry)

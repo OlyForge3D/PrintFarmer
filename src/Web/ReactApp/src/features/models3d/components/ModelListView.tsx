@@ -106,7 +106,7 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
               </td>
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-2">
-                  {model.fileType !== '3mf' && (
+                  {model.fileType !== '3mf' && model.fileType !== 'step' && model.fileType !== 'stp' && (
                     <Button
                       onMouseEnter={() => {
                         // Preload hint for 3D viewer
@@ -136,7 +136,7 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
                     <TagIcon className="w-4 h-4" />
                   </Button>
                   <Button
-                    onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
+                    onClick={() => navigate(`/slicer?modelId=${model.id}`)}
                     variant="subtle"
                     size="sm"
                     title="Slice Model"

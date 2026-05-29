@@ -161,6 +161,93 @@ public class PrinterGroupService(
         logger.LogInformation("Removed printer '{PrinterName}' from group '{GroupName}'", printer.Name, group.Name);
     }
 
+    public async Task<IReadOnlyList<PrinterGroupAccessDto>> GetAccessRulesAsync(Guid groupId, CancellationToken ct)
+    {
+        List<PrinterGroupAccess> rules = await db.PrinterGroupAccesses
+            .Include(a => a.Role)
+            .Where(a => a.PrinterGroupId == groupId)
+            .OrderBy(a => a.Role.Name)
+            .ThenBy(a => a.AccessLevel)
+            .ToListAsync(ct);
+
+        return rules.Select(a => new PrinterGroupAccessDto(
+            a.Id,
+            a.RoleId,
+            a.Role.Name,
+            a.AccessLevel,
+            a.CreatedDate)).ToList();
+    }
+
+    public async Task<IReadOnlyList<PrinterGroupAccessDto>> SetAccessRulesAsync(Guid groupId, SetAccessRulesDto dto, CancellationToken ct)
+    {
+        bool groupExists = await db.PrinterGroups.AnyAsync(g => g.Id == groupId, ct);
+        if (!groupExists)
+        {
+            throw new KeyNotFoundException($"Printer group {groupId} not found.");
+        }
+
+        // Validate all RoleIds reference existing roles
+        if (dto.Rules.Count > 0)
+        {
+            List<Guid> requestedRoleIds = dto.Rules.Select(r => r.RoleId).Distinct().ToList();
+            List<Guid> existingRoleIds = await db.Roles
+                .Where(r => requestedRoleIds.Contains(r.Id))
+                .Select(r => r.Id)
+                .ToListAsync(ct);
+            List<Guid> invalidIds = requestedRoleIds.Except(existingRoleIds).ToList();
+            if (invalidIds.Count > 0)
+            {
+                throw new ArgumentException($"Invalid role ID(s): {string.Join(", ", invalidIds)}");
+            }
+        }
+
+        // Replace-all: remove existing rules, insert new ones
+        List<PrinterGroupAccess> existing = await db.PrinterGroupAccesses
+            .Where(a => a.PrinterGroupId == groupId)
+            .ToListAsync(ct);
+        db.PrinterGroupAccesses.RemoveRange(existing);
+
+        List<PrinterGroupAccess> newRules = dto.Rules.Select(r => new PrinterGroupAccess
+        {
+            Id = Guid.NewGuid(),
+            PrinterGroupId = groupId,
+            RoleId = r.RoleId,
+            AccessLevel = r.AccessLevel,
+            CreatedDate = DateTimeOffset.UtcNow,
+        }).ToList();
+
+        db.PrinterGroupAccesses.AddRange(newRules);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Set {Count} access rule(s) on printer group {GroupId}", newRules.Count, groupId);
+
+        return await GetAccessRulesAsync(groupId, ct);
+    }
+
+    public async Task<bool> CanUserSubmitToGroupAsync(Guid groupId, Guid userId, CancellationToken ct)
+    {
+        List<PrinterGroupAccess> rules = await db.PrinterGroupAccesses
+            .Where(a => a.PrinterGroupId == groupId)
+            .ToListAsync(ct);
+
+        // No rules → open to all (backward compatible)
+        if (rules.Count == 0)
+        {
+            return true;
+        }
+
+        // Get the user's active role IDs
+        List<Guid> userRoleIds = await db.UserRoles
+            .Where(ur => ur.UserId == userId && ur.IsActive)
+            .Select(ur => ur.RoleId)
+            .ToListAsync(ct);
+
+        // Check if any of the user's roles has Submit-level (or higher) access
+        return rules.Any(r =>
+            userRoleIds.Contains(r.RoleId) &&
+            r.AccessLevel >= PrinterGroupAccessLevel.Submit);
+    }
+
     private static PrinterGroupDto MapToDto(PrinterGroup group) => new()
     {
         Id = group.Id,

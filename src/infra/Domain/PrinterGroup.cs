@@ -35,4 +35,10 @@ public class PrinterGroup
     /// When the group is deleted, printers get PrinterGroupId set to null.
     /// </summary>
     public ICollection<Printer> Printers { get; set; } = new List<Printer>();
+
+    /// <summary>
+    /// Role-based access rules for this group.
+    /// When empty, the group is open to all users (backward compatible).
+    /// </summary>
+    public ICollection<PrinterGroupAccess> AccessRules { get; set; } = new List<PrinterGroupAccess>();
 }

@@ -12,6 +12,13 @@ export interface SubmitSliceJobRequest {
   slicerProfileId?: string;
   requiredCapabilitiesJson: string;
   priority?: number;
+  modelTransformJson?: string;
+  /** Per-extruder filament profile names for multi-toolhead printers (index = extruder index). */
+  extruderFilamentProfileNames?: string[];
+  /** Multiple model file URLs for multi-model slice jobs (e.g., split/cut models). */
+  modelFileUrls?: string[];
+  /** Per-model transforms for multi-model slice jobs. Each entry corresponds positionally to a URL in modelFileUrls. */
+  modelFileTransforms?: (string | null)[];
 }
 
 export interface SubmitSliceJobResponse {
@@ -53,15 +60,40 @@ export enum SlicerEngine {
   PrusaSlicer = 1
 }
 
+export interface SendToPrinterRequest {
+  printerId: string;
+  startPrint: boolean;
+}
+
+export interface SendToPrinterResponse {
+  jobId: string;
+  printerId: string;
+  fileName: string;
+  printStarted: boolean;
+  message: string;
+}
+
 export class SliceJobService {
   /**
    * Submit a new slicing job
    */
   async submitJob(request: SubmitSliceJobRequest): Promise<SubmitSliceJobResponse> {
     const response = await apiClient.request<SubmitSliceJobResponse>({
-      url: '/slice',
+      url: '/slice/',
       method: 'POST',
       data: request
+    });
+    return response;
+  }
+
+  /**
+   * Send completed gcode to a printer for printing
+   */
+  async sendToPrinter(jobId: string, printerId: string, startPrint: boolean): Promise<SendToPrinterResponse> {
+    const response = await apiClient.request<SendToPrinterResponse>({
+      url: `/slice/${jobId}/send-to-printer`,
+      method: 'POST',
+      data: { printerId, startPrint } satisfies SendToPrinterRequest
     });
     return response;
   }
@@ -85,6 +117,17 @@ export class SliceJobService {
       url: `/slice/${jobId}/cancel`,
       method: 'POST'
     });
+  }
+
+  /**
+   * Retry a failed job
+   */
+  async retryJob(jobId: string): Promise<SliceJobStatusResponse> {
+    const response = await apiClient.request<SliceJobStatusResponse>({
+      url: `/slice/${jobId}/retry`,
+      method: 'POST'
+    });
+    return response;
   }
 
   /**

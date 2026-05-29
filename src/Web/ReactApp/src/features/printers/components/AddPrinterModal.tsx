@@ -52,8 +52,6 @@ function AddPrinterModalContent({
     apiKey: undefined,
     username: undefined,
     password: undefined,
-    cameraStreamUrl: '',
-    cameraSnapshotUrl: '',
     backendPort: 7125,
     frontendPort: 80,
   });
@@ -221,8 +219,6 @@ function AddPrinterModalContent({
       apiKey: undefined,
       username: undefined,
       password: undefined,
-      cameraStreamUrl: '',
-      cameraSnapshotUrl: '',
     });
     setValidationErrors({});
     setError('');
@@ -364,7 +360,7 @@ function AddPrinterModalContent({
                     type="button"
                     variant="subtle"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                     iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                   />
@@ -392,7 +388,7 @@ function AddPrinterModalContent({
                     type="button"
                     variant="subtle"
                     onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
                     aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
                     iconCenter={showApiKey ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                   />
@@ -428,29 +424,9 @@ function AddPrinterModalContent({
               </div>
             )}
 
-            {/* Camera URLs (for OctoPrint) */}
-            {formData.backend === PrinterBackend.OctoPrint && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <FormField label="Camera Stream URL">
-                  <Input
-                    type="url"
-                    value={formData.cameraStreamUrl || ''}
-                    onChange={(e) => handleInputChange('cameraStreamUrl', e.target.value)}
-                    placeholder="http://octoprint.local/webcam/?action=stream"
-                    aria-label="Camera stream URL"
-                  />
-                </FormField>
-                <FormField label="Camera Snapshot URL">
-                  <Input
-                    type="url"
-                    value={formData.cameraSnapshotUrl || ''}
-                    onChange={(e) => handleInputChange('cameraSnapshotUrl', e.target.value)}
-                    placeholder="http://octoprint.local/webcam/?action=snapshot"
-                    aria-label="Camera snapshot URL"
-                  />
-                </FormField>
-              </div>
-            )}
+            <Alert type="info" title="Camera Management">
+              Cameras are managed from the Cameras page after the printer is added.
+            </Alert>
 
             {/* Manufacturer & Model Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

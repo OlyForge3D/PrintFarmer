@@ -419,7 +419,8 @@ public sealed class OctoPrintPollingService(
                             BedTemp: statusData.BedTemp,
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
-                            SpoolInfo: spoolInfo);
+                            SpoolInfo: spoolInfo,
+                            PrintTimeLeftSeconds: statusData.PrintTimeLeftSeconds);
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(cacheUpdate);

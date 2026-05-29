@@ -7,6 +7,7 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
@@ -20,10 +21,12 @@ namespace Farm.Web.Api.Controllers;
 [Authorize]
 public class CatalogController(
     ILogger<CatalogController> unifiedLoggingService,
-    Services.Catalog.ICatalogService catalogService) : ControllerBase
+    Services.Catalog.ICatalogService catalogService,
+    AppDbContext db) : ControllerBase
 {
     private readonly ILogger<CatalogController> _unifiedLoggingService = unifiedLoggingService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
+    private readonly AppDbContext _db = db;
 
     /// <summary>
     /// Gets all available printer manufacturers.
@@ -259,6 +262,94 @@ public class CatalogController(
         {
             _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateModelAliasesAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update model aliases" });
+        }
+    }
+
+    // ============ Model Dispatch Defaults Endpoints ============
+
+    /// <summary>
+    /// Sets auto-dispatch defaults for a printer model.
+    /// </summary>
+    [HttpPut("printer-models/{id:guid}/dispatch-defaults")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(PrinterModelDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<PrinterModelDto>> SetModelDispatchDefaultsAsync(
+        Guid id,
+        [FromBody] SetModelDispatchDefaultsRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            PrinterModel? entity = await _db.PrinterModels.FindAsync([id], ct);
+            if (entity is null)
+            {
+                return NotFound(new { error = "Model not found" });
+            }
+
+            entity.DefaultAutoDispatchState = request.DefaultAutoDispatchState;
+            entity.DefaultStartBehavior = request.DefaultStartBehavior;
+            entity.UpdatedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+
+            PrinterModelDto? updated = await _catalogService.GetModelByIdAsync(id, ct);
+            return updated is null ? NotFound(new { error = "Model not found" }) : Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] SetModelDispatchDefaultsAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to set model dispatch defaults" });
+        }
+    }
+
+    /// <summary>
+    /// Applies a model's dispatch defaults to all existing printers of that model.
+    /// </summary>
+    [HttpPost("printer-models/{id:guid}/apply-defaults")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(ApplyModelDefaultsResult), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<ApplyModelDefaultsResult>> ApplyModelDefaultsAsync(
+        Guid id,
+        CancellationToken ct)
+    {
+        try
+        {
+            PrinterModelDto? model = await _catalogService.GetModelByIdAsync(id, ct);
+            if (model is null)
+            {
+                return NotFound(new { error = "Model not found" });
+            }
+
+            List<Printer> printers = await _db.Printers
+                .Where(p => p.ModelId == id && p.UseModelDispatchDefaults)
+                .ToListAsync(ct);
+
+            int updated = 0;
+            int skipped = 0;
+            foreach (Printer printer in printers)
+            {
+                bool shouldEnable = model.DefaultAutoDispatchState != AutoDispatchState.None;
+                if (printer.AutoDispatchEnabled != shouldEnable)
+                {
+                    printer.AutoDispatchEnabled = shouldEnable;
+                    updated++;
+                }
+                else
+                {
+                    skipped++;
+                }
+            }
+
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(new ApplyModelDefaultsResult(updated, skipped));
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] ApplyModelDefaultsAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to apply model defaults" });
         }
     }
 

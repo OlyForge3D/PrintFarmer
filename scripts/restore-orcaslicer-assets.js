@@ -101,14 +101,17 @@ function restoreAssets() {
         return;
       }
 
-      // Find corresponding manifest entry
-      const mfrEntry = manifest.manufacturers.find(m => 
+      // Find corresponding manifest entry, or create one
+      let mfrEntry = manifest.manufacturers.find(m => 
         m.name.toLowerCase() === mfrDir.toLowerCase()
       );
 
       if (!mfrEntry) {
-        console.log(`⚠️  No manifest entry for ${mfrDir}`);
-        return;
+        // Create new manufacturer entry
+        const mfrId = mfrDir.toLowerCase().replace(/\s+/g, '-');
+        mfrEntry = { id: mfrId, name: mfrDir, printers: [] };
+        manifest.manufacturers.push(mfrEntry);
+        console.log(`  ➕ Created manifest entry for ${mfrDir}`);
       }
 
       // Create manufacturer asset directory
@@ -122,12 +125,15 @@ function restoreAssets() {
         const printerName = modelEntry.name;
 
         // Find corresponding printer in manifest
-        const printerEntry = mfrEntry.printers.find(p => 
+        let printerEntry = mfrEntry.printers.find(p => 
           p.name === printerName
         );
 
         if (!printerEntry) {
-          return;
+          // Create new printer entry
+          const printerId = printerName.toLowerCase().replace(/\s+/g, '_');
+          printerEntry = { id: printerId, name: printerName };
+          mfrEntry.printers.push(printerEntry);
         }
 
         // Get printer spec JSON path
@@ -145,10 +151,10 @@ function restoreAssets() {
           if (modelJson.bed_model) {
             const bedModelSrc = path.join(mfrPath, modelJson.bed_model);
             if (fs.existsSync(bedModelSrc)) {
-              const destName = `${printerId}_bed.stl`;
+              const destName = `${printerName}_bed.stl`;
               const dest = path.join(mfrAssetDir, destName);
               if (copyFile(bedModelSrc, dest)) {
-                printerEntry.bedModel = `/assets/orcaslicer/${mfrEntry.id}/${destName}`;
+                printerEntry.bedModel = `/assets/orcaslicer/${mfrEntry.id}/${encodeURIComponent(destName)}`;
                 stats.beds++;
               }
             }
@@ -159,10 +165,10 @@ function restoreAssets() {
             const bedTextureSrc = path.join(mfrPath, modelJson.bed_texture);
             if (fs.existsSync(bedTextureSrc)) {
               const ext = path.extname(modelJson.bed_texture);
-              const destName = `${printerId}_texture${ext}`;
+              const destName = `${printerName}_texture${ext}`;
               const dest = path.join(mfrAssetDir, destName);
               if (copyFile(bedTextureSrc, dest)) {
-                printerEntry.bedTexture = `/assets/orcaslicer/${mfrEntry.id}/${destName}`;
+                printerEntry.bedTexture = `/assets/orcaslicer/${mfrEntry.id}/${encodeURIComponent(destName)}`;
                 printerEntry.bedTextureFormat = ext === '.svg' ? 'svg' : 'png';
                 stats.textures++;
               }
@@ -173,10 +179,9 @@ function restoreAssets() {
           const coverName = `${printerName}_cover.png`;
           const coverSrc = path.join(mfrPath, coverName);
           if (fs.existsSync(coverSrc)) {
-            const destName = `${printerId}_cover.png`;
-            const dest = path.join(mfrAssetDir, destName);
+            const dest = path.join(mfrAssetDir, coverName);
             if (copyFile(coverSrc, dest)) {
-              printerEntry.cover = `/assets/orcaslicer/${mfrEntry.id}/${destName}`;
+              printerEntry.cover = `/assets/orcaslicer/${mfrEntry.id}/${encodeURIComponent(coverName)}`;
               stats.covers++;
             }
           }
@@ -205,6 +210,7 @@ function restoreAssets() {
   });
 
   // Update manifest statistics
+  if (!manifest.statistics) manifest.statistics = {};
   manifest.statistics.totalPrinters = manifest.manufacturers.reduce((sum, m) => sum + m.printers.length, 0);
   manifest.statistics.printersWithBedModel = manifest.manufacturers.reduce((sum, mfr) =>
     sum + mfr.printers.filter(p => p.bedModel).length, 0);

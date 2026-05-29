@@ -83,7 +83,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     // ------- CreatePrinter with MultiMaterial=true auto-creates MmuGate toolheads -------
 
     [Fact]
-    public async Task CreatePrinter_MultiMaterialTrue_CreatesThreeMmuGateToolheads()
+    public async Task CreatePrinter_MultiMaterialTrue_CreatesFourMmuGateToolheads()
     {
         (Guid mfgId, Guid modelId) = await SeedCatalog("MMU");
 
@@ -104,16 +104,15 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             .OrderBy(t => t.Index)
             .ToListAsync();
 
-        // 1 physical (T0) + 3 MmuGate (T1, T2, T3) = 4 total
-        toolheads.Should().HaveCount(4);
+        // 1 physical (T0) + 4 MmuGate (T1, T2, T3, T4) = 5 total — matches AMS hardware capacity (#302)
+        toolheads.Should().HaveCount(5);
         toolheads[0].ToolheadType.Should().Be(ToolheadType.Physical);
         toolheads[0].Index.Should().Be(0);
-        toolheads[1].ToolheadType.Should().Be(ToolheadType.MmuGate);
-        toolheads[1].Index.Should().Be(1);
-        toolheads[2].ToolheadType.Should().Be(ToolheadType.MmuGate);
-        toolheads[2].Index.Should().Be(2);
-        toolheads[3].ToolheadType.Should().Be(ToolheadType.MmuGate);
-        toolheads[3].Index.Should().Be(3);
+        for (int i = 1; i <= 4; i++)
+        {
+            toolheads[i].ToolheadType.Should().Be(ToolheadType.MmuGate);
+            toolheads[i].Index.Should().Be(i);
+        }
     }
 
     [Fact]
@@ -136,7 +135,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             .Where(t => t.PrinterId == created.Id && t.ToolheadType == ToolheadType.MmuGate)
             .ToListAsync();
 
-        mmuGates.Should().HaveCount(3);
+        mmuGates.Should().HaveCount(4);
         mmuGates.Should().AllSatisfy(g => g.IsPrimary.Should().BeFalse("MMU gates are virtual — only the physical T0 is primary"));
     }
 
@@ -180,7 +179,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             .Where(t => t.PrinterId == created.Id && t.ToolheadType == ToolheadType.MmuGate)
             .ToListAsync();
 
-        mmuGates.Should().HaveCount(3);
+        mmuGates.Should().HaveCount(4);
         mmuGates.Should().AllSatisfy(g =>
         {
             g.HotendModelId.Should().Be(hotendId, "MmuGate should copy HotendModelId from primary");
@@ -401,10 +400,126 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             .OrderBy(t => t.Index)
             .ToListAsync();
 
-        afterToolheads.Should().HaveCount(4);
-        afterToolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate).Should().Be(3);
+        afterToolheads.Should().HaveCount(5);
+        afterToolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate).Should().Be(4);
         afterToolheads.Where(t => t.ToolheadType == ToolheadType.MmuGate)
             .Select(t => t.Index)
-            .Should().BeEquivalentTo(new[] { 1, 2, 3 });
+            .Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
+    }
+
+    // ------- Gate-count semantics: mmuGateCount equals the number of AMS gates created (#302) -------
+
+    [Theory]
+    [InlineData(1, new[] { 1 })]
+    [InlineData(4, new[] { 1, 2, 3, 4 })]
+    [InlineData(16, new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 })]
+    public async Task SyncMmuToolheadsOnEntity_ToggleOn_CreatesGateCountGates(int mmuGateCount, int[] expectedGateIndices)
+    {
+        Guid printerId;
+        await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            Guid mfgId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = $"GateCount{mmuGateCount} Mfg" });
+            seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = $"GateCount{mmuGateCount} Model" });
+
+            var printer = new Printer
+            {
+                Id = Guid.NewGuid(),
+                Name = $"GateCount{mmuGateCount} Printer",
+                ServerUrl = $"http://192.168.1.{100 + mmuGateCount}",
+                BackendPort = 7125,
+                Backend = (int)PrinterBackend.Moonraker,
+                MultiMaterial = false,
+                ManufacturerId = mfgId,
+                ModelId = modelId
+            };
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = "Extruder",
+                Index = 0,
+                ToolheadType = ToolheadType.Physical,
+                IsPrimary = true,
+                UpdatedAt = DateTime.UtcNow
+            });
+
+            seedDb.Printers.Add(printer);
+            await seedDb.SaveChangesAsync();
+            printerId = printer.Id;
+        }
+
+        Printer reloaded = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .FirstAsync(p => p.Id == printerId);
+
+        reloaded.MultiMaterial = true;
+        _printersService.SyncMmuToolheadsOnEntity(reloaded, wasMultiMaterial: false, mmuGateCount: mmuGateCount);
+        await _dbContext.SaveChangesAsync();
+
+        List<int> mmuIndices = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.MmuGate)
+            .Select(t => t.Index)
+            .OrderBy(i => i)
+            .ToListAsync();
+
+        mmuIndices.Should().BeEquivalentTo(expectedGateIndices, $"mmuGateCount={mmuGateCount} should produce that many AMS gates at indices 1..{mmuGateCount}");
+    }
+
+    [Fact]
+    public async Task SyncMmuToolheadsOnEntity_ToggleOn_GateCountZero_CreatesNoGates()
+    {
+        Guid printerId;
+        await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            Guid mfgId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = "GateCountZero Mfg" });
+            seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = "GateCountZero Model" });
+
+            var printer = new Printer
+            {
+                Id = Guid.NewGuid(),
+                Name = "GateCountZero Printer",
+                ServerUrl = "http://192.168.1.50",
+                BackendPort = 7125,
+                Backend = (int)PrinterBackend.Moonraker,
+                MultiMaterial = false,
+                ManufacturerId = mfgId,
+                ModelId = modelId
+            };
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = "Extruder",
+                Index = 0,
+                ToolheadType = ToolheadType.Physical,
+                IsPrimary = true,
+                UpdatedAt = DateTime.UtcNow
+            });
+
+            seedDb.Printers.Add(printer);
+            await seedDb.SaveChangesAsync();
+            printerId = printer.Id;
+        }
+
+        Printer reloaded = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .FirstAsync(p => p.Id == printerId);
+
+        reloaded.MultiMaterial = true;
+        _printersService.SyncMmuToolheadsOnEntity(reloaded, wasMultiMaterial: false, mmuGateCount: 0);
+        await _dbContext.SaveChangesAsync();
+
+        int mmuCount = await _dbContext.Toolheads
+            .CountAsync(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.MmuGate);
+
+        mmuCount.Should().Be(0, "mmuGateCount=0 should not create any gates");
     }
 }

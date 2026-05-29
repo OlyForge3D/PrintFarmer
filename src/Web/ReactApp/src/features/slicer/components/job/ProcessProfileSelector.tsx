@@ -1,5 +1,5 @@
-import React from 'react';
-import { Select } from '@/common/components/ui';
+import React, { useMemo } from 'react';
+import Dropdown from '@/common/components/ui/Select';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import type { ProcessProfileListItem, HierarchicalProfilesResponse } from './types';
 
@@ -18,9 +18,28 @@ interface ProcessProfileSelectorProps {
   className?: string;
 }
 
+/** Split profiles into User (first) and System (second) groups, preserving order within each. */
+function groupByUserSystem(profiles: ProcessProfileListItem[]) {
+  const user: ProcessProfileListItem[] = [];
+  const system: ProcessProfileListItem[] = [];
+  for (const p of profiles) {
+    (p.isSystem ? system : user).push(p);
+  }
+  return { user, system };
+}
+
+function renderProfileOption(profile: ProcessProfileListItem) {
+  return (
+    <option key={profile.id} value={profile.id}>
+      {profile.name} - {profile.quality} ({profile.layerHeight}mm)
+    </option>
+  );
+}
+
 /**
  * Process profile selection component.
  * Shows filtered profiles if available, otherwise falls back to hierarchical or flat list.
+ * Profiles are grouped by User presets (first) then System presets.
  */
 export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
   availableProcessProfiles,
@@ -32,22 +51,41 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
 }) => {
   const hasFilteredProfiles = availableProcessProfiles.length > 0;
 
+  const filteredGroups = useMemo(
+    () => groupByUserSystem(availableProcessProfiles),
+    [availableProcessProfiles]
+  );
+
+  const fallbackGroups = useMemo(
+    () => groupByUserSystem(printerProcessProfiles),
+    [printerProcessProfiles]
+  );
+
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Process Profile</label>
+      <label htmlFor="process-profile-selector" className="block text-sm font-semibold text-pf-text-primary mb-2">Process Profile</label>
       {hasFilteredProfiles ? (
-        <Select
+        <Dropdown
+          id="process-profile-selector"
+          label="Process Profile"
+          aria-label="Process Profile"
+          title="Process Profile"
           value={selectedProcessPresetId}
           onChange={e => onProcessProfileChange(e.target.value)}
           className="w-full"
         >
           <option value="">-- Select Process Profile --</option>
-          {availableProcessProfiles.map(profile => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name} - {profile.quality} ({profile.layerHeight}mm)
-            </option>
-          ))}
-        </Select>
+          {filteredGroups.user.length > 0 && (
+            <optgroup label="User Presets">
+              {filteredGroups.user.map(renderProfileOption)}
+            </optgroup>
+          )}
+          {filteredGroups.system.length > 0 && (
+            <optgroup label="System Presets">
+              {filteredGroups.system.map(renderProfileOption)}
+            </optgroup>
+          )}
+        </Dropdown>
       ) : hierarchyProfiles ? (
         <ProfileSelector
           hierarchyData={hierarchyProfiles}
@@ -55,16 +93,31 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
           onChange={onProcessProfileChange}
         />
       ) : (
-        <Select
+        <Dropdown
+          id="process-profile-selector"
+          label="Process Profile"
+          aria-label="Process Profile"
+          title="Process Profile"
           value={selectedProcessPresetId}
           onChange={e => onProcessProfileChange(e.target.value)}
           className="w-full"
         >
           <option value="">-- Select Process Profile --</option>
-          {printerProcessProfiles.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </Select>
+          {fallbackGroups.user.length > 0 && (
+            <optgroup label="User Presets">
+              {fallbackGroups.user.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </optgroup>
+          )}
+          {fallbackGroups.system.length > 0 && (
+            <optgroup label="System Presets">
+              {fallbackGroups.system.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </optgroup>
+          )}
+        </Dropdown>
       )}
     </div>
   );

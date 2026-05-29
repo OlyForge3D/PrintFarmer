@@ -8,9 +8,13 @@
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <PreserveCompilationContext>false</PreserveCompilationContext>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Farm.OrcaSlicer.Worker.Tests" />
+  </ItemGroup>
   <!-- Note: Health check and System.Text.Json packages removed - available via project references -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.7" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../worker-shared/Farm.Slicer.Worker.Core.csproj" />

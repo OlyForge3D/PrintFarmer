@@ -1,5 +1,6 @@
 import { useState, useEffect, useTransition, useCallback, useMemo, useRef } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
+import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
   FilterIcon,
   RefreshIcon,
@@ -7,6 +8,7 @@ import {
   PackageIcon,
   EditIcon,
   GridIcon,
+  ListIcon,
   TableIcon,
   GearIcon,
   CloseIcon,
@@ -25,10 +27,12 @@ import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { SpoolCard } from '@/features/filamentManagement/components/SpoolCard';
+import { SpoolCompactView } from '@/features/filamentManagement/components/SpoolCompactView';
 import { SpoolTableView } from '@/features/filamentManagement/components/SpoolTableView';
 import { EditSpoolModal } from '@/features/filamentManagement/components/EditSpoolModal';
 import { AddSpoolModal } from '@/features/filamentManagement/components/AddSpoolModal';
 import { BulkEditSpoolsModal } from '@/features/filamentManagement/components/BulkEditSpoolsModal';
+import { SpoolLabelModal } from '@/features/filamentManagement/components/SpoolLabelModal';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { useDeleteSpool, useBulkDeleteSpools, useImportSpoolmanSpoolsCsv } from '@/common/hooks/useApi';
 import { formatSpoolWeight, getUsagePercentage, getRemainingPercentage } from '@/features/filamentManagement/utils/formatters';
@@ -70,27 +74,74 @@ export function SpoolsTab() {
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const importCsvMutation = useImportSpoolmanSpoolsCsv();
   const [,startTransition] = useTransition();
-  const [currentPage, setCurrentPage] = useState(0);
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    material: '',
-    vendor: '',
-    color: '',
-    pageSize: 50,
-    location: '',
-    showEmpty: false
-  });
-  const [sortField, setSortField] = useState<string>('id');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
-    const saved = localStorage.getItem('spools-view-mode');
-    return saved === 'table' ? 'table' : 'cards';
+
+  const {
+    search: urlSearch,
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    location: urlLocation,
+    showEmpty: urlShowEmpty,
+    pageSize: urlPageSize,
+    sortField: urlSortField,
+    sortDir: urlSortDir,
+    page: urlPage,
+    setSearch,
+    setMany,
+    resetAll,
+    hasActiveFilters: urlHasActiveFilters,
+  } = useUrlFilterState({
+    search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
+    material: { key: 'material', type: 'string', defaultValue: '' },
+    vendor: { key: 'vendor', type: 'string', defaultValue: '' },
+    color: { key: 'color', type: 'string', defaultValue: '' },
+    location: { key: 'location', type: 'string', defaultValue: '' },
+    showEmpty: { key: 'showEmpty', type: 'boolean', defaultValue: false },
+    pageSize: { key: 'pageSize', type: 'number', defaultValue: 50, filterable: false },
+    sortField: { key: 'sort', type: 'string', defaultValue: 'id', filterable: false },
+    sortDir: { key: 'dir', type: 'string', defaultValue: 'asc', filterable: false },
+    page: { key: 'page', type: 'number', defaultValue: 0, filterable: false },
   });
 
-  // Filter dropdown options — accumulated from loaded data
+  const currentPage = urlPage as number;
+  const filters: FilterState = {
+    search: urlSearch,
+    material: urlMaterial,
+    vendor: urlVendor,
+    color: urlColor,
+    pageSize: urlPageSize as number,
+    location: urlLocation,
+    showEmpty: urlShowEmpty as boolean,
+  };
+  const sortField = urlSortField as string;
+  const sortDir = urlSortDir as 'asc' | 'desc';
+  const [viewMode, setViewMode] = useState<'cards' | 'compact' | 'table'>(() => {
+    const saved = localStorage.getItem('spools-view-mode');
+    if (saved === 'table' || saved === 'compact') return saved;
+    return 'cards';
+  });
+
+  // Filter dropdown options — loaded once from dedicated endpoint, supplemented by page data
   const [materialOptions, setMaterialOptions] = useState<string[]>([]);
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
+  const filterOptionsLoaded = useRef(false);
+
+  // Load filter dropdown options from the server once on mount
+  useEffect(() => {
+    if (filterOptionsLoaded.current) return;
+    filterOptionsLoaded.current = true;
+    (async () => {
+      try {
+        const opts = await apiClient.getSpoolFilterOptions();
+        setMaterialOptions(opts.materials ?? []);
+        setVendorOptions(opts.vendors ?? []);
+        setLocationOptions(opts.locations ?? []);
+      } catch {
+        // Endpoint unavailable — fallback accumulation in loadSpools will fill them
+      }
+    })();
+  }, []);
 
   // Persist view mode preference
   useEffect(() => {
@@ -106,6 +157,7 @@ export function SpoolsTab() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [cloningSpool, setCloningSpool] = useState<SpoolmanSpoolDto | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single'; spool: SpoolmanSpoolDto } | { type: 'bulk' } | null>(null);
+  const [labelSpool, setLabelSpool] = useState<SpoolmanSpoolDto | null>(null);
   const deleteSpoolMutation = useDeleteSpool();
   const bulkDeleteMutation = useBulkDeleteSpools();
 
@@ -167,8 +219,8 @@ export function SpoolsTab() {
     },
     {
       key: 'v',
-      handler: () => setViewMode(viewMode === 'cards' ? 'table' : 'cards'),
-      description: 'Toggle view mode (cards/table)'
+      handler: () => setViewMode(prev => prev === 'cards' ? 'compact' : prev === 'compact' ? 'table' : 'cards'),
+      description: 'Cycle view mode (cards/compact/table)'
     }
   ]);
 
@@ -235,10 +287,9 @@ export function SpoolsTab() {
     });
   };
 
-  const hasActiveSpoolFilters = filters.search !== '' || filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.location !== '' || filters.showEmpty;
+  const hasActiveSpoolFilters = urlHasActiveFilters;
   const resetSpoolFilters = () => {
-    setFilters(prev => ({ ...prev, search: '', material: '', vendor: '', color: '', location: '', showEmpty: false }));
-    setCurrentPage(0);
+    resetAll();
   };
 
   const loadSpools = useCallback(async () => {
@@ -515,6 +566,15 @@ export function SpoolsTab() {
               <GridIcon className="h-4 w-4" />
             </Button>
             <Button
+              variant={viewMode === 'compact' ? 'primary' : 'secondary'}
+              size="sm"
+              aria-label="Compact list view"
+              title="Compact list view"
+              onClick={() => setViewMode('compact')}
+            >
+              <ListIcon className="h-4 w-4" />
+            </Button>
+            <Button
               variant={viewMode === 'table' ? 'primary' : 'secondary'}
               size="sm"
               aria-label="Table view"
@@ -665,10 +725,7 @@ export function SpoolsTab() {
                   id="spool-search"
                   type="search"
                   value={filters.search}
-                  onChange={e => {
-                    setFilters(prev => ({ ...prev, search: e.target.value }));
-                    setCurrentPage(0);
-                  }}
+                  onChange={e => setSearch(e.target.value)}
                   placeholder="Name, vendor, material..."
                   className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
                   aria-label="Search spools"
@@ -679,10 +736,7 @@ export function SpoolsTab() {
                 <Select
                   aria-label="Filter by material"
                   value={filters.material}
-                  onChange={(e) => {
-                    setFilters(prev => ({ ...prev, material: e.target.value }));
-                    setCurrentPage(0);
-                  }}
+                  onChange={(e) => setMany({ material: e.target.value, page: 0 })}
                   className="w-40"
                 >
                   <option value="">All Materials</option>
@@ -697,10 +751,7 @@ export function SpoolsTab() {
                 <Select
                   aria-label="Filter by vendor"
                   value={filters.vendor}
-                  onChange={(e) => {
-                    setFilters(prev => ({ ...prev, vendor: e.target.value }));
-                    setCurrentPage(0);
-                  }}
+                  onChange={(e) => setMany({ vendor: e.target.value, page: 0 })}
                   className="w-40"
                 >
                   <option value="">All Vendors</option>
@@ -714,7 +765,7 @@ export function SpoolsTab() {
                 <label className="text-xs text-pf-text-secondary">Color</label>
                 <ColorFamilySelect
                   value={filters.color}
-                  onChange={(val) => setFilters(prev => ({ ...prev, color: val }))}
+                  onChange={(val) => setMany({ color: val, page: 0 })}
                   options={getColorFamilyOptions()}
                   placeholder="All Colors"
                 />
@@ -725,10 +776,7 @@ export function SpoolsTab() {
                 <Select
                   aria-label="Filter by location"
                   value={filters.location}
-                  onChange={(e) => {
-                    setFilters(prev => ({ ...prev, location: e.target.value }));
-                    setCurrentPage(0);
-                  }}
+                  onChange={(e) => setMany({ location: e.target.value, page: 0 })}
                   className="w-40"
                 >
                   <option value="">All Locations</option>
@@ -738,7 +786,7 @@ export function SpoolsTab() {
                 </Select>
               </div>
 
-              {viewMode === 'cards' && (
+              {(viewMode === 'cards' || viewMode === 'compact') && (
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-pf-text-secondary" htmlFor="sort-field">Sort</label>
                   <div className="flex gap-1 items-center">
@@ -746,10 +794,7 @@ export function SpoolsTab() {
                       id="sort-field"
                       aria-label="Sort field"
                       value={sortField}
-                      onChange={e => {
-                        setSortField(e.target.value);
-                        setCurrentPage(0);
-                      }}
+                      onChange={e => setMany({ sortField: e.target.value, page: 0 })}
                       className="w-40"
                     >
                       <option value="id">ID</option>
@@ -763,10 +808,7 @@ export function SpoolsTab() {
                       size="sm"
                       variant="subtle"
                       aria-label="Toggle sort direction"
-                      onClick={() => {
-                        setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
-                        setCurrentPage(0);
-                      }}
+                      onClick={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 0 })}
                       iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
                     />
                   </div>
@@ -780,10 +822,7 @@ export function SpoolsTab() {
                     id="spool-page-size"
                     aria-label="Page size"
                     value={String(filters.pageSize)}
-                    onChange={(e) => {
-                      setFilters(prev => ({ ...prev, pageSize: parseInt(e.target.value) }));
-                      setCurrentPage(0);
-                    }}
+                    onChange={(e) => setMany({ pageSize: parseInt(e.target.value), page: 0 })}
                     className="w-20"
                   >
                     <option value="10">10</option>
@@ -804,7 +843,7 @@ export function SpoolsTab() {
                     size="sm"
                     variant="subtle"
                     disabled={currentPage === 0}
-                    onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+                    onClick={() => setMany({ page: Math.max(0, currentPage - 1) })}
                     aria-label="Previous page"
                     iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
                   />
@@ -815,7 +854,7 @@ export function SpoolsTab() {
                     size="sm"
                     variant="subtle"
                     disabled={currentPage >= totalPages - 1}
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))}
+                    onClick={() => setMany({ page: Math.min(totalPages - 1, currentPage + 1) })}
                     aria-label="Next page"
                     iconLeft={<ArrowRightIcon className="h-3 w-3" />}
                   />
@@ -825,10 +864,7 @@ export function SpoolsTab() {
                   <Checkbox
                     aria-label="Show empty spools"
                     checked={filters.showEmpty}
-                    onChange={e => {
-                      setFilters(prev => ({ ...prev, showEmpty: e.target.checked }));
-                      setCurrentPage(0);
-                    }}
+                    onChange={e => setMany({ showEmpty: e.target.checked, page: 0 })}
                   />
                   Show empty
                 </label>
@@ -891,9 +927,23 @@ export function SpoolsTab() {
                   onEdit={() => setEditingSpool(spool)}
                   onClone={() => setCloningSpool(spool)}
                   onDelete={() => setDeleteConfirm({ type: 'single', spool })}
+                  onPrintLabel={() => setLabelSpool(spool)}
                 />
               ))}
             </div>
+          )}
+          {viewMode === 'compact' && (
+            <SpoolCompactView
+              spools={displayedSpools}
+              selectedIds={selectedIds}
+              allSelected={allSelected}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onEdit={(s) => setEditingSpool(s)}
+              onClone={(s) => setCloningSpool(s)}
+              onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
+              onPrintLabel={(s) => setLabelSpool(s)}
+            />
           )}
           {viewMode === 'table' && (
             <SpoolTableView
@@ -903,12 +953,13 @@ export function SpoolsTab() {
               allSelected={allSelected}
               sortField={sortField}
               sortDir={sortDir}
-              onSort={(field, dir) => { setSortField(field); setSortDir(dir); setCurrentPage(0); }}
+              onSort={(field, dir) => setMany({ sortField: field, sortDir: dir, page: 0 })}
               onToggleSelect={toggleSelect}
               onToggleSelectAll={toggleSelectAll}
               onEdit={(s) => setEditingSpool(s)}
               onClone={(s) => setCloningSpool(s)}
               onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
+              onPrintLabel={(s) => setLabelSpool(s)}
             />
           )}
           {displayedSpools.length === 0 && (totalCount > 0 || hasActiveSpoolFilters) && (
@@ -951,6 +1002,13 @@ export function SpoolsTab() {
         onClose={() => setIsBulkEditOpen(false)}
         selectedIds={[...selectedIds]}
         onSuccess={reload}
+      />
+
+      {/* Print Label Modal */}
+      <SpoolLabelModal
+        isOpen={labelSpool !== null}
+        onClose={() => setLabelSpool(null)}
+        spool={labelSpool}
       />
 
       {/* Delete Confirmation Modal */}

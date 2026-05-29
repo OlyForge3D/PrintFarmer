@@ -22,7 +22,7 @@ if [ ! -f "./Dockerfile.multistage" ]; then
     exit 1
 fi
 
-ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
+ORCA_VERSION="${ORCASLICER_VERSION:-2.3.2}"
 
 echo "[buildx] Building orcaslicer-binaries:${ORCA_VERSION} for linux/amd64 (cached layer) using Dockerfile.multistage";
 

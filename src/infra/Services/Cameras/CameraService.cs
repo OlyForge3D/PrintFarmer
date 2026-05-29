@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Cameras;
@@ -16,19 +18,23 @@ namespace Farm.Infrastructure.Services.Cameras;
 public class CameraService : ICameraService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly AppDbContext _db;
     private readonly ILogger<CameraService> _logger;
     private readonly IPrintersService _printersService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
+        AppDbContext db,
         ILogger<CameraService> logger,
         IPrintersService printersService)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
+        ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(printersService);
 
         _unitOfWork = unitOfWork;
+        _db = db;
         _logger = logger;
         _printersService = printersService;
     }
@@ -46,6 +52,7 @@ public class CameraService : ICameraService
         CreatedAt = camera.CreatedAt,
         UpdatedAt = camera.UpdatedAt,
         PrinterId = camera.PrinterId,
+        PrinterName = camera.Printer?.Name,
         Source = camera.Source,
         CameraType = camera.CameraType,
         HealthStatus = camera.HealthStatus,
@@ -156,10 +163,10 @@ public class CameraService : ICameraService
                 throw new InvalidOperationException($"A camera with name '{dto.Name}' already exists");
             }
 
-            // Validate PrinterId if provided
+            Printer? printer = null;
             if (dto.PrinterId.HasValue)
             {
-                Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
+                printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
                 if (printer == null)
                 {
                     throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
@@ -177,6 +184,7 @@ public class CameraService : ICameraService
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
                 PrinterId = dto.PrinterId,
+                Printer = printer,
                 Source = dto.Source ?? CameraSource.Standalone,
                 CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,
@@ -267,19 +275,16 @@ public class CameraService : ICameraService
                 camera.CameraType = dto.CameraType.Value;
             }
 
-            // Validate and update PrinterId if provided
-            if (dto.PrinterId != camera.PrinterId)
+            if (dto.PrinterId.HasValue && dto.PrinterId != camera.PrinterId)
             {
-                if (dto.PrinterId.HasValue)
+                Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
+                if (printer == null)
                 {
-                    Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
-                    if (printer == null)
-                    {
-                        throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
-                    }
+                    throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
                 }
 
                 camera.PrinterId = dto.PrinterId;
+                camera.Printer = printer;
             }
 
             camera.UpdatedAt = DateTime.UtcNow;
@@ -311,6 +316,20 @@ public class CameraService : ICameraService
             if (camera == null)
             {
                 return false;
+            }
+
+            // Pre-delete snapshot rows before removing the camera entity.
+            // The Camera→CameraSnapshot FK is Restrict, so EF Core will throw a FK
+            // violation if any snapshot rows still reference this camera when it is removed.
+            List<Domain.CameraSnapshot> snapshots = await _db.CameraSnapshots
+                .Where(s => s.CameraId == id)
+                .ToListAsync(ct);
+            if (snapshots.Count > 0)
+            {
+                _db.CameraSnapshots.RemoveRange(snapshots);
+                _logger.LogInformation(
+                    "Removing {Count} orphaned snapshot records for camera {CameraId}",
+                    snapshots.Count, id);
             }
 
             _unitOfWork.Cameras.Remove(camera);
@@ -426,7 +445,6 @@ public class CameraService : ICameraService
 
         try
         {
-            // Validate printer exists
             Printer? printer = await _printersService.FindByIdAsync(printerId, ct);
             if (printer == null)
             {
@@ -450,6 +468,7 @@ public class CameraService : ICameraService
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
                 PrinterId = printerId,
+                Printer = printer,
                 Source = dto.Source ?? CameraSource.Standalone,
                 CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,

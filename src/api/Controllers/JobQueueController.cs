@@ -1,8 +1,5 @@
 ﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
-using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
@@ -79,7 +76,21 @@ public class JobQueueController(
 
         try
         {
-            JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
+            // Parse userId from claims for ACL enforcement — fail closed for authenticated requests
+            string? userIdStr = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User?.FindFirst("sub")?.Value;
+
+            if (!Guid.TryParse(userIdStr, out Guid parsed))
+            {
+                logger.LogWarning("Queue job denied: unable to resolve user identity from claims (raw value: {UserIdStr})", userIdStr);
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { error = "Unable to verify group access — user identity could not be resolved." });
+            }
+
+            Guid? userId = parsed;
+
+            JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, userId, CancellationToken.None);
             if (added == null)
             {
                 return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
@@ -88,6 +99,12 @@ public class JobQueueController(
             // Return 201 Created with location header
             string location = $"/api/job-queue/{added.Id}";
             return Created(location, added);
+        }
+        catch (QueueGroupAccessDeniedException)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "You do not have permission to submit jobs to this printer group." });
         }
         catch (Exception ex)
         {

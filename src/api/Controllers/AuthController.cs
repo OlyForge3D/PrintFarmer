@@ -6,6 +6,7 @@ using Farm.Infrastructure.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;
 using ConfirmEmailRequest = Farm.Infrastructure.ConfirmEmailRequest;
 using ForgotPasswordRequest = Farm.Infrastructure.Contracts.Auth.ForgotPasswordRequest;
@@ -19,9 +20,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/auth")]
 [Tags("Authentication")]
-public class AuthController(IAuthenticationService authService, ILogger<AuthController> logger) : ControllerBase
+public class AuthController(IAuthenticationService authService, ILoginAuditService loginAuditService, ILogger<AuthController> logger) : ControllerBase
 {
     private readonly IAuthenticationService _authService = authService;
+    private readonly ILoginAuditService _loginAuditService = loginAuditService;
     private readonly ILogger<AuthController> _logger = logger;
 
     [HttpPost("login")]
@@ -33,7 +35,15 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
             return BadRequest(new AuthenticationResult(false, Error: "Username/Email and password are required"));
         }
 
+        string ipAddress = ResolveClientIp(HttpContext);
+        string? rawUa = HttpContext.Request.Headers.UserAgent.ToString();
+        string? userAgent = string.IsNullOrEmpty(rawUa) ? null : rawUa;
+        string? usernameSubmitted = request.UsernameOrEmail;
+
         AuthenticationResult result = await _authService.AuthenticateAsync(request.UsernameOrEmail, request.Password);
+
+        string? failureReason = result.Success ? null : MapFailureReason(result.Error);
+        await _loginAuditService.RecordAsync(usernameSubmitted, result.Success, ipAddress, userAgent, failureReason, HttpContext.RequestAborted);
 
         return result.Success ? Ok(result) : Unauthorized(result);
     }
@@ -341,6 +351,48 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
             return BadRequest(new ResendConfirmationResponse(false, "An error occurred while sending the confirmation email"));
         }
     }
+
+    // ─── helpers ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolve the real client IP. Checks X-Forwarded-For first (nginx proxy), falls back to connection IP.
+    /// Takes only the first (leftmost) value from a comma-delimited XFF list — that is the original client.
+    /// </summary>
+    private static string ResolveClientIp(HttpContext context)
+    {
+        try
+        {
+#pragma warning disable S6932 // Reading X-Forwarded-For directly is intentional — nginx sets it, model binding doesn't cover arbitrary headers
+            if (context.Request.Headers.TryGetValue("X-Forwarded-For", out StringValues xff) &&
+                !StringValues.IsNullOrEmpty(xff))
+            {
+                string first = xff.ToString().Split(',')[0].Trim();
+                if (!string.IsNullOrEmpty(first))
+                {
+                    return first;
+                }
+            }
+#pragma warning restore S6932
+        }
+        catch
+        {
+            // Ignore malformed header; fall through to connection IP
+        }
+
+        return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
+
+    /// <summary>
+    /// Map an <see cref="AuthenticationResult.Error"/> string to a short, normalised failure-reason code.
+    /// </summary>
+    private static string? MapFailureReason(string? error) =>
+        error switch
+        {
+            null => null,
+            _ when error.Contains("locked", StringComparison.OrdinalIgnoreCase) => "account_locked",
+            _ when error.Contains("disabled", StringComparison.OrdinalIgnoreCase) => "account_disabled",
+            _ => "invalid_credentials",
+        };
 }
 
 public record ConfirmEmailResponse(bool Success, string Message);

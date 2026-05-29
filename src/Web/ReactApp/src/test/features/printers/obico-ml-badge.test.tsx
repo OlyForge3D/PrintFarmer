@@ -34,8 +34,14 @@ vi.mock('@/common/hooks/usePrinterDisplay', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
+    setQueryData: vi.fn(),
   }),
   useQuery: () => ({ data: undefined, isLoading: false }),
+  useMutation: () => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn().mockResolvedValue({ success: true }),
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({

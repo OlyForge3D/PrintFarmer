@@ -208,7 +208,7 @@ When deploying with multiple OrcaSlicer workers:
 #   Architecture: microservices
 #   Database: PostgreSQL
 #   Enable OrcaSlicer workers: yes
-#   OrcaSlicer version: 2.3.1
+#   OrcaSlicer version: 2.3.2
 #   Number of replicas: 3
 ```
 
@@ -270,7 +270,7 @@ The worker registration flow is implemented in three files:
 # Choose architecture [1=Monolithic, 2=Microservices]: 2
 # Choose database [1=PostgreSQL, 2=SQL Server, 3=MySQL, 4=External]: 1
 # Enable OrcaSlicer worker(s)? yes
-# OrcaSlicer version to deploy: 2.3.1
+# OrcaSlicer version to deploy: 2.3.2
 # Number of OrcaSlicer worker replicas: 1
 ```
 
@@ -278,7 +278,7 @@ Generated `.env` (Relevant Sections):
 ```bash
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=1
-ORCASLICER_VERSION=2.3.1
+ORCASLICER_VERSION=2.3.2
 SlicerRegistry__ApiKey=a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6
 ```
 
@@ -311,7 +311,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=3
-ORCASLICER_VERSION=2.3.1
+ORCASLICER_VERSION=2.3.2
 ```
 
 Generated `.env` (Worker Section):
@@ -537,7 +537,7 @@ ENABLE_ORCA_WORKER=yes
 ORCA_HOST_PORT=8081
 
 # Slicer Versions
-ORCASLICER_VERSION=2.3.1
+ORCASLICER_VERSION=2.3.2
 
 # Slicer Worker API Keys - Generated for automatic worker registration
 # Workers use these keys to authenticate with the API during registration

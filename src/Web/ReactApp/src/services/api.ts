@@ -5,8 +5,10 @@ import {
   ApiError,
   PrintJobStatusDto,
   AuthenticationResult,
+  BedType,
   CatalogContext,
   CommandResult,
+  CreateBedTypeRequest,
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
@@ -42,6 +44,7 @@ import {
   PrinterFast,
   PrinterFileDto,
   PrinterGroup,
+  PrinterGroupAccessRule,
   PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
@@ -50,8 +53,12 @@ import {
   QueueOverviewDto,
   RegisterRequest,
   ResolveHostnameRequest,
+  RoleDto,
+  SetAccessRulesRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
+  ProfileSchemasResponse,
+  ProfileTypeSchema,
   SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -70,9 +77,12 @@ import {
   UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
+  SetModelDispatchDefaultsRequest,
+  ApplyModelDefaultsResult,
   GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
+  SpoolFilterOptions,
   SpoolmanFilament,
   SpoolmanVendor,
   SpoolmanMaterial,
@@ -98,6 +108,7 @@ import {
     FailureDetectionEvent,
     NotificationDto,
   NotificationPreferencesDto,
+  UpdateBedTypeRequest,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
   ScheduledJob,
@@ -113,7 +124,25 @@ import {
   ObicoServerHealthResponse,
   TimelineEventDto,
   TimezoneInfo,
+  MaterialClusterDto,
+  CreateMaterialClusterRequest,
+  UpdateMaterialClusterRequest,
+  QuotaDto,
+  CreateQuotaRequest,
+  UpdateQuotaRequest,
+  CheckQuotaRequest,
+  QuotaCheckResult,
+  UserBalanceDto,
+  BalanceTransactionDto,
+  BalanceAdjustRequest,
+  ZOffsetSaveRequest,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldValue,
+  CreateCustomFieldDefinitionRequest,
+  UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
+import type { GeometryUploadResultDto, ThreeMfMetadata } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
@@ -839,6 +868,19 @@ export class ApiClient {
   }
 
   /**
+   * Save calibrated Z-offset to the printer and optionally to firmware.
+   * @param printerId The printer's GUID
+   * @param request The Z-offset save payload
+   */
+  async saveZOffset(printerId: string, request: ZOffsetSaveRequest): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/z-offset`,
+      request
+    );
+    return response.data;
+  }
+
+  /**
    * Set the active spool on a printer via Spoolman.
    * @param printerId The printer's GUID
    * @param spoolId The Spoolman spool ID to activate
@@ -985,6 +1027,80 @@ export class ApiClient {
     await this.client.delete(`/printer-groups/${groupId}/printers/${printerId}`);
   }
 
+  async getPrinterGroupAccessRules(groupId: string): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.get<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`
+    );
+    return response.data;
+  }
+
+  async setPrinterGroupAccessRules(
+    groupId: string,
+    dto: SetAccessRulesRequest
+  ): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.put<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`,
+      dto
+    );
+    return response.data;
+  }
+
+  async getRoles(): Promise<RoleDto[]> {
+    const response = await this.client.get<RoleDto[]>("/users/roles");
+    return response.data;
+  }
+
+  // ============ Bed Type API methods ============
+
+  async getBedTypes(): Promise<BedType[]> {
+    const response = await this.client.get<BedType[]>("/bed-types");
+    return response.data;
+  }
+
+  async createBedType(dto: CreateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.post<BedType>("/bed-types", dto);
+    return response.data;
+  }
+
+  async updateBedType(id: string, dto: UpdateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.put<BedType>(`/bed-types/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteBedType(id: string): Promise<void> {
+    await this.client.delete(`/bed-types/${id}`);
+  }
+
+  // ============ Custom Fields API methods ============
+
+  async getCustomFieldDefinitions(entityType: CustomFieldEntityType): Promise<CustomFieldDefinition[]> {
+    const response = await this.client.get<CustomFieldDefinition[]>('/custom-fields/definitions', { params: { entityType } });
+    return response.data;
+  }
+
+  async createCustomFieldDefinition(dto: CreateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.post<CustomFieldDefinition>('/custom-fields/definitions', dto);
+    return response.data;
+  }
+
+  async updateCustomFieldDefinition(id: string, dto: UpdateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.put<CustomFieldDefinition>(`/custom-fields/definitions/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteCustomFieldDefinition(id: string): Promise<void> {
+    await this.client.delete(`/custom-fields/definitions/${id}`);
+  }
+
+  async getCustomFieldValues(entityType: CustomFieldEntityType, entityId: string): Promise<CustomFieldValue[]> {
+    const response = await this.client.get<CustomFieldValue[]>(`/custom-fields/values/${entityType}/${entityId}`);
+    return response.data;
+  }
+
+  async setCustomFieldValues(entityType: CustomFieldEntityType, entityId: string, values: Record<string, string | null>): Promise<void> {
+    await this.client.put(`/custom-fields/values/${entityType}/${entityId}`, { values });
+  }
+
   // ============ Catalog API methods ============
 
   async getManufacturers(): Promise<ManufacturerDto[]> {
@@ -1070,6 +1186,24 @@ export class ApiClient {
     const response = await this.client.put<SlicerModelAliasDto[]>(
       `/catalog/printer-models/${modelId}/aliases`,
       request
+    );
+    return response.data;
+  }
+
+  async setModelDispatchDefaults(
+    modelId: string,
+    request: SetModelDispatchDefaultsRequest
+  ): Promise<PrinterModelDto> {
+    const response = await this.client.put<PrinterModelDto>(
+      `/catalog/printer-models/${modelId}/dispatch-defaults`,
+      request
+    );
+    return response.data;
+  }
+
+  async applyModelDefaults(modelId: string): Promise<ApplyModelDefaultsResult> {
+    const response = await this.client.post<ApplyModelDefaultsResult>(
+      `/catalog/printer-models/${modelId}/apply-defaults`
     );
     return response.data;
   }
@@ -1417,6 +1551,66 @@ export class ApiClient {
       "/spoolman/scan-network"
     );
     return response.data;
+  }
+
+  // ============ Material Clusters ============
+
+  async getMaterialClusters(): Promise<MaterialClusterDto[]> {
+    const response = await this.client.get<MaterialClusterDto[]>(
+      "/material-clusters"
+    );
+    return response.data;
+  }
+
+  async getMaterialCluster(id: string): Promise<MaterialClusterDto> {
+    const response = await this.client.get<MaterialClusterDto>(
+      `/material-clusters/${id}`
+    );
+    return response.data;
+  }
+
+  async createMaterialCluster(
+    request: CreateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      "/material-clusters",
+      request
+    );
+    return response.data;
+  }
+
+  async updateMaterialCluster(
+    id: string,
+    request: UpdateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.put<MaterialClusterDto>(
+      `/material-clusters/${id}`,
+      request
+    );
+    return response.data;
+  }
+
+  async deleteMaterialCluster(id: string): Promise<void> {
+    await this.client.delete(`/material-clusters/${id}`);
+  }
+
+  async addMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
+    return response.data;
+  }
+
+  async removeMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<void> {
+    await this.client.delete(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
   }
 
   // ============ Network utilities ============
@@ -2043,6 +2237,19 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Dispatch a job to a specific printer, bypassing the scorer's material compatibility check.
+   * Used when the operator explicitly overrides a material mismatch.
+   */
+  async dispatchJobToPrinter(jobId: string, printerId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+      `/job-queue/${jobId}/dispatch-to`,
+      { printerId },
+      { timeout: 0 }
+    );
+    return response.data;
+  }
+
   // ============ Dispatch history ============
 
   async getDispatchHistory(page: number = 1, pageSize: number = 20): Promise<DispatchHistoryPageDto> {
@@ -2114,6 +2321,11 @@ export class ApiClient {
 
   async getSystemCapabilities(): Promise<SystemCapabilities> {
     const response = await this.client.get<SystemCapabilities>('/system/capabilities');
+    return response.data;
+  }
+
+  async getFeatureFlags(): Promise<Record<string, boolean>> {
+    const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
     return response.data;
   }
 
@@ -2560,20 +2772,27 @@ export class ApiClient {
     return response.data || [];
   }
 
+  /**
+   * Upload raw STL geometry (e.g. cut model pieces) to the server.
+   * Returns a server-side URL that slicer workers can HTTP-fetch.
+   */
+  async uploadGeometry(stlBlob: Blob, fileName: string): Promise<GeometryUploadResultDto> {
+    const formData = new FormData();
+    formData.append('geometryFile', new File([stlBlob], fileName, { type: 'application/octet-stream' }));
+    const response = await this.client.post<GeometryUploadResultDto>(
+      '/3d-models/upload-geometry',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return response.data;
+  }
+
   // ============ User Management API methods ============
   /**
    * Get all users
    */
   async getUsers(): Promise<Record<string, unknown>[]> {
     const response = await this.client.get('/users');
-    return response.data || [];
-  }
-
-  /**
-   * Get all roles
-   */
-  async getRoles(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/users/roles');
     return response.data || [];
   }
 
@@ -2714,6 +2933,15 @@ export class ApiClient {
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
     return { items, totalCount: items.length };
+  }
+
+  /**
+   * Get distinct material, vendor, and location values across all spools.
+   * Used to populate filter dropdowns without relying on paginated data.
+   */
+  async getSpoolFilterOptions(): Promise<SpoolFilterOptions> {
+    const response = await this.client.get<SpoolFilterOptions>('/spoolman/filter-options');
+    return response.data;
   }
 
   /**
@@ -3064,6 +3292,22 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Get all profile schemas (process, machine, filament)
+   */
+  async getProfileSchemas(): Promise<ProfileSchemasResponse> {
+    const response = await this.client.get<ProfileSchemasResponse>('/slicer/profiles/schemas');
+    return response.data;
+  }
+
+  /**
+   * Get process profile schema
+   */
+  async getProcessProfileSchema(): Promise<ProfileTypeSchema> {
+    const response = await this.client.get<ProfileTypeSchema>('/slicer/profiles/schema/process');
+    return response.data;
+  }
+
   // ============ Generic API methods ============
 
   /**
@@ -3113,6 +3357,14 @@ export class ApiClient {
     if (!modelId) return {};
     const response = await this.client.get(`/3d-models/${modelId}`);
     return response.data as Record<string, unknown>;
+  }
+
+  /**
+   * Get extracted 3MF metadata for a model
+   */
+  async getModel3DMetadata(modelId: string): Promise<ThreeMfMetadata | null> {
+    const response = await this.client.get(`/3d-models/${modelId}/metadata`);
+    return response.data as ThreeMfMetadata | null;
   }
 
   /**
@@ -3521,6 +3773,17 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Detect camera endpoints for a printer backend.
+   */
+  async detectCameraEndpoints(
+    request: import('@/types/api').DetectCameraEndpointsRequest
+  ): Promise<import('@/types/api').DetectCameraEndpointsResponse> {
+    // TODO: Confirm Lambert's backend contract remains POST /api/cameras/detect-endpoints with { printerId }.
+    const response = await this.client.post('/cameras/detect-endpoints', request);
+    return response.data;
+  }
+
   // ====== NFC Devices ======
 
   async getNfcDevices(): Promise<import('@/types/api').NfcDeviceDto[]> {
@@ -3857,6 +4120,72 @@ export class ApiClient {
    */
   async clearToolheadSpool(printerId: string, toolheadIndex: number): Promise<void> {
     await this.client.delete(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`);
+  }
+
+  // ── Quotas & Balances ───────────────────────────────────────────────
+
+  async getQuotas(): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>('/quotas');
+    return data;
+  }
+
+  async getQuotasForUser(userId: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/user/${userId}`);
+    return data;
+  }
+
+  async getQuotasForGroup(groupName: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/group/${encodeURIComponent(groupName)}`);
+    return data;
+  }
+
+  async getQuota(id: string): Promise<QuotaDto> {
+    const { data } = await this.client.get<QuotaDto>(`/quotas/${id}`);
+    return data;
+  }
+
+  async createQuota(request: CreateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.post<QuotaDto>('/quotas', request);
+    return data;
+  }
+
+  async updateQuota(id: string, request: UpdateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.put<QuotaDto>(`/quotas/${id}`, request);
+    return data;
+  }
+
+  async deleteQuota(id: string): Promise<void> {
+    await this.client.delete(`/quotas/${id}`);
+  }
+
+  async checkQuota(request: CheckQuotaRequest): Promise<QuotaCheckResult> {
+    const { data } = await this.client.post<QuotaCheckResult>('/quotas/check', request);
+    return data;
+  }
+
+  async resetExpiredQuotas(): Promise<{ resetCount: number }> {
+    const { data } = await this.client.post<{ resetCount: number }>('/quotas/reset-expired');
+    return data;
+  }
+
+  async getBalance(userId: string): Promise<UserBalanceDto> {
+    const { data } = await this.client.get<UserBalanceDto>(`/quotas/balance/${userId}`);
+    return data;
+  }
+
+  async creditBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/credit`, request);
+    return data;
+  }
+
+  async debitBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/debit`, request);
+    return data;
+  }
+
+  async getBalanceTransactions(userId: string, take = 50): Promise<BalanceTransactionDto[]> {
+    const { data } = await this.client.get<BalanceTransactionDto[]>(`/quotas/balance/${userId}/transactions`, { params: { take } });
+    return data;
   }
 }
 

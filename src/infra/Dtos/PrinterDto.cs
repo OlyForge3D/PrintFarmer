@@ -38,6 +38,7 @@ namespace Farm.Infrastructure;
 /// <param name="Location">Location information (farm location assignment).</param>
 /// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
 /// <param name="HasCatalogUpdate">True when the printer's linked catalog model has been updated since the last template sync.</param>
+/// <param name="UseModelDispatchDefaults">Whether this printer inherits dispatch settings from its model.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -71,4 +72,5 @@ public record PrinterDto(
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,
-    bool HasCatalogUpdate = false);
+    bool HasCatalogUpdate = false,
+    bool UseModelDispatchDefaults = true);

@@ -390,6 +390,161 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Import selected profiles from an OrcaSlicer config bundle.
+    /// </summary>
+    /// <param name="request">Bundle JSON and selection criteria.</param>
+    /// <param name="orcaParsingService">OrcaSlicer bundle parsing service.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("import/orca")]
+    [Authorize(Policy = "farm_admin")]
+    [ProducesResponseType(typeof(ImportOrcaBundleResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ImportOrcaBundleResultDto>> ImportOrcaBundleAsync(
+        [FromBody] ImportOrcaBundleDto? request,
+        [FromServices] IOrcaBundleParsingService orcaParsingService,
+        CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.BundleJson))
+        {
+            return BadRequest("BundleJson is required");
+        }
+
+        try
+        {
+            if (!orcaParsingService.IsValidOrcaBundle(request.BundleJson))
+            {
+                return BadRequest("Invalid OrcaSlicer bundle format. Expected JSON object with printer/filament/process sections.");
+            }
+
+            OrcaBundlePreviewDto preview = orcaParsingService.ParseBundle(request.BundleJson);
+
+            ImportOrcaBundleResultDto result = new()
+            {
+                Success = true,
+                PrintersImported = 0,
+                FilamentsImported = 0,
+                ProcessesImported = 0
+            };
+
+            // Import selected printer presets
+            if (request.ImportPrinters)
+            {
+                IEnumerable<OrcaPrinterPresetDto> printersToImport = request.SelectedPrinters != null && request.SelectedPrinters.Count > 0
+                    ? preview.Printers.Where(p => request.SelectedPrinters.Contains(p.Name))
+                    : preview.Printers;
+
+                foreach (OrcaPrinterPresetDto printer in printersToImport)
+                {
+                    try
+                    {
+                        string rawJson = System.Text.Json.JsonSerializer.Serialize(printer.RawParameters);
+                        ImportProcessProfileDto importDto = new()
+                        {
+                            Name = printer.Name,
+                            Description = $"Imported OrcaSlicer printer preset: {printer.PrinterModel}",
+                            RawJson = rawJson,
+                            SlicerType = "OrcaSlicer",
+                            AllowSystemOverride = request.AllowSystemOverride,
+                            SetDefault = request.SetDefaults
+                        };
+
+                        await _profilesService.ImportProfileAsync(importDto, ct);
+                        result.PrintersImported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to import printer preset: {PrinterName}", printer.Name);
+                        result.Warnings.Add($"Failed to import printer '{printer.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            // Import selected filament presets
+            if (request.ImportFilaments)
+            {
+                IEnumerable<OrcaFilamentPresetDto> filamentsToImport = request.SelectedFilaments != null && request.SelectedFilaments.Count > 0
+                    ? preview.Filaments.Where(f => request.SelectedFilaments.Contains(f.Name))
+                    : preview.Filaments;
+
+                foreach (OrcaFilamentPresetDto filament in filamentsToImport)
+                {
+                    try
+                    {
+                        string rawJson = System.Text.Json.JsonSerializer.Serialize(filament.RawParameters);
+                        ImportProcessProfileDto importDto = new()
+                        {
+                            Name = filament.Name,
+                            Description = $"Imported OrcaSlicer filament preset: {filament.FilamentType}",
+                            RawJson = rawJson,
+                            SlicerType = "OrcaSlicer",
+                            AllowSystemOverride = request.AllowSystemOverride,
+                            SetDefault = request.SetDefaults
+                        };
+
+                        await _profilesService.ImportProfileAsync(importDto, ct);
+                        result.FilamentsImported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to import filament preset: {FilamentName}", filament.Name);
+                        result.Warnings.Add($"Failed to import filament '{filament.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            // Import selected process presets
+            if (request.ImportProcesses)
+            {
+                IEnumerable<OrcaProcessPresetDto> processesToImport = request.SelectedProcesses != null && request.SelectedProcesses.Count > 0
+                    ? preview.Processes.Where(p => request.SelectedProcesses.Contains(p.Name))
+                    : preview.Processes;
+
+                foreach (OrcaProcessPresetDto process in processesToImport)
+                {
+                    try
+                    {
+                        string rawJson = System.Text.Json.JsonSerializer.Serialize(process.RawParameters);
+                        ImportProcessProfileDto importDto = new()
+                        {
+                            Name = process.Name,
+                            Description = $"Imported OrcaSlicer process preset: {process.Quality ?? process.LayerHeight.ToString("F2") + "mm"}",
+                            RawJson = rawJson,
+                            SlicerType = "OrcaSlicer",
+                            AllowSystemOverride = request.AllowSystemOverride,
+                            SetDefault = request.SetDefaults
+                        };
+
+                        await _profilesService.ImportProfileAsync(importDto, ct);
+                        result.ProcessesImported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to import process preset: {ProcessName}", process.Name);
+                        result.Warnings.Add($"Failed to import process '{process.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            _logger.LogInformation(
+                "OrcaSlicer bundle imported: {PrintersImported} printers, {FilamentsImported} filaments, {ProcessesImported} processes",
+                result.PrintersImported, result.FilamentsImported, result.ProcessesImported);
+
+            result.Success = result.Errors.Count == 0;
+            return Ok(result);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogWarning(ex, "Invalid OrcaSlicer bundle format");
+            return BadRequest(new { error = "Invalid bundle format", detail = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to import OrcaSlicer bundle");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to import bundle");
+        }
+    }
+
+    /// <summary>
     /// Export PrintFarmer profiles to OrcaSlicer config bundle JSON format.
     /// </summary>
     /// <param name="request">Export configuration (optional filters).</param>
@@ -479,7 +634,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error seeding system profiles");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Error seeding profiles: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error seeding profiles");
         }
     }
 
@@ -517,7 +672,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error force-reseeding system profiles");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Error reseeding profiles: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error reseeding profiles");
         }
     }
 
@@ -538,7 +693,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting system profiles");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Error deleting profiles: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error deleting profiles");
         }
     }
 
@@ -576,7 +731,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching profiles from OrcaSlicer worker: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -606,7 +761,38 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
+        }
+    }
+
+    /// <summary>
+    /// Get the profile hierarchy from OrcaSlicer worker filtered to only include
+    /// manufacturers present in the PrintFarmer catalog.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("catalog-hierarchy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetCatalogFilteredWorkerHierarchyAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            AllProfilesResponseDto? profiles = await _profilesService.GetCatalogFilteredWorkerHierarchyAsync(httpClient, ct);
+            return Ok(profiles ?? new AllProfilesResponseDto());
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error fetching catalog-filtered profiles from OrcaSlicer worker: {Message}", ex.Message);
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -640,7 +826,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching machine profiles for {Manufacturer}/{Model}: {Message}", manufacturer, model, ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -669,19 +855,28 @@ public class ProfilesController(
             }
 
             IReadOnlyList<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
-            SlicerModelAliasDto? orcaAlias = aliases.FirstOrDefault(a => a.SlicerType == "OrcaSlicer");
+            List<string> orcaAliases = aliases
+                .Where(a => string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase))
+                .Select(a => a.SlicerModelName)
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()!;
 
-            if (orcaAlias == null || string.IsNullOrWhiteSpace(orcaAlias.SlicerModelName))
+            if (orcaAliases.Count == 0)
             {
                 _logger.LogWarning("No OrcaSlicer alias configured for model {ModelName}", model.Name);
                 return NotFound($"No OrcaSlicer alias configured for model {model.Name}");
             }
 
-            string printerModel = orcaAlias.SlicerModelName;
-            _logger.LogInformation("Fetching machine profiles for model {ModelName} using OrcaSlicer alias: {Alias}", model.Name, printerModel);
+            _logger.LogInformation(
+                "Fetching machine profiles for model {ModelName} using {AliasCount} OrcaSlicer aliases",
+                model.Name,
+                orcaAliases.Count);
 
-            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesByAliasAsync(
-                httpClient, printerModel, ct);
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForCatalogModelAsync(
+                httpClient,
+                orcaAliases,
+                ct);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -692,7 +887,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching machine profiles for model {ModelId}: {Message}", modelId, ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -724,7 +919,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching process profiles for machines: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -756,7 +951,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching filament profiles for machines: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
         }
     }
 
@@ -786,7 +981,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error fetching filament templates: {Message}", ex.Message);
-            return StatusCode(500, $"Error fetching templates from worker: {ex.Message}");
+            return StatusCode(500, "Error fetching templates from worker");
         }
     }
 
@@ -808,7 +1003,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError("Error getting imported profile names: {Message}", ex.Message);
-            return StatusCode(500, $"Error getting imported profile names: {ex.Message}");
+            return StatusCode(500, "Error getting imported profile names");
         }
     }
 
@@ -985,7 +1180,7 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Clone failed");
-            return BadRequest($"Clone failed: {ex.Message}");
+            return BadRequest("Clone failed");
         }
     }
 
@@ -1180,6 +1375,61 @@ public class ProfilesController(
             _logger.LogError(ex, "Update custom profile failed");
             return StatusCode(StatusCodes.Status500InternalServerError, "Update custom profile failed");
         }
+    }
+
+    // ── Schema metadata endpoints (static, public, cached) ─────────
+
+    /// <summary>
+    /// Returns combined schema metadata for all profile types (process, machine, filament),
+    /// powering schema-driven settings editors in the UI.
+    /// </summary>
+    [HttpGet("schemas")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileSchemasResponseDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetAllSchemas()
+    {
+        return Ok(ProfileSchemaProvider.GetAllSchemas());
+    }
+
+    /// <summary>
+    /// Returns schema metadata for process profile fields.
+    /// </summary>
+    [HttpGet("schema/process")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetProcessSchema()
+    {
+        return Ok(ProfileSchemaProvider.GetProcessSchema());
+    }
+
+    /// <summary>
+    /// Returns schema metadata for machine profile fields.
+    /// </summary>
+    [HttpGet("schema/machine")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetMachineSchema()
+    {
+        return Ok(ProfileSchemaProvider.GetMachineSchema());
+    }
+
+    /// <summary>
+    /// Returns schema metadata for filament profile fields.
+    /// </summary>
+    [HttpGet("schema/filament")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetFilamentSchema()
+    {
+        return Ok(ProfileSchemaProvider.GetFilamentSchema());
     }
 
     /// <summary>
