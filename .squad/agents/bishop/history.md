@@ -71,7 +71,7 @@ _(append new learnings below this line)_
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570269998
 - **Commit:** `533b86f`
 
-### 2026-05-29 — PrintFarmerMobile #12 third-review APPROVE (home subgroup, round 16 final sign-off)
+### 2026-05-29 — Round 16: PrintFarmerMobile #12 third-review APPROVE (home subgroup, round 16 final sign-off)
 
 - **Verdict:** ✅ APPROVE (third review, closing the loop after iterative gap-closing across rounds 12–16).
 - **Closure confirmed:** Spec adherence is exact; VoiceOver labels and hints match `docs/design/printer-controls-section.md` verbatim. Disabled-state rendering is correct. Test layer reads from same computed properties as view layer — non-tautological design confirmed.
@@ -84,3 +84,11 @@ _(append new learnings below this line)_
 - **Third-review pattern:** When first two reviews identify blockers that are then fixed, a third review pass provides closure and confidence in the durable pattern.
 - **Spec-driven testing:** Assertion strings must be sourced from the same location as view strings (computed property), not hardcoded constants. This rule eliminates tautology and ensures test rejects stale code.
 
+### 2026-05-21 — Round 22: PR #318 REQUEST_CHANGES (architectural blockers caught)
+
+- **Verdict:** ❌ REQUEST_CHANGES.
+- **Architectural blocker 1:** `PrinterBackendBusyException` does NOT become HTTP 409 in today's code. `PrintersService` maps it to `BackendBusy` outcome, and `PrintersController.MapControlOutcome()` returns **502 BadGateway**, not 409 Conflict. PR's firmware-409 propagation premise is undermined without fixing the controller-side mapping first.
+- **Architectural blocker 2:** Moonraker introduces new convention treating HTTP 503 as "busy" (Klippy unavailable/error states, not just busy-printing). Diverges from tighter OctoPrint/PrusaLink 409-only pattern. Requires spec alignment before landing.
+- **Non-blocking:** Real-transport tests have minor `GetFreeTcpPort()` race risk in CI (ephemeral port collisions on parallel runs).
+- **Durable lesson:** Backend cross-layer changes (exception → outcome → HTTP code) need two-reviewer consensus. Single code-path approval can miss system-wide mapping assumptions. Architectural consistency (409 for firmware conflicts across backends) is enforcer role.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570616436

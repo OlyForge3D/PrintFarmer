@@ -1289,3 +1289,36 @@ Scribe should flag in post-merge review:
 
 **Newt integration pattern locked:** `controlsSection()` composition allows independent subgroup testing + future component reuse. No blocking review feedback.
 **Brett snapshot strategy validated:** pointfreeco library meets framework requirements (Xcode/iOS 15+ compatible, SPM distribution). Recommend pinning simulator OS version in CI YAML.
+
+---
+
+## Decision: Round 22 — Bishop CR #318 architectural blockers; Parker dependabot triage
+
+**Date:** 2026-05-21
+**Authors:** Bishop (architectural review), Hicks (context), Parker (dependabot triage)
+**Status:** ✅ DOCUMENTED; PR #318 blockers identified; dependabot pattern catalogued
+
+### Summary
+
+**Bishop REQUEST_CHANGES PR #318 (real-transport tests):**
+- ❌ **Architectural blocker 1:** `PrinterBackendBusy` exception does **NOT** map to HTTP 409 in current code. `PrintersService` maps it to `BackendBusy` outcome, and `PrintersController.MapControlOutcome()` returns **502 BadGateway**, not 409 Conflict. PR's firmware-409 propagation premise is undermined without fixing the controller-side mapping first.
+- ❌ **Architectural blocker 2:** Moonraker 503 (Service Unavailable) for Klippy unavailable/error states diverges from tighter OctoPrint/PrusaLink 409-only convention. Introduces wider "busy" semantic (not just busy-printing). Requires spec alignment before landing.
+- ⚠️ **Non-blocking:** Real-transport tests have minor `GetFreeTcpPort()` race risk in CI (ephemeral port collisions on parallel runs).
+- **Comment:** https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570616436
+- **Hicks context:** PR #318 was APPROVE'd by Hicks before Bishop caught cross-layer mapping disconnect. Real-transport test coverage is good; architectural translation is not.
+
+**Parker dependabot triage (2026-05-21, artifact `.squad/parker/triage-2026-05-21.md`):**
+- 9 open PRs, all CI green.
+- 2 safe auto-merge: #235 (FluentAssertions 6→7 test lib), #238 (Mvc.Testing 10→11).
+- 3 need verification: #239 (System.Text.Json), #271 (System.Reflection.Metadata), #272 (System.ComponentModel.Annotations) — patch bumps on runtime libs.
+- 5 need manual review: #240–244 (GitHub Actions majors: node, setup-dotnet, etc.).
+- **Recommendation:** Jeff merge #235 + #238; build-test #239/#271/#272 for regression; changelog-check #240–244 before gh-actions updates.
+
+### Durable Rule Captured
+
+**Rule 7 — Two-reviewer consensus on backend cross-layer changes (effective immediately):**
+- Backend PR's that span service-layer logic + controller-layer translation (HTTP mapping, error code propagation) require architectural sign-off from **two reviewers**.
+- Single-voice approval insufficient; cross-layer disconnect (e.g., exception → outcome → HTTP code translation) is highest-risk refactoring class.
+- **Applies to:** PrintersService → PrintersController exception/outcome flows; payment/subscription domain chains; worker-slicer routing layers.
+- **Hicks lesson:** Individual diff review (service tests) sometimes misses downstream controller mapping. Always pair with second reviewer checking translation boundary.
+- **Bishop lesson:** Architectural consistency (409 for firmware conflicts across backends) is enforcer role; single code-path approval can mask system-wide assumptions.

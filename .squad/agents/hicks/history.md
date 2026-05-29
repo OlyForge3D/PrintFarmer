@@ -84,3 +84,10 @@ _(append new learnings below this line)_
 - Full rejected-mutation → status-roundtrip → exception path verified end-to-end as required in Round 19 decision.
 - All tests pass; `dotnet format --verify-no-changes` clean.
 - Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570558773
+
+### 2026-05-21 — Round 22: PR #318 re-review blocked by Bishop's architectural CR
+
+- **Context:** Hicks approved PR #318 in Round 21 based on real-transport test coverage (14/14 passing). Bishop then identified two architectural blockers on 2026-05-21.
+- **Lesson — Cross-layer translation gap:** Individual diff review (service layer tests) can miss downstream controller mapping. `PrinterBackendBusy` exception → `BackendBusy` outcome → HTTP 502 code chain was not verified in test path inspection. Code-path tests pass; system-path translation fails.
+- **Lesson — Two-reviewer consensus rule (durable):** Backend PRs spanning service logic + controller translation need two reviewers. Applies to: PrintersService → PrintersController exception/outcome flows; domain chains; worker-slicer routing. Single voice insufficient.
+- **Action:** PR #318 requires fix at PrintersController mapping layer before re-review. Bishop's catch earns the rule.
