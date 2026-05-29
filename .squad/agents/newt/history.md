@@ -220,3 +220,50 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 
 
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
+
+---
+
+## 2026-05-28: Printer Controls Section Design Spec (#283)
+
+**Task:** Create design specification for printer controls (preheat, home, jog) in iOS `PrinterDetailView`
+**Status:** ✅ COMPLETE — PR opened [OlyForge3D/PrintFarmerMobile#1](https://github.com/OlyForge3D/PrintFarmerMobile/pull/1)
+
+### Design Decisions
+
+1. **Preheat layout:** List-style rows (not grid) — shows temperature readouts inline (e.g., "PLA — 200°/60°") for at-a-glance reference. Each row is a full-width tappable area meeting 44pt HIG minimum.
+
+2. **Home layout:** 3-button horizontal row with 60pt height. Icons: `house.fill` (All), `arrow.left.and.right` (XY), `arrow.up.and.down` (Z).
+
+3. **Jog layout:** Segmented pickers for axis (X/Y/Z) and step (0.1/1/10/100mm), with paired +/− buttons showing dynamic labels ("Move X +10mm").
+
+4. **Disabled-while-printing:** Color-blind friendly — uses **lock icon** (`lock.fill`) + 0.5 opacity, not just color change. Per spike #279, client-side gating required for states: Printing, Pausing, Paused, Resuming, Cancelling, Heating.
+
+5. **Hidden-while-offline:** Entire Controls section conditionally rendered only when `printer.isOnline == true`.
+
+### Design Tokens Used
+
+| Token | Usage |
+|-------|-------|
+| `pfCard` | Subgroup card backgrounds |
+| `pfBorder` | Card stroke borders |
+| `pfAccent` / `pfButtonPrimary` | Button tints (Home, Jog) |
+| `pfWarning` | Flame icon (preheat heating) |
+| `pfSecondaryAccent` | Snowflake icon (Cool Down) |
+| `pfTextPrimary/Secondary/Tertiary` | Text hierarchy and disabled states |
+
+### Key iOS Component Files
+
+- `PrintFarmer/Theme/ThemeColors.swift` — All `pf*` color tokens
+- `PrintFarmer/Views/Components/ActionButtonStyle.swift` — `.standard` (44pt) / `.prominent` (50pt) sizing
+- `PrintFarmer/Views/Printers/PrinterDetailView.swift` — Target integration point
+
+### HIG Patterns Applied
+
+- Touch targets: All buttons ≥44pt (preheat rows: 44pt, home buttons: 60pt, jog buttons: 56pt)
+- Segmented pickers: Native `.segmented` style
+- Dark Mode: All colors via adaptive `pf*` tokens
+- Haptics: `UIImpactFeedbackGenerator(.medium)` recommended on button press
+
+### Files Created
+
+- `docs/design/printer-controls-section.md` — Full design specification (611 lines)
