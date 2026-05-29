@@ -1,6 +1,138 @@
 
 ---
 
+## Decision: Status-Gated Mutation Endpoints — Layer and HTTP Code Mapping
+
+**Date:** 2026-05-28
+**Issue:** OlyForge3D/PrintFarmer#290
+**Author:** Dallas
+**Status:** Implemented (PR #308, merged)
+
+### Decision
+
+The 409 state-gate for `/temps`, `/move`, and `/moveto` lives in the **controller layer**
+(`PrintersController.GatePrinterControlAsync`), not in `PrintersService`. The plugin layer
+propagates firmware 409s as `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy`
+→ 502 Bad Gateway.
+
+### HTTP Status Code Mapping
+
+| Condition | HTTP code | Reason |
+|---|---|---|
+| Cached status is Printing/Pausing/Paused/Resuming/Cancelling/Heating | 409 Conflict | Client-side pre-flight; API knows before trying |
+| Printer ID not found | 404 Not Found | Entity doesn't exist |
+| Firmware refused (409 from PrusaLink/OctoPrint) | 502 Bad Gateway | Upstream refused after we tried; client cannot fix this |
+| Backend does not support command | 502 Bad Gateway | Capability mismatch |
+| Backend unreachable | 502 Bad Gateway | Infrastructure fault |
+
+### Rationale
+
+- **Controller, not service**: The status cache check is a request pre-flight concern. Services
+  should not know about HTTP semantics. Keeps `PrintersService` focused on printer I/O.
+- **502 for upstream busy (not 409)**: 409 from our API means "you asked at the wrong time and
+  our state says so." 502 from our API means "we tried and the printer said no." These must be
+  distinguishable so iOS clients can show the right UX.
+- **`PrinterBackendBusyException`** is the seam: backend plugins throw it when firmware returns
+  409, service catches and maps to `BackendBusy`, controller maps to 502.
+- **Busy state list** (`PrinterControlGate.BusyStates`) is authoritative and kept in sync with
+  `PrintFailureMonitorService` via PR #310.
+
+### Files Changed
+
+- `src/infra/Services/Printers/PrinterControlGate.cs` (new)
+- `src/infra/Services/Printers/PrinterControlOutcome.cs` (new)
+- `src/infra/Services/Printers/PrinterBackendBusyException.cs` (new)
+- `src/api/Controllers/PrintersController.cs` (`GatePrinterControlAsync`, `MapControlOutcome`, `IPrinterStatusCacheReader` injection)
+- `src/backends/Farm.Backend.Plugin.OctoPrint/OctoPrintClient.cs` (409 → `PrinterBackendBusyException` in SetBed/SetHotend/Jog)
+- `src/backends/Farm.Backend.Plugin.PrusaLink/PrusaLinkApiClient.cs` (409 → `PrinterBackendBusyException` in SetToolTemp/SetBedTemp/JogPrintHead)
+- `src/tests/Farm.Web.Api.Tests/Controllers/PrintersControllerControlGuardsTests.cs` (new, 4 tests)
+
+---
+
+# Decision: PrinterBackendCapabilities — Endpoint Confirmed, Fallback Table Canonical
+
+**Date:** 2026-05-28
+**Agent:** Gorman
+**Issue:** #280
+**PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
+
+## Decision
+
+`GET /api/printers/{printerId}/backend-capabilities` **exists** in `PrintersController.cs`
+(src/api/Controllers/PrintersController.cs:181). No backend work is needed for Mobile Controls v1.
+
+## Fallback Table Values
+
+The static table in `PrinterBackendCapabilities.fallback(for:)` is now the canonical iOS
+fallback when the endpoint returns 404 or decoding fails:
+
+| Backend     | supportsMovement | supportsTemperatureControl | supportsControlOperations | Notes |
+|-------------|-----------------|---------------------------|--------------------------|-------|
+| Moonraker   | true            | true                      | true                     | Full FFF; camera+history too |
+| PrusaLink   | true            | true                      | true                     | Full FFF |
+| OctoPrint   | true            | true                      | true                     | Full FFF |
+| FlashForge  | true            | true                      | false                    | FFF; no fan control |
+| SDCP        | false           | false                     | false                    | Resin printer |
+| Unknown     | false           | false                     | false                    | Conservative |
+
+## Locked Decisions Applied
+
+- `supportsBedTemperature` is derived from `supportsTemperatureControl` — no separate field in
+  backend DTO. Locked per Mobile Controls v1 spec: trust `supportsTemperatureControl` for FlashForge.
+- `supportsFanControl` derived from `supportsControlOperations` — fan is a general control operation.
+
+## Downstream Impact
+
+- `PrinterControlsViewModel` (#282) already calls `PrinterBackendCapabilities.fallback(for:)` —
+  the interface and fallback signature are compatible.
+- UI gating (#284/#285/#286) can trust all four of the required booleans.
+
+---
+
+# Newt — 2026-05-28 — Printer Controls Design Decisions (#283)
+
+## Preheat: List layout, not grid
+
+**Decision:** Use vertical list rows for preheat presets instead of 2×2 grid.
+
+**Reasoning:**
+- List rows allow inline temperature readout (e.g., "PLA — 200°/60°") which provides at-a-glance reference
+- Full-width rows are easier to tap on phone screens
+- Consistent with iOS Settings patterns for actionable list items
+- Grid would require separate tap + temperature lookup, adding cognitive load
+
+## Disabled-While-Printing: Lock icon + opacity (color-blind friendly)
+
+**Decision:** Disabled state uses lock icon (`lock.fill`) at trailing edge plus 0.5 opacity, not just color change.
+
+**Reasoning:**
+- Per WCAG 2.2, disabled state must not rely on color alone
+- Lock icon provides shape-based indicator recognizable without color perception
+- Aligns with iOS system patterns (e.g., locked settings rows)
+- Ensures accessibility for protanopia/deuteranopia users
+
+## Jog: Segmented pickers + dynamic button labels
+
+**Decision:** Jog subgroup uses native segmented pickers for axis (X/Y/Z) and step (0.1/1/10/100mm), with +/− buttons showing dynamic labels like "Move X +10mm".
+
+**Reasoning:**
+- Segmented pickers are HIG-native and automatically meet touch target requirements
+- Dynamic button labels prevent mode errors (operator always knows what will happen)
+- Axis/step state is visually prominent in picker selection
+- Compact layout fits phone screens without scrolling
+
+## Section Visibility: Hidden when offline
+
+**Decision:** Entire Controls section is conditionally rendered only when `printer.isOnline == true`.
+
+**Reasoning:**
+- Controls require active printer connection — showing disabled controls when offline adds noise
+- Consistent with existing pattern: `actionSection` only renders when online
+- Reduces visual clutter for disconnected printers
+- Clear mental model: "no controls = printer not reachable"
+
+---
+
 # 2026-05-20: Mobile API Drift + Basic Printer Controls v1 — Locked Decisions
 
 **By:** Dallas (Lead/Architect), via Jeff Papiez
