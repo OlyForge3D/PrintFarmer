@@ -12,6 +12,9 @@ import { FailureDetectionStatusModal } from '@/features/printers/components/Fail
 interface FailureDetectionMonitoringBadgeProps {
   enabled: boolean;
   status?: FailureDetectionPrinterStatusDto;
+  /** Live printer isPrinting from the printer card (state === 'Printing'). Overrides the
+   *  potentially-stale isPrinting field inside the polled FailureDetection DTO. */
+  isPrinting?: boolean;
   className?: string;
   printerId?: string;
   printerName?: string;
@@ -21,6 +24,7 @@ interface FailureDetectionMonitoringBadgeProps {
 export function FailureDetectionMonitoringBadge({
   enabled,
   status,
+  isPrinting,
   className,
   printerId,
   printerName,
@@ -32,10 +36,26 @@ export function FailureDetectionMonitoringBadge({
     return null;
   }
 
-  const displayState = getFailureDetectionDisplayState(status);
+  // The DTO's isPrinting is computed by a 30-second backend poll and can lag behind the
+  // live printer status (updated via SignalR). Override it with the live value when provided.
+  // When the live printer IS printing but the DTO says otherwise, also replace a stale
+  // "not printing" reason so operators never see a false "not printing" message.
+  const stalePrintingMismatch = isPrinting === true && !!status && !status.isPrinting
+    && (status.state === 'idle' || status.state === 'disabled');
+  const effectiveStatus = isPrinting !== undefined && status
+    ? {
+        ...status,
+        isPrinting,
+        reason: stalePrintingMismatch
+          ? 'Waiting for the monitoring service to begin scanning the current print.'
+          : status.reason,
+      }
+    : status;
+
+  const displayState = getFailureDetectionDisplayState(effectiveStatus);
   const label = getFailureDetectionStateLabel(displayState, enabled);
-  const resolvedPrinterId = status?.printerId ?? printerId;
-  const resolvedPrinterName = status?.printerName ?? printerName;
+  const resolvedPrinterId = effectiveStatus?.printerId ?? printerId;
+  const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
 
   // Color mapping based on state
   const iconColorClass = {
@@ -71,7 +91,7 @@ export function FailureDetectionMonitoringBadge({
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
         enabled={enabled}
-        status={status}
+        status={effectiveStatus}
         printerId={resolvedPrinterId}
         printerName={resolvedPrinterName}
         recentEvents={recentEvents}
