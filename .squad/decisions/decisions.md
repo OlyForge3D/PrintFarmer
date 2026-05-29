@@ -392,6 +392,38 @@ sudo softwareupdate --all --install --force
 
 ---
 
+## 2026-05-29: PR #316 Merged — /home Control Gates Applied
+
+**Decision:** Rebased and squash-merged PR #316 (`fix(api): gate /home endpoints`).
+
+**By:** Bishop (background agent, session 2026-05-29T18:34:16Z)
+
+**Status:** ✅ COMPLETE — PR merged, issues #314 and #279 auto-closed.
+
+### What Shipped
+
+- The `/home`, `/homexy`, and `/homez` endpoints now call `GatePrinterControlAsync` before backend commands.
+- 409 `CommandResult` busy envelope preserved for all gated endpoints.
+- Control-gate pattern consistently applied across home movement endpoints.
+
+### Conflict Resolution
+
+- **Conflicting file:** `src/tests/Farm.Web.Api.Tests/Controllers/PrintersControllerControlGuardsTests.cs`
+- **Resolution:** Union merge preserving both base `BackendBusy -> 409` regression tests and PR's six `/home` gate tests.
+- **Validation:** 12/12 tests passing (PrintersControllerControlGuardsTests).
+
+### Implementation Notes
+
+- Merge method: squash
+- Merge SHA: `8becf256162ed2b4e14efe9df85cee2d18122426`
+- `dotnet test` verified with `dotnet clean` before rerun (cleared stale artifacts)
+
+### Next Steps
+
+- Lambert to apply consistent control-gate pattern to remaining endpoints (backlog priority).
+
+---
+
 ## 2026-05-21: Active-Printing State Set Diverges Intentionally from PrinterControlGate
 
 **Decision:** `PrintFailureMonitorService.EvaluateMonitoringWindow` uses a new shared helper `Farm.Infrastructure.Services.Printers.PrinterStateClassifier.IsActivePrintingJob(string?)` to decide whether AI failure monitoring should run.
