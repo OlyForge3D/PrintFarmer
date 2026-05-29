@@ -963,3 +963,47 @@ The correct pattern: model layer stores wire values; view/presentation layer app
 
 Ripley (iOS Dev) owns implementation. Issue #8 filed.
 
+# Shared Checkout Hazard — Recurring Pattern
+
+**Date:** 2026-05-28  
+**Incident:** Round 8 near-miss — Gorman's #278 commit landed on Hudson's `squad/284` branch (shared-checkout race condition).  
+**Previous:** Round 6 design-spec leak via same mechanism.  
+
+## Symptom
+
+When multiple agents work in the same workspace directory without sequencing checkout operations:
+- Agent A finishes work on branch X, pushes, but leaves checkout at branch X.
+- Agent B expects to start on branch Y, runs `git commit` without verifying current branch.
+- Commit lands on the *wrong* branch.
+
+## Root Cause
+
+**Shared `.git/` directory + async agent cleanup** — agents assume they're on the correct branch after `git push` but do not verify branch state before staging/committing.
+
+## Mitigation (Each Agent)
+
+Before staging changes:
+
+```bash
+git status
+```
+
+Verify:
+1. **Current branch** matches intended scope (e.g., `squad/284`).
+2. **Changed files** in the output match expected scope (no unexpected `.squad/` changes, etc.).
+3. **No detached HEAD** state.
+
+If mismatch detected, abort and notify Scribe.
+
+## Detection
+
+Scribe should flag in post-merge review:
+- Commits on unexpected branches.
+- File diffs crossing agent scopes (e.g., Gorman's PR includes `.squad/` agent history changes).
+
+## Recurring Risk
+
+- **R6:** Design-spec leak (shared-checkout collision).
+- **R8:** Gorman #278 → Hudson `squad/284` branch (same race pattern).
+
+**Action:** Log this as a standing hazard. Each agent's pre-commit `git status` verification should reduce recurrence.
