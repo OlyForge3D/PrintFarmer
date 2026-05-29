@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { EditPrinterModal } from '../EditPrinterModal';
 
 const mockUsePrinterDetails = vi.fn();
@@ -39,6 +40,15 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
   CloneProfilesModal: () => null,
 }));
 
+vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
+  usePrinterCameras: () => ({ data: [] }),
+}));
+
+function renderWithQueryClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
 function basePrinterDetails(overrides: Record<string, unknown> = {}) {
   return {
     name: 'test-printer',
@@ -74,7 +84,7 @@ describe('Printer Cost Fields', () => {
   });
 
   it('renders Wattage and Machine Hourly Rate fields in edit modal', async () => {
-    render(
+    renderWithQueryClient(
       <EditPrinterModal printerId="p-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
     );
 
@@ -84,7 +94,7 @@ describe('Printer Cost Fields', () => {
   });
 
   it('shows helper text for cost fields', async () => {
-    render(
+    renderWithQueryClient(
       <EditPrinterModal printerId="p-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
     );
 
@@ -98,7 +108,7 @@ describe('Printer Cost Fields', () => {
       data: basePrinterDetails({ wattage: 350, machineHourlyRate: 1.25 }),
     });
 
-    render(
+    renderWithQueryClient(
       <EditPrinterModal printerId="p-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
     );
 
@@ -110,7 +120,7 @@ describe('Printer Cost Fields', () => {
   });
 
   it('leaves cost fields empty when printer has no overrides', async () => {
-    render(
+    renderWithQueryClient(
       <EditPrinterModal printerId="p-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
     );
 
@@ -124,7 +134,7 @@ describe('Printer Cost Fields', () => {
   it('submits wattage and machineHourlyRate with numeric values', async () => {
     const user = userEvent.setup();
 
-    render(
+    renderWithQueryClient(
       <EditPrinterModal printerId="p-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
     );
 
@@ -156,7 +166,7 @@ describe('Printer Cost Fields', () => {
       data: basePrinterDetails({ wattage: 200, machineHourlyRate: 0.75 }),
     });
 
-    render(
+    renderWithQueryClient(
       <EditPrinterModal printerId="p-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
     );
 

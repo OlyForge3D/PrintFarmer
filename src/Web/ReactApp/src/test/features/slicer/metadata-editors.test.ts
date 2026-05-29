@@ -151,7 +151,10 @@ describe('Tab/Section completeness', () => {
   it('every section has at least one field (with known exceptions)', () => {
     // filament "Setting Overrides / Retraction" section is an empty placeholder
     // in the OrcaSlicer metadata — no fields assigned to it.
-    const KNOWN_EMPTY_SECTIONS = new Set(['filament/Setting Overrides/Retraction']);
+    const KNOWN_EMPTY_SECTIONS = new Set([
+      'filament/Setting Overrides/Retraction',
+      'filament/Setting Overrides/Ironing',
+    ]);
     for (const pt of PROFILE_TYPES) {
       const pm = getProfileMeta(pt);
       for (const tab of pm.tabs) {
