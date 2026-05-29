@@ -827,7 +827,27 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             Uri baseUri4 = new(baseUrl);
             Uri scriptUri = new(baseUri4, "printer/gcode/script");
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
+
+            // Secondary defense (#317): translate firmware-level busy signals to PrinterBackendBusyException
+            // so the controller's exception handler can return a 409 to the caller.
+            // 409 Conflict — firmware explicitly blocked the command (e.g., printhead lock during print).
+            // 503 Service Unavailable — Klippy is not ready (disconnected, error state, or firmware busy).
+            // Gap: Moonraker silently queues/accepts most gcodes (temps, moves) while printing; the 503
+            // only fires when Klippy itself is unavailable. The controller-level gate is the primary defense.
+            // TODO(#317-followup): evaluate Moonraker /printer/objects/query?print_stats to detect
+            // "printing" state for a proactive check on temperature/move mutations.
+            if (resp.StatusCode is System.Net.HttpStatusCode.Conflict
+                                 or System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                throw new PrinterBackendBusyException(
+                    $"Moonraker refused gcode ({(int)resp.StatusCode} {resp.StatusCode}) at {baseUrl}.");
+            }
+
             return resp.IsSuccessStatusCode;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            throw;
         }
         catch
         {
