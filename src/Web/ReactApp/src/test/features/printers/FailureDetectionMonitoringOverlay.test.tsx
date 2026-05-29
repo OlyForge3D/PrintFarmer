@@ -322,4 +322,62 @@ describe('FailureDetectionMonitoringOverlay', () => {
       screen.getByText(/Open the latest snapshot and confirm/i)
     ).toBeInTheDocument();
   });
+
+  it('liveIsPrinting_True_PreservesReason_WhenDisabledWithFeatureOffReason', () => {
+    // Regression for Bishop review on #313: state=disabled means the feature is
+    // intentionally off. The reason must be preserved even when live isPrinting=true.
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-3',
+      printerName: 'Bambu X1C',
+      state: 'disabled',
+      reason: 'Failure detection is disabled in Settings.',
+      isPrinting: false,
+      detectionSource: 'none',
+      lastOutcome: 'none',
+      lastAnalyzedAt: null,
+    };
+
+    renderWithQueryClient(
+      <FailureDetectionMonitoringOverlay
+        enabled={false}
+        status={status}
+        isPrinting={true}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /open spaghetti detection details for bambu x1c/i }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByText('Failure detection is disabled in Settings.').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/waiting for the monitoring service/i)).not.toBeInTheDocument();
+  });
+
+  it('liveIsPrinting_True_PreservesReason_WhenDisabledWithUnsupportedBackendReason', () => {
+    // Regression for Bishop review on #313: backends that do not support failure detection
+    // report state=disabled with an explanatory reason. That reason must not be overwritten.
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-4',
+      printerName: 'SDCP Resin Printer',
+      state: 'disabled',
+      reason: 'Backend does not support failure detection.',
+      isPrinting: false,
+      detectionSource: 'none',
+      lastOutcome: 'none',
+      lastAnalyzedAt: null,
+    };
+
+    renderWithQueryClient(
+      <FailureDetectionMonitoringOverlay
+        enabled={true}
+        status={status}
+        isPrinting={true}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /open spaghetti detection details for sdcp resin printer/i }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByText('Backend does not support failure detection.').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/waiting for the monitoring service/i)).not.toBeInTheDocument();
+  });
 });

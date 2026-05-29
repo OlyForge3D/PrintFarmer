@@ -38,10 +38,11 @@ export function FailureDetectionMonitoringBadge({
 
   // The DTO's isPrinting is computed by a 30-second backend poll and can lag behind the
   // live printer status (updated via SignalR). Override it with the live value when provided.
-  // When the live printer IS printing but the DTO says otherwise, also replace a stale
-  // "not printing" reason so operators never see a false "not printing" message.
+  // Only patch the reason for 'idle' state — that is the stale "not printing" case.
+  // 'disabled' means the feature is intentionally off or the backend doesn't support it;
+  // its reason is always authoritative and must never be overwritten.
   const stalePrintingMismatch = isPrinting === true && !!status && !status.isPrinting
-    && (status.state === 'idle' || status.state === 'disabled');
+    && status.state === 'idle';
   const effectiveStatus = isPrinting !== undefined && status
     ? {
         ...status,

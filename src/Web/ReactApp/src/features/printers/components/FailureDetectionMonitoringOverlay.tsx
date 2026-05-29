@@ -66,8 +66,11 @@ export function FailureDetectionMonitoringOverlay({
     return null;
   }
 
+  // Only patch the reason for 'idle' state — that is the stale "not printing" case.
+  // 'disabled' means the feature is intentionally off or the backend doesn't support it;
+  // its reason is always authoritative and must never be overwritten.
   const stalePrintingMismatch = isPrinting === true && !!status && !status.isPrinting
-    && (status.state === 'idle' || status.state === 'disabled');
+    && status.state === 'idle';
   const effectiveStatus = isPrinting !== undefined && status
     ? {
         ...status,
