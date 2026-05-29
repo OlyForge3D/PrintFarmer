@@ -125,3 +125,29 @@
 **Dallas** (#290 status-gating) complete: API guards for `/temps`, `/move`, `/moveto` live via PR #308. Status-gating orthogonal to capabilities.
 **Newt** (#283 design spec) complete: Design decisions locked. UI gating ready to use capabilities endpoint.
 **Unblocked:** Fallback table canonical; endpoint `GET /api/printers/{printerId}/backend-capabilities` confirmed live. PR OlyForge3D/PrintFarmerMobile#2 awaiting CI.
+
+### 2026-05-28: Issue #282 — PrinterControlsViewModel (PR #7)
+
+- **Queue strategy chosen: Task-chain (not actor)**
+  - A dedicated `actor CommandQueue` was considered but rejected: it would require all callers to `await` the enqueue (changing sync wrappers to async), and adds indirection without benefit since the ViewModel is already `@MainActor`.
+  - Task-chain: `queueTail = Task { await previousTail?.value; ... }`. Each new task awaits the previous tail before executing. FIFO guaranteed. No actor needed. Cancel-on-deinit via `queueTail?.cancel()`.
+  - Caveat: `isCommandInFlight` goes `false` briefly between consecutive commands in a chain. Chosen as acceptable for controls UI (aggregate tracking). Per-command `[CommandType: Bool]` map deferred until view layer requests it.
+
+- **`@ObservationIgnored nonisolated(unsafe) var queueTail`** — required in Swift 6 for `@MainActor @Observable` classes: `@Observable` macro wraps stored properties in `_$observationRegistrar` which conflicts with `nonisolated(unsafe)` alone. `@ObservationIgnored` disables macro wrapping so the annotation takes effect. `deinit` can then cancel the task without a MainActor hop. Confirmed by: warning "nonisolated(unsafe) has no effect" disappears when combined with `@ObservationIgnored`.
+
+- **Capability cache invalidation rule**: no TTL-based invalidation. Cache is valid for the lifetime of the ViewModel instance. Consumers call `loadCapabilities()` again when they detect a backend reconnection (SignalR disconnect/reconnect signal). This keeps the cache simple; stale data is only possible during a reconnect window.
+
+- **Conflict-error UX string convention**: `NetworkError.conflict` (HTTP 409 — printer busy) → `"The printer is busy — please wait a moment and try again."`. All other errors use `error.localizedDescription`. The distinct string is static and English-only; i18n deferred. Pattern lives in `PrinterControlsViewModel.userFacingMessage(for:)`.
+
+- **`drainQueue()` test hook** — exposes `await queueTail?.value` as `internal` (not `private`) for test synchronization. Not intended for production call sites. Pattern matches existing test patterns in the project.
+
+- **Key files**:
+  - `mobile/PrintFarmer/ViewModels/PrinterControlsViewModel.swift` — new ViewModel
+  - `mobile/PrintFarmerTests/ViewModels/PrinterControlsViewModelTests.swift` — 14 XCTest cases
+- **PR**: https://github.com/OlyForge3D/PrintFarmerMobile/pull/7 (base: squad/281-printer-service-commands)
+
+## Learnings
+
+- **Swift 6 + @Observable + deinit**: Use `@ObservationIgnored nonisolated(unsafe)` for stored properties that deinit must access. `nonisolated(unsafe)` alone has no effect when the property is wrapped by `@Observable`'s `_$observationRegistrar`.
+- **Task-chain queue**: Preferred over `actor` for @MainActor ViewModels. Simpler, no async enqueue API, FIFO guaranteed, cancel-on-deinit straightforward.
+- **Conflict-error UX**: Standardized distinct string for HTTP 409 in `PrinterControlsViewModel.userFacingMessage(for:)`. Future ViewModels with commands should follow this pattern.
