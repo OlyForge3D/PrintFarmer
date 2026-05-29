@@ -44,3 +44,11 @@ _(append new learnings below this line)_
   2. **Test layer violation:** `HomeSubgroupTests` exercises viewmodel state directly; does not render view or verify picker selection, button taps, axis gating through SwiftUI layer. Tests must render the component and use testability extensions to access state.
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570057941
 - **Durable rule established:** Apply "test the view, not the viewmodel" rule to all SwiftUI subgroup PRs going forward. Reviewers must reject PRs whose tests only exercise viewmodel state without rendering the view.
+
+### 2026-05-29 — PrintFarmerMobile #12 re-review (home subgroup, final)
+
+- **Verdict:** ✅ APPROVE (merged).
+- **Fix confirmed:** Verbatim spec strings inlined by coordinator per-button ("Double-tap to home printer" / "Double-tap to home XY" / "Double-tap to home Z"). Disabled-state pattern: `resolvedAccessibilityHint` returns `""` when disabled; `resolvedAccessibilityLabel` appends `", unavailable during print"`. Computed properties used directly by `.accessibilityLabel()` / `.accessibilityHint()`.
+- **Test pattern non-tautological:** Both view's `.accessibilityLabel(...)` and test assertion route through same `resolvedAccessibilityLabel` property. Changing string in one place changes both — test cannot pass if view changes.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570269998
+- **Commit:** `533b86f`

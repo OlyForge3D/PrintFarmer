@@ -1111,3 +1111,38 @@ Scribe should flag in post-merge review:
    - Spec strings (VoiceOver labels, hints, button copy) must be asserted by reading from the rendered view, not comparing against hardcoded constants in tests.
    - Constants in tests = compile-time tautology, not a spec check.
    - Pattern: render view with fixture; read `.accessibilityLabel`, `.accessibilityHint` from inspected element; compare to spec source string.
+
+---
+
+## Decision: Round 15 — Hudson final #12 (verbatim spec strings), Hicks pedant CR #13 (init-state tests tooling gap)
+
+**Date:** 2026-05-29  
+**Authors:** Hudson (fix-up), Hicks (re-review), Vasquez (pending tiebreaker)  
+**Status:** PR #12 Merged, PR #13 Open + REQUEST_CHANGES  
+
+### Summary
+
+- **Hudson PR #12 final fix:** ✅ MERGED.
+  - **Spec strings inlined by coordinator:** Verbatim per-button hyphenated hints from `docs/design/printer-controls-section.md` now coded: "Double-tap to home printer", "Double-tap to home XY", "Double-tap to home Z".
+  - **Disabled-state pattern finalized:** `resolvedAccessibilityLabel` appends `", unavailable during print"` when disabled; `resolvedAccessibilityHint` returns `""` (empty string) when disabled. Both computed properties used directly by `.accessibilityLabel()` / `.accessibilityHint()`.
+  - **Test layer non-tautological pattern:** Helpers construct real `HomeButton` and call `resolved*` computed properties — same properties the view uses. If view strings change, test assertions change automatically; test cannot pass with stale spec.
+  - **Commit:** `533b86f`
+  - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570269998
+
+- **Hicks PR #13 re-review:** ❌ REQUEST_CHANGES (pedantic).
+  - **Issue:** Init-state tests instantiate `JogSubgroup` and inspect `*ForTesting` test hooks rather than routing through SwiftUI render lifecycle.
+  - **Rationale:** No ViewInspector or equivalent SwiftUI introspection library available in project; true "render-lifecycle" tests require UI framework integration not present.
+  - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570184502
+  - **Status:** Awaiting Vasquez tiebreaker (spawned as R16 task).
+
+### Tooling Gap Identified
+
+**Project limitation:** Absence of ViewInspector (or equivalent SwiftUI introspection lib) prevents render-lifecycle tests on init state. Post-init `@State` reads via `*ForTesting` extensions are the practical equivalent for verifying init logic without adding a test dependency.
+
+### Durable Decision Rules Captured
+
+4. **SwiftUI introspection tooling threshold rule (effective immediately):**
+   - **If ViewInspector or equivalent SwiftUI introspection lib is unavailable,** accept `*ForTesting` extensions that expose post-init `@State` values as the practical equivalent of render-lifecycle tests.
+   - Do not ratchet code-review expectations beyond available tooling; test-hook reads of `@State` post-init are valid for init-logic verification.
+   - Rationale: Full lifecycle tests require UIKit integration or framework support not present in this project. Don't require the impossible.
+   - Applies to: All SwiftUI subgroup init-state testing going forward.

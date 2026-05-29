@@ -74,8 +74,15 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - **Durable rule:** All SwiftUI subgroup tests must exercise rendered view, not viewmodel state directly; failure to do so is a blocker for code review.
 - PR #13 commit: `6344c8f`
 
+### 2026-05-29: Round 15 — PR #12 verbatim spec strings + HomeButton non-tautological tests
+
+- **Spec strings finalized:** Coordinator inlined verbatim per-button hints from `docs/design/printer-controls-section.md`. Tests now route both view `.accessibilityLabel()` and assertions through same `resolvedAccessibilityLabel` computed property. **Changing the string in one place changes both — test fails if view strings change.**
+- **Disabled-state pattern:** `resolvedAccessibilityHint` returns `""` when disabled; `resolvedAccessibilityLabel` appends `", unavailable during print"`. Computed properties used directly by `.accessibilityLabel()` / `.accessibilityHint()` modifiers.
+- **PR #12 merged** (`533b86f`). PR #13 (Jog) rebased 4/4 commits cleanly, awaiting Hicks re-review.
+
 ## Milestone Summary
 - 2026-05-20: iOS squad merged; mobile controls v1 issues assigned (#274 role gate, #275 drift, #284–#286 controls, #288 polish).
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291–#298).
 - 2026-05-24: Beta 74 released; Xcode registration patterns solidified.
 - 2026-05-28: Issue #274 re-run complete (role-gating decision finalized for PR #3).
+- 2026-05-29: PR #12 merged (verbatim spec strings); PR #13 rebased + pending Vasquez tiebreaker on test-tooling gap.
