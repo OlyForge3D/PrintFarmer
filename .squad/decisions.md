@@ -4532,3 +4532,160 @@ One reviewer must document in review notes:
 - **All async view-state tests:** Require continuation-based hold-point in mock.
 - **Test review gate:** Ask "what does this test observe?" If only endpoints, request continuation-based redesign.
 - **Applies to:** Loading flags, progress indicators, modal dismissals, any state that transitions mid-async operation.
+
+---
+
+## 101. Bind-Source/Test-Source Equivalence via Computed Properties (APPROVED)
+
+**Date:** 2026-06-18  
+**Author:** Vasquez (Reviewer) + Hudson (Implementer)  
+**Status:** APPROVED — Applied to PR #17 round 28  
+**Context:** A11y testing with string constants flowing through computed properties
+
+### Problem
+
+Bishop flagged HomeSubgroup A11y tests as potentially tautological: tests asserted through `HomeButton.resolvedAccessibilityLabel` (computed property) rather than the bare static constant. View also reads through the same property. Question: Is this test truly non-tautological?
+
+### Decision
+
+**When a view binds `.accessibilityLabel(component.resolvedX)` where `resolvedX` is a computed property reading a static constant, AND tests construct the same component with the same constant and assert on the same computed property, the test IS non-tautological.**
+
+Changing the constant breaks both view and test identically. The bind-source (what the view reads) equals the test-source (what the test asserts), via the same computed property.
+
+### Why
+
+- Bind-source ≡ test-source (via property X) means modifying the constant causes both view and test to fail.
+- Computed properties often encapsulate composition logic (disabled-state suffix concatenation, accessibility identifier transforms, etc.).
+- Asserting through the computed property preserves coverage of that composition logic.
+- Asserting on the bare constant loses coverage of the composition inside the property.
+
+### Anti-Pattern (Reduced Coverage)
+
+```swift
+// Test asserts the constant directly
+let label = "Home All"
+XCTAssertEqual(label, "Home All")  // ✓ passes
+// But misses coverage of the composition logic:
+// - disabled-state suffix appended?
+// - accessibility identifier set correctly?
+```
+
+### Pattern (Full Coverage)
+
+```swift
+// View binds through computed property
+let button = HomeButton(label: Self.homeAllAccessibilityLabel)
+// resolvedAccessibilityLabel = label + (isPrinting ? ", unavailable during print" : "")
+
+// Test constructs same component, asserts through same property
+XCTAssertEqual(button.resolvedAccessibilityLabel, expected)
+// Tests the constant AND the composition inside the property
+```
+
+### Verification Checklist
+
+One reviewer must verify:
+
+- [ ] Constant is `static let` in the component/subgroup struct.
+- [ ] View injects constant via `Self.constantName`.
+- [ ] View binds to the component via `.accessibilityLabel(component.resolvedX)` where `resolvedX` reads the constant.
+- [ ] Test constructs component with same constant.
+- [ ] Test asserts on the same computed property (`component.resolvedX`).
+- [ ] Composition logic inside property (suffixes, transforms) is non-trivial (≥1 conditional or concatenation).
+
+### Example: PR #17 Round 28
+
+**HomeSubgroup:**
+```swift
+struct HomeSubgroup {
+  static let homeAllAccessibilityLabel = "Home All"
+  // ... other labels
+  
+  var homeButton: HomeButton {
+    HomeButton(label: Self.homeAllAccessibilityLabel)
+    // HomeButton.resolvedAccessibilityLabel = label + (isPrinting ? ", unavailable" : "")
+  }
+}
+
+// Test:
+let subgroup = HomeSubgroup(printer: printer)
+let expected = "Home All" + (printer.isPrinting ? ", unavailable during print" : "")
+XCTAssertEqual(subgroup.homeButton.resolvedAccessibilityLabel, expected)
+// Asserts constant AND composition logic inside resolvedAccessibilityLabel
+```
+
+### Operational Rule
+
+- **A11y testing with string constants:** Assert through the computed property the view renders from, not bare constants.
+- **Approval gate:** If bind-source ≡ test-source via computed property, test is non-tautological (do not reject on "assert constant directly" grounds).
+- **Composition logic:** Computed properties containing composition deserve coverage via property-level assertions, not raw-constant assertions.
+
+---
+
+## 102. Tiebreaker Authority — Methodology Disputes After Blockers Fixed (APPROVED)
+
+**Date:** 2026-06-18  
+**Author:** Vasquez (Tiebreaker)  
+**Status:** APPROVED — Applied to PR #17 round 28  
+**Context:** Bishop and Vasquez disagreed on HomeSubgroup test methodology after Hudson fixed Jog blocker
+
+### Problem
+
+After Hudson fixed Bishop's round-27 REQUEST_CHANGES (Jog picker tautology), Bishop raised a NEW concern: HomeSubgroup tests should assert the constant directly, not through computed property. Vasquez disagreed, traced binding chain, and concluded tests were non-tautological. Question: Who decides? What happens next?
+
+### Decision
+
+**When a tiebreaker (Vasquez) overrules a post-blocker methodology concern raised by another reviewer (Bishop) after the original blocker is fixed, the tiebreaker conclusion stands. The coordinator does NOT request a second rework round.**
+
+### Why
+
+- Original blocker (Jog picker tautology) is fixed; Hudson delivered surgical solution.
+- New concern (HomeSubgroup methodology) is a disagreement on testing philosophy, not a blocking defect.
+- Tiebreaker traces chain end-to-end and provides reasoned decision (bind-source ≡ test-source).
+- Requiring a second rework round would create indefinite rework cycles when reviewers have methodological disagreements.
+- *ForTesting ceiling (round-16 history) establishes: testing standards are not infinitely detailed; tradeoffs exist between coverage and implementation effort.
+
+### Anti-Pattern (Infinite Rework)
+
+```
+Round 27: Bishop REQUEST_CHANGES (blocker).
+Round 28: Hudson fixes blocker. Bishop raises NEW concern (not blocker).
+         Vasquez tiebreak APPROVE. Coordinator asks for THIRD round to address
+         Bishop's new concern.
+Round 29: Infinite loop possible if Vasquez and Bishop keep disagreeing on methodology.
+```
+
+### Pattern (Tiebreaker Decisive)
+
+```
+Round 27: Bishop REQUEST_CHANGES (blocker).
+Round 28: Hudson fixes blocker. Bishop raises NEW concern.
+         Vasquez tiebreak APPROVE (traces chain, explains reasoning).
+         Coordinator accepts tiebreak; no second rework requested.
+         PR proceeds with two-APPROVE consensus (Vasquez r27 + tiebreak r28).
+```
+
+### Verification Checklist
+
+Before accepting tiebreaker conclusion and moving to approval:
+
+- [ ] Original blocker is fixed (not deferred or weaseled).
+- [ ] New concern raised post-fix is methodology/philosophy (not a correctness defect).
+- [ ] Tiebreaker traces full reasoning chain (not just "I disagree").
+- [ ] Tiebreaker decision aligns with prior ceilings/patterns (e.g., *ForTesting, round-16).
+
+### Example: PR #17 Round 28
+
+**Original blocker (r27):** Jog picker labels tautological (constants defined in tests only, view rendered from different source). **VALID.** Hudson fixed.
+
+**New concern (r28):** HomeSubgroup should "assert constant directly" not "through computed property." **METHODOLOGY.** Not a correctness bug.
+
+**Vasquez tiebreak:** Traced bind-source ≡ test-source via `resolvedAccessibilityLabel`. Explains that asserting through property preserves composition coverage. Aligns with *ForTesting ceiling (testing philosophy has bounds; composition logic justifies property-level assertions).
+
+**Coordinator outcome:** Accept tiebreak. PR approved with Vasquez r27 APPROVE + tiebreak r28 APPROVE.
+
+### Operational Rule
+
+- **Tiebreaker methodology disputes:** Trace chain end-to-end; if reasoning is sound and aligns with prior ceilings, decision is final.
+- **Post-blocker concerns:** If not a blocking defect, new methodology disagreements do not trigger second rework rounds; tiebreaker decides.
+- **Approval gate:** Two-APPROVE consensus (original + tiebreak) sufficient to ship. Coordinator does not re-request additional reviews of tiebreaker decision.

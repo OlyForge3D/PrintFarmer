@@ -90,3 +90,44 @@ Bishop verified fix and re-APPROVE. Question answered: **the test now observes t
 
 - All async loading UI tests: require continuation-based hold-point to assert mid-flight state.
 - Test review rule: ask "what does this test actually observe?" If only endpoints, request continuation-based redesign.
+
+## Round 27-28: PR #17 Review — A11y Pass on PreheatSubgroup/HomeSubgroup/JogSubgroup (2026-06-15 to 2026-06-18)
+
+**PR:** `squad/288-controls-a11y-pass` (OlyForge3D/PrintFarmerMobile)
+**Status:** Consensus-approved (round 28). Stacked on PR #16 (unmerged).
+
+### Round 27: REQUEST_CHANGES — Jog Picker Tautology
+
+Bishop reviewed Hudson's comprehensive A11y pass (32 tests, VoiceOver strings, disabled-state suffix, hit targets, ReduceMotion gating, Dynamic Type smoke tests).
+
+**REQUEST_CHANGES:** Jog picker labels (4 string constants) defined inline in struct, then lifted to file scope in tests only. View renders from struct instance, tests asserted constants directly. Tautological: changing constant breaks test but view would still render old inline value.
+
+### Round 28: NEW Concern Raised, Then Tiebreak Overruled
+
+Hudson fixed by lifting all labels (Jog 4 + Home 6) to `static let`, binding via `Self.constantName`.
+
+**Bishop raised NEW concern:** HomeSubgroup tests still read through `HomeButton.resolvedAccessibilityLabel` computed property rather than asserting constant directly. "Unnecessarily indirected; test should assert the constant."
+
+**Vasquez tiebreak APPROVE:** Traced binding chain end-to-end:
+- View injects `Self.homeAllAccessibilityLabel` (static constant) into `HomeButton`.
+- `HomeButton.resolvedAccessibilityLabel` computed property reads the injected label.
+- View renders `.accessibilityLabel(homeButton.resolvedAccessibilityLabel)`.
+- Test constructs the same `HomeButton` with the same constant, asserts on same property.
+- **Bind-source ≡ test-source** — both read constant through the same property.
+- Bishop's "assert constant directly" would lose coverage of composition logic inside `resolvedAccessibilityLabel` (disabled-state suffix concatenation).
+
+**Vasquez invoked round-16 *ForTesting ceiling:** Tiebreaker conclusion stands; no second rework round.
+
+### Key Learnings
+
+1. **Constant-lift-and-bind pattern creates non-tautological tests if bind-source ≡ test-source.** Asserting through the view's computed property preserves coverage of composition logic (disabled-state, concatenations, transforms).
+
+2. **Tautology detection requires full chain tracing.** Don't spot-check endpoints; trace where the constant flows (through computed properties, state transforms, view renderers) and verify test exercises the same flow.
+
+3. **When tiebreaker overrules after blocker is fixed, no second rework requested.** Round 28: Bishop wanted "assert constant directly", Vasquez demonstrated this reduces coverage. Coordinator accepted tiebreak; PR proceeds with two-APPROVE consensus.
+
+### Pattern
+
+- A11y testing with string constants: assert through the computed property the view renders from, not bare constants.
+- Bind-source ≡ test-source rule: if view and test both read constant through property X, test is non-tautological.
+- Tiebreaker methodology disputes: trace chain end-to-end; tiebreaker decision is final (no appeal/rework round).

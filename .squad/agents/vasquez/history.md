@@ -37,3 +37,52 @@ Vasquez reviewed Hudson's PrinterControlsSection integration after Bishop COMMEN
 
 - All iOS view tests: assert through @State or observable output, not through internal view inspection.
 - No ViewInspector ceiling = design test strategy around observable state, not view internals.
+
+## Round 27-28: PR #17 APPROVE + Tiebreak — A11y Pass (2026-06-15 to 2026-06-18)
+
+**PR:** `squad/288-controls-a11y-pass` (OlyForge3D/PrintFarmerMobile)
+**Status:** Consensus-approved (round 28). Stacked on PR #16 (unmerged).
+
+### Round 27: APPROVE
+
+Vasquez reviewed Hudson's comprehensive A11y pass across three subgroups:
+- Verbatim-spec VoiceOver strings (`resolvedAccessibilityLabel`, `resolvedAccessibilityHint`).
+- Disabled-state suffix (`", unavailable during print"` concatenation).
+- Hit targets ≥56pt, ReduceMotion gating, Dynamic Type smoke tests.
+- 32 tests covering transitions, variants, accessibility identifiers.
+
+Vasquez APPROVE: A11y specs comprehensive, VoiceOver direct from spec, disabled-state composition correct, hit targets verified. Acknowledged Bishop's REQUEST_CHANGES on Jog picker tautology; Hudson will fix in round 28.
+
+### Round 28: Tiebreak APPROVE After Hudson Fix
+
+Hudson fixed by lifting all labels to `static let`, binding via `Self.constantName`:
+- **JogSubgroup:** 4 labels lifted.
+- **HomeSubgroup:** 6 labels lifted.
+- **PreheatSubgroup:** Already correct (uses `resolvedAccessibilityLabel`).
+
+Bishop raised NEW concern: HomeSubgroup tests still read through `HomeButton.resolvedAccessibilityLabel` (computed property) rather than asserting constant directly.
+
+**Vasquez tiebreak APPROVE:** Traced full binding chain:
+- View injects `Self.homeAllAccessibilityLabel` (static) into `HomeButton`.
+- `HomeButton` stores in `@State var label`.
+- View renders `.accessibilityLabel(homeButton.resolvedAccessibilityLabel)`.
+- Test constructs `HomeButton` with same constant, asserts on same property.
+- **Bind-source ≡ test-source:** both read constant through property X.
+- Bishop's proposed "assert constant directly" would lose coverage of composition inside `resolvedAccessibilityLabel` (e.g., disabled-state suffix concatenation).
+
+**Invoked round-16 *ForTesting ceiling:** "When constants flow through computed properties, asserting on the computed property is NOT tautological if the view also reads through that property. This preserves coverage of the composition logic."
+
+**PR #17 now fully approved** (Vasquez r27 APPROVE + tiebreak r28 APPROVE).
+
+### Key Learnings
+
+1. **Bind-source/test-source equivalence via computed properties:** When a view binds `.accessibilityLabel(component.resolvedX)` where `resolvedX` is a computed property reading a static constant, AND tests construct the same component with the same constant and assert on the same computed property, the test IS non-tautological. Changing the constant breaks both view and test identically.
+
+2. **Tiebreaker traces the binding chain end-to-end before deciding.** Don't accept tautology claims on methodology disputes without verifying the complete flow (constant → computed property → view modifier).
+
+3. **Asserting on the bare constant can reduce coverage.** When the view's computed property includes composition logic (disabled-state suffix, concatenations, transforms), testing through that property is more thorough than asserting the raw constant.
+
+### Pattern
+
+- Bind-source/test-source equivalence is sufficient for non-tautological tests, even if both use the same constant source.
+- Tiebreaker authority: when two reviewers dispute test methodology after blocker is fixed, tiebreaker traces chain; if bind-source ≡ test-source, the test stands (no second rework round requested).

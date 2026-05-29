@@ -101,3 +101,76 @@
 - **Agent history entries**: `.squad/agents/hudson/history.md`, `.squad/agents/bishop/history.md`, `.squad/agents/vasquez/history.md`
 - **Decision rules**: `.squad/decisions.md` (Async Loading-State Test Rule)
 - **Squad bottleneck status**: All P0/P1 squad PRs across both repos (PrintFarmer + PrintFarmerMobile) now approved. Bottleneck shifts to Jeff's merge queue (unmerged base chains, deployment scheduling).
+
+---
+
+## PR #17: A11y Pass — Rounds 27-28
+
+**Title:** `squad/288-controls-a11y-pass` (OlyForge3D/PrintFarmerMobile)
+
+**PR Link:** [OlyForge3D/PrintFarmerMobile#17](https://github.com/OlyForge3D/PrintFarmerMobile/pull/17)
+
+**Status:** Consensus-approved (round 28). Stacked on PR #16 (unmerged base).  
+**Final State:** Two-reviewer APPROVE (Vasquez r27 + tiebreak r28).
+
+### Timeline
+
+**Round 27 (2026-06-15)**
+- **Hudson**: Shipped PR #17 with comprehensive A11y pass on PreheatSubgroup/HomeSubgroup/JogSubgroup:
+  - Verbatim-spec VoiceOver strings via `resolvedAccessibilityLabel` and `resolvedAccessibilityHint`.
+  - Disabled-state suffix: `", unavailable during print"` appended when `isPrinting == true`.
+  - Hit targets ≥56pt verified on all buttons/sliders.
+  - ReduceMotion gating for animations.
+  - Dynamic Type smoke tests for text scaling.
+  - +32 tests covering view transitions, layout variance, accessibility identifiers.
+- **Bishop**: REQUEST_CHANGES — flagged Jog picker labels as tautological. 4 string constants defined inline in struct, then lifted to file scope in tests only. View renders from struct instance; tests asserted constants directly. Changing constant breaks test assertion but view would still render old value.
+- **Vasquez**: APPROVE — A11y specs comprehensive, VoiceOver direct from spec, disabled-state composition correct, hit targets verified. Acknowledged Bishop's blocker; Hudson will fix in r28.
+
+**Round 28 (2026-06-18)**
+- **Hudson**: Surgical fix (commits 2-3):
+  - **JogSubgroup:** Lifted all 4 picker labels to `static let`.
+  - **HomeSubgroup:** Lifted all 6 button labels to `static let`.
+  - **PreheatSubgroup:** Already correct (uses `resolvedAccessibilityLabel` on model).
+  - View binds via `Self.constantName` (static reference).
+  - Tests construct component and assert on the same constant and computed property.
+- **Bishop**: Raised NEW concern (not blocking original fix) — HomeSubgroup tests should assert the constant directly, not through `HomeButton.resolvedAccessibilityLabel` computed property.
+- **Vasquez**: Tiebreak APPROVE after tracing full binding chain:
+  - View injects `Self.homeAllAccessibilityLabel` (static) → `HomeButton` stores → `.accessibilityLabel(homeButton.resolvedAccessibilityLabel)`.
+  - Test constructs same `HomeButton` with same constant → asserts on same property.
+  - **Bind-source ≡ test-source:** both read constant through property.
+  - Asserting "constant directly" would lose coverage of composition logic inside `resolvedAccessibilityLabel` (disabled-state suffix concatenation).
+  - Invoked round-16 *ForTesting ceiling: tiebreaker decision final; no second rework round.
+
+### Key Decisions Recorded
+
+**Decision #101:** Bind-Source/Test-Source Equivalence via Computed Properties — when view binds through computed property X and test asserts through same property X, test is non-tautological even if both use same constant source. Preserves coverage of composition logic.
+
+**Decision #102:** Tiebreaker Authority — Methodology Disputes After Blockers Fixed — when tiebreaker overrules post-blocker methodology concern from another reviewer, tiebreaker conclusion is final. Coordinator does not request second rework round.
+
+### Squad Learning Summary
+
+1. **Constant-lift-and-bind pattern:** String constants used by multiple subgroup components should be `static let`, bound via `Self.constantName`. Tests construct component and assert through view's computed property (not bare constant). This preserves coverage of composition logic.
+
+2. **Bind-source ≡ test-source equivalence:** If view and test both read constant through the same computed property, the test is non-tautological — changing constant breaks both identically.
+
+3. **Tiebreaker finality on methodology:** When two reviewers disagree on testing methodology after the original blocker is fixed, the tiebreaker traces the chain end-to-end, decides, and the decision stands (no second rework).
+
+4. **A11y composition logic justifies property-level testing:** Asserting through the property that includes disabled-state suffix, accessibility identifiers, and transforms covers more ground than asserting bare constants.
+
+5. **Follow-up work filed:** Issue #18 for VoiceOver element grouping (combining Home + Preheat buttons into semantically-unified container for nav efficiency). Vasquez raised in r27 review; Hudson escalated to backlog.
+
+### Squad Bottleneck Status
+
+**All P0/P1 PrintFarmer Mobile squad PRs now approved:**
+- PR #11, #12, #13 (controls v1 base chain): unmerged, awaiting Jeff's merge queue.
+- PR #16 (controls integration): fully approved r26, stacked on #13.
+- PR #17 (a11y pass): fully approved r28, stacked on #16.
+- **#289 (snapshot tests):** only remaining unmerged work. Blocked on snapshot-testing infrastructure not yet added to test suite.
+
+**Bottleneck:** Jeff's merge queue. Squad is now fully blocked on infrastructure + merge decisions, not engineering work. All code review gates satisfied.
+
+### Artifacts
+
+- **Agent history entries:** `.squad/agents/hudson/history.md`, `.squad/agents/bishop/history.md`, `.squad/agents/vasquez/history.md`
+- **Decision rules:** `.squad/decisions.md` (decisions #101, #102)
+- **Follow-up issue:** PrintFarmerMobile #18 (VoiceOver element grouping)
