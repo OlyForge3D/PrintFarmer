@@ -133,6 +133,133 @@ fallback when the endpoint returns 404 or decoding fails:
 
 ---
 
+# Decision: Role-gated UI uses plain `if`-conditional, not a ViewModifier
+
+**Date:** 2026-05-28  
+**Issue:** OlyForge3D/PrintFarmerMobile#3 (iOS #274)  
+**Author:** Hudson  
+**Status:** Implemented
+
+## Context
+
+The Maintenance toggle in `PrinterDetailView` must be hidden for non-`farm_admin` users.
+Two patterns were considered:
+
+1. **Plain `if authViewModel.currentUserRole == "farm_admin" { ... }`** around the button block.
+2. A custom `adminOnly()` ViewModifier that reads role from environment and calls `.hidden()` or returns `EmptyView`.
+
+## Decision
+
+Plain `if`-conditional (option 1).
+
+## Rationale
+
+- The button is **entirely absent** from the view hierarchy for non-admins, not merely hidden. This avoids focus/VoiceOver traversal and any accidental tap passthrough.
+- ViewModifier would still construct the button node and apply `.hidden()` — semantically weaker.
+- Consistent with Apple HIG: omit controls the user can't use rather than disable/hide them.
+- Simpler — no new abstraction needed for a single call site. If multiple admin-only surfaces emerge, a modifier becomes worthwhile and this decision should be revisited.
+
+## Consequences
+
+- Any future admin-only control needs the same one-liner `if authViewModel.currentUserRole == "farm_admin"`.  
+- If admin role gating becomes widespread (>3 sites), consider extracting a `.adminOnly(authViewModel)` modifier or an `@ViewBuilder adminOnly { ... }` helper.
+
+---
+
+# iOS #281 — PrinterService Command Method Routing Decisions
+
+**Date:** 2026-05-28  
+**Author:** Gorman  
+**Issue:** OlyForge3D/PrintFarmer#281  
+**PR:** OlyForge3D/PrintFarmerMobile#4
+
+## Decision 1: homeXY / homeZ map to dedicated backend routes, not a parameterized `/home`
+
+**Context:** Issue #281 spec described `home(printerId:axes:)` as a single method routing to
+`POST /api/printers/{id}/home`. Backend inspection revealed three separate no-body POST endpoints:
+`/home` (all axes), `/homexy`, `/homez`.
+
+**Decision:** `home(printerId:axes:)` dispatches internally by sorted axes array:
+- `["X","Y"]` → `/homexy`
+- `["Z"]` → `/homez`
+- anything else (empty, `["X","Y","Z"]`, etc.) → `/home`
+
+`homeXY` and `homeZ` are protocol extension defaults that call `home(axes:)`.
+
+**Rationale:** No new backend routes needed. Caller API matches the issue spec. Route selection
+is an implementation detail hidden from callers.
+
+## Decision 2: setTemperatures nil-omit via custom Encodable (not dictionary)
+
+**Context:** Backend `TempTargets` C# record always has both `hotend` and `bed` (non-nullable
+ints). Issue #281 allows callers to pass `nil` for either field to omit it.
+
+**Decision:** Private `SetTemperaturesRequest` with custom `encode(to:)` that conditionally
+encodes each field. Not a `[String: Double]` dictionary — typed struct is safer and more
+readable.
+
+**Rationale:** Dictionary approach works but loses type safety. Custom Encodable is the Swift
+idiomatic pattern for omitting optional JSON fields without `null` emission.
+
+## Decision 3: move body uses [String: Double] dictionary
+
+**Context:** `MoveRequest` C# record has `x?`, `y?`, `z?`, `f?` fields. Swift needs to set
+only the relevant axis.
+
+**Decision:** `var body: [String: Double] = ["f": Double(feedrateMmMin)]` then
+`body[axis.lowercased()] = distanceMm`. Dictionary naturally omits unset keys.
+
+**Rationale:** A 4-field Encodable struct with 3 nil fields and a custom encoder is more
+boilerplate than the problem warrants. Dictionary is clean and correct here.
+
+## Decision 4: 409 conflict maps to existing NetworkError.conflict
+
+**Context:** `GatePrinterControlAsync` returns HTTP 409 when printer is printing/busy.
+Applies to `/temps` and `/move` (not `/home*`).
+
+**Decision:** No new error case. `APIClient` already maps HTTP 409 → `NetworkError.conflict`.
+Callers (`PrinterControlsViewModel`) catch `.conflict` and surface "Printer busy" to the user.
+
+---
+
+# Decision: Canonical "Is Printing" Source for Failure Detection Shield
+
+**Date:** 2026-05-28  
+**Author:** Ripley  
+**Issue:** #309  
+**PR:** #313
+
+## Decision
+
+The failure-detection shield badge must derive `isPrinting` from the live printer state (`printer.state`), not from `FailureDetectionPrinterStatusDto.isPrinting`.
+
+## Context
+
+`FailureDetectionPrinterStatusDto.isPrinting` is computed by the backend failure-detection polling service on a ~30-second cycle. Between poll cycles, the DTO can report `isPrinting: false` while the printer has already started a print job. The badge was using this stale value directly, causing the shield to show "Printer is not printing." on actively printing printers.
+
+The live `printer.state` field is updated via SignalR in near-realtime and is the authoritative source of the printer's current state.
+
+## Rule
+
+When rendering `FailureDetectionMonitoringBadge` or `FailureDetectionMonitoringOverlay`:
+
+1. Compute live `isPrinting` from `printer.state`:
+   - `CompactPrinterCard`: `state.toLowerCase().includes('printing')` (catches Pausing too)
+   - `DetailedPrinterCard`: `isOnline && state === 'Printing'`
+2. Pass as `isPrinting` prop to the badge/overlay.
+3. Inside the badge, build `effectiveStatus = { ...status, isPrinting, reason: <override if staleMismatch> }`.
+4. Pass `effectiveStatus` (not raw `status`) to `FailureDetectionStatusModal`.
+
+If `isPrinting === true` but `status.state` is `'idle'` or `'disabled'`, also replace `status.reason` with a waiting message so the modal copy is accurate.
+
+## References
+
+- `FailureDetectionMonitoringBadge.tsx` — `isPrinting` prop, `stalePrintingMismatch`, `effectiveStatus`
+- `CompactPrinterCard.tsx` / `DetailedPrinterCard.tsx` — `isPrinting={isPrinting}` passed to badge
+- `usePrinterFailureDetectionStatus.ts` — 30s polling hook (stale source)
+
+---
+
 # 2026-05-20: Mobile API Drift + Basic Printer Controls v1 — Locked Decisions
 
 **By:** Dallas (Lead/Architect), via Jeff Papiez
