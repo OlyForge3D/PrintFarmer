@@ -110,3 +110,26 @@
 **Dallas** (#290 status-gating) complete: API guards for `/temps`, `/move`, `/moveto` live via PR #308. Status-gating orthogonal to capabilities.
 **Newt** (#283 design spec) complete: Design decisions locked. UI gating ready to use capabilities endpoint.
 **Unblocked:** Fallback table canonical; endpoint `GET /api/printers/{printerId}/backend-capabilities` confirmed live. PR OlyForge3D/PrintFarmerMobile#2 awaiting CI.
+
+## Learnings
+
+### 2026-05-28: Issue #278 — Dead int-branch decoders removed (PR OlyForge3D/PrintFarmerMobile#10)
+
+**Files where dead int branches lived:**
+- `mobile/PrintFarmer/Models/Models.swift` — 5 enums each had a `else if let num = try? container.decode(Int.self)` block:
+  - `PrinterBackend` (cases 0–5, default `.unknown`)
+  - `MotionType` (cases 0–2, default `.unknown`)
+  - `PrintJobStatus` (cases 0–7, default `.queued`)
+  - `PrintJobPriority` (cases 0–3, default `.normal`)
+  - `AutoDispatchState` (cases 0–3, default `.none`)
+  - Total: 45 lines of dead code deleted.
+
+**No tests deleted.** Test fixtures using `"priority": 1` decode into `PrintJob.priority: Int` and `QueuedJobInfo.priority: Int` — plain `Int` fields, not `PrintJobPriority` enum. The enum decoder is never invoked by those fixtures.
+
+**`PrintJobPriority.from(intValue:)` kept** — it is a UI helper converting the stored `Int` priority to a display enum in `JobDetailView` and `JobListView`. Not a JSON decode path.
+
+**`AnyCodable` in `SignalRModels.swift` not touched** — its int branch is correct; it is a heterogeneous JSON value wrapper.
+
+**Issue relabelling:** Removed `squad:🔧 lambert` (mis-routed, Lambert is backend-only), added `squad:gorman`.
+
+**Branch contamination recurred** — commit initially landed on `squad/284-preheat-subgroup`. Recovered via `git cherry-pick` onto `squad/278-remove-dead-int-decoders`, then deleted the contaminated branch. Always verify `git branch` immediately before `git add/commit`.
