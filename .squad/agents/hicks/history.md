@@ -12,6 +12,15 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-22 — PR #13 re-review (jog subgroup init-state bug)
+
+- **Verdict:** ❌ REQUEST_CHANGES (same PR, real init bug uncovered on second pass).
+- **Init-state bug:** `selectedAxis` defaults to `.x` in `JogSubgroup` and only snaps on user `onChange`. If `JogSubgroup` is created in subset-capability state (e.g., backend supports Z-only jog), the initial render shows Z buttons only (correct), but the bound action/feedrate still targets X (wrong — the default). User must manually tap a new axis to snap state, but by then they've likely sent a command with wrong axis.
+- **Root cause:** `@State` defaults computed for full-capability case, not validated for subset-capability case. Constructor receives caps but only uses them in `onChange` reactive closure, not in `init`.
+- **Fix pattern:** Compute SwiftUI `@State` defaults in initializer from the **actual initial capability subset**, not a generic default. Use `init(capabilities:) { selectedAxis = capabilities.supportsZ && !capabilities.supportsXY ? .z : .x }` (or similar domain logic).
+- **Lesson:** Catching SwiftUI `@State` initialization bugs requires second-voice review that simulates the **initial render** in a **subset-capability state**, not just the transition (onChange). Initial mount is a distinct execution path from state changes.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570098227
+
 ### 2026-05-21T09:45-07:00 — PR #300 review (HomeSubgroup, Hudson)
 
 - **Verdict:** ✅ Approved (posted as `--comment` because GitHub blocks self-approval when reviewer and PR author share a gh account).

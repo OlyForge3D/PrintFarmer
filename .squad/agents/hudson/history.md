@@ -38,6 +38,11 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 
 ### Git/Shell Hygiene
 - **Backtick danger in heredoc:** Never inline backticks in a heredoc; use file-edit tool to write the body, then reference with `--body-file` or `replace_string_in_file`.
+
+### Stack Rebase Pattern (Round 13)
+- When fixing a parent PR with a stacked child PR, rebase the child onto the updated parent and force-push after parent fix completes.
+- Workflow: Parent fix merges → child PR branch rebases cleanly onto updated parent → force-push without conflicts.
+- Confirmed round 13: PR #12 (HomeButton fix) merged → PR #13 (Jog subgroup) rebased onto updated `squad/285-home-subgroup` cleanly.
 - Always use `git commit -F <tempfile>` for multi-line messages with shell metacharacters.
 
 ### Authentication & Role Gating (Issue #274)

@@ -1,3 +1,19 @@
+## Decision: Round 13 — Hudson fix #12, Hicks CR #13 rebase init-state bug
+
+**Date:** 2025-11-22
+**Authors:** Hudson (iOS), Hicks (code review)
+**Status:** PR #12 merged, PR #13 rebased + REQUEST_CHANGES (init-state bug)
+
+### Summary
+
+- **PR #12 fix-up (HomeButton):** `HomeButton` now takes explicit `accessibilityLabel` and `activeHint` parameters; spec-defined labels passed at call site. Dispatch + per-button cap tests create `HomeSubgroup` struct, assert via `tap*ForTesting()`/`canHome*ForTesting()`. New section 8 locks in spec VoiceOver strings.
+- **PR #13 rebase:** Cleanly rebased onto updated `squad/285-home-subgroup` and force-pushed — no conflicts. Stack rebase pattern confirmed: when fixing parent PR with stacked child, `git rebase` child onto updated parent and force-push after parent fix.
+- **Hicks re-review (PR #13):** ❌ REQUEST_CHANGES. Real init bug: `selectedAxis` defaults to `.x` and only snaps on `onChange`. If `JogSubgroup` is created in subset-capability state (e.g. Z-only), UI shows only Z but bound action/feedrate still targets X until user changes selection. Must compute defaults from **initial capability subset**, not just full-capability case.
+- **Durable rule:** SwiftUI subgroup `@State` defaults must be valid for **any initial capability subset**, not just full-capability. Use `init(...)` to compute defaults from caps, not just `onChange`.
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570098227
+
+---
+
 ## Decision: Round 11 — Bishop APPROVE #11, Hicks CR #13
 
 **Date:** 2025-11-21
