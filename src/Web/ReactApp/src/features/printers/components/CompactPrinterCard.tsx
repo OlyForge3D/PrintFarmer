@@ -178,6 +178,7 @@ export function CompactPrinterCard({
           <FailureDetectionMonitoringBadge
             enabled={!!printer.obicoEnabled}
             status={failureDetectionStatus}
+            isPrinting={isPrinting}
             printerId={printer.id}
             printerName={printer.name}
             recentEvents={recentEvents}

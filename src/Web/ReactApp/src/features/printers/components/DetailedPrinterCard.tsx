@@ -441,6 +441,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           <FailureDetectionMonitoringBadge
             enabled={!!apiPrinter.obicoEnabled}
             status={failureDetectionStatus}
+            isPrinting={isPrinting}
             printerId={printer.id}
             printerName={printer.name}
             recentEvents={recentEvents}
