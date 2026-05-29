@@ -91,3 +91,16 @@
 
 
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291, #292, #293, #294, #295, #296, #297, #298). See `.squad/log/2026-05-21T08-15-00Z-ralph-rounds-2-5-phase-1-complete.md`. Phase 2 launching (#284 preheat, #285 home, #286 jog).
+
+### 2026-05-28: Issue #280 — PrinterBackendCapabilities model + service (PR #2)
+- **Endpoint confirmed present**: `GET /api/printers/{printerId}/backend-capabilities` exists in `PrintersController.cs`. No follow-up GitHub issue required.
+- **Backend DTO fields decoded**: `printerId`, `printerName`, `backend`, `supportsMovement`, `supportsTemperatureControl`, `supportsControlOperations`, `supportsCamera`, `supportsFileList`, `supportsFileUpload`, `supportsFileDownload`, `supportsStartPrint`, `supportsFileMetadata`, `supportsPrinterInformation`, `supportsHistory`, `supportsFilamentControl`.
+- **Derived fields**: `supportsBedTemperature = supportsTemperatureControl` (locked decision); `supportsFanControl = supportsControlOperations`.
+- **Fallback table** (keyed on `PrinterBackend`): Moonraker/PrusaLink/OctoPrint → full FFF (movement+temp+control); FlashForge → movement+temp, no fan/camera; SDCP → resin (movement=false, temp=false); Unknown → conservative all-false.
+- **Service fallback path**: `NetworkError.notFound` or `DecodingError` → calls `get(id:)` then `fallback(for:backend)`.
+- **Key files**:
+  - `mobile/PrintFarmer/Models/PrinterBackendCapabilities.swift` — new model
+  - `mobile/PrintFarmer/Protocols/PrinterServiceProtocol.swift` — added `getBackendCapabilities(printerId:)`
+  - `mobile/PrintFarmer/Services/PrinterService.swift` — implementation with fallback
+  - `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` — 15 XCTest cases
+- **Build note**: `swiftc -typecheck` clean. Local `xcodebuild` unavailable (CoreSimulator out of date). Relying on CI. PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
