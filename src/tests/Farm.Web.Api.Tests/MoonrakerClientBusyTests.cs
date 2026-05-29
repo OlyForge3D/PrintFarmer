@@ -99,6 +99,52 @@ public class MoonrakerClientBusyTests
     }
 
     [Fact]
+    public async Task SendGcode_WhenFirmwareReturns503WithKlippyBusyInitializingBody_ReturnsFalse()
+    {
+        // "Klippy is busy initializing" contains "busy" as a substring but is NOT printer-job-busy.
+        // Phrase-based matching must not match this (#318 r23 blocker).
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent(
+                """{"error":"WebRequestError","message":"Klippy is busy initializing"}""",
+                Encoding.UTF8, "application/json")
+        });
+
+        bool result = await client.SendGcodeAsync("http://moonraker:7125", "M104 S200");
+        result.Should().BeFalse(because: "'Klippy is busy initializing' is a startup state, not printer-job-busy");
+    }
+
+    [Fact]
+    public async Task SendGcode_WhenFirmwareReturns503WithSdBusyBody_ThrowsPrinterBackendBusyException()
+    {
+        // "SD busy" is an unambiguous printer-job-busy signal (SD card locked by active print).
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent(
+                """{"error":"WebRequestError","message":"SD busy"}""",
+                Encoding.UTF8, "application/json")
+        });
+
+        await Assert.ThrowsAsync<PrinterBackendBusyException>(
+            () => client.SendGcodeAsync("http://moonraker:7125", "M104 S200"));
+    }
+
+    [Fact]
+    public async Task SendGcode_WhenFirmwareReturns503WithUppercasePrinterIsPrintingBody_ThrowsPrinterBackendBusyException()
+    {
+        // Detection must be case-insensitive.
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent(
+                """{"error":"WebRequestError","message":"PRINTER IS PRINTING"}""",
+                Encoding.UTF8, "application/json")
+        });
+
+        await Assert.ThrowsAsync<PrinterBackendBusyException>(
+            () => client.SendGcodeAsync("http://moonraker:7125", "M104 S200"));
+    }
+
+    [Fact]
     public async Task SendGcode_WhenFirmwareReturns200_ReturnsTrueWithoutException()
     {
         (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)

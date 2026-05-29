@@ -48,8 +48,22 @@ mean the printer is busy printing. Treating all 503s as "busy" was overly broad.
 **Rule (implemented in `MoonrakerClient.SendGcodePrivateAsync`):**
 
 - **409** → always `PrinterBackendBusyException`
-- **503 + body contains "printing" or "busy"** → `PrinterBackendBusyException`
-- **503 + body is "Klippy is not connected/ready" (or empty)** → return `false` (backend unavailable, not busy)
+- **503 + body matches printer-busy phrase allowlist** → `PrinterBackendBusyException`
+- **503 + any other body (including empty)** → return `false` (backend unavailable, not busy)
+
+**Phrase allowlist** (case-insensitive substring match after lowercasing body):
+
+| Phrase | Source |
+|---|---|
+| `"printer is printing"` | Most common — gcode rejected while a job is active |
+| `"printer is currently printing"` | Klipper firmware variant |
+| `"printer is busy"` | Firmware variant |
+| `"printer busy"` | Older firmware variant |
+| `"sd busy"` | SD-card busy during active print |
+
+**Intentionally excluded:** bare `"busy"` and bare `"printing"` — these over-match Klippy
+startup states (e.g. `"Klippy is busy initializing"`) and unrelated error messages.
+Prefer false negatives (return false → backend unavailable) over false positives (wrong 409).
 
 This aligns Moonraker with the tighter OctoPrint/PrusaLink convention of 409-only busy detection.
 
@@ -57,5 +71,6 @@ This aligns Moonraker with the tighter OctoPrint/PrusaLink convention of 409-onl
 
 - `PrintersControllerControlGuardsTests` — controller unit tests covering status-cache gate (409
   when printing) and `BackendBusy` → 409 from service layer.
-- `MoonrakerClientBusyTests` — covers 409 busy, 503+printing-body busy, 503+Klippy-body → false.
+- `MoonrakerClientBusyTests` — covers 409 busy, 503+printing-body busy, 503+Klippy-body → false,
+  503+`"Klippy is busy initializing"` → false, 503+`"SD busy"` → throws, uppercase phrase → throws.
 - `OctoPrintClientTests`, `SdcpClientBusyTests`, `FlashForgeClientStartPrintBusyTests` — plugin-level busy propagation.

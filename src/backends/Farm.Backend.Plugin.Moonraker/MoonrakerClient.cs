@@ -875,11 +875,28 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     /// Returns true when a Moonraker 503 error body indicates the printer is actively printing
     /// (as opposed to Klippy being disconnected or in a shutdown/error state).
     /// Moonraker 503 bodies are JSON: <c>{"error": "WebRequestError", "message": "..."}</c>.
-    /// "Klippy not connected/ready" bodies do NOT contain these keywords.
+    ///
+    /// Phrase allowlist (case-insensitive) — only unambiguous printer-job-busy signals:
+    ///   "printer is printing"           — gcode rejected while a job is active
+    ///   "printer is currently printing" — Klipper firmware variant
+    ///   "printer is busy"               — firmware variant
+    ///   "printer busy"                  — older firmware variant
+    ///   "sd busy"                       — SD-card busy variant
+    ///
+    /// Bare "busy" and bare "printing" are intentionally excluded: they over-match Klippy
+    /// startup states (e.g. "Klippy is busy initializing") and error messages that mention
+    /// "printing" in a non-job-busy context. Prefer false negatives over false positives —
+    /// a miss returns false (backend unavailable), not a wrong 409.
     /// </summary>
-    private static bool IsMoonrakerBusyPrintingBody(string body) =>
-        body.Contains("printing", StringComparison.OrdinalIgnoreCase)
-        || body.Contains("busy", StringComparison.OrdinalIgnoreCase);
+    private static bool IsMoonrakerBusyPrintingBody(string body)
+    {
+        string lower = body.ToLowerInvariant();
+        return lower.Contains("printer is printing")
+            || lower.Contains("printer is currently printing")
+            || lower.Contains("printer is busy")
+            || lower.Contains("printer busy")
+            || lower.Contains("sd busy");
+    }
 
     // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback
     private async Task<(string? Stream, string? Snapshot)> GetCameraUrlsAsync(string baseUrl, CancellationToken ct = default)
