@@ -105,6 +105,21 @@
   - `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` — 15 XCTest cases
 - **Build note**: `swiftc -typecheck` clean. Local `xcodebuild` unavailable (CoreSimulator out of date). Relying on CI. PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
 
+### 2026-05-28: Issue #281 — PrinterService command methods (PR #4)
+
+- **Endpoints confirmed** (`PrintersController.cs`):
+  - `POST /api/printers/{id}/temps` — body `{ "hotend": double, "bed": double }` (both fields; TempTargets C# record). 409 gate (`GatePrinterControlAsync`) applies.
+  - `POST /api/printers/{id}/home` — no body, homes all axes. **No 409 gate.**
+  - `POST /api/printers/{id}/homexy` — no body, dedicated endpoint. **No 409 gate.**
+  - `POST /api/printers/{id}/homez` — no body, dedicated endpoint. **No 409 gate.**
+  - `POST /api/printers/{id}/move` — body `{ "x"?, "y"?, "z"?, "f"? }` (MoveRequest C# record, all nullable doubles). 409 gate applies.
+- **409 handled by existing `NetworkError.conflict`** — `APIClient` already maps HTTP 409 → `.conflict`; no new error type needed.
+- **`home(axes:)` dispatches to three routes** — sorted axes comparison: `["X","Y"]` → `/homexy`, `["Z"]` → `/homez`, else → `/home`. `homeXY`/`homeZ` are protocol extension defaults.
+- **`setTemperatures` nil-omit via custom Encodable** — private `SetTemperaturesRequest` struct with custom `encode(to:)` that conditionally encodes each field. Pattern: `if let hotend { try container.encode(hotend, forKey: .hotend) }`.
+- **`move` body via `[String: Double]`** — naturally omits unused axes; keyed by `axis.lowercased()` + `"f"` feedrate. Callers pass locked feedrates (3000 XY, 600 Z).
+- **`DemoPrinterService` gap fixed** — `getBackendCapabilities` was missing from demo (overlooked in #280); added in this PR.
+- PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/4
+
 ## Cross-Team Note (2026-05-29)
 
 **Dallas** (#290 status-gating) complete: API guards for `/temps`, `/move`, `/moveto` live via PR #308. Status-gating orthogonal to capabilities.
