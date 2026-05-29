@@ -1146,3 +1146,43 @@ Scribe should flag in post-merge review:
    - Do not ratchet code-review expectations beyond available tooling; test-hook reads of `@State` post-init are valid for init-logic verification.
    - Rationale: Full lifecycle tests require UIKit integration or framework support not present in this project. Don't require the impossible.
    - Applies to: All SwiftUI subgroup init-state testing going forward.
+
+---
+
+## Decision: Round 16 — iOS controls v1 stack APPROVED end-to-end
+
+**Date:** 2026-05-29
+**Authors:** Bishop (third-review APPROVE #12), Vasquez (tiebreaker APPROVE #13), Hicks (CR re-check, scope-creep acknowledged)
+**Status:** ✅ APPROVED (all three PRs cleared)
+
+### Summary
+
+**PR #11 (preheat, #284):** ✅ **Bishop APPROVE**
+- Cool Down preset label fixed (removed hardcoded "Off" ternary; format string now produces "0° / 0°" uniformly).
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/11#issuecomment-4570039961
+
+**PR #12 (home, #285):** ✅ **Vasquez APPROVE + Bishop APPROVE**
+- Verbatim spec strings inlined per-button ("Double-tap to home printer" / "Double-tap to home XY" / "Double-tap to home Z"). Disabled-state pattern: `resolvedAccessibilityLabel` appends `", unavailable during print"`; `resolvedAccessibilityHint` returns `""` when disabled.
+- Both computed properties used directly by `.accessibilityLabel()` / `.accessibilityHint()` — test cannot pass if view strings change (non-tautological pattern verified).
+- Commit: `533b86f`
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570211958 (third review), https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570269998 (Bishop final)
+
+**PR #13 (jog, #286):** ✅ **Vasquez APPROVE** (tiebreaker; Hicks pedant CR overruled)
+- Test-hook pattern (`.hasAnyJogCapabilityForTesting`, etc.) matches established HomeSubgroup/PreheatSubgroup project convention.
+- Hicks objection: "True render-lifecycle tests require ViewInspector" — valid but scope-creep. No ViewInspector in project; accept test-hook reads of post-init `@State` per Rule 4 (tooling-threshold).
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570216262 (Vasquez tiebreaker)
+
+### Durable Decision Rules Captured
+
+5. **Scope-creep early-stop rule (effective immediately):**
+   - When second-voice reviewer requests adding a test framework or major tooling (e.g., ViewInspector, screenshot testing) for a single PR, that is scope creep if:
+     - The project has no established precedent for that tool.
+     - The pattern (test-hooks, mock views, manual renders) already covers the requirement.
+     - PR author's implementation matches project convention.
+   - **Remedy:** Tiebreaker votes may override tooling blockers when convention suffices.
+   - **Exception:** Never waive security, safety, or coverage gaps — only tool/framework choice.
+
+6. **Multi-review consensus rule (standing):**
+   - When two-of-three reviewers APPROVE (with tiebreaker rationale documented), PR is approved.
+   - Third dissent is honored but does not block if rationale falls outside project scope or misses established convention.
+   - Document dissent in decision log and agent history for future reference.

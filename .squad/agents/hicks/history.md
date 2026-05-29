@@ -53,3 +53,15 @@ _(append new learnings below this line)_
   - These are SwiftUI-layer concerns and must be tested at the view level (not mocked).
 - **Lesson:** Capability gating is per-axis, not per-subgroup. Mobile spec #279/#280 distinguish between `supportsXYJog`, `supportsZJog`, `supportsHomingXY`, `supportsHomingZ`. View must reflect all four flags at button level.
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570039264
+
+### 2026-05-29 — Round 16: PrintFarmerMobile #13 re-check (jog subgroup, scope-creep acknowledgment)
+
+- **Verdict:** ❌ REQUEST_CHANGES (re-issued after tiebreaker override by Vasquez).
+- **Re-check focus:** Init-state tests instantiate `JogSubgroup` and read `.hasAnyJogCapabilityForTesting`, `.availableAxisLabelsForTesting` via test-hook extensions — not via ViewInspector render lifecycle.
+- **Pedantic rationale:** "No ViewInspector in project; true render-lifecycle tests require UI framework integration. Test-hooks are insufficient proxy."
+- **Scope-creep acknowledgment (Vasquez tiebreaker override):**
+  - Over-ratcheting risk acknowledged: Hicks' second-voice rigor is valuable for preventing test-layer erosion, but requested tooling (ViewInspector) does not exist in project.
+  - Established precedent: HomeSubgroup and PreheatSubgroup both use `.*.ForTesting` test-hook pattern. Rejecting #13 for the same pattern creates inconsistent enforcement.
+  - Project tooling threshold: Accept test-hooks as practical equivalent when ViewInspector/equivalent introspection library is unavailable.
+  - **Durable lesson:** Second-voice value is real, but must respect available tooling and established convention. Do not require the impossible.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570216262 (Vasquez tiebreaker, noting Hicks' dissent honored in log)

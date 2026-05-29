@@ -45,3 +45,19 @@ _(append new learnings below this line)_
 - VoiceOver: `accessibilityLabel` + contextual `accessibilityHint` per button state
 - 15 tests cover: gating, dispatch, in-flight, blocking, 409 vs generic error, per-button cap rendering
 - Stacked PR cleanliness: diff only touches expected files (hudson history.md, xcodeproj, HomeSubgroup.swift, HomeSubgroupTests.swift) — no preheat duplication
+
+### 2026-05-29 — Round 16: PrintFarmerMobile #13 tiebreaker APPROVE (jog subgroup)
+
+- **Verdict:** ✅ APPROVE (tiebreaker; Hicks REQUEST_CHANGES overruled as scope creep).
+- **Hicks objection:** Init-state tests use `.hasAnyJogCapabilityForTesting` test-hooks instead of ViewInspector-based render-lifecycle verification. "True tests require SwiftUI introspection library."
+- **Tiebreaker rationale:** 
+  - Project precedent: HomeSubgroup and PreheatSubgroup already use `.*.ForTesting` test-hook pattern — no ViewInspector elsewhere.
+  - Tooling-threshold rule: Do not ratchet review expectations beyond available tools. Test-hooks exposing post-init `@State` are the practical equivalent in absence of framework support.
+  - Scope creep: Requiring ViewInspector installation for a single PR is out of scope when established convention covers the requirement.
+  - Hicks' second-voice value is real (pedantic catch), but must respect available tooling and project precedent.
+- **Durable decision:** When second reviewer requests adding a test framework, evaluate:
+  1. Is project precedent established for that tool? (No ViewInspector here.)
+  2. Does existing convention cover the requirement? (Yes, test-hooks do.)
+  3. Is the blocker a safety/security gap or a tooling choice? (Tooling choice → accept tiebreaker override.)
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570216262 (round 16)
+- **Stack closure:** PR #11 ✅, PR #12 ✅, PR #13 ✅ — iOS controls v1 stack approved end-to-end.

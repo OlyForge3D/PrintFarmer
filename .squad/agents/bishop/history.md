@@ -52,3 +52,17 @@ _(append new learnings below this line)_
 - **Test pattern non-tautological:** Both view's `.accessibilityLabel(...)` and test assertion route through same `resolvedAccessibilityLabel` property. Changing string in one place changes both — test cannot pass if view changes.
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570269998
 - **Commit:** `533b86f`
+
+### 2026-05-29 — PrintFarmerMobile #12 third-review APPROVE (home subgroup, round 16 final sign-off)
+
+- **Verdict:** ✅ APPROVE (third review, closing the loop after iterative gap-closing across rounds 12–16).
+- **Closure confirmed:** Spec adherence is exact; VoiceOver labels and hints match `docs/design/printer-controls-section.md` verbatim. Disabled-state rendering is correct. Test layer reads from same computed properties as view layer — non-tautological design confirmed.
+- **Durable pattern validated:** This PR establishes the template for all future SwiftUI subgroup PRs: spec-string sourcing, disabled-state label appending, and test-hook verification of rendered state.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570211958 (round 16)
+
+## Learnings
+
+- **Iterative gap-closing:** Three separate review rounds were needed to resolve spec-adherence and test-layer mismatches. Final APPROVE only arrived after Hudson applied fixes and re-review confirmed each pattern.
+- **Third-review pattern:** When first two reviews identify blockers that are then fixed, a third review pass provides closure and confidence in the durable pattern.
+- **Spec-driven testing:** Assertion strings must be sourced from the same location as view strings (computed property), not hardcoded constants. This rule eliminates tautology and ensures test rejects stale code.
+
