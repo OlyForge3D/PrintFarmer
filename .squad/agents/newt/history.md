@@ -273,3 +273,28 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 **Dallas** (#290 status-gating) complete: API guards validated via PR #308. State blocking for controls confirmed safe.
 **Gorman** (#280 capabilities) complete: Endpoint confirmed live. Fallback table canonical.
 **Unblocked:** UI gating decisions finalized; PR OlyForge3D/PrintFarmerMobile#1 design decisions locked.
+
+---
+
+## 2026-05-28: PR #1 Review Fixes — Capability Gating, Jog Default, Home Endpoints
+
+**Task:** Address Bishop's review on PR #1 (printer-controls design spec)
+**Status:** ✅ COMPLETE — Changes pushed, PR comment posted
+
+### Issues Fixed
+
+1. **Capability-gated states missing (lines 355-387 new):** Spec only defined idle/pending/printing/offline. Added explicit rule: **hide entire subgroup** when `supportsTemperatureControl == false` (Preheat) or `supportsMovement == false` (Home, Jog). Cleaner UX than disabled-row clutter.
+
+2. **Jog default mismatch (lines 342, 567):** Spec said `10` / `10.0`; #286 acceptance criteria locks default at `1 mm`. Updated both Jog Specifications table and Implementation Notes.
+
+3. **Wrong API endpoints (lines 231-235):** Spec said all three Home buttons call `/home` with axes body. Gorman verified backend has dedicated routes: `/home` (all), `/homexy`, `/homez` — no axes body for dedicated routes. Updated table.
+
+### Learnings
+
+| Spec Section | Ambiguity Caused | Resolution |
+|--------------|------------------|------------|
+| State Matrix | Hudson didn't know whether to HIDE or DISABLE when capability missing | Added "Capability-Gated Subgroups" subsection with explicit hide rule |
+| Jog Specifications | Conflicting defaults between spec (10mm) and issue AC (1mm) | Single source of truth: spec now says 1mm, matching #286 |
+| API endpoints | Home XY/Z spec implied same endpoint with body | Dedicated routes documented; no axes body |
+
+**Capability-gating rule chosen:** HIDE entire subgroup when capability is `false`. Rationale: operators should only see controls their printer can actually use; disabled-row clutter confuses more than it helps. This is distinct from "disabled during print" which shows controls but blocks interaction.
