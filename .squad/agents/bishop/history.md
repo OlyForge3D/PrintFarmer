@@ -55,3 +55,38 @@ Lambert tightened with phrase-based allowlist. Bishop verified end-to-end:
 
 - All future cross-layer backend PRs: require evidence of end-to-end path verification in review comments.
 - Error-body classification rule (added to squad decisions): phrase-based allowlists with explicit semantics, not bare substring matches.
+
+## Round 25-26: PR #16 Review — PrinterControlsSection Async Loading (2026-06-10 to 2026-06-12)
+
+**PR:** `squad/287-integrate-controls-section` (OlyForge3D/PrintFarmerMobile)
+**Status:** Fully approved (round 26). Stacked on unmerged controls v1 base chain.
+
+### Round 25: COMMENT (Not Blocking)
+
+Bishop reviewed Hudson's PrinterControlsSection integration:
+- Composition logic clean, layout variance sound, capability gating correct (12 tests).
+- **Flagged:** Loading-state test weak. Mock returns immediately, so test only verifies endpoints (start: false, end: false). Cannot observe `isLoadingCapabilities == true` mid-flight.
+
+Vasquez APPROVE (controls composition sound despite test gap).
+
+### Round 26: Re-APPROVE After Fix
+
+Hudson implemented `HoldablePrinterService` using `withCheckedThrowingContinuation` to suspend mid-fetch:
+- Two new tests assert `isLoadingCapabilities == true` mid-flight.
+- One confirms false after resolve.
+- 14 tests total.
+
+Bishop verified fix and re-APPROVE. Question answered: **the test now observes the transition, not just endpoints**.
+
+### Key Learnings
+
+1. **For async view-state tests, ask: "Can this test assert the in-flight state, or just the endpoints?"** Immediate-return mocks prove nothing about transitions. Continuation-based holds enable real async pause points for in-flight assertions.
+
+2. **Loading-state + capability-gating + multi-layout designs compound test surface.** Preemptively design for async holds when laying out feature specs.
+
+3. **Test rigor = end-to-end view behavior.** If a test can only see start and end, it's not testing the actual user-visible transition (the loading spinner, disabled controls, etc.).
+
+### Pattern
+
+- All async loading UI tests: require continuation-based hold-point to assert mid-flight state.
+- Test review rule: ask "what does this test actually observe?" If only endpoints, request continuation-based redesign.

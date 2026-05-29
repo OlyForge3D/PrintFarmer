@@ -4497,3 +4497,38 @@ One reviewer must document in review notes:
 - **At least one reviewer:** Document end-to-end path verification in review comments.
 - **Approval gate:** Cannot approve without evidence of full request-path verification.
 
+## Async Loading-State Test Rule
+
+**Rule:** When asserting that a `isLoading` flag transitions correctly (false → true mid-flight → false), the mock must support an explicit hold-point (e.g., `CheckedContinuation`) so the test can observe the in-flight state. Immediate-return mocks cannot prove the transition.
+
+**Rationale:** Immediate-return mocks only verify endpoints (start state, end state). They cannot assert the mid-flight state that users actually see (loading spinner, disabled controls). Continuation-based holds create a real async pause point, allowing the test to:
+1. Start the async operation.
+2. Assert `isLoading == true` mid-flight (before continuation releases).
+3. Release the continuation.
+4. Assert `isLoading == false` after resolution.
+
+**Anti-Pattern:** Test that only verifies start and end state, relying on mock that returns immediately. This proves nothing about the transition visible to the user.
+
+**Pattern:** Use `withCheckedThrowingContinuation` (Swift) or similar to suspend mid-operation, enabling in-flight assertions.
+
+### Example: PR #16 Round 26
+
+**Before (weak test):**
+- Mock service returns immediately.
+- Test asserts `isLoadingCapabilities` starts false.
+- Mock runs, test asserts ends false.
+- No observation of `true` mid-flight.
+
+**After (strong test with continuation hold):**
+- `HoldablePrinterService` wraps fetch in `withCheckedThrowingContinuation`.
+- Continuation holds mid-fetch.
+- Test asserts `isLoadingCapabilities == true` while continuation suspended.
+- Release continuation.
+- Test asserts `isLoadingCapabilities == false` after resolution.
+- Full transition observed.
+
+### Operational Rule
+
+- **All async view-state tests:** Require continuation-based hold-point in mock.
+- **Test review gate:** Ask "what does this test observe?" If only endpoints, request continuation-based redesign.
+- **Applies to:** Loading flags, progress indicators, modal dismissals, any state that transitions mid-async operation.

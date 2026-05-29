@@ -50,3 +50,54 @@
 - **Agent history entries**: `.squad/agents/lambert/history.md`, `.squad/agents/bishop/history.md`, `.squad/agents/hicks/history.md`, `.squad/agents/parker/history.md`
 - **Decision rules**: `.squad/decisions.md` (decision #99, #100)
 - **Dependabot triage**: `.squad/parker/triage-2026-05-21.md`
+
+---
+
+## PR #16: PrinterControlsSection Integration — Rounds 25-26
+
+**Title:** `squad/287-integrate-controls-section` (OlyForge3D/PrintFarmerMobile)
+
+**PR Link:** [OlyForge3D/PrintFarmerMobile#16](https://github.com/OlyForge3D/PrintFarmerMobile/pull/16)
+
+**Status:** Fully approved (round 26). Stacked on unmerged controls v1 base chain (#11/12/13).  
+**Final State:** Two-reviewer APPROVE (Vasquez round 25 + Bishop round 26).
+
+### Timeline
+
+**Round 25 (2026-06-10)**
+- **Hudson**: Shipped PR #16 integrating all three `PrinterControlsSection` subgroups (jog, feed rate, safety) into `PrinterDetailView`:
+  - Phone layout: 1-column controls below printer status.
+  - iPad layout: 2-column with sidebar controls.
+  - Capability gating: hide controls if printer lacks required axes/e-stop.
+  - 12 tests: view state transitions, layout variance, accessibility identifiers.
+- **Bishop**: COMMENT (not blocking) — flagged weak loading-state test. Mock returns immediately, so test cannot observe `isLoadingCapabilities == true` mid-flight. Only sees start (false) → end (false), no transition observation.
+- **Vasquez**: APPROVE — controls composition correct, capability gating sound, layout logic clean. Approved with note that test rigor will be addressed in round 26. Read assertions from view state, not through internals (no-ViewInspector ceiling applies).
+
+**Round 26 (2026-06-12)**
+- **Hudson**: Surgical fix (commit `3da6249`):
+  - Implemented `HoldablePrinterService` (private to test file).
+  - Uses `withCheckedThrowingContinuation` to suspend mid-fetch.
+  - Two new tests assert `isLoadingCapabilities == true` mid-flight (before continuation releases).
+  - One new test confirms `isLoadingCapabilities == false` after resolve.
+  - 14 tests total (12 → 14).
+- **Bishop**: Re-reviewed and re-APPROVE. Question answered: test now observes the transition, not just endpoints.
+
+### Key Decisions Recorded
+
+**Decision:** Async Loading-State Test Rule — when asserting `isLoading` transitions correctly, mock must support explicit hold-point (e.g., `CheckedContinuation`) so test observes in-flight state. Immediate-return mocks cannot prove transition. See `.squad/decisions.md` for full rule.
+
+### Squad Learning Summary
+
+1. **Async loading-state transitions require hold-point mocks.** Immediate-return mocks only verify endpoints; cannot observe mid-flight state (loading spinner, disabled controls). Use continuation-based holds for real async pause points.
+
+2. **Capability gating + loading states compound test complexity.** Future feature gate work should preemptively design for testable async holds.
+
+3. **Stacked PRs on unmerged base chains need clear approval signals.** Vasquez + Bishop marked approval despite merge queue blockage, helping unblock dependent work visibility.
+
+4. **Test rigor = view behavior.** iOS view tests without ViewInspector must assert through @State-observable output, not internal rendering. Design tests around observable state.
+
+### Artifacts
+
+- **Agent history entries**: `.squad/agents/hudson/history.md`, `.squad/agents/bishop/history.md`, `.squad/agents/vasquez/history.md`
+- **Decision rules**: `.squad/decisions.md` (Async Loading-State Test Rule)
+- **Squad bottleneck status**: All P0/P1 squad PRs across both repos (PrintFarmer + PrintFarmerMobile) now approved. Bottleneck shifts to Jeff's merge queue (unmerged base chains, deployment scheduling).
