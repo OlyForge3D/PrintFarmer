@@ -23,7 +23,7 @@ jobs:
         allow_stub: [false]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check dispatch input (disable_slicer_builds)
         id: check

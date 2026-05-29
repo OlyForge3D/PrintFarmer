@@ -11,7 +11,7 @@ jobs:
       artifact-name: prusa-tar
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install prerequisites
         run: |
@@ -50,7 +50,7 @@ jobs:
     needs: prepare-preseed
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download preseed artifact
         uses: actions/download-artifact@v4
