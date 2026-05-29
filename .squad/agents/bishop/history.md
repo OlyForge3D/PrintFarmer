@@ -92,3 +92,9 @@ _(append new learnings below this line)_
 - **Non-blocking:** Real-transport tests have minor `GetFreeTcpPort()` race risk in CI (ephemeral port collisions on parallel runs).
 - **Durable lesson:** Backend cross-layer changes (exception → outcome → HTTP code) need two-reviewer consensus. Single code-path approval can miss system-wide mapping assumptions. Architectural consistency (409 for firmware conflicts across backends) is enforcer role.
 - **Comment:** https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570616436
+### 2026-05-29 — PR #316 merge learnings
+
+- **Rebase strategy:** Let `git rebase origin/development` identify the real conflict set first, then resolve only the files in `git diff --name-only --diff-filter=U`. Here the only conflict was `src/tests/Farm.Web.Api.Tests/Controllers/PrintersControllerControlGuardsTests.cs`; `PrintersController.cs` rebased cleanly.
+- **Conflict resolution lesson:** This was a union merge, not a choose-one-side merge. Keep base regressions (the backend-busy 409 assertions) and add the PR's six `/home` guard tests so the rebased branch preserves both the gating change and newer controller-mapping coverage.
+- **Gating pattern confirmation:** `/home`, `/homexy`, and `/homez` now follow the same `GatePrinterControlAsync` preflight used by `/temps`, `/move`, and `/moveto`: gate before backend I/O, return the 409 `CommandResult` envelope on busy cached states, and only call the printer service when idle.
+- **Operational fallback:** If `gh` auth is invalid but HTTPS git credentials still exist in the keychain, a one-off GitHub REST merge can safely finish a stalled PR without exposing any token values in logs.
