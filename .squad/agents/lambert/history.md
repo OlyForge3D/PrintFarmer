@@ -479,3 +479,56 @@ Added `MaxToolheadIndex = 16` constant in `PrintersService.cs`. Bounds checking 
 **Key files:**
 - `src/infra/Services/Printers/PrintJobCompletionService.cs` (batch consumption)
 - `src/infra/Services/Printers/PrintersService.cs` (bounds validation)
+
+## 2026-05-23 to 2026-05-29: Moonraker Busy Error Classification & HTTP Status Mapping (PR #318, Rounds 23-24)
+
+**PR:** feat(backends): propagate firmware-409 from Moonraker/SDCP/FlashForge plugins  
+**Commits:** `51d1bb9c3` (round 23), `90699107b` (round 24)  
+**Status:** OPEN, all CI checks passing. Two-reviewer APPROVE (Bishop + Hicks, round 24).
+
+### Round 23 Fixes
+
+Fixed two critical architectural bugs caught by Bishop:
+
+1. **HTTP Status Mapping** — `PrintersController.MapControlOutcome()` returned HTTP 502 (Bad Gateway) instead of 409 (Conflict) for `PrinterBackendBusyException`. 
+   - **Fix**: Return `Conflict()` for BackendBusy instead of Server error.
+   - **Impact**: Downstream callers (UI, queue scheduler) now receive the correct signal: 409 = non-retriable device state, not 502 = retriable infrastructure failure.
+
+2. **Moonraker 503 Detection** — Moonraker treats all HTTP 503 as printer-busy without body inspection.
+   - **Fix**: Narrow via body inspection (Option A — substring matching on `"busy"`).
+   - **Test port allocator hardening**: Rebind+retry (10 attempts) to prevent flaky port-in-use failures.
+   - **Test coverage**: 2 new controller unit tests + 5 Moonraker integration tests.
+
+**Round 23 Blocker**: Both Bishop and Hicks blocked re-review — substring match over-broad. False-positive on `"Klippy is busy initializing"` (firmware startup state, not printer-busy).
+
+### Round 24 Refinement
+
+Replaced bare substring matching with phrase-based allowlist in `IsMoonrakerBusyPrintingBody()`:
+
+**Allowed Phrases** (case-insensitive):
+- `"printer is printing"`
+- `"printer is currently printing"`
+- `"printer is busy"`
+- `"printer busy"`
+- `"sd busy"`
+
+**Negative Test Case**: `"Klippy is busy initializing"` → correctly returns false (phrase-based match prevents false-positive).
+
+**Test Coverage**: 3 new tests covering:
+- Phrase allowlist semantics.
+- Case-insensitivity (uppercase/lowercase variants).
+- Negative case verification.
+
+**Full Test Suite**: 35 Moonraker tests passing.
+
+**Approvals**: Bishop + Hicks both APPROVE round 24 → PR #318 fully approved.
+
+### Key Learning
+
+**Bare substring matching in error-body parsing is fragile and prone to false-positives.** Phrase-based allowlists with explicit semantics are the durable answer. **Prefer false-negative (returns false for ambiguous cases) over false-positive (wrongly throws busy)** — an incorrect error message is recoverable; wrong system-state classification poisons downstream gating logic (print queue, device scheduler, system-state transitions).
+
+### Pattern Applied
+
+- Error-body classification in firmware/slicer response handling → use allowlists, not regex/substring scans.
+- When classifying external error bodies to typed exceptions, prioritize correctness of the negative case.
+- Added to squad decisions: **Error-body classification rule** (phrase-based allowlists with explicit semantics).

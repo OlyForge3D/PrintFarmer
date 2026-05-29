@@ -186,3 +186,30 @@ Improves operational reliability by allowing ML API timeout behavior to be tuned
 Switched ml_api model downloads from curl to wget to resolve `/bin/sh: 1: curl: not found` failures. The ml_api_base image ships wget but not curl reliably. Commit 6efe08e pushed to release branch.
 
 **Files:** obico-server ml_api/ (sibling repo)
+
+## 2026-05-21: Dependabot Triage — 9 PRs Bucketed (Round 22)
+
+**Date:** 2026-05-21  
+**Task:** Triage Dependabot PRs into risk/action buckets  
+**Artifact:** `.squad/parker/triage-2026-05-21.md` (commit `ee32cb504`)
+
+Triaged **9 Dependabot PRs** into 3 categories:
+
+1. **Auto-Merge Candidates** (~3 PRs)
+   - Minor/patch updates to stable dependencies.
+   - No breaking changes, no integration issues.
+   - Safe to auto-merge post-CI-pass.
+
+2. **Verify-Then-Merge** (~4 PRs)
+   - Minor version bumps to key libraries (logging, serialization).
+   - Require manual review before merge.
+   - Check for deprecated APIs, breaking serialization changes.
+
+3. **GitHub Actions Majors** (~2 PRs)
+   - CI/CD workflow tool updates (e.g., `actions/checkout@v4`, `azure/login@v1`).
+   - Require full CI pipeline validation before merge.
+   - May change behavior of build, deploy, or secrets handling.
+
+**Key Pattern:** Dependabot triage prevents mechanical merges of risky updates. Categorizing by impact allows parallel work — auto-merge candidates queued immediately; verify-then-merge go to Lambert/Hicks for integration testing; GitHub Actions go to Release Manager for pipeline validation.
+
+**Deliverable:** Triage doc `.squad/parker/triage-2026-05-21.md` filed as decision artifact for future dependency updates.

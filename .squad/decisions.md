@@ -4388,3 +4388,112 @@ Test coverage includes:
 - ✅ Financial accuracy locked in for multi-toolhead scenarios
 - ✅ Regression gate prevents cost calculation regressions in future multi-toolhead work
 
+
+---
+
+## 99. Error-Body Classification Rule — Phrase-Based Allowlists (APPROVED)
+
+**Date:** 2026-05-29  
+**Author:** Lambert (Backend) + Bishop (Reviewer)  
+**Status:** APPROVED — Applied to PR #318 round 24  
+**Context:** Firmware error response parsing for printer-state classification
+
+### Problem
+
+When parsing external error bodies (e.g., firmware HTTP responses, slicer responses) to map to typed exceptions, bare substring matching is fragile and produces false-positives. Example: substring match on `"busy"` incorrectly conflates `"Klippy is busy initializing"` (firmware startup state) with `"printer is busy"` (actual printer-device state).
+
+### Decision
+
+Use a **phrase-based allowlist with explicit semantics**, not bare substring matches or regex.
+
+### Why
+
+- Substring matches are fragile and conflate unrelated error messages.
+- An incorrect error-body classification poisons downstream gating logic (print queue, device scheduler, system-state transitions).
+- Explicit phrase allowlists make intent clear and testable.
+
+### Preference
+
+**Prefer false-negative (returns false for ambiguous cases) over false-positive** (wrongly throws an exception). An incorrect error message is recoverable; a wrong system-state classification is not.
+
+### Implementation Example
+
+**Moonraker `IsMoonrakerBusyPrintingBody()`** (PR #318):
+
+```csharp
+// Allowed phrases (case-insensitive):
+// - "printer is printing"
+// - "printer is currently printing"
+// - "printer is busy"
+// - "printer busy"
+// - "sd busy"
+
+// Test case: "Klippy is busy initializing" → false (not in allowlist)
+```
+
+### Evidence
+
+- **Round 23 blocker:** Substring match on `"busy"` produced false-positive.
+- **Round 24 fix:** Phrase allowlist correctly handles 35+ Moonraker test cases.
+- **Approvals:** Bishop + Hicks both verified end-to-end semantics.
+
+### Operational Rule
+
+For all future firmware/slicer error-body classification:
+1. Create an explicit phrase allowlist.
+2. Document the semantics of each phrase (what printer/firmware state does it represent?).
+3. Write negative test cases to prevent false-positives.
+4. Prefer false-negative (ambiguous case returns false) over false-positive.
+
+---
+
+## 100. End-to-End Review Rule for Cross-Layer Backend Changes (APPROVED)
+
+**Date:** 2026-05-29  
+**Author:** Bishop (Reviewer) + Hicks (Reviewer)  
+**Status:** APPROVED — Applied to PR #318  
+**Context:** Multi-layer architectural bugs in firmware-409 propagation
+
+### Problem
+
+Single-layer review of cross-layer changes is insufficient. Hicks approved PR #318 round 22 based on plugin-layer tests alone, missing two critical architectural bugs:
+1. `PrintersController.MapControlOutcome()` returning HTTP 502 instead of 409.
+2. Moonraker treating all HTTP 503 as printer-busy without body inspection.
+
+Plugin logic alone ≠ end-to-end correctness.
+
+### Decision
+
+**For cross-layer changes spanning controller ↔ service ↔ plugin layers, pair Bishop + Hicks (or Bishop + Vasquez) and require at least one reviewer to trace a complete request path end-to-end in their review notes.**
+
+### Why
+
+- Plugin-layer logic is necessary but insufficient for system correctness.
+- HTTP status mapping in controllers is as critical as business logic in services.
+- Downstream consumers (UI, queue scheduler) interpret HTTP status codes as system-state signals. Wrong status poisons consumer logic.
+- Single reviewers can miss integration seams even when individual components are correct.
+
+### Verification Checklist
+
+One reviewer must document in review notes:
+
+- [ ] HTTP request enters the plugin correctly (request path, parameters, headers).
+- [ ] Plugin returns typed exception or domain result (e.g., `PrinterBackendBusyException`).
+- [ ] Service/controller maps that to the correct HTTP status (e.g., 409 Conflict).
+- [ ] Downstream consumers (UI, queue, scheduler) receive the correct signal.
+
+### Example: PR #318
+
+**Request path traced:**
+- Firmware returns HTTP 503 with body.
+- Moonraker plugin inspects body for printer-busy phrases (phrase allowlist).
+- Plugin throws `PrinterBackendBusyException`.
+- `PrintersController.MapControlOutcome()` returns `Conflict()` (409).
+- UI interprets 409 as non-retriable device state (don't retry).
+
+### Operational Rule
+
+- **All backend cross-layer PRs:** Pair Bishop+Hicks or Bishop+Vasquez.
+- **At least one reviewer:** Document end-to-end path verification in review comments.
+- **Approval gate:** Cannot approve without evidence of full request-path verification.
+
