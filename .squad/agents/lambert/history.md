@@ -54,3 +54,17 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - **2026-05-26 — arco1 offline classification + list-vs-detail discrepancy fix.** Moonraker `IsOnline` false-negative: `MoonrakerSubscriptionService._klippyReadyState` only accepted `webhooks.state == "ready"` on entry; valid status payloads without the `webhooks` blob would keep the printer offline. Fix: treat explicit `webhooks.state != ready` as offline, but accept any payload with printer objects (`toolhead`, `print_stats`, etc.) as proof of reachability. Cache must also update on HTTP fallback and disconnect broadcasts so REST + mobile clients don't read stale data. Live Playwright probe by lambert-probe2 confirmed Moonraker is reachable; root cause is cache merge logic in `PrintersService.GetAllCompleteDtosAsync` — list endpoint serves stale `isOnline=false` while detail endpoint shows current `isOnline=true`. Commits: f2dfe74bc (classifier fix + tests).
 
 - **2026-05-26 — Login audit log backend (19 tests).** New `LoginAuditEntry` entity separate from `AuthAuditLog`; `Username` is a direct indexed column for efficient admin audit queries. `AuthController.LoginAsync` hook (NOT `AuthenticationService` — HTTP context belongs at the boundary). Helper: `ResolveClientIp` (check `X-Forwarded-For`, fall back to `RemoteIpAddress`). `MapFailureReason` normalizes opaque error strings to `{account_locked, account_disabled, invalid_credentials}`. Entity uses `DateTime` UTC (NOT `DateTimeOffset` — SQLite EF Core doesn't support DateTimeOffset in ORDER BY). `GET /api/admin/security/login-audit` with `[Authorize(Roles = "farm_admin")]`, query params `from`/`to`, `username` (substring), `success` (bool), `page`/`pageSize` (default 50, max 200). Migrations created for Postgres + SqlServer. Pushed to `development`.
+
+## Learnings — 2026-05-28
+
+### Gate pattern reused for home endpoints (#314, PR #316)
+
+The `GatePrinterControlAsync` + `MapControlOutcome` pattern in `PrintersController` is the canonical way to add status-gated control to any printer endpoint. Pattern lives at lines ~2122–2155. The three home handlers (`/home`, `/homexy`, `/homez`) previously returned `bool` from service methods — gate sits in front and short-circuits with 409 before the service call; the `bool` result mapping stays unchanged after the gate.
+
+### Plugin-propagation gap deferred (follow-up #317)
+
+Moonraker, SDCP, and FlashForge plugins do not translate firmware busy responses into `PrinterBackendBusyException`. This was confirmed in the #279 spike. The controller gate is sufficient as the primary defense; the race-condition gap (firmware refuses between gate check and call) is tracked as P2 in issue #317.
+
+### Test pattern: unit mock controller tests, not CustomWebApplicationFactory
+
+For guarded-endpoint coverage, the existing `PrintersControllerControlGuardsTests` uses a direct `new PrintersController(...)` with Moq — not `CustomWebApplicationFactory`. This keeps the tests fast and focused. Mirror this for any future control-guard additions.
