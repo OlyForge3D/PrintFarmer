@@ -2145,7 +2145,7 @@ public class PrintersController(
             Farm.Infrastructure.Services.Printers.PrinterControlOutcome.NotFound =>
                 NotFound(new CommandResult(false, "Printer not found.")),
             Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendBusy =>
-                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Printer firmware refused the command (busy).")),
+                Conflict(new CommandResult(false, "Printer firmware refused the command (busy).")),
             Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnsupported =>
                 StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend does not support this command.")),
             Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnreachable =>

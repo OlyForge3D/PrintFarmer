@@ -133,11 +133,29 @@ public sealed class FlashForgeClientStartPrintBusyTests
 
     private static int GetFreeTcpPort()
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
+        // Bind to port 0 to get an OS-assigned ephemeral port. Re-verify availability before
+        // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+
+            try
+            {
+                var verify = new TcpListener(IPAddress.Loopback, port);
+                verify.Start();
+                verify.Stop();
+                return port;
+            }
+            catch (SocketException)
+            {
+                // Port was grabbed between allocation and verification; retry.
+            }
+        }
+
+        throw new InvalidOperationException("Unable to allocate a free TCP port after 10 attempts.");
     }
 
     private sealed class FlashForgeTcpTestServer(TcpListener listener, Task serverTask, int port)

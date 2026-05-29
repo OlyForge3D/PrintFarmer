@@ -829,18 +829,34 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
 
             // Secondary defense (#317): translate firmware-level busy signals to PrinterBackendBusyException
-            // so the controller's exception handler can return a 409 to the caller.
-            // 409 Conflict — firmware explicitly blocked the command (e.g., printhead lock during print).
-            // 503 Service Unavailable — Klippy is not ready (disconnected, error state, or firmware busy).
-            // Gap: Moonraker silently queues/accepts most gcodes (temps, moves) while printing; the 503
-            // only fires when Klippy itself is unavailable. The controller-level gate is the primary defense.
-            // TODO(#317-followup): evaluate Moonraker /printer/objects/query?print_stats to detect
-            // "printing" state for a proactive check on temperature/move mutations.
-            if (resp.StatusCode is System.Net.HttpStatusCode.Conflict
-                                 or System.Net.HttpStatusCode.ServiceUnavailable)
+            // so the controller returns HTTP 409 Conflict to the caller.
+            //
+            // 409 Conflict — Moonraker/firmware explicitly blocked the command (gcode queue locked).
+            //   Always treat as printer-busy-printing.
+            //
+            // 503 Service Unavailable — Moonraker returns this when Klippy is unavailable
+            //   (disconnected, shutdown, or error state), NOT when the printer is actively printing.
+            //   Inspect the JSON body: only raise PrinterBackendBusyException when the message
+            //   contains printer-busy keywords (e.g. "printing", "busy"); otherwise treat as a
+            //   transient backend-unavailable condition and return false.
+            //   This narrows the overly-broad "503 = busy" rule from #317 (Bishop's review #318).
+            if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
                 throw new PrinterBackendBusyException(
-                    $"Moonraker refused gcode ({(int)resp.StatusCode} {resp.StatusCode}) at {baseUrl}.");
+                    $"Moonraker refused gcode (409 Conflict) at {baseUrl}.");
+            }
+
+            if (resp.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                string errorBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                if (IsMoonrakerBusyPrintingBody(errorBody))
+                {
+                    throw new PrinterBackendBusyException(
+                        $"Moonraker refused gcode (503 printing-busy) at {baseUrl}.");
+                }
+
+                // Klippy unavailable / error state — not a printer-busy signal.
+                return false;
             }
 
             return resp.IsSuccessStatusCode;
@@ -854,6 +870,16 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             return false;
         }
     }
+
+    /// <summary>
+    /// Returns true when a Moonraker 503 error body indicates the printer is actively printing
+    /// (as opposed to Klippy being disconnected or in a shutdown/error state).
+    /// Moonraker 503 bodies are JSON: <c>{"error": "WebRequestError", "message": "..."}</c>.
+    /// "Klippy not connected/ready" bodies do NOT contain these keywords.
+    /// </summary>
+    private static bool IsMoonrakerBusyPrintingBody(string body) =>
+        body.Contains("printing", StringComparison.OrdinalIgnoreCase)
+        || body.Contains("busy", StringComparison.OrdinalIgnoreCase);
 
     // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback
     private async Task<(string? Stream, string? Snapshot)> GetCameraUrlsAsync(string baseUrl, CancellationToken ct = default)

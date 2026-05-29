@@ -11,8 +11,9 @@ using Moq.Protected;
 namespace Farm.Web.Api.Tests;
 
 /// <summary>
-/// Tests that MoonrakerClient propagates firmware-level busy responses as
-/// <see cref="PrinterBackendBusyException"/> (#317).
+/// Tests that MoonrakerClient correctly propagates firmware-level busy responses as
+/// <see cref="PrinterBackendBusyException"/>, and that Moonraker 503 (Klippy unavailable)
+/// is NOT treated as printer-busy unless the body contains printing-busy keywords (#317, #318).
 /// </summary>
 public class MoonrakerClientBusyTests
 {
@@ -33,15 +34,6 @@ public class MoonrakerClientBusyTests
     }
 
     [Fact]
-    public async Task SendGcode_WhenFirmwareReturns503_ThrowsPrinterBackendBusyException()
-    {
-        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
-
-        await Assert.ThrowsAsync<PrinterBackendBusyException>(
-            () => client.SendGcodeAsync("http://moonraker:7125", "M104 S200"));
-    }
-
-    [Fact]
     public async Task SendGcode_WhenFirmwareReturns409_ThrowsPrinterBackendBusyException()
     {
         (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
@@ -51,12 +43,59 @@ public class MoonrakerClientBusyTests
     }
 
     [Fact]
-    public async Task SetTemps_WhenFirmwareReturns503_ThrowsPrinterBackendBusyException()
+    public async Task SendGcode_WhenFirmwareReturns503WithPrintingBody_ThrowsPrinterBackendBusyException()
     {
-        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        // A 503 body that explicitly indicates the printer is printing should still be treated as busy.
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent(
+                """{"error":"WebRequestError","message":"Script response: Unable to send command, printer is currently printing"}""",
+                Encoding.UTF8, "application/json")
+        });
 
         await Assert.ThrowsAsync<PrinterBackendBusyException>(
-            () => client.SetTempsAsync("http://moonraker:7125", hotend: 200));
+            () => client.SendGcodeAsync("http://moonraker:7125", "M104 S200"));
+    }
+
+    [Fact]
+    public async Task SendGcode_WhenFirmwareReturns503WithKlippyNotConnectedBody_ReturnsFalse()
+    {
+        // Moonraker 503 with "Klippy not connected" means backend unavailable, not printer-busy-printing.
+        // Should return false (transport error), not throw PrinterBackendBusyException (#318 blocker 2).
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent(
+                """{"error":"WebRequestError","message":"Klippy is not connected"}""",
+                Encoding.UTF8, "application/json")
+        });
+
+        bool result = await client.SendGcodeAsync("http://moonraker:7125", "M104 S200");
+        result.Should().BeFalse(because: "Klippy-unavailable 503 is a transport error, not a printer-busy signal");
+    }
+
+    [Fact]
+    public async Task SendGcode_WhenFirmwareReturns503WithEmptyBody_ReturnsFalse()
+    {
+        // A bare 503 with no body is Klippy unavailable, not printer-busy.
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        bool result = await client.SendGcodeAsync("http://moonraker:7125", "M104 S200");
+        result.Should().BeFalse(because: "bare 503 must not be treated as printer-busy (#318 blocker 2)");
+    }
+
+    [Fact]
+    public async Task SetTemps_WhenFirmwareReturns503WithKlippyBody_ReturnsFalse()
+    {
+        // SetTempsAsync routes through SendGcodePrivateAsync; same narrowing rule applies.
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent(
+                """{"error":"WebRequestError","message":"Klippy is not ready"}""",
+                Encoding.UTF8, "application/json")
+        });
+
+        bool result = await client.SetTempsAsync("http://moonraker:7125", hotend: 200);
+        result.Should().BeFalse(because: "Klippy-not-ready 503 must not be treated as printer-busy (#318 blocker 2)");
     }
 
     [Fact]
