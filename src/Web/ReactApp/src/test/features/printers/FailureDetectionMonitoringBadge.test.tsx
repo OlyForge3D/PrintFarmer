@@ -335,4 +335,74 @@ describe('FailureDetectionMonitoringBadge', () => {
     // Modal should open
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
+
+  it('liveIsPrinting_OverridesStaleDto_WhenPrinterIsActivePrinting', () => {
+    // Regression test for #309: DTO isPrinting can lag up to 30s behind live SignalR status.
+    // When the printer card reports isPrinting=true, the shield must NOT show the stale
+    // "idle / not printing" state from the DTO.
+    const staleStatus: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Bambu X1',
+      state: 'idle',
+      reason: 'Printer is not printing.',
+      isPrinting: false, // stale — DTO hasn't polled yet since print started
+      detectionSource: 'global',
+      lastOutcome: 'none',
+      lastAnalyzedAt: null,
+    };
+
+    render(
+      <FailureDetectionMonitoringBadge
+        enabled={true}
+        status={staleStatus}
+        isPrinting={true} // live value from printer.state === 'Printing'
+      />
+    );
+
+    const button = screen.getByRole('button', { name: /open spaghetti detection details for bambu x1/i });
+
+    // The tooltip must NOT claim the printer is idle/off when it's actively printing.
+    // With live isPrinting=true overriding the stale DTO, state stays 'idle' (not 'error'),
+    // so it displays as 'Ready' rather than being suppressed as undefined.
+    expect(button).toHaveAttribute('title', expect.not.stringContaining('Off'));
+
+    // Open the modal and verify it does not show the stale "not printing" reason as the
+    // primary detail — the live override replaces the reason with an accurate message.
+    fireEvent.click(button);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // The stale reason must be completely replaced — the override patches both isPrinting
+    // and the reason string so "Printer is not printing." never appears.
+    expect(screen.queryByText(/printer is not printing/i)).not.toBeInTheDocument();
+    // Instead, an accurate waiting message should appear.
+    expect(
+      screen.getAllByText('Waiting for the monitoring service to begin scanning the current print.').length
+    ).toBeGreaterThan(0);
+  });
+
+  it('liveIsPrinting_False_OverridesStaleDto_WhenPrintJustEnded', () => {
+    // When a print ends, the live isPrinting goes false quickly (SignalR) but the DTO
+    // may still say isPrinting:true. The override should propagate the live value correctly.
+    const staleStatus: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-2',
+      printerName: 'Prusa MK4',
+      state: 'monitoring',
+      reason: 'Actively monitoring the current print.',
+      isPrinting: true, // stale — print already ended per SignalR
+      detectionSource: 'global',
+      lastOutcome: 'healthy',
+      lastAnalyzedAt: '2026-05-28T17:00:00Z',
+    };
+
+    render(
+      <FailureDetectionMonitoringBadge
+        enabled={true}
+        status={staleStatus}
+        isPrinting={false} // live: print has ended
+      />
+    );
+
+    const button = screen.getByRole('button', { name: /open spaghetti detection details for prusa mk4/i });
+    // State is 'monitoring' which displays as 'Guarding' regardless of isPrinting value
+    expect(button).toHaveAttribute('title', expect.stringContaining('Guarding'));
+  });
 });

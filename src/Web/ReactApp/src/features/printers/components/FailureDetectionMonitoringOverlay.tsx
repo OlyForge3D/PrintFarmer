@@ -12,6 +12,8 @@ import { FailureDetectionStatusModal } from '@/features/printers/components/Fail
 interface FailureDetectionMonitoringOverlayProps {
   enabled: boolean;
   status?: FailureDetectionPrinterStatusDto;
+  /** Live printer isPrinting from the printer card. Overrides the stale isPrinting in the DTO. */
+  isPrinting?: boolean;
   className?: string;
   printerName?: string;
 }
@@ -54,6 +56,7 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
 export function FailureDetectionMonitoringOverlay({
   enabled,
   status,
+  isPrinting,
   className,
   printerName,
 }: FailureDetectionMonitoringOverlayProps) {
@@ -63,10 +66,22 @@ export function FailureDetectionMonitoringOverlay({
     return null;
   }
 
-  const displayState = getFailureDetectionDisplayState(status);
+  const stalePrintingMismatch = isPrinting === true && !!status && !status.isPrinting
+    && (status.state === 'idle' || status.state === 'disabled');
+  const effectiveStatus = isPrinting !== undefined && status
+    ? {
+        ...status,
+        isPrinting,
+        reason: stalePrintingMismatch
+          ? 'Waiting for the monitoring service to begin scanning the current print.'
+          : status.reason,
+      }
+    : status;
+
+  const displayState = getFailureDetectionDisplayState(effectiveStatus);
   const label = getFailureDetectionStateLabel(displayState, enabled);
   const styles = getChipStyles(displayState);
-  const resolvedPrinterName = status?.printerName ?? printerName;
+  const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
 
   return (
     <>
@@ -92,7 +107,7 @@ export function FailureDetectionMonitoringOverlay({
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
         enabled={enabled}
-        status={status}
+        status={effectiveStatus}
         printerName={resolvedPrinterName}
       />
     </>
