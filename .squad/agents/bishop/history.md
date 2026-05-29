@@ -12,6 +12,15 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-24 — PR #15 APPROVE (Newt integration plan fix-up)
+
+- **Verdict:** ✅ APPROVE.
+- **Blockers closed:**
+  1. **Home gating corrected:** Now `canHomeAll || canHomeXY || canHomeZ` per PR #12 implementation.
+  2. **ViewModel scope specified:** Injection scoped correctly (`init(printerId:)` + `configure(printerService:)` from `@EnvironmentObject ServiceContainer.printerService` in `.task`).
+  3. **Test scope clarified:** New test file + swift-snapshot-testing SPM dep + Package.swift/test-target update referenced PR #14.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570460323
+
 ### 2025-11-23 — PR #15 REQUEST_CHANGES (Newt integration plan)
 
 - **Verdict:** ❌ REQUEST_CHANGES.

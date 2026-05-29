@@ -1,3 +1,22 @@
+## Decision: Round 20 — Bishop APPROVE #15; Lambert real-transport tests #318
+
+**Date:** 2025-11-24
+**Authors:** Bishop (code review), Lambert (backend), Coordinator
+**Status:** PR #15 APPROVED (iterative gap-closing successful), PR #318 fix-up merged (real-transport behavior tests)
+
+### Summary
+
+- **PR #15 APPROVE (Bishop consensus):** All 3 blockers addressed in `9dc9af2`: (1) Home gating corrected to `canHomeAll || canHomeXY || canHomeZ`; (2) ViewModel injection scoped correctly (`init(printerId:)` + `configure(printerService:)` from `@EnvironmentObject`); (3) test scope updated (new test file + swift-snapshot-testing SPM dep). **Approved.**
+- **PR #318 fix-up (Lambert):** Added 6 behavior-level tests using real transports (Kestrel WebSocket for SDCP, TcpListener for FlashForge). Full rejected-mutation → status-roundtrip → exception path verified end-to-end, not just helper logic in isolation. All tests pass; `dotnet format --verify-no-changes` clean. **Merged.**
+
+### Durable Rule Reinforced
+
+**Real-transport test pattern for plugin backends:** Spinning up Kestrel WebSocket (SDCP) + TcpListener (FlashForge) to exercise the full rejected-mutation → status-roundtrip → exception propagation path. Much higher fidelity than mocking the transport layer. Validates the seam (backend rejects → exception raised → controller maps to outcome) end-to-end.
+
+- Comment (Bishop #15): https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570460323
+
+---
+
 ## Decision: Round 19 — Vasquez APPROVE #14; Newt fix #15; Hicks CR #318
 
 **Date:** 2025-11-24
