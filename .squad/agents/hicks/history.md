@@ -12,6 +12,18 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-24: Round 19 — PR #14 APPROVE + PR #318 REQUEST_CHANGES
+
+- **PR #14 (snapshot spike):** ✅ APPROVE (2-of-2 consensus with Vasquez).
+- **PR #318 (error-translation tests):** ❌ REQUEST_CHANGES. SDCP + FlashForge tests cover parsing/helper logic only; full path (reject → exception → outcome) unverified. Moonraker OK. Requires mutation-level end-to-end test, not just helper logic.
+- Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570450469
+
+### 2025-11-23 — PR #14 APPROVE (Brett snapshot spike)
+
+- **Verdict:** ✅ APPROVE.
+- **Context:** FlashForge temp claim matches `fallback(for: .flashForge)` on stack branch. Noted: older `PrinterBackendCapabilitiesTests` fixture JSON shows FlashForge temp support off — Brett should describe source more precisely in any revision.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/14#issuecomment-4570277291
+
 ### 2025-11-22 — PR #13 re-review (jog subgroup init-state bug)
 
 - **Verdict:** ❌ REQUEST_CHANGES (same PR, real init bug uncovered on second pass).
@@ -65,3 +77,17 @@ _(append new learnings below this line)_
   - Project tooling threshold: Accept test-hooks as practical equivalent when ViewInspector/equivalent introspection library is unavailable.
   - **Durable lesson:** Second-voice value is real, but must respect available tooling and established convention. Do not require the impossible.
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570216262 (Vasquez tiebreaker, noting Hicks' dissent honored in log)
+
+### 2025-11-24: Round 21 — APPROVE PR #318 re-review (real-transport tests)
+- **Verdict:** ✅ APPROVE.
+- Real-transport behavior tests 14/14 pass locally (Kestrel WebSocket for SDCP, TcpListener for FlashForge).
+- Full rejected-mutation → status-roundtrip → exception path verified end-to-end as required in Round 19 decision.
+- All tests pass; `dotnet format --verify-no-changes` clean.
+- Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570558773
+
+### 2026-05-21 — Round 22: PR #318 re-review blocked by Bishop's architectural CR
+
+- **Context:** Hicks approved PR #318 in Round 21 based on real-transport test coverage (14/14 passing). Bishop then identified two architectural blockers on 2026-05-21.
+- **Lesson — Cross-layer translation gap:** Individual diff review (service layer tests) can miss downstream controller mapping. `PrinterBackendBusy` exception → `BackendBusy` outcome → HTTP 502 code chain was not verified in test path inspection. Code-path tests pass; system-path translation fails.
+- **Lesson — Two-reviewer consensus rule (durable):** Backend PRs spanning service logic + controller translation need two reviewers. Applies to: PrintersService → PrintersController exception/outcome flows; domain chains; worker-slicer routing. Single voice insufficient.
+- **Action:** PR #318 requires fix at PrintersController mapping layer before re-review. Bishop's catch earns the rule.

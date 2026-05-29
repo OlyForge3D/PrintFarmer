@@ -268,3 +268,38 @@ This ensures TestFlight sees monotonically increasing build numbers and does not
 - Tag: `v1.0-beta.75`
 - Original request ref: Workflow scope fix isolated beta triggers; this offset ensures build continuity across repo consolidation.
 
+---
+
+## 2026-05-21: Dependabot Triage Pattern
+
+**Role:** Infrastructure & Release Management  
+**Status:** ✅ Documented (artifact `.squad/parker/triage-2026-05-21.md`)
+
+### Context
+
+Dependabot maintains 9 open PRs on PrintFarmer repo. All CI green. Triage categorizes by risk and verification pathway:
+
+### Triage Categories
+
+**Safe auto-merge (2 PRs):**
+- #235: FluentAssertions 6.12.0 → 7.0.0 (test library, no runtime impact, explicit version bump)
+- #238: Mvc.Testing 10.0.0 → 11.0.0 (test framework, no runtime impact)
+- **Action:** Jeff auto-merge; no regression risk.
+
+**Need verification (3 PRs):**
+- #239: System.Text.Json patch bump
+- #271: System.Reflection.Metadata patch bump
+- #272: System.ComponentModel.Annotations patch bump
+- **Action:** Build + test locally; check for regression. Patch bumps are low-risk but runtime-touching.
+
+**Need manual review (5 PRs):**
+- #240–244: GitHub Actions major updates (node, setup-dotnet, upload-artifact, etc.)
+- **Action:** Changelog review (behavior changes documented?), then land individually. Major version bumps on CI actions have downstream effect; no auto-merge.
+
+### Learnings
+
+- **Triage pattern:** Categorize by scope (test-only vs runtime) and version (patch vs major). Three-tier (auto, verify, manual) avoids decision fatigue and scales to larger dependabot backlogs.
+- **All-green CI is false confidence:** Green tests don't imply no regressions in edge cases (e.g., serialization behavior changes in System.Text.Json). Explicit build + test + changelog review required for runtime-touching deps.
+- **GH Actions major bumps need inline review:** CI actions are infrastructure; behavior changes are not always backward-compatible. Document expected changes before landing.
+
+

@@ -12,6 +12,24 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-24 — PR #15 APPROVE (Newt integration plan fix-up)
+
+- **Verdict:** ✅ APPROVE.
+- **Blockers closed:**
+  1. **Home gating corrected:** Now `canHomeAll || canHomeXY || canHomeZ` per PR #12 implementation.
+  2. **ViewModel scope specified:** Injection scoped correctly (`init(printerId:)` + `configure(printerService:)` from `@EnvironmentObject ServiceContainer.printerService` in `.task`).
+  3. **Test scope clarified:** New test file + swift-snapshot-testing SPM dep + Package.swift/test-target update referenced PR #14.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570460323
+
+### 2025-11-23 — PR #15 REQUEST_CHANGES (Newt integration plan)
+
+- **Verdict:** ❌ REQUEST_CHANGES.
+- **Blockers:**
+  1. **Home gating logic mis-stated:** Plan re-states gating as `canHomeAll` alone instead of OR of `canHomeAll || canHomeXY || canHomeZ` per PR #12 implementation. Spec mismatch.
+  2. **ViewModel scope under-specified:** `PrinterControlsViewModel` still requires `printerService` injection — plan doesn't address injection source or scope.
+  3. **Test scope under-specified:** #289 implies a new test file/test target update despite plan's "2 files / no new files" claim. Actual scope is unclear.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570286051
+
 ### 2026-05-21: PR #299 review (jog subgroup)
 - Verdict ✅ approved via `--comment` (Ruling G — self-PR cannot `--approve`).
 - Coordinator squash-merged with `--admin`.
@@ -53,7 +71,7 @@ _(append new learnings below this line)_
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570269998
 - **Commit:** `533b86f`
 
-### 2026-05-29 — PrintFarmerMobile #12 third-review APPROVE (home subgroup, round 16 final sign-off)
+### 2026-05-29 — Round 16: PrintFarmerMobile #12 third-review APPROVE (home subgroup, round 16 final sign-off)
 
 - **Verdict:** ✅ APPROVE (third review, closing the loop after iterative gap-closing across rounds 12–16).
 - **Closure confirmed:** Spec adherence is exact; VoiceOver labels and hints match `docs/design/printer-controls-section.md` verbatim. Disabled-state rendering is correct. Test layer reads from same computed properties as view layer — non-tautological design confirmed.
@@ -66,3 +84,11 @@ _(append new learnings below this line)_
 - **Third-review pattern:** When first two reviews identify blockers that are then fixed, a third review pass provides closure and confidence in the durable pattern.
 - **Spec-driven testing:** Assertion strings must be sourced from the same location as view strings (computed property), not hardcoded constants. This rule eliminates tautology and ensures test rejects stale code.
 
+### 2026-05-21 — Round 22: PR #318 REQUEST_CHANGES (architectural blockers caught)
+
+- **Verdict:** ❌ REQUEST_CHANGES.
+- **Architectural blocker 1:** `PrinterBackendBusyException` does NOT become HTTP 409 in today's code. `PrintersService` maps it to `BackendBusy` outcome, and `PrintersController.MapControlOutcome()` returns **502 BadGateway**, not 409 Conflict. PR's firmware-409 propagation premise is undermined without fixing the controller-side mapping first.
+- **Architectural blocker 2:** Moonraker introduces new convention treating HTTP 503 as "busy" (Klippy unavailable/error states, not just busy-printing). Diverges from tighter OctoPrint/PrusaLink 409-only pattern. Requires spec alignment before landing.
+- **Non-blocking:** Real-transport tests have minor `GetFreeTcpPort()` race risk in CI (ephemeral port collisions on parallel runs).
+- **Durable lesson:** Backend cross-layer changes (exception → outcome → HTTP code) need two-reviewer consensus. Single code-path approval can miss system-wide mapping assumptions. Architectural consistency (409 for firmware conflicts across backends) is enforcer role.
+- **Comment:** https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570616436

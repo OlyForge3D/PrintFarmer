@@ -32,6 +32,11 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-24: Round 19 — APPROVE snapshot spike (PR #14 PFarmerMobile)
+- **Verdict:** ✅ APPROVE (2-of-2 consensus with Hicks).
+- FlashForge temp claim via `fallback(for: .flashForge)` on stack branch. Capability source-of-truth notes added but non-blocking.
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/14#issuecomment-4570410288
+
 ### 2026-05-21: PR #301 review (preheat subgroup)
 - Verdict 💬 comment, no blockers. Four non-blocking findings: unused `previewSeedCapabilities(_:)`, iPad disabled-tap reveal gap (`.disabled` + `.help()` won't show on touch-only iPad), a11y-label localization gap, misnamed `unsafeBitCastedFallback()`.
 - Confirmed client-side capability gating respected (#279/#290) — `isVisible(capabilities:)` on view + re-validate at dispatch in `PrinterControlsViewModel.preheat`.
@@ -61,3 +66,9 @@ _(append new learnings below this line)_
   3. Is the blocker a safety/security gap or a tooling choice? (Tooling choice → accept tiebreaker override.)
 - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570216262 (round 16)
 - **Stack closure:** PR #11 ✅, PR #12 ✅, PR #13 ✅ — iOS controls v1 stack approved end-to-end.
+
+### 2025-11-24: Round 21 — APPROVE PR #15 re-review (capability research)
+- **Verdict:** ✅ APPROVE (second voice).
+- `@State` lifecycle matches `PrinterDetailViewModel` 1:1 nav pattern; layout placement against main; no retain cycles.
+- Non-blocking note: missing loading-state UI during initial capability fetch (handoff to Hudson).
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570526326
