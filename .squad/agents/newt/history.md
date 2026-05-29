@@ -301,6 +301,31 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 
 ---
 
+## Round 19 (2025-11-24): PrinterControlsSection Integration Fix-up — PR #15
+
+**Task:** Correct Home gate logic, ViewModel injection details, test scope for integration plan
+**Status:** ✅ COMPLETE — Fix-up pushed to `squad/289-printer-controls-ios-integration-fix-up`
+
+### Fixes Applied
+
+1. **Home gate logic:** Changed from `canHomeAll` alone to `canHomeAll || canHomeXY || canHomeZ` (matches `HomeSubgroup.hasAnyHomeCapability`). Ensures subgroup visible if ANY home capability present, not just all-axes.
+
+2. **ViewModel injection clarified:** Added explicit `init(printerId:)` constructor. Wired `configure(printerService:)` method called from `.task` receiving `@EnvironmentObject ServiceContainer.printerService`. Avoids ambiguity about when/how service becomes available.
+
+3. **Test scope corrected:** 
+   - New test file (not added to existing suite)
+   - swift-snapshot-testing SPM dependency added to Package.swift
+   - Test target updated in `Package.swift` `testTargets`
+   - References PR #14 (snapshot spike) for capability fixtures
+
+### Learnings
+
+- Integration plan specs must call out **every injection point and its timing** — `init` vs `.task` vs `@Environment` ambiguity causes follow-up CR cycles.
+- Test scope changes (new files, new deps) belong in the scope section, not hidden in "implementation notes".
+- Single-capability gates (`canHomeAll`) should be ORed with per-axis gates (`canHomeXY || canHomeZ`) at the subgroup level, not just at individual button level.
+
+---
+
 ## Round 17 (2025-11-23): PrinterControlsSection Integration Plan — PR #15
 
 **Task:** Design composition strategy for `PrinterControlsSection` integration into `PrinterDetailView`  

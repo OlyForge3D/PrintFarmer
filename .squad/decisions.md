@@ -1,3 +1,23 @@
+## Decision: Round 19 — Vasquez APPROVE #14; Newt fix #15; Hicks CR #318
+
+**Date:** 2025-11-24
+**Authors:** Vasquez (iOS review), Newt (iOS), Hicks (backend review), Coordinator
+**Status:** PR #14 merged (snapshot spike), PR #15 fix-up pushed + OPEN, PR #318 REQUEST_CHANGES (error-translation test gap)
+
+### Summary
+
+- **PR #14 APPROVE (Vasquez consensus):** Snapshot spike capability (FlashForge temp claim via `fallback(for: .flashForge)`). Vasquez + Hicks = 2-of-2 reviewer consensus. Source-of-truth capability disambiguation noted non-blocking. **Merged.**
+- **PR #15 fix-up (Newt):** Home gate corrected to `canHomeAll || canHomeXY || canHomeZ` (matches `HomeSubgroup.hasAnyHomeCapability`). ViewModel injection spelled out: `init(printerId:)` + `configure(printerService:)` wired from `@EnvironmentObject ServiceContainer.printerService` in `.task`. Test scope updated: new test file + swift-snapshot-testing SPM dep + Package.swift/test-target update (references PR #14). **Pushed; re-review pending.**
+- **PR #318 REQUEST_CHANGES (Hicks):** SDCP + FlashForge tests cover helper logic/parsing only — full rejected-start → `PrinterBackendBusyException` propagation path unverified for those two backends. Moonraker translation OK. Requires mutation-level end-to-end test (mock backend rejection → call mutation → assert exception thrown), not just helper/parsing logic in isolation. **Blocked.**
+
+### Durable Rule Added
+
+**Plugin error-translation tests must exercise the full rejected mutation path:** Mock backend rejection → call the actual mutation method (e.g., `StartPrintAsync`) → assert `PrinterBackendBusyException` thrown. Do not test helper/parsing logic in isolation; those are compile-time correct. The contract seam (backend rejects → exception raised → controller maps to outcome) is the critical path that needs end-to-end verification.
+
+- Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570450469
+
+---
+
 ## Decision: Round 18 — Lambert PR #318 (backend firmware-409); Hicks APPROVE #14; Bishop CR #15
 
 **Date:** 2025-11-23

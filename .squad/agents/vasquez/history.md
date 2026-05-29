@@ -32,6 +32,11 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-24: Round 19 — APPROVE snapshot spike (PR #14 PFarmerMobile)
+- **Verdict:** ✅ APPROVE (2-of-2 consensus with Hicks).
+- FlashForge temp claim via `fallback(for: .flashForge)` on stack branch. Capability source-of-truth notes added but non-blocking.
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/14#issuecomment-4570410288
+
 ### 2026-05-21: PR #301 review (preheat subgroup)
 - Verdict 💬 comment, no blockers. Four non-blocking findings: unused `previewSeedCapabilities(_:)`, iPad disabled-tap reveal gap (`.disabled` + `.help()` won't show on touch-only iPad), a11y-label localization gap, misnamed `unsafeBitCastedFallback()`.
 - Confirmed client-side capability gating respected (#279/#290) — `isVisible(capabilities:)` on view + re-validate at dispatch in `PrinterControlsViewModel.preheat`.

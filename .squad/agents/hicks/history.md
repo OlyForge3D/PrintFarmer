@@ -12,6 +12,12 @@
 
 _(append new learnings below this line)_
 
+### 2025-11-24: Round 19 — PR #14 APPROVE + PR #318 REQUEST_CHANGES
+
+- **PR #14 (snapshot spike):** ✅ APPROVE (2-of-2 consensus with Vasquez).
+- **PR #318 (error-translation tests):** ❌ REQUEST_CHANGES. SDCP + FlashForge tests cover parsing/helper logic only; full path (reject → exception → outcome) unverified. Moonraker OK. Requires mutation-level end-to-end test, not just helper logic.
+- Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570450469
+
 ### 2025-11-23 — PR #14 APPROVE (Brett snapshot spike)
 
 - **Verdict:** ✅ APPROVE.
