@@ -23,7 +23,7 @@ jobs:
         allow_stub: [false]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check dispatch input (disable_slicer_builds)
         id: check
@@ -37,7 +37,7 @@ jobs:
 
       - name: Set up QEMU (optional for multi-arch)
         if: steps.check.outputs.skip != 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/amd64
 
