@@ -332,4 +332,52 @@ The merge includes changes to `.github/workflows/` (both application and squad w
 - **Conflict resolution strategy for code files:** `git checkout --theirs <file>` for all application code and workflow files — development is the source of truth.
 - **The `release.sh` script does this same strip-and-push in a single command** (see `.squad/skills/release/SKILL.md`). For PRs (rather than direct push), the manual approach above is required.
 
+## 2026-05-30: main→development Sync Redo (Correcting #321)
+
+**Role:** DevOps & Release Engineer  
+**Status:** ✅ Complete — PR #329 opened, verified .squad/ preservation
+
+### Context
+
+PR #321 (sync/main-to-dev-2026-05-29) was a BROKEN sync that would have deleted 14,549 lines of .squad/ state from development. The merge took the wrong side on modify/delete conflicts — files that exist on dev but not main (because squad-main-guard strips them) were staged for deletion instead of preservation.
+
+### Actions Taken
+
+1. **Closed PR #321** with explanation comment
+2. **Deleted bad branch** (local and remote)
+3. **Redid the sync** with explicit conflict resolution:
+   - Created `sync/main-to-dev-2026-05-30` from `origin/development`
+   - Merged `origin/main` with `--no-commit --no-ff -X ours`
+   - Removed 3 spurious .github files (git's directory-rename heuristic misfire)
+   - Staged all 64 modify/delete conflicts (kept dev's .squad/ files)
+   - Restored all 163 .squad/ files that were deleted during merge (from HEAD)
+4. **Verified before push:**
+   - Zero .squad/ paths in diff vs origin/development ✅
+   - Zero spurious .github files ✅
+   - 34 files changed: +852/-186 (workflows, mobile scripts, React components)
+5. **Pushed and opened PR #329** — https://github.com/OlyForge3D/PrintFarmer/pull/329
+
+### Key Learnings
+
+**Modify/delete conflict pattern:**
+- When merging branch A (has files) into branch B (lacks files), git creates "modify/delete" conflicts with status `UD` (unmerged, deleted by them).
+- The `-X ours` strategy handles TEXT conflicts but **does NOT automatically resolve modify/delete conflicts** — you must explicitly choose which side to keep.
+- Git's output says "Version HEAD of X left in tree" but this only happens for files that existed in BOTH branches at some point. Files that only existed on dev (like many .squad/ files) get DELETED during the merge unless explicitly restored.
+
+**Correct main→dev conflict resolution recipe:**
+1. Merge with `-X ours` (prefer dev on text conflicts)
+2. Remove spurious .github files from git's directory-rename heuristic: `git rm -f .github/fact-checker-charter.md .github/loop.md .github/squad.agent.md.template`
+3. Stage all modify/delete conflicts (keep dev's files): `git status --porcelain | grep '^UD' | awk '{print $2}' | xargs git add`
+4. Restore ALL .squad/ files deleted during merge: `git diff HEAD --name-only --diff-filter=D | grep '^\.squad/' | xargs -I {} git checkout HEAD -- {}`
+5. Verify zero .squad/ in diff: `git diff origin/development --name-only | grep '^\.squad/' | wc -l` must return 0
+
+**Why `-X ours` alone is insufficient:**
+- `-X ours` only affects how git resolves TEXT conflicts (hunks where both sides modified the same lines)
+- Modify/delete conflicts are STRUCTURAL, not textual — git doesn't know if you want to keep the file or delete it
+- You must explicitly restore files from HEAD after the merge to preserve them
+
+**Direction-specific strategies:**
+- **main→dev:** Preserve ALL .squad/ (keep dev's version). Accept main's workflows/manifests (security updates).
+- **dev→main:** Strip ALL .squad/ before committing. Accept dev's code. Both directions may hit the same file-location conflicts (spurious .github files).
+
 
