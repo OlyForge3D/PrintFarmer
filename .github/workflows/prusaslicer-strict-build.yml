@@ -43,7 +43,7 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.check.outputs.skip != 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build slicer-base (amd64)
         if: steps.check.outputs.skip != 'true'
