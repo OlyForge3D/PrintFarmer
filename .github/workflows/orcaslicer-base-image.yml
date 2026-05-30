@@ -231,7 +231,7 @@ jobs:
 
       - name: Build and push base image
         if: steps.check.outputs.exists != 'true' || inputs.force_rebuild == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.orca-base
