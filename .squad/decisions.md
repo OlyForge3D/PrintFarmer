@@ -1322,3 +1322,95 @@ Scribe should flag in post-merge review:
 - **Applies to:** PrintersService → PrintersController exception/outcome flows; payment/subscription domain chains; worker-slicer routing layers.
 - **Hicks lesson:** Individual diff review (service tests) sometimes misses downstream controller mapping. Always pair with second reviewer checking translation boundary.
 - **Bishop lesson:** Architectural consistency (409 for firmware conflicts across backends) is enforcer role; single code-path approval can mask system-wide assumptions.
+## Decision Record: dev→main Sync PR — 2026-05-29
+
+**Author:** Parker
+**Date:** 2026-05-29
+**Status:** ⚠️ PR ready locally, push blocked — needs `workflow` scope
+
+### Summary
+
+Prepared a clean sync of `development` → `main` to pick up 536 commits including Dependabot security fixes for 49 flagged vulnerabilities (2 critical, 15 high, 31 moderate, 1 low).
+
+### What Was Accomplished
+
+- **Branch created:** `sync/dev-to-main-2026-05-29` off `origin/main`
+- **Commits merged:** 536 (all of development since the last main sync)
+- **Commit SHA:** `d4d8b4a1e`
+- **Forbidden paths stripped from index:** All `.squad/`, `.ai-team/`, `.ai-team-templates/`, `team-docs/`, `docs/proposals/` — confirmed 0 forbidden paths in staged index
+- **Conflicts resolved (16):**
+  - `.squad/*` modify/delete conflicts (≈60 files) — resolved by `git rm --cached`
+  - `.github/fact-checker-charter.md`, `.github/loop.md`, `.github/squad.agent.md.template` — git directory-rename heuristic misfire; removed
+  - `.gitignore`, 5 `.github/workflows/squad-*.yml`, `mobile/scripts/release-beta.sh`, `scripts/sync-monorepo-version.sh`, 5 `.csproj` files — resolved using development's version
+
+### Blocker
+
+Push rejected: `refusing to allow an OAuth App to create or update workflow ... without 'workflow' scope`.
+
+**Resolution required:** Jeff must run `gh auth refresh --scopes workflow` (browser one-time code), then run:
+```bash
+cd /Users/jpapiez/s/PFarm1
+git push -u origin sync/dev-to-main-2026-05-29
+gh pr create --base main --head sync/dev-to-main-2026-05-29 \
+  --title "chore: sync development → main (Dependabot + accumulated)" \
+  --body "Brings main current with development (536 commits). Picks up Dependabot security fixes for the 49 vulnerabilities flagged on the default branch.
+
+Squad metadata (.squad/, .ai-team/, team-docs/, docs/proposals/) explicitly excluded per repo policy. The squad-main-guard.yml workflow will verify."
+```
+
+The local branch `sync/dev-to-main-2026-05-29` is ready to push — no further merge or conflict resolution needed.
+
+### CI Expectation
+
+- `squad-main-guard.yml` — should PASS (0 forbidden paths in index, verified)
+- All other checks (build, tests, compose validation) — expected green (same codebase as development which passed CI)
+# Decision: main→development Sync Must Explicitly Preserve .squad/ Files
+
+**Date:** 2026-05-30  
+**Decider:** Parker (DevOps)  
+**Status:** Approved  
+**Context:** PR #321 cleanup and redo
+
+## Problem
+
+PR #321 (sync/main-to-dev-2026-05-29) was broken — it would have deleted 14,549 lines of .squad/ state from development. The merge used `-X ours` but still lost files because:
+
+1. `-X ours` only resolves TEXT conflicts (where both sides modified the same lines)
+2. It does NOT resolve STRUCTURAL modify/delete conflicts (files on dev but not main)
+3. Git deleted many .squad/ files during the merge that weren't part of the explicit UD (modify/delete) conflict list
+
+## Decision
+
+**When syncing main → development, always:**
+
+1. Merge with `-X ours` (prefer dev on text conflicts)
+2. Remove spurious .github files from git's directory-rename heuristic
+3. Stage all modify/delete conflicts: `git status --porcelain | grep '^UD' | awk '{print $2}' | xargs git add`
+4. **Restore ALL .squad/ files deleted during merge:**
+   ```bash
+   git diff HEAD --name-only --diff-filter=D | grep '^\.squad/' | xargs -I {} git checkout HEAD -- {}
+   ```
+5. Verify zero .squad/ in diff before committing:
+   ```bash
+   git diff origin/development --name-only | grep '^\.squad/' | wc -l
+   # Must return 0
+   ```
+
+## Rationale
+
+- main strips .squad/ via squad-main-guard, so it never has squad files
+- When merging main into dev, git sees dev's .squad/ files as "unilaterally added" and may delete them
+- The only way to preserve ALL .squad/ files is to explicitly restore them from HEAD after the merge
+- Without step 4 above, we lose ~100+ .squad/ files that weren't in the UD conflict list
+
+## Consequences
+
+- main→dev syncs require explicit .squad/ preservation step (step 4 above)
+- This is the inverse of dev→main syncs (which explicitly strip .squad/)
+- The verification step (step 5) is MANDATORY before pushing — if it returns non-zero, abort and debug
+
+## Related
+
+- PR #321 (broken sync, closed)
+- PR #329 (corrected sync, preserves .squad/)
+- Parker history entry: 2026-05-30 main→dev sync redo
