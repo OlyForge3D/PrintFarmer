@@ -17,6 +17,7 @@ import {
   PrinterIcon,
   RefreshIcon,
   EyeIcon,
+  ExternalLinkIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import {
@@ -541,6 +542,18 @@ function JobCard({
           </p>
         )}
 
+        {job.sourceUrl && (
+          <a
+            href={job.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-pf-text-tertiary hover:text-pf-accent"
+          >
+            from Printables{job.sourceCreator ? ` by ${job.sourceCreator}` : ''}
+            <ExternalLinkIcon className="w-3 h-3" />
+          </a>
+        )}
+
         <div className="flex items-center gap-2 pt-1">
           {canRetry && (
             <Button
@@ -660,6 +673,22 @@ function JobDetailPanel({ job }: { job: SliceJobStatusResponse }) {
       {job.errorMessage && (
         <div className="col-span-full">
           <DetailField label="Error" value={job.errorMessage} error />
+        </div>
+      )}
+      {job.sourceUrl && (
+        <div className="col-span-full">
+          <span className="text-xs text-pf-text-tertiary">Source</span>
+          <p className="text-sm">
+            <a
+              href={job.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-pf-accent hover:underline"
+            >
+              from Printables{job.sourceCreator ? ` by ${job.sourceCreator}` : ''}
+              <ExternalLinkIcon className="w-3 h-3" />
+            </a>
+          </p>
         </div>
       )}
       {job.resultFileUrl && (

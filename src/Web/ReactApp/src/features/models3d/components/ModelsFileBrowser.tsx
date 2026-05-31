@@ -8,8 +8,9 @@ import {
 } from '@/features/fileBrowser/types';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
 import { Button } from '@/common/components/ui';
-import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
 import { apiClient } from '@/services/api';
@@ -124,6 +125,7 @@ export const ModelsFileBrowser = ({
 }: ModelsFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showPrintablesModal, setShowPrintablesModal] = useState(false);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
@@ -324,6 +326,18 @@ export const ModelsFileBrowser = ({
       {hasPermission('3d_models', 'create') && (
         <Button
           type="button"
+          onClick={() => setShowPrintablesModal(true)}
+          variant="secondary"
+          size="sm"
+          title="Import from Printables"
+          iconLeft={<FileImportIcon className="h-4 w-4" />}
+        >
+          Printables
+        </Button>
+      )}
+      {hasPermission('3d_models', 'create') && (
+        <Button
+          type="button"
           onClick={() => setShowUploadModal(true)}
           variant="secondary"
           size="sm"
@@ -363,6 +377,10 @@ export const ModelsFileBrowser = ({
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadSuccess={() => fileBrowserRef.current?.refetch() ?? Promise.resolve()}
+      />
+      <PrintablesImportModal
+        isOpen={showPrintablesModal}
+        onClose={() => setShowPrintablesModal(false)}
       />
       <ConfirmationModal
         isOpen={deleteConfirm.isOpen}
