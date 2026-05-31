@@ -157,6 +157,11 @@ const navigation: NavigationElement[] = [
     href: '/nfc-devices',
     icon: NfcIcon
   },
+  {
+    name: 'NFC Bindings',
+    href: '/nfc-bindings',
+    icon: NfcIcon
+  },
 
   // — Management —
   { name: 'Management', isSectionHeader: true },
