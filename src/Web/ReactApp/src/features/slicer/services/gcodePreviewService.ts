@@ -21,8 +21,34 @@ export interface ParsedGCode {
   layerCount: number;
 }
 
+/** A single parsed move/extrusion point with tool info. */
+export interface GCodePoint {
+  x: number;
+  y: number;
+  z: number;
+  e: number;
+  feedRate: number;
+  type: 'move' | 'extrude';
+  tool: number;
+}
+
+/** A layer with full point data for Three.js rendering. */
+export interface DetailedLayer {
+  index: number;
+  z: number;
+  points: GCodePoint[];
+}
+
+/** Full parse result including rendering data and tool info. */
+export interface DetailedParsedGCode {
+  layers: DetailedLayer[];
+  layerCount: number;
+  tools: number[];
+}
+
 export interface IGcodePreviewService {
   parseGCode(gcodeText: string): Promise<ParsedGCode>;
+  parseGCodeDetailed(gcodeText: string): Promise<DetailedParsedGCode>;
   dispose(): void;
 }
 
@@ -66,6 +92,71 @@ function parseLayersFromGCode(gcodeText: string): ParsedLayer[] {
   }));
 }
 
+function parseDetailedLayers(gcodeText: string): { layers: DetailedLayer[]; tools: number[] } {
+  const lines = gcodeText.split('\n');
+  const layerMap = new Map<number, GCodePoint[]>();
+  const toolsFound = new Set<number>();
+  let currentTool = 0;
+  let pos = { x: 0, y: 0, z: 0, e: 0, f: 0 };
+
+  for (const rawLine of lines) {
+    const line = rawLine.split(';')[0].trim();
+    if (!line) continue;
+
+    // Tool change
+    const toolMatch = line.match(/^T(\d+)/);
+    if (toolMatch) {
+      currentTool = parseInt(toolMatch[1], 10);
+      toolsFound.add(currentTool);
+      continue;
+    }
+
+    if (!line.startsWith('G0') && !line.startsWith('G1')) continue;
+
+    const x = line.match(/X([-\d.]+)/)?.[1];
+    const y = line.match(/Y([-\d.]+)/)?.[1];
+    const z = line.match(/Z([-\d.]+)/)?.[1];
+    const e = line.match(/E([-\d.]+)/)?.[1];
+    const f = line.match(/F([\d.]+)/)?.[1];
+
+    const newPos = {
+      x: x ? parseFloat(x) : pos.x,
+      y: y ? parseFloat(y) : pos.y,
+      z: z ? parseFloat(z) : pos.z,
+      e: e ? parseFloat(e) : pos.e,
+      f: f ? parseFloat(f) : pos.f,
+    };
+
+    const isExtrude = e !== undefined && parseFloat(e) > pos.e;
+    const layerZ = Math.round(newPos.z * 100) / 100;
+
+    if (!layerMap.has(layerZ)) {
+      layerMap.set(layerZ, []);
+    }
+
+    layerMap.get(layerZ)!.push({
+      x: newPos.x,
+      y: newPos.y,
+      z: newPos.z,
+      e: newPos.e,
+      feedRate: newPos.f,
+      type: isExtrude ? 'extrude' : 'move',
+      tool: currentTool,
+    });
+
+    pos = newPos;
+  }
+
+  // Ensure tool 0 is always present
+  if (toolsFound.size === 0) toolsFound.add(0);
+
+  const layers = Array.from(layerMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([z, points], idx) => ({ index: idx, z, points }));
+
+  return { layers, tools: Array.from(toolsFound).sort((a, b) => a - b) };
+}
+
 /**
  * v1 implementation: synchronous parser wrapped in a resolved Promise.
  * v2 swap will replace this body with a Web Worker + gcode-preview WebGLPreview —
@@ -76,6 +167,11 @@ export function createGcodePreviewService(): IGcodePreviewService {
     async parseGCode(gcodeText: string): Promise<ParsedGCode> {
       const layers = parseLayersFromGCode(gcodeText);
       return { layers, layerCount: layers.length };
+    },
+
+    async parseGCodeDetailed(gcodeText: string): Promise<DetailedParsedGCode> {
+      const { layers, tools } = parseDetailedLayers(gcodeText);
+      return { layers, layerCount: layers.length, tools };
     },
 
     dispose(): void {
