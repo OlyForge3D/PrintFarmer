@@ -16,7 +16,7 @@ function RedirectTest({ from }: { from: string }) {
         <Route path="/nfc-devices" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="/locations" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="/users" element={<Navigate to="/settings?tab=users" replace />} />
-        <Route path="/profile/api-keys" element={<Navigate to="/settings?tab=users" replace />} />
+        {/* /profile/api-keys is NOT redirected — it renders ApiKeysPage directly for all auth'd users */}
         <Route path="/admin/tags" element={<Navigate to="/settings?tab=data" replace />} />
         <Route path="/admin/bed-types" element={<Navigate to="/settings?tab=slicing" replace />} />
         <Route path="/admin/custom-fields" element={<Navigate to="/settings?tab=hardware" replace />} />
@@ -39,7 +39,6 @@ describe('Settings nav migration redirects', () => {
     { from: '/nfc-devices', tab: 'hardware', label: '/nfc-devices → hardware' },
     { from: '/locations', tab: 'hardware', label: '/locations → hardware' },
     { from: '/users', tab: 'users', label: '/users → users' },
-    { from: '/profile/api-keys', tab: 'users', label: '/profile/api-keys → users' },
     { from: '/admin/tags', tab: 'data', label: '/admin/tags → data' },
     { from: '/admin/bed-types', tab: 'slicing', label: '/admin/bed-types → slicing' },
     { from: '/admin/custom-fields', tab: 'hardware', label: '/admin/custom-fields → hardware' },
