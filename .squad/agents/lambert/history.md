@@ -106,3 +106,40 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 - **2026-05-31 — Artifact metadata endpoint pattern (#336, PR #365).** Added `GET /api/artifacts/{id}/metadata` to slicer-host `ArtifactsController`. Pattern: (1) load artifact, (2) load parent `SliceJob`, (3) compare `job.UserId` vs caller's `ClaimTypes.NameIdentifier` claim — admin bypass via `User.IsInRole("farm_admin")`. `downloadUrl` is hardcoded to `/api/artifacts/{id}` — same as the existing binary download action. DTO is a C# `record` in `Farm.Slicer.Module/Dtos/`. `[ProducesResponseType]` attributes cover 200/404/403. Tests use `ControllerContext` with a `DefaultHttpContext` carrying a `ClaimsPrincipal` for auth-sensitive unit tests — no need to spin up a full HTTP pipeline.
 
 - **2026-05-31 — beads (`bd`) not available in worktrees.** Running `bd` from a worktree directory (e.g. `/Users/jpapiez/s/PFarm1-336`) fails with "no beads database found". The `.beads/` directory lives only in the main tree. Workaround: `BEADS_DIR=/path/to/main-tree/.beads bd ...`, or run `bd` from the main tree path. If `.beads/` is absent from the main tree entirely, the database has not been initialized — skip `bd sync` step and note as a blocker in the health report.
+
+- **2026-05-31 — Spoolman filament cost provider (#342, PR #378).** `IFilamentCostProvider` is the abstraction; `SpoolmanFilamentCostProvider` is the Spoolman-backed implementation. Lives in `src/infra/Services/Cost/`. Uses `IMemoryCache` (5-min TTL, `spoolman_cpg_spool_{id}` / `spoolman_cpg_filament_{id}` keys). Registered as Scoped (not Singleton) to avoid captive-dependency with `ISpoolmanService` typed HttpClient. Optional ctor injection `IFilamentCostProvider? filamentCostProvider = null` follows same pattern as `IJobCostCalculationService?` in `PrintJobCompletionService`. All exceptions caught → `null` return; Spoolman unconfigured also returns `null` (BaseUrl empty check inside `ISpoolmanService`). Multi-spool cost path in `JobCostCalculationService` uses provider as fast path; falls back to settings cascade on null. Cost per gram = Price / InitialWeightG (spool), or Price / Weight (filament).
+
+## Issue #353 — WebAuthn/FIDO2 Passkey Ceremony Endpoints (PR #380)
+
+**Branch:** `squad/353-passkey-webauthn-endpoints`
+
+### Package Gotcha
+- NuGet package is **`Fido2`** v4.0.1 (by abergs, 5M+ downloads) — NOT `Fido2NetLib` which stalled at `1.0.0-alpha`.
+- Namespace is still `Fido2NetLib` despite the different package name.
+- Companion: `Fido2.Models` v4.0.1 (types). `Fido2.AspNet` v4.0.1 is optional (not used).
+
+### Fido2 v4 API
+- `Fido2(Fido2Configuration)` — concrete class, not interface-backed.
+- `RequestNewCredential(RequestNewCredentialParams)` → `CredentialCreateOptions` (sync)
+- `MakeNewCredentialAsync(MakeNewCredentialParams, ct)` → `RegisteredPublicKeyCredential`
+- `GetAssertionOptions(GetAssertionOptionsParams)` → `AssertionOptions` (sync)
+- `MakeAssertionAsync(MakeAssertionParams, ct)` → `VerifiedAssertionResult`
+- `CredentialCreateOptions.ToJson()` / `.FromJson(string)` for cache round-trip
+- `AssertionOptions.ToJson()` / `.FromJson(string)` for cache round-trip
+
+### CredentialCreateOptions Required Members (v4)
+Object initializer requires: `Rp`, `User`, `Challenge`, `PubKeyCredParams`.
+- `PublicKeyCredentialRpEntity` has positional constructor: `(string id, string name, string? icon)`
+- `Fido2User`: properties `Id`, `Name`, `DisplayName`
+
+### AssertionOptions Required Members (v4)
+`Challenge` and `RpId` — can use object initializer: `new() { Challenge = [...], RpId = "localhost" }`
+
+### Vulnerability Warnings
+`Fido2` v4.0.1 pulls in `PeterO.Cbor` and `System.IdentityModel.Tokens.Jwt` which have known CVEs.
+These are transitive and expected — not blockers for the feature work.
+
+### Architecture Decisions
+- Challenges stored in `IDistributedCache` (in-memory; swap for Redis in prod)
+- Replay prevention: cache key deleted immediately on read (`LoadOptionsAsync`)
+- Credential persistence deferred to #354 — `CompleteRegistration` and `CompleteLogin` log TODO warnings

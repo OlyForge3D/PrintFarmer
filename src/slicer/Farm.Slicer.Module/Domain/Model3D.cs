@@ -27,4 +27,18 @@ public class Model3D : StoredFileBase
 
     /// <summary>JSON-serialized 3MF metadata extracted during upload.</summary>
     public string? ExtractedMetadataJson { get; set; }
+
+    // Attribution fields — populated for imported models (e.g., from Printables)
+
+    /// <summary>Original source URL for imported models (e.g., https://www.printables.com/model/12345).</summary>
+    public string? SourceUrl { get; set; }
+
+    /// <summary>License name for imported models (e.g., "CC BY 4.0").</summary>
+    public string? SourceLicense { get; set; }
+
+    /// <summary>Creator/author handle for imported models.</summary>
+    public string? SourceCreator { get; set; }
+
+    /// <summary>Timestamp when the model was imported from an external source. Null for locally uploaded models.</summary>
+    public DateTime? ImportedAt { get; set; }
 }

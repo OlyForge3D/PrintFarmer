@@ -30,3 +30,16 @@ public sealed record PrintablesFileEntryDto(
     string Id,
     string Name,
     long FileSize);
+
+/// <summary>
+/// Request body for <c>POST api/3d-models/printables/attribution</c>.
+/// Associates an already-uploaded model record with its Printables source.
+/// </summary>
+public sealed class PersistAttributionRequestDto
+{
+    /// <summary>Gets or sets the ID of the uploaded model record to annotate.</summary>
+    public Guid ModelId { get; set; }
+
+    /// <summary>Gets or sets the canonical Printables model page URL.</summary>
+    public string PrintablesUrl { get; set; } = string.Empty;
+}

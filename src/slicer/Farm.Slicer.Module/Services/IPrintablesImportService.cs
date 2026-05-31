@@ -25,4 +25,14 @@ public interface IPrintablesImportService
     /// Thrown when the Printables GraphQL API returns an error or the model is not found.
     /// </exception>
     Task<PrintablesPreviewDto> PreviewAsync(string printablesUrl, CancellationToken ct);
+
+    /// <summary>
+    /// Sets attribution metadata on an existing <see cref="Farm.Slicer.Module.Domain.Model3D"/> record
+    /// that was uploaded via <see cref="IModel3DFileService.UploadModelAsync"/>.
+    /// Call this after upload to associate the model with its Printables source.
+    /// </summary>
+    /// <param name="modelId">The ID of the already-uploaded model record.</param>
+    /// <param name="printablesUrl">The canonical Printables model page URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task PersistAttributionAsync(Guid modelId, string printablesUrl, CancellationToken ct);
 }

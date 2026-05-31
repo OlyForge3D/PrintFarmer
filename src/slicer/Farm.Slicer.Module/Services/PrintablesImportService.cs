@@ -8,16 +8,20 @@ namespace Farm.Slicer.Module.Services;
 /// delegating metadata fetches to <see cref="PrintablesGraphQLClient"/>.
 /// </summary>
 /// <remarks>
-/// Only the preview path is implemented in this issue (#349).
-/// Import (DB persistence of attribution) lands in #351.
+/// Preview fetches model metadata without any DB writes.
+/// Attribution persistence (<see cref="PersistAttributionAsync"/>) was added in #351 and
+/// writes <c>SourceUrl</c>, <c>SourceCreator</c>, <c>SourceLicense</c>, and <c>ImportedAt</c>
+/// onto an existing <see cref="Farm.Slicer.Module.Domain.Model3D"/> record.
 /// </remarks>
 public sealed class PrintablesImportService(
     PrintablesGraphQLClient graphQlClient,
+    IModel3DFileService model3DFileService,
     ILogger<PrintablesImportService> logger) : IPrintablesImportService
 {
     private static readonly string[] AllowedHosts = ["printables.com", "www.printables.com"];
 
     private readonly PrintablesGraphQLClient _graphQlClient = graphQlClient;
+    private readonly IModel3DFileService _model3DFileService = model3DFileService;
     private readonly ILogger<PrintablesImportService> _logger = logger;
 
     /// <inheritdoc />
@@ -38,6 +42,30 @@ public sealed class PrintablesImportService(
             _logger.LogWarning(ex, "Printables API error for model {ModelId}", modelId);
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task PersistAttributionAsync(Guid modelId, string printablesUrl, CancellationToken ct)
+    {
+        string parsedModelId = ParseModelId(printablesUrl);
+
+        _logger.LogInformation(
+            "Fetching attribution for Printables model {ModelId} to persist on file record {FileId}",
+            parsedModelId, modelId);
+
+        PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(parsedModelId, printablesUrl, ct);
+
+        await _model3DFileService.SetAttributionAsync(
+            modelId,
+            sourceUrl: printablesUrl,
+            sourceCreator: preview.Creator,
+            sourceLicense: preview.License,
+            importedAt: DateTime.UtcNow,
+            ct);
+
+        _logger.LogInformation(
+            "Attribution persisted for model record {FileId}: creator={Creator}, license={License}",
+            modelId, preview.Creator, preview.License);
     }
 
     /// <summary>
