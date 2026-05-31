@@ -4,3 +4,5 @@ export type {
   NfcLinkRequest,
   NfcBindingDto,
 } from './nfc';
+
+export { parseSpoolId } from './nfc';
