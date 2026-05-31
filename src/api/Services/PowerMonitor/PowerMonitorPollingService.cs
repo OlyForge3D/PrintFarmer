@@ -173,7 +173,7 @@ public class PowerMonitorPollingService(
                 j.ActualStartTime != null &&
                 j.ActualEndTime != null &&
                 j.AssignedPrinterId != null &&
-                db.PowerMonitors.Any(m => m.PrinterId == j.AssignedPrinterId && m.IsEnabled))
+                db.PowerMonitors.Any(m => m.PrinterId == j.AssignedPrinterId))
             .ToListAsync(ct);
 
         if (jobs.Count == 0)
@@ -210,8 +210,10 @@ public class PowerMonitorPollingService(
         TimeSpan pollInterval,
         CancellationToken ct)
     {
+        // Backfill uses historical readings regardless of current IsEnabled state.
+        // The Enabled flag gates future polling only.
         List<int> monitorIds = await db.PowerMonitors
-            .Where(m => m.PrinterId == job.AssignedPrinterId && m.IsEnabled)
+            .Where(m => m.PrinterId == job.AssignedPrinterId)
             .Select(m => m.Id)
             .ToListAsync(ct);
 
