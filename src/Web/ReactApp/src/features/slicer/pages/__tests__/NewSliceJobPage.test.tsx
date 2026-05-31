@@ -254,6 +254,13 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
 // Mock SlicerSettingsPanel
 vi.mock('@/features/slicer/components/settings', () => ({
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
+  BED_TYPE_OPTIONS: [
+    { value: 'Default Plate', label: 'Default Plate' },
+    { value: 'Cool Plate', label: 'Cool Plate' },
+    { value: 'Engineering Plate', label: 'Engineering Plate' },
+    { value: 'High Temp Plate', label: 'High Temp Plate' },
+    { value: 'Textured PEI Plate', label: 'Textured PEI Plate' },
+  ],
 }));
 
 // Mock useSTLFile hook
@@ -641,6 +648,43 @@ describe('NewSliceJobPage', () => {
       
       // The model ID from URL should be captured
       // This is tested by verifying the page renders without error
+    });
+  });
+
+  describe('Bed Type Override', () => {
+    it('renders bed type dropdown with inherit as default', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        const bedTypeSelect = screen.getByLabelText(/bed type/i);
+        expect(bedTypeSelect).toBeInTheDocument();
+        expect(bedTypeSelect).toHaveValue('');
+      });
+    });
+
+    it('shows bed type options from OrcaSlicer metadata', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/bed type/i)).toBeInTheDocument();
+      });
+
+      const bedTypeSelect = screen.getByLabelText(/bed type/i);
+      const options = bedTypeSelect.querySelectorAll('option');
+      // First option is "Inherit from profile", plus the bed type options
+      expect(options.length).toBeGreaterThan(1);
+      expect(options[0].textContent).toBe('Inherit from profile');
+    });
+
+    it('allows user to select a bed type override', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/bed type/i)).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByLabelText(/bed type/i), { target: { value: 'Cool Plate' } });
+      expect(screen.getByLabelText(/bed type/i)).toHaveValue('Cool Plate');
     });
   });
 });
