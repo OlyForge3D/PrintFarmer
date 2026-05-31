@@ -1644,7 +1644,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("Success")
                         .HasColumnType("boolean");
 
-                    b.Property<DateTimeOffset>("Timestamp")
+                    b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("UserAgent")
@@ -2238,6 +2238,52 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("ScannedAt");
 
                     b.ToTable("NfcScanEvents");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("SpoolId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SpoolLastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SpoolName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("TagUid")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TrayId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId");
+
+                    b.HasIndex("SpoolId");
+
+                    b.HasIndex("TagUid")
+                        .IsUnique();
+
+                    b.ToTable("NfcTagBindings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
@@ -5162,6 +5208,16 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired();
 
                     b.Navigation("NfcDevice");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Printer");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>

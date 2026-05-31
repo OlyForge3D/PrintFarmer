@@ -5,7 +5,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.NfcDevices;
 
-public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger) : INfcDeviceService
+public class NfcDeviceService(
+    AppDbContext db,
+    ILogger<NfcDeviceService> logger,
+    INfcTagService? nfcTagService = null) : INfcDeviceService
 {
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(3);
 
@@ -131,6 +134,13 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
         device.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+
+        // Flush any events queued while the device was offline
+        if (nfcTagService is not null)
+        {
+            await nfcTagService.FlushOfflineQueueAsync(device.Id, ct);
+        }
+
         return MapToDto(device, DateTime.UtcNow);
     }
 
@@ -173,6 +183,12 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
         logger.LogInformation(
             "NFC scan event: device {DeviceId}, spool {SpoolId}, format {Format}",
             device.Id, dto.SpoolId, dto.TagFormat);
+
+        // Route the event through the tag-binding service for SignalR broadcast
+        if (nfcTagService is not null && dto.TagUid is not null)
+        {
+            await nfcTagService.ProcessTagReadAsync(dto.TagUid, device.Id, device.PrinterId, scanEvent.ScannedAt, ct);
+        }
 
         return new NfcScanHistoryDto
         {
