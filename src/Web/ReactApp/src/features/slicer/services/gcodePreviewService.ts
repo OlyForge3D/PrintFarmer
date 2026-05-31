@@ -4,19 +4,9 @@
  * v1: lightweight synchronous layer parser (no WebGL dependency).
  * v2: will swap to gcode-preview WebGLPreview in a Web Worker with OffscreenCanvas.
  *
- * Why the regex parser and not the `gcode-preview` library for v1:
- * The `gcode-preview` package (v2.18+) exports only `WebGLPreview` and `init`.
- * Its internal `Parser` class is not part of the public API surface.
- * `WebGLPreview` requires a DOM canvas + WebGL context, making it unsuitable
- * for headless parsing in service code and unit tests.
- *
- * This regex parser is the intentional v1 design choice. It matches
- * gcode-preview's layer-detection semantics: a new layer is confirmed only
- * when the first extrusion command appears at the new Z height (a bare Z move
- * without extrusion is treated as a Z-hop candidate until extrusion confirms it).
- *
- * The v2 swap will replace this body with Web Worker + OffscreenCanvas —
- * zero component changes needed at that point.
+ * The gcode-preview package (v2.18+) is installed as the intended rendering engine
+ * for v2. Its WebGLPreview class requires a real WebGL context, so v1 uses a
+ * standalone parser to avoid DOM/GPU coupling in service code and tests.
  */
 
 export interface ParsedLayer {
@@ -45,11 +35,7 @@ interface LayerAccumulator {
 function parseLayersFromGCode(gcodeText: string): ParsedLayer[] {
   const lines = gcodeText.split('\n');
   const layerAccumulators: LayerAccumulator[] = [];
-  let currentLayerZ = -Infinity;
-  // Tracks a Z increase that hasn't been confirmed as a real layer yet.
-  // A bare "G1 Z<h>" without extrusion could be a Z-hop travel move; we only
-  // promote it to a new layer when the first extrusion at that height appears.
-  let pendingZ: number | null = null;
+  let currentZ = -Infinity;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -59,28 +45,16 @@ function parseLayersFromGCode(gcodeText: string): ParsedLayer[] {
     if (!isMove) continue;
 
     const zMatch = line.match(/Z([\d.]+)/);
-    const hasExtrusion = /E[\d.]+/.test(line);
-
     if (zMatch) {
       const z = parseFloat(zMatch[1]);
-      if (z > currentLayerZ) {
-        // Z went up — candidate for a new layer, but could be a Z-hop.
-        pendingZ = z;
-      } else {
-        // Z dropped back (or stayed the same) — cancel any pending Z-hop candidate.
-        pendingZ = null;
+      if (z > currentZ) {
+        currentZ = z;
+        layerAccumulators.push({ z, commandCount: 0, lineNumber: i + 1 });
       }
     }
 
-    if (hasExtrusion) {
-      if (pendingZ !== null) {
-        // First extrusion after a Z increase confirms a real layer transition.
-        currentLayerZ = pendingZ;
-        pendingZ = null;
-        layerAccumulators.push({ z: currentLayerZ, commandCount: 1, lineNumber: i + 1 });
-      } else if (layerAccumulators.length > 0) {
-        layerAccumulators[layerAccumulators.length - 1].commandCount++;
-      }
+    if (layerAccumulators.length > 0 && line.match(/E[\d.]+/)) {
+      layerAccumulators[layerAccumulators.length - 1].commandCount++;
     }
   }
 
