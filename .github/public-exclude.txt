@@ -3,7 +3,6 @@
 # Managed in the private repo, never published
 
 # Internal tooling
-.beads/
 .deploy-config
 .devcontainer/
 .env

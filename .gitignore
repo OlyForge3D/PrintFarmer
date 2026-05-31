@@ -112,9 +112,6 @@ tools/installer/dist/
 .squad/sessions/
 .squad-workstream
 
-# Beads / Dolt files (added by bd init)
-.dolt/
-.beads-credential-key
 *.png
 !src/Web/ReactApp/public/assets/orcaslicer/**/*.png
 
