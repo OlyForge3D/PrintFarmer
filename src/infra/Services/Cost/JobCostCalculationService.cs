@@ -61,8 +61,8 @@ public class JobCostCalculationService : IJobCostCalculationService
         // Calculate material cost (per-toolhead if usage records exist, single-spool otherwise)
         decimal? materialCost = await CalculateMaterialCostAsync(job, ct);
 
-        // Calculate energy cost
-        decimal? energyCost = CalculateEnergyCost(job, settings);
+        // Calculate energy cost — uses measured KwhUsed when available, otherwise wattage estimate
+        decimal? energyCost = await CalculateEnergyCostAsync(job, settings, ct);
 
         // Calculate machine time cost
         decimal? machineTimeCost = CalculateMachineTimeCost(job, settings);
@@ -123,7 +123,7 @@ public class JobCostCalculationService : IJobCostCalculationService
 
         // Use overrides if provided, otherwise recalculate
         decimal? finalMaterialCost = materialCost ?? await CalculateMaterialCostAsync(job, ct);
-        decimal? finalEnergyCost = energyCost ?? CalculateEnergyCost(job, settings);
+        decimal? finalEnergyCost = energyCost ?? await CalculateEnergyCostAsync(job, settings, ct);
         decimal? finalMachineTimeCost = machineTimeCost ?? CalculateMachineTimeCost(job, settings);
 
         // Calculate subtotal
@@ -396,15 +396,46 @@ public class JobCostCalculationService : IJobCostCalculationService
     }
 
     /// <summary>
-    /// Calculates energy cost from print duration and electricity rate.
-    /// Wattage cascade: printer.Wattage → printer.Model.DefaultWattage → settings.AveragePrinterWattage.
-    /// Formula: (printDurationHours × printerWattage / 1000) × electricityRatePerKwh
+    /// Calculates energy cost from power consumption data.
+    /// When <see cref="PrintJob.KwhUsed"/> is set (measured by a smart plug), uses that directly.
+    /// The electricity rate is taken from the printer's <see cref="PowerMonitor"/> if one is
+    /// configured (and its rate is non-zero); otherwise falls back to
+    /// <see cref="CostTrackingSettings.ElectricityRatePerKwh"/>.
+    /// When <see cref="PrintJob.KwhUsed"/> is null, falls back to a wattage-based estimate:
+    /// (printDurationHours × printerWattage / 1000) × electricityRatePerKwh.
     /// </summary>
-    /// <param name="job">The print job with AssignedPrinter and Model loaded.</param>
-    /// <param name="settings">Global cost tracking settings for fallback values.</param>
-    private decimal? CalculateEnergyCost(PrintJob job, CostTrackingSettings? settings)
+    private async Task<decimal?> CalculateEnergyCostAsync(
+        PrintJob job,
+        CostTrackingSettings? settings,
+        CancellationToken ct)
     {
-        if (!job.ActualPrintTime.HasValue || job.ActualPrintTime.Value.TotalHours <= 0 || settings == null)
+        if (settings == null)
+        {
+            return null;
+        }
+
+        if (job.KwhUsed.HasValue && job.KwhUsed.Value > 0)
+        {
+            // Prefer per-monitor rate; fall back to farm-wide rate
+            decimal rate = settings.ElectricityRatePerKwh;
+
+            if (job.AssignedPrinterId.HasValue)
+            {
+                PowerMonitor? monitor = await _db.Set<PowerMonitor>()
+                    .Where(m => m.PrinterId == job.AssignedPrinterId.Value && m.IsEnabled)
+                    .FirstOrDefaultAsync(ct);
+
+                if (monitor is { ElectricityRateUsdPerKwh: > 0 })
+                {
+                    rate = monitor.ElectricityRateUsdPerKwh;
+                }
+            }
+
+            return Math.Round(job.KwhUsed.Value * rate, 2);
+        }
+
+        // Wattage-based estimate when no measured energy is available
+        if (!job.ActualPrintTime.HasValue || job.ActualPrintTime.Value.TotalHours <= 0)
         {
             return null;
         }
@@ -415,10 +446,7 @@ public class JobCostCalculationService : IJobCostCalculationService
             ?? settings.AveragePrinterWattage;
         decimal electricityRate = settings.ElectricityRatePerKwh;
 
-        // Convert watts to kilowatts and multiply by hours and rate
-        decimal energyCost = (printDurationHours * printerWattage / 1000m) * electricityRate;
-
-        return Math.Round(energyCost, 2);
+        return Math.Round((printDurationHours * printerWattage / 1000m) * electricityRate, 2);
     }
 
     /// <summary>

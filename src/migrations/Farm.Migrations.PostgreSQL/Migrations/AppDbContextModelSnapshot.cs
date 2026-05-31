@@ -2780,6 +2780,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("boolean");
 
+                    b.Property<decimal?>("KwhUsed")
+                        .HasColumnType("numeric");
+
                     b.Property<decimal?>("LaborCostUsd")
                         .HasColumnType("numeric");
 

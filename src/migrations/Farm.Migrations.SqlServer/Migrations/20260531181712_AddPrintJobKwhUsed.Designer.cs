@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260531181712_AddPrintJobKwhUsed")]
+    partial class AddPrintJobKwhUsed
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2239,52 +2242,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("ScannedAt");
 
                     b.ToTable("NfcScanEvents");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("PrinterId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("SpoolId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("SpoolLastSeenAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("SpoolName")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("TagUid")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("TrayId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("SpoolId");
-
-                    b.HasIndex("TagUid")
-                        .IsUnique();
-
-                    b.ToTable("NfcTagBindings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
@@ -4568,52 +4525,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("UserBalances");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AaguidDescription")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<byte[]>("CredentialId")
-                        .IsRequired()
-                        .HasColumnType("varbinary(900)");
-
-                    b.Property<string>("DeviceName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("LastUsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<byte[]>("PublicKey")
-                        .IsRequired()
-                        .HasColumnType("varbinary(max)");
-
-                    b.Property<long>("SignCount")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CredentialId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("UserPasskeyCredentials");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5328,16 +5239,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("NfcDevice");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Printer");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "Job")
@@ -5851,17 +5752,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
                         .WithMany()

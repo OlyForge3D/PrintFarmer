@@ -65,6 +65,10 @@ public static class BackgroundServicesStartup
         // Electricity Module - prune PowerReading rows older than 90 days, runs daily
         services.AddHostedService<Farm.Infrastructure.Services.Electricity.PowerReadingPruneService>();
 
+        // Electricity Module - poll enabled PowerMonitor records, persist PowerReading rows,
+        // and aggregate KwhUsed for completed print jobs
+        services.AddHostedService<Farm.Web.Api.Services.PowerMonitor.PowerMonitorPollingService>();
+
         return services;
     }
 }
