@@ -73,21 +73,21 @@ jobs:
         run: dotnet publish src/printer-discovery/PrinterDiscoveryService.csproj -c Release -o ./publish/printer-discovery --no-build
 
       - name: Upload API artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: api-publish
           path: ./publish/api
           retention-days: 1
 
       - name: Upload OrcaSlicer Worker artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orcaslicer-worker-publish
           path: ./publish/orcaslicer-worker
           retention-days: 1
 
       - name: Upload Printer Discovery artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: printer-discovery-publish
           path: ./publish/printer-discovery
@@ -118,7 +118,7 @@ jobs:
         run: npm run build
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-build
           path: src/Web/ReactApp/dist
