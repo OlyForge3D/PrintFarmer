@@ -6480,3 +6480,342 @@ Both `deploy-docker.sh` and `compose-generator.sh` need modification. The go2rtc
 
 ## Effort
 ~30 minutes. Templates and `merge_addon_services` already exist.
+
+---
+
+## Archive batch: 2026-05-31T03:18:29Z
+
+**Retention:** decisions.md was 89709 bytes, so entries dated before 2026-05-23 (7+ day policy) were archived.
+
+## Decision: Round 21 — Vasquez APPROVE #15; Hicks APPROVE #318 (re-review)
+
+**Date:** 2025-11-24
+**Authors:** Vasquez (iOS review), Hicks (backend re-review), Coordinator
+**Status:** PR #15 APPROVED (design/research prep complete), PR #318 APPROVED (real-transport tests verified)
+
+### Summary
+
+- **PR #15 APPROVE (Vasquez consensus):** `@State` lifecycle matches existing `PrinterDetailViewModel` 1:1 nav pattern; layout placement against main; no retain cycles verified. Non-blocking note: missing loading-state UI during initial capability fetch (handoff to Hudson). **Approved.**
+- **PR #318 APPROVE (Hicks re-review):** Real-transport behavior tests 14/14 pass locally (Kestrel WebSocket for SDCP, TcpListener for FlashForge). Full rejected-mutation → status-roundtrip → exception path verified end-to-end as required in Round 19 decision. All tests pass; `dotnet format --verify-no-changes` clean. **Approved.**
+
+### Status Snapshot
+
+**iOS Controls v1 Stack — Complete:**
+- P0/P1 PRs all APPROVED: #1, #3, #4, #7, #9, #10, #11, #12, #13 (HomeSubgroup, PreheatSubgroup, JogSubgroup, etc.)
+- Design/research prep approved: #14 (snapshot spike), #15 (capability research)
+
+**PFarm1 Backend:**
+- Approved & merged: #313 (error translation), #316 (firmware signals) — 2-vote consensus reached
+- PR #318 (real-transport tests): Now APPROVED (Hicks re-vote); merged
+- Blocked by Jeff merges: #287, #288, #289 (stack unblock pending)
+
+**Backlog Summary:**
+- iOS controls v1 ready for integration/merge (awaiting parent PR coordination)
+- Backend firmware-409 error propagation fully tested end-to-end
+- Next phase: stack merge coordination + capability research handoff (Hudson loading states)
+
+- Comment (Vasquez #15): https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570526326
+- Comment (Hicks #318): https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570558773
+
+---
+
+## Decision: Round 20 — Bishop APPROVE #15; Lambert real-transport tests #318
+
+**Date:** 2025-11-24
+**Authors:** Bishop (code review), Lambert (backend), Coordinator
+**Status:** PR #15 APPROVED (iterative gap-closing successful), PR #318 fix-up merged (real-transport behavior tests)
+
+### Summary
+
+- **PR #15 APPROVE (Bishop consensus):** All 3 blockers addressed in `9dc9af2`: (1) Home gating corrected to `canHomeAll || canHomeXY || canHomeZ`; (2) ViewModel injection scoped correctly (`init(printerId:)` + `configure(printerService:)` from `@EnvironmentObject`); (3) test scope updated (new test file + swift-snapshot-testing SPM dep). **Approved.**
+- **PR #318 fix-up (Lambert):** Added 6 behavior-level tests using real transports (Kestrel WebSocket for SDCP, TcpListener for FlashForge). Full rejected-mutation → status-roundtrip → exception path verified end-to-end, not just helper logic in isolation. All tests pass; `dotnet format --verify-no-changes` clean. **Merged.**
+
+### Durable Rule Reinforced
+
+**Real-transport test pattern for plugin backends:** Spinning up Kestrel WebSocket (SDCP) + TcpListener (FlashForge) to exercise the full rejected-mutation → status-roundtrip → exception propagation path. Much higher fidelity than mocking the transport layer. Validates the seam (backend rejects → exception raised → controller maps to outcome) end-to-end.
+
+- Comment (Bishop #15): https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570460323
+
+---
+
+## Decision: Round 19 — Vasquez APPROVE #14; Newt fix #15; Hicks CR #318
+
+**Date:** 2025-11-24
+**Authors:** Vasquez (iOS review), Newt (iOS), Hicks (backend review), Coordinator
+**Status:** PR #14 merged (snapshot spike), PR #15 fix-up pushed + OPEN, PR #318 REQUEST_CHANGES (error-translation test gap)
+
+### Summary
+
+- **PR #14 APPROVE (Vasquez consensus):** Snapshot spike capability (FlashForge temp claim via `fallback(for: .flashForge)`). Vasquez + Hicks = 2-of-2 reviewer consensus. Source-of-truth capability disambiguation noted non-blocking. **Merged.**
+- **PR #15 fix-up (Newt):** Home gate corrected to `canHomeAll || canHomeXY || canHomeZ` (matches `HomeSubgroup.hasAnyHomeCapability`). ViewModel injection spelled out: `init(printerId:)` + `configure(printerService:)` wired from `@EnvironmentObject ServiceContainer.printerService` in `.task`. Test scope updated: new test file + swift-snapshot-testing SPM dep + Package.swift/test-target update (references PR #14). **Pushed; re-review pending.**
+- **PR #318 REQUEST_CHANGES (Hicks):** SDCP + FlashForge tests cover helper logic/parsing only — full rejected-start → `PrinterBackendBusyException` propagation path unverified for those two backends. Moonraker translation OK. Requires mutation-level end-to-end test (mock backend rejection → call mutation → assert exception thrown), not just helper/parsing logic in isolation. **Blocked.**
+
+### Durable Rule Added
+
+**Plugin error-translation tests must exercise the full rejected mutation path:** Mock backend rejection → call the actual mutation method (e.g., `StartPrintAsync`) → assert `PrinterBackendBusyException` thrown. Do not test helper/parsing logic in isolation; those are compile-time correct. The contract seam (backend rejects → exception raised → controller maps to outcome) is the critical path that needs end-to-end verification.
+
+- Comment: https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570450469
+
+---
+
+## Decision: Round 18 — Lambert PR #318 (backend firmware-409); Hicks APPROVE #14; Bishop CR #15
+
+**Date:** 2025-11-23
+**Authors:** Lambert (backend), Hicks (iOS review), Bishop (backend review), Coordinator
+**Status:** PR #318 merged (plugins firmware-409 propagation), PR #14 APPROVE snapshot spike (Brett), PR #15 REQUEST_CHANGES (Newt integration under-spec)
+
+### Summary
+
+- **PR #318 (Backend busy-error propagation):** Moonraker `SendGcodePrivateAsync` throws on HTTP 409/503; SDCP `StartPrintAsync` round-trips status on Ack failure (new `IsPrintingStatus` internal helper + `InternalsVisibleTo`); FlashForge `StartPrintAsync` echoes `~M119` check on rejection (`IsBuildingStatus` promoted to internal). All backends now translate firmware signals into `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy` → 502. Controller gate (`PrinterControlGate.IsBusyForControl`) remains primary defense; plugin layer is defense-in-depth. 23 tests, 3 new files, all passing. Build clean, no new warnings. **Merged.**
+- **PR #14 APPROVE (Brett snapshot spike):** FlashForge temp claim matches `fallback(for: .flashForge)` on stack branch. Note: older `PrinterBackendCapabilitiesTests` fixture JSON shows FlashForge temp support off — Brett should describe source more precisely in any revision.
+- **PR #15 REQUEST_CHANGES (Newt integration plan):** Plan re-states Home gating incorrectly (restates `canHomeAll` alone instead of OR of `canHomeAll || canHomeXY || canHomeZ` per PR #12 implementation). ViewModel scope under-specified (`PrinterControlsViewModel` still requires `printerService` injection — plan doesn't address). Test scope under-specified (#289 implies a new test file/test target update despite plan's "2 files / no new files" claim).
+
+---
+
+## Decision: Round 14 — Hudson PR #13 init-state fix; Bishop CR #12 spec-string hazard persists
+
+**Date:** 2025-11-22
+**Authors:** Hudson (iOS), Bishop (code review), Coordinator
+**Status:** PR #13 merged (init-state fix), PR #12 REQUEST_CHANGES (spec strings + test gaps)
+
+### Summary
+
+- **PR #13 (Jog subgroup init fix):** `JogSubgroup` now has explicit `init` seeding `_selectedAxis = State(initialValue:)` from first available axis in capability subset. Added `canJogX/Y/ZOverride: Bool?` to ViewModel (nil = fallback to `supportsMovement`). Three new init-state tests: Z-only → `.z`, XY-only → `.x`, Y-only → `.y`. **Merged.**
+- **Bishop re-review (PR #12):** ❌ REQUEST_CHANGES (again). **Same gaps:** VoiceOver hints don't match spec **verbatim** (e.g., "Double-tap" with hyphen + XY/Z-specific wording). Tests hard-code expected strings instead of asserting through rendered `HomeButton`. Root cause: spec doc lives on `squad/283-design-printer-controls-section` (Newt's PR #1, not yet merged). Hudson's working branches don't have the spec file; he reconstructs strings from memory. **Fix:** Coordinator now inlines exact spec strings in Hudson's prompts, and directed him to `git show squad/283-design-printer-controls-section:docs/design/printer-controls-section.md`.
+- **Durable rule added:** Spec strings (VoiceOver labels, hints, button copy) must be asserted by reading from rendered view, not comparing hardcoded constants in tests. Constants in tests = compile-time tautology, not spec validation.
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570135789
+
+---
+
+## Decision: Round 13 — Hudson fix #12, Hicks CR #13 rebase init-state bug
+
+**Date:** 2025-11-22
+**Authors:** Hudson (iOS), Hicks (code review)
+**Status:** PR #12 merged, PR #13 rebased + REQUEST_CHANGES (init-state bug)
+
+### Summary
+
+- **PR #12 fix-up (HomeButton):** `HomeButton` now takes explicit `accessibilityLabel` and `activeHint` parameters; spec-defined labels passed at call site. Dispatch + per-button cap tests create `HomeSubgroup` struct, assert via `tap*ForTesting()`/`canHome*ForTesting()`. New section 8 locks in spec VoiceOver strings.
+- **PR #13 rebase:** Cleanly rebased onto updated `squad/285-home-subgroup` and force-pushed — no conflicts. Stack rebase pattern confirmed: when fixing parent PR with stacked child, `git rebase` child onto updated parent and force-push after parent fix.
+- **Hicks re-review (PR #13):** ❌ REQUEST_CHANGES. Real init bug: `selectedAxis` defaults to `.x` and only snaps on `onChange`. If `JogSubgroup` is created in subset-capability state (e.g. Z-only), UI shows only Z but bound action/feedrate still targets X until user changes selection. Must compute defaults from **initial capability subset**, not just full-capability case.
+- **Durable rule:** SwiftUI subgroup `@State` defaults must be valid for **any initial capability subset**, not just full-capability. Use `init(...)` to compute defaults from caps, not just `onChange`.
+- Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570098227
+
+---
+
+## Decision: Round 11 — Bishop APPROVE #11, Hicks CR #13
+
+**Date:** 2025-11-21
+**Authors:** Bishop (code review), Hicks (code review)
+**Status:** In Review (PR #11 open + APPROVED, PR #13 open + REQUEST_CHANGES)
+
+### Summary
+
+- **Bishop re-review (PR #11 — preheat):** ✅ APPROVE. Cool Down fix confirmed working.
+  - Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/11#issuecomment-4570039961
+- **Hicks review (PR #13 — jog):** ❌ REQUEST_CHANGES. Two blockers identified:
+  1. **Per-axis capability gating:** `JogSubgroup` always shows X/Y/Z buttons; should differentiate (show only Z if backend caps differ).
+  2. **Test coverage:** Jog tests bypass SwiftUI view layer; don't verify picker selection, button taps, or view-level gating.
+  - Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/13#issuecomment-4570039264
+
+### Correction Note
+
+**Round 10 status mislabel:** PR #11 was listed as "Merged" in round 10 entry. **Actual state: Open.** PR status must always be verified via `gh pr view --repo <owner>/<repo> <number>` at decision time, not assumed.
+
+---
+
+## Decision: Round 10 — Cool Down Label & Jog Subgroup
+
+**Date:** 2025-11-21
+**Authors:** Hudson (iOS)
+**Status:** In Review (PR #11 open, PR #13 open)
+
+### Summary
+
+Hudson resolved the Cool Down preset label inconsistency and implemented the Jog subgroup for PrinterControlsSection. Also detected and fixed a pre-existing xcodeproj UUID collision.
+
+- **Cool Down fix (PR #11):** Removed hardcoded "Off" ternary in `PreheatPreset.tempLabel`. Standard format string now produces "0° / 0°" uniformly.
+- **Jog subgroup (PR #13):** Axis picker (X/Y/Z), step picker (0.1/1/10/100 mm, **default 1mm per Newt's spec**), ±mm buttons. Feedrates 3000 XY / 600 Z owned by view, forwarded to `viewModel.move()`. 15 tests, stack: #7 → #11 → #12 → #13.
+- **xcodeproj fix:** Fixed pre-existing UUID collision (HomeSubgroupTests UUID = PushNotificationManager.swift fileRef) that broke xcodebuild.
+
+---
+
+## Decision: Round 12 — Bishop REQUEST_CHANGES #12 (HomeSubgroup), Hudson fixes #13 (per-axis jog gating + view tests)
+
+**Date:** 2025-11-21
+**Authors:** Bishop (code review), Hudson (fix-up)
+**Status:** In Review (PR #12 open + REQUEST_CHANGES, PR #13 open + awaiting re-review)
+
+### Summary
+
+- **Bishop re-review (PR #12 — home):** ❌ REQUEST_CHANGES.
+  - **Blocker 1:** VoiceOver labels and hints do not match `docs/design/printer-controls-section.md` spec verbatim.
+  - **Blocker 2:** Tests bypass SwiftUI view layer — `JogSubgroupTests` exercised `viewModel` state directly instead of rendering `JogSubgroup` view and verifying picker selection, button visibility, and axis gating through the UI.
+  - **Comment:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/12#issuecomment-4570057941
+
+- **Hudson fix-up (PR #13 — jog):** ✅ Addresses review blockers from Round 11.
+  - **Per-axis capability scaffolding:** Added `canJogX`, `canJogY`, `canJogZ` boolean flags to `PrinterControlsViewModel` (all currently derived from shared `supportsMovement` flag; seam left open for future backend differentiation). Aggregate `canJog` retained for compatibility.
+  - **View-level gating:** Replaced single `canJog` gate with `hasAnyJogCapability` check; `availableAxes` filters picker options by per-axis flags; picker auto-snaps `selectedAxis` when unavailable.
+  - **View-layer tests:** Rebuilt `JogSubgroupTests` to exercise rendered `JogSubgroup` view, not viewmodel state. Added testability extensions (`hasAnyJogCapabilityForTesting`, `canJogX/Y/ZForTesting`, `availableAxisLabelsForTesting`) matching `HomeSubgroup`/`PreheatSubgroup` pattern.
+  - **Caveat:** xcodebuild cannot run locally (iOS 26.5 simulator not installed); `swiftc` type-check passed.
+  - **Commit:** `6344c8f`
+
+### Durable Decision Rules Captured
+
+1. **View-layer testing rule (effective immediately for all SwiftUI subgroup PRs):**
+   - Tests must exercise the rendered view, not just viewmodel state.
+   - Reviewers must reject PRs whose test suites call viewmodel constructors or state mutators directly without rendering the SwiftUI component.
+   - Pattern: use testability extensions (`.hasAnyJogCapabilityForTesting`, etc.) to inject view state; render view with `@State`; verify picker visibility, button taps, and layout gating.
+   - Add to durable rules (see section below).
+
+2. **VoiceOver spec adherence rule:**
+   - VoiceOver labels and hints must match `docs/design/printer-controls-section.md` verbatim where the spec provides them.
+   - Reviewers must cross-check accessibility audit against spec; mismatch is a blocker.
+
+3. **Spec-string testing rule (effective immediately):**
+   - Spec strings (VoiceOver labels, hints, button copy) must be asserted by reading from the rendered view, not comparing against hardcoded constants in tests.
+   - Constants in tests = compile-time tautology, not a spec check.
+   - Pattern: render view with fixture; read `.accessibilityLabel`, `.accessibilityHint` from inspected element; compare to spec source string.
+
+---
+
+## Decision: Round 17 — Newt PR #15 integration plan, Brett PR #14 snapshot spike
+
+**Date:** 2025-11-23
+**Authors:** Newt (iOS design/integration), Brett (research/snapshot strategy)
+**Status:** Prep PRs opened in PrintFarmerMobile
+
+### Summary
+
+- **Newt PR #15 (integration plan):** Composition strategy finalized — `controlsSection()` private helper on `PrinterDetailView` (matches `actionSection` convention), placed after `actionSection`. Single `@State var controlsViewModel: PrinterControlsViewModel`, lazy-injected via `.task` based on printer ID + caps. Hudson scope: ~40 lines `PrinterDetailView.swift` + ~10 lines `PrinterControlsViewModel.swift` additions; subgroup files (Preheat, Home, Jog) ship complete from #11–#13 stack. **PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/15
+- **Brett PR #14 (snapshot spike):** Recommends `swift-snapshot-testing` (pointfreeco) via SPM for snapshot regression tests. 8-snapshot matrix: Moonraker/FlashForge/SDCP × {blocked, in-flight, error, dark-mode, iPhone SE}. Biggest risk: simulator OS version drift — CI must pin simulator OS version to match baseline environment. **PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/14
+
+### Unblocked Decisions
+
+**Newt integration pattern locked:** `controlsSection()` composition allows independent subgroup testing + future component reuse. No blocking review feedback.
+**Brett snapshot strategy validated:** pointfreeco library meets framework requirements (Xcode/iOS 15+ compatible, SPM distribution). Recommend pinning simulator OS version in CI YAML.
+
+---
+
+## Decision: Round 22 — Bishop CR #318 architectural blockers; Parker dependabot triage
+
+**Date:** 2026-05-21
+**Authors:** Bishop (architectural review), Hicks (context), Parker (dependabot triage)
+**Status:** ✅ DOCUMENTED; PR #318 blockers identified; dependabot pattern catalogued
+
+### Summary
+
+**Bishop REQUEST_CHANGES PR #318 (real-transport tests):**
+- ❌ **Architectural blocker 1:** `PrinterBackendBusy` exception does **NOT** map to HTTP 409 in current code. `PrintersService` maps it to `BackendBusy` outcome, and `PrintersController.MapControlOutcome()` returns **502 BadGateway**, not 409 Conflict. PR's firmware-409 propagation premise is undermined without fixing the controller-side mapping first.
+- ❌ **Architectural blocker 2:** Moonraker 503 (Service Unavailable) for Klippy unavailable/error states diverges from tighter OctoPrint/PrusaLink 409-only convention. Introduces wider "busy" semantic (not just busy-printing). Requires spec alignment before landing.
+- ⚠️ **Non-blocking:** Real-transport tests have minor `GetFreeTcpPort()` race risk in CI (ephemeral port collisions on parallel runs).
+- **Comment:** https://github.com/OlyForge3D/PrintFarmer/pull/318#issuecomment-4570616436
+- **Hicks context:** PR #318 was APPROVE'd by Hicks before Bishop caught cross-layer mapping disconnect. Real-transport test coverage is good; architectural translation is not.
+
+**Parker dependabot triage (2026-05-21, artifact `.squad/parker/triage-2026-05-21.md`):**
+- 9 open PRs, all CI green.
+- 2 safe auto-merge: #235 (FluentAssertions 6→7 test lib), #238 (Mvc.Testing 10→11).
+- 3 need verification: #239 (System.Text.Json), #271 (System.Reflection.Metadata), #272 (System.ComponentModel.Annotations) — patch bumps on runtime libs.
+- 5 need manual review: #240–244 (GitHub Actions majors: node, setup-dotnet, etc.).
+- **Recommendation:** Jeff merge #235 + #238; build-test #239/#271/#272 for regression; changelog-check #240–244 before gh-actions updates.
+
+### Durable Rule Captured
+
+**Rule 7 — Two-reviewer consensus on backend cross-layer changes (effective immediately):**
+- Backend PR's that span service-layer logic + controller-layer translation (HTTP mapping, error code propagation) require architectural sign-off from **two reviewers**.
+- Single-voice approval insufficient; cross-layer disconnect (e.g., exception → outcome → HTTP code translation) is highest-risk refactoring class.
+- **Applies to:** PrintersService → PrintersController exception/outcome flows; payment/subscription domain chains; worker-slicer routing layers.
+- **Hicks lesson:** Individual diff review (service tests) sometimes misses downstream controller mapping. Always pair with second reviewer checking translation boundary.
+- **Bishop lesson:** Architectural consistency (409 for firmware conflicts across backends) is enforcer role; single code-path approval can mask system-wide assumptions.
+## Decision Record: dev→main Sync PR — 2026-05-29
+
+**Author:** Parker
+**Date:** 2026-05-29
+**Status:** ⚠️ PR ready locally, push blocked — needs `workflow` scope
+
+### Summary
+
+Prepared a clean sync of `development` → `main` to pick up 536 commits including Dependabot security fixes for 49 flagged vulnerabilities (2 critical, 15 high, 31 moderate, 1 low).
+
+### What Was Accomplished
+
+- **Branch created:** `sync/dev-to-main-2026-05-29` off `origin/main`
+- **Commits merged:** 536 (all of development since the last main sync)
+- **Commit SHA:** `d4d8b4a1e`
+- **Forbidden paths stripped from index:** All `.squad/`, `.ai-team/`, `.ai-team-templates/`, `team-docs/`, `docs/proposals/` — confirmed 0 forbidden paths in staged index
+- **Conflicts resolved (16):**
+  - `.squad/*` modify/delete conflicts (≈60 files) — resolved by `git rm --cached`
+  - `.github/fact-checker-charter.md`, `.github/loop.md`, `.github/squad.agent.md.template` — git directory-rename heuristic misfire; removed
+  - `.gitignore`, 5 `.github/workflows/squad-*.yml`, `mobile/scripts/release-beta.sh`, `scripts/sync-monorepo-version.sh`, 5 `.csproj` files — resolved using development's version
+
+### Blocker
+
+Push rejected: `refusing to allow an OAuth App to create or update workflow ... without 'workflow' scope`.
+
+**Resolution required:** Jeff must run `gh auth refresh --scopes workflow` (browser one-time code), then run:
+```bash
+cd /Users/jpapiez/s/PFarm1
+git push -u origin sync/dev-to-main-2026-05-29
+gh pr create --base main --head sync/dev-to-main-2026-05-29 \
+  --title "chore: sync development → main (Dependabot + accumulated)" \
+  --body "Brings main current with development (536 commits). Picks up Dependabot security fixes for the 49 vulnerabilities flagged on the default branch.
+
+Squad metadata (.squad/, .ai-team/, team-docs/, docs/proposals/) explicitly excluded per repo policy. The squad-main-guard.yml workflow will verify."
+```
+
+The local branch `sync/dev-to-main-2026-05-29` is ready to push — no further merge or conflict resolution needed.
+
+### CI Expectation
+
+- `squad-main-guard.yml` — should PASS (0 forbidden paths in index, verified)
+- All other checks (build, tests, compose validation) — expected green (same codebase as development which passed CI)
+# Decision: main→development Sync Must Explicitly Preserve .squad/ Files
+
+**Date:** 2026-05-30  
+**Decider:** Parker (DevOps)  
+**Status:** Approved  
+**Context:** PR #321 cleanup and redo
+
+## Problem
+
+PR #321 (sync/main-to-dev-2026-05-29) was broken — it would have deleted 14,549 lines of .squad/ state from development. The merge used `-X ours` but still lost files because:
+
+1. `-X ours` only resolves TEXT conflicts (where both sides modified the same lines)
+2. It does NOT resolve STRUCTURAL modify/delete conflicts (files on dev but not main)
+3. Git deleted many .squad/ files during the merge that weren't part of the explicit UD (modify/delete) conflict list
+
+## Decision
+
+**When syncing main → development, always:**
+
+1. Merge with `-X ours` (prefer dev on text conflicts)
+2. Remove spurious .github files from git's directory-rename heuristic
+3. Stage all modify/delete conflicts: `git status --porcelain | grep '^UD' | awk '{print $2}' | xargs git add`
+4. **Restore ALL .squad/ files deleted during merge:**
+   ```bash
+   git diff HEAD --name-only --diff-filter=D | grep '^\.squad/' | xargs -I {} git checkout HEAD -- {}
+   ```
+5. Verify zero .squad/ in diff before committing:
+   ```bash
+   git diff origin/development --name-only | grep '^\.squad/' | wc -l
+   # Must return 0
+   ```
+
+## Rationale
+
+- main strips .squad/ via squad-main-guard, so it never has squad files
+- When merging main into dev, git sees dev's .squad/ files as "unilaterally added" and may delete them
+- The only way to preserve ALL .squad/ files is to explicitly restore them from HEAD after the merge
+- Without step 4 above, we lose ~100+ .squad/ files that weren't in the UD conflict list
+
+## Consequences
+
+- main→dev syncs require explicit .squad/ preservation step (step 4 above)
+- This is the inverse of dev→main syncs (which explicitly strip .squad/)
+- The verification step (step 5) is MANDATORY before pushing — if it returns non-zero, abort and debug
+
+## Related
+
+- PR #321 (broken sync, closed)
+- PR #329 (corrected sync, preserves .squad/)
+- Parker history entry: 2026-05-30 main→dev sync redo

@@ -995,6 +995,7 @@
 			mainGroup = 5C999E731352905727541C3C;
 			packageReferences = (
 				2AFD394787A3655B48DC756A /* XCRemoteSwiftPackageReference "keychain-swift" */,
+				D1A6C200000000000000F004 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
 			);
 			productRefGroup = 6D159F361021D92BC3E10E55 /* Products */;
 			projectDirPath = "";

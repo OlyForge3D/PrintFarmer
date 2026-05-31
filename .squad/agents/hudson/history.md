@@ -80,6 +80,16 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - **Disabled-state pattern:** `resolvedAccessibilityHint` returns `""` when disabled; `resolvedAccessibilityLabel` appends `", unavailable during print"`. Computed properties used directly by `.accessibilityLabel()` / `.accessibilityHint()` modifiers.
 - **PR #12 merged** (`533b86f`). PR #13 (Jog) rebased 4/4 commits cleanly, awaiting Hicks re-review.
 
+## Learnings
+
+### 2026-05-30: PR #329 iOS Unit Tests package-product failure
+
+- Failure mode: `xcodebuild test` can fail before XCTest runs with `Missing package product 'SnapshotTesting'` even when the companion app build passes. App build resolves only app dependencies; the test target also needs every test-only package registered in `PBXProject.packageReferences`.
+- Secondary failure mode: Swift 6/XCTest rejects `XCTAssertEqual(optionalDouble, expected, accuracy:)`; unwrap the optional first with `XCTUnwrap` before using the accuracy overload. Prefer helper defaults of `#filePath` over `#file` to avoid XCTest source-location warnings.
+- Fix pattern: when adding an SPM product to a test target in `project.pbxproj`, verify all three links exist: `PBXBuildFile` in test Frameworks, `XCSwiftPackageProductDependency` in target `packageProductDependencies`, and the `XCRemoteSwiftPackageReference` listed under project `packageReferences`.
+- CI coupling: PFarm1 PR #329's iOS workflow runs the checked-in `mobile/` project directly, not `/Users/jpapiez/s/PFarm-Ios`; workflow-only assumptions should be verified from `.github/workflows/ios-pr-ci.yml` before switching repos.
+- Environmental follow-up: a macOS job can fail with no steps/logs if the account has failed payments or a spending-limit block. Check the check-run annotations when `gh run view --log-failed` says `log not found`.
+
 ## Milestone Summary
 - 2026-05-20: iOS squad merged; mobile controls v1 issues assigned (#274 role gate, #275 drift, #284–#286 controls, #288 polish).
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291–#298).

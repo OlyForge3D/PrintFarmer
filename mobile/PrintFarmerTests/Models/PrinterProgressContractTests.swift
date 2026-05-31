@@ -34,20 +34,20 @@ final class PrinterProgressContractTests: XCTestCase {
 
     func testProgressFiftyDecodesToOneHalf() throws {
         let printer = try decode(progressJSON: "50")
-        XCTAssertEqual(printer.progress, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(printer.progress), 0.5, accuracy: 0.0001)
         try assertProgressInContract(printer)
     }
 
     func testProgressOneHundredDecodesToOne() throws {
         let printer = try decode(progressJSON: "100")
-        XCTAssertEqual(printer.progress, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(printer.progress), 1.0, accuracy: 0.0001)
         try assertProgressInContract(printer)
     }
 
     func testProgressFractionalInRange() throws {
         // Real backends emit decimals (e.g. 42.7%).
         let printer = try decode(progressJSON: "42.7")
-        XCTAssertEqual(printer.progress, 0.427, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(printer.progress), 0.427, accuracy: 0.0001)
         try assertProgressInContract(printer)
     }
 
@@ -95,7 +95,7 @@ final class PrinterProgressContractTests: XCTestCase {
     }
 
     /// Asserts the iOS internal contract: a non-nil `progress` is always within `0.0...1.0`.
-    private func assertProgressInContract(_ printer: Printer, file: StaticString = #file, line: UInt = #line) throws {
+    private func assertProgressInContract(_ printer: Printer, file: StaticString = #filePath, line: UInt = #line) throws {
         let progress = try XCTUnwrap(printer.progress, file: file, line: line)
         XCTAssertGreaterThanOrEqual(progress, 0.0, file: file, line: line)
         XCTAssertLessThanOrEqual(progress, 1.0, file: file, line: line)

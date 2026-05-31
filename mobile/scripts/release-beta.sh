@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Release Beta Script
-# Merges development → main, strips .squad/ files, tags, and pushes to OlyForge3D.
+# Merges development → main, strips .squad/ files, tags, and pushes to origin.
 #
 # Usage: ./scripts/release-beta.sh <beta-number>
 # Example: ./scripts/release-beta.sh 8
@@ -54,7 +54,18 @@ ORIGINAL_BRANCH=$(git branch --show-current)
 # 1. Update development from remote
 echo "📥 Fetching latest from remotes..."
 git fetch origin
-git fetch "$RELEASE_REMOTE"
+
+# Safety: ensure local main exactly matches origin/main before release.
+# This prevents accidentally pushing a large unrelated local commit stack.
+LOCAL_MAIN_SHA=$(git rev-parse main)
+REMOTE_MAIN_SHA=$(git rev-parse origin/main)
+if [[ "$LOCAL_MAIN_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+  echo "❌ main is not synced with origin/main."
+  echo "   local main:  $LOCAL_MAIN_SHA"
+  echo "   origin/main: $REMOTE_MAIN_SHA"
+  echo "   Sync/reset main before running release-beta.sh to avoid unintended pushes."
+  exit 1
+fi
 
 # 2. Checkout main and merge development
 echo "🔀 Merging development → main..."
@@ -108,4 +119,4 @@ git checkout "$ORIGINAL_BRANCH"
 
 echo ""
 echo "✅ ${TAG} released! TestFlight build should start shortly."
-echo "   Monitor at: https://github.com/OlyForge3D/PrintFarmerMobile/actions"
+echo "   Monitor at: https://github.com/OlyForge3D/PrintFarmer/actions/workflows/testflight-beta.yml"
