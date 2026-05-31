@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260531174848_AddPowerMonitorAndReadings")]
+    partial class AddPowerMonitorAndReadings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2238,52 +2241,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("ScannedAt");
 
                     b.ToTable("NfcScanEvents");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("PrinterId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int?>("SpoolId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("SpoolLastSeenAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SpoolName")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("TagUid")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("TrayId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("SpoolId");
-
-                    b.HasIndex("TagUid")
-                        .IsUnique();
-
-                    b.ToTable("NfcTagBindings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
@@ -4562,52 +4519,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("UserBalances");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AaguidDescription")
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<byte[]>("CredentialId")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<string>("DeviceName")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("LastUsedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<byte[]>("PublicKey")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<long>("SignCount")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CredentialId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("UserPasskeyCredentials");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5322,16 +5233,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("NfcDevice");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Printer");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "Job")
@@ -5845,17 +5746,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
                         .WithMany()
