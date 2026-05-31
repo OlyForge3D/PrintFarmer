@@ -189,6 +189,9 @@ public static class ServiceCollectionExtensions
         // Custom field service
         _ = services.AddScoped<Farm.Infrastructure.Services.CustomFields.ICustomFieldService, Farm.Infrastructure.Services.CustomFields.CustomFieldService>();
 
+        // Farm settings service (consolidates farm-wide config access)
+        _ = services.AddScoped<Farm.Infrastructure.Services.IFarmSettingsService, Farm.Infrastructure.Services.FarmSettingsService>();
+
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
         _ = services.AddSingleton(autoDispatchTrigger);

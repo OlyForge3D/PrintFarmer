@@ -208,6 +208,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
 
+    // Per-user settings (theme, locale, slicer defaults, etc.)
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

@@ -1644,7 +1644,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("Success")
                         .HasColumnType("boolean");
 
-                    b.Property<DateTimeOffset>("Timestamp")
+                    b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("UserAgent")
@@ -4514,6 +4514,43 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("UserRoles");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DefaultSlicerPreset")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("ItemsPerPage")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Locale")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Theme")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserSettings");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserTask", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5691,6 +5728,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired();
 
                     b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserSettings", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });
