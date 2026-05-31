@@ -1,4 +1,5 @@
-﻿using Fido2NetLib;
+﻿using Farm.Infrastructure.Domain;
+using Fido2NetLib;
 using Fido2NetLib.Objects;
 
 namespace Farm.Infrastructure.Services.Authentication;
@@ -6,7 +7,7 @@ namespace Farm.Infrastructure.Services.Authentication;
 /// <summary>
 /// Orchestrates WebAuthn/FIDO2 passkey registration and authentication ceremonies.
 /// Challenge state is stored in <see cref="Microsoft.Extensions.Caching.Distributed.IDistributedCache"/>
-/// with a 5-minute TTL. Credential persistence is deferred to the entity migration in #354.
+/// with a 5-minute TTL.
 /// </summary>
 public interface IPasskeyService
 {
@@ -17,7 +18,6 @@ public interface IPasskeyService
 
     /// <summary>
     /// Verifies the authenticator attestation. Challenge is consumed from cache (replay prevention).
-    /// Credential persistence is stubbed until #354 delivers <c>UserPasskeyCredential</c>.
     /// </summary>
     Task<RegisteredPublicKeyCredential> CompleteRegistrationAsync(string username, AuthenticatorAttestationRawResponse attestationResponse, CancellationToken ct = default);
 
@@ -28,7 +28,21 @@ public interface IPasskeyService
 
     /// <summary>
     /// Verifies the authenticator assertion and issues a JWT on success.
-    /// Stubbed for credential lookup until #354 delivers stored-credential support.
     /// </summary>
     Task<AuthenticationResult> CompleteLoginAsync(string username, AuthenticatorAssertionRawResponse assertionResponse, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists all registered passkey credentials for a user.
+    /// </summary>
+    Task<List<UserPasskeyCredential>> ListCredentialsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes a passkey credential. Verifies ownership by userId.
+    /// </summary>
+    Task<bool> DeleteCredentialAsync(Guid userId, int credentialId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Renames a passkey credential's DeviceName. Verifies ownership by userId.
+    /// </summary>
+    Task<bool> RenameCredentialAsync(Guid userId, int credentialId, string newName, CancellationToken ct = default);
 }

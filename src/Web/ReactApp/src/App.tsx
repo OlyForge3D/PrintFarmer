@@ -37,6 +37,7 @@ import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminP
 import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
+import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
@@ -206,6 +207,7 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
+        <Route path="profile/passkeys" element={<PasskeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
