@@ -29,6 +29,7 @@ import { PrintersPage } from '@/features/printers/pages/PrintersPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { UserPreferencesPage } from '@/features/settings/pages/UserPreferencesPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
@@ -206,6 +207,7 @@ function AuthenticatedAppRoutes() {
          * via the Settings shell (users tab), but the direct /profile/api-keys route
          * must remain open to all authenticated users to avoid a regression.
          */}
+        <Route path="preferences" element={<UserPreferencesPage />} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="profile/notifications" element={<NotificationPreferencesPage />} />
         <Route path="profile/passkeys" element={<PasskeysPage />} />
