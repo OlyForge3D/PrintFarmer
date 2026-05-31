@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
+import type { CostTrackingSettings } from '@/types/api';
+import { apiClient } from '@/services/api';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, FormField, Input, Select, Toggle, Badge } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
@@ -40,9 +42,18 @@ export function PowerMonitorSettingsPage() {
   const [testResult, setTestResult] = useState<PowerMonitorTestResult | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
 
-  // Farm-wide fallback rate (from CostTracking settings, shown as reference)
   const [fallbackRate, setFallbackRate] = useState('');
   const [savingFallback, setSavingFallback] = useState(false);
+  const costSettingsRef = useRef<CostTrackingSettings | null>(null);
+
+  useEffect(() => {
+    apiClient.getCostTrackingSettings().then((settings) => {
+      costSettingsRef.current = settings;
+      setFallbackRate(settings.electricityRatePerKwh > 0 ? settings.electricityRatePerKwh.toString() : '');
+    }).catch(() => {
+      // Non-fatal: farm-wide rate section degrades gracefully
+    });
+  }, []);
 
   const resetForm = () => {
     setPrinterId('');
@@ -142,7 +153,6 @@ export function PowerMonitorSettingsPage() {
   };
 
   const handleSaveFallbackRate = async () => {
-    // TODO: Wire to CostTracking settings save endpoint
     setSavingFallback(true);
     try {
       const rate = Number(fallbackRate);
@@ -150,8 +160,12 @@ export function PowerMonitorSettingsPage() {
         toast.error('Enter a valid rate');
         return;
       }
-      // Placeholder: will call settings API once backend wired
+      const current = costSettingsRef.current ?? await apiClient.getCostTrackingSettings();
+      costSettingsRef.current = current;
+      await apiClient.updateCostTrackingSettings({ ...current, electricityRatePerKwh: rate });
       toast.success('Farm-wide fallback rate saved');
+    } catch {
+      toast.error('Failed to save farm-wide rate');
     } finally {
       setSavingFallback(false);
     }
@@ -206,7 +220,7 @@ export function PowerMonitorSettingsPage() {
         <div className="text-center text-pf-text-secondary py-8">Loading power monitors...</div>
       ) : isError ? (
         <div className="text-center text-pf-error py-8">
-          Failed to load power monitors. The backend endpoint may not be available yet.
+          Failed to load power monitors.
         </div>
       ) : monitors.length === 0 ? (
         <div className="text-center text-pf-text-secondary py-12">
