@@ -426,6 +426,7 @@ app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
+app.MapHub<NfcHub>("/hubs/nfc");
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
 if (slicerModuleEnabled)

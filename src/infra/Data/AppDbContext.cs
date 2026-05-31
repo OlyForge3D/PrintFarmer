@@ -177,6 +177,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<NfcScanEvent> NfcScanEvents => Set<NfcScanEvent>();
 
+    public DbSet<NfcTagBinding> NfcTagBindings => Set<NfcTagBinding>();
+
     // Webhooks
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
 
