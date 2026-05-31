@@ -28,8 +28,9 @@ public class PrintablesImportServiceTests
     [InlineData("https://www.printables.com/model/12345", "12345")]
     [InlineData("https://www.printables.com/model/12345-my-cool-model", "12345")]
     [InlineData("https://printables.com/model/99999-slug-with-many-words", "99999")]
-    [InlineData("http://www.printables.com/model/1", "1")]
     [InlineData("https://www.printables.com/model/777777?ref=search", "777777")]
+    [InlineData("https://printables.com/model/123", "123")]
+    [InlineData("https://www.printables.com/model/123", "123")]
     public void ParseModelId_ValidUrl_ExtractsId(string url, string expectedId)
     {
         string modelId = PrintablesImportService.ParseModelId(url);
@@ -42,19 +43,15 @@ public class PrintablesImportServiceTests
     [InlineData("https://www.thingiverse.com/thing:12345")]
     [InlineData("https://www.printables.com/")]
     [InlineData("not-a-url")]
+    [InlineData("https://evil.com/redirect?to=printables.com/model/123")]
+    [InlineData("http://evil.com/redirect?to=printables.com/model/123")]
+    [InlineData("https://printables.com.evil.com/model/123")]
+    [InlineData("https://printables.evil.com/model/123")]
+    [InlineData("http://www.printables.com/model/1")]
+    [InlineData("https://www.printables.com/notmodel/123")]
+    [InlineData("ftp://www.printables.com/model/12345")]
+    [InlineData("https://evilprintables.com/model/12345")]
     public void ParseModelId_InvalidUrl_ThrowsArgumentException(string url)
-    {
-        Action act = () => PrintablesImportService.ParseModelId(url);
-        _ = act.Should().Throw<ArgumentException>();
-    }
-
-    [Theory]
-    [InlineData("https://fakeprintables.com/model/12345")]
-    [InlineData("https://printables.com.evil.org/model/12345")]
-    [InlineData("https://printables.com@attacker.com/model/12345")]
-    [InlineData("https://notprintables.com/model/12345")]
-    [InlineData("https://www.printables.com.malicious.io/model/12345")]
-    public void ParseModelId_LookalikeDomain_ThrowsArgumentException(string url)
     {
         Action act = () => PrintablesImportService.ParseModelId(url);
         _ = act.Should().Throw<ArgumentException>();
@@ -224,5 +221,54 @@ public class PrintablesImportServiceTests
 
         ObjectResult obj = Assert.IsType<ObjectResult>(result);
         _ = obj.StatusCode.Should().Be(502);
+    }
+
+    [Fact]
+    public async Task ImportAsync_HappyPath_Returns200WithDto()
+    {
+        PrintablesPreviewDto dto = new(
+            ModelId: "42",
+            Name: "Awesome Bracket",
+            Creator: "maker_jane",
+            License: "CC BY 4.0",
+            ThumbnailUrl: "https://media.printables.com/thumb.jpg",
+            SourceUrl: "https://www.printables.com/model/42-awesome-bracket",
+            Files: new List<PrintablesFileEntryDto> { new("s1", "bracket.stl", 1024) });
+
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        _ = svcMock
+            .Setup(s => s.PreviewAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        PrintablesImportController controller = BuildController(svcMock);
+        IActionResult result = await controller.ImportAsync(new PrintablesImportRequest("https://www.printables.com/model/42-awesome-bracket"), CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        PrintablesPreviewDto returned = Assert.IsType<PrintablesPreviewDto>(ok.Value);
+        _ = returned.ModelId.Should().Be("42");
+    }
+
+    [Fact]
+    public async Task ImportAsync_EmptyUrl_Returns400()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        PrintablesImportController controller = BuildController(svcMock);
+
+        IActionResult result = await controller.ImportAsync(new PrintablesImportRequest(""), CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ImportAsync_InvalidUrl_Returns400()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        PrintablesImportController controller = BuildController(svcMock);
+
+        IActionResult result = await controller.ImportAsync(
+            new PrintablesImportRequest("https://thingiverse.com/thing:1"),
+            CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
     }
 }

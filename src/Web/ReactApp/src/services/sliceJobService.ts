@@ -65,6 +65,8 @@ export interface SliceJobStatusResponse {
   workerId?: string;
   artifactsCount?: number;
   artifactsTotalBytes?: number;
+  sourceUrl?: string;
+  sourceCreator?: string;
 }
 
 // Job statuses
