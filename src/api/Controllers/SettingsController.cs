@@ -58,6 +58,7 @@ public class SettingsController(
     [Authorize(Policy = "RequireAdmin")]
     [ProducesResponseType(typeof(FarmSettingsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult UpdateFarmSettings([FromBody] UpdateFarmSettingsBody body)
     {
@@ -76,9 +77,14 @@ public class SettingsController(
             return BadRequest("averagePrinterWattage must be between 0 and 5000.");
         }
 
-        // Get the expected row version from If-Match header or body
-        string? ifMatch = Request.Headers.IfMatch.FirstOrDefault()?.Trim('"');
-        string? expectedRowVersion = ifMatch ?? body.RowVersion;
+        IActionResult? tokenValidationError = TryGetValidatedConcurrencyToken(
+            body.RowVersion,
+            out string expectedRowVersion,
+            out _);
+        if (tokenValidationError is not null)
+        {
+            return tokenValidationError;
+        }
 
         try
         {
@@ -116,6 +122,7 @@ public class SettingsController(
     [HttpPut("user")]
     [ProducesResponseType(typeof(UserSettingsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateUserSettingsAsync(
         [FromBody] UpdateUserSettingsBody body, CancellationToken ct)
@@ -125,9 +132,14 @@ public class SettingsController(
             return BadRequest("itemsPerPage must be between 1 and 200.");
         }
 
-        // Get the expected row version from If-Match header or body
-        string? ifMatch = Request.Headers.IfMatch.FirstOrDefault()?.Trim('"');
-        string? expectedRowVersion = ifMatch ?? body.RowVersion;
+        IActionResult? tokenValidationError = TryGetValidatedConcurrencyToken(
+            body.RowVersion,
+            out _,
+            out byte[] expectedRowVersionBytes);
+        if (tokenValidationError is not null)
+        {
+            return tokenValidationError;
+        }
 
         Guid userId = GetUserId();
         UserSettings? entity = await _db.UserSettings.FirstOrDefaultAsync(u => u.UserId == userId, ct);
@@ -137,11 +149,10 @@ public class SettingsController(
             entity = new UserSettings { UserId = userId };
             _db.UserSettings.Add(entity);
         }
-        else if (expectedRowVersion is not null)
+        else
         {
             // Enforce optimistic concurrency: set the original row version so EF checks it
-            byte[] expectedBytes = Convert.FromBase64String(expectedRowVersion);
-            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedBytes;
+            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedRowVersionBytes;
         }
 
         if (body.Theme is not null)
@@ -199,6 +210,36 @@ public class SettingsController(
             ItemsPerPage: entity?.ItemsPerPage ?? 25,
             DefaultSlicerPreset: entity?.DefaultSlicerPreset,
             RowVersion: entity?.RowVersion is { Length: > 0 } rv ? Convert.ToBase64String(rv) : null);
+
+    private IActionResult? TryGetValidatedConcurrencyToken(
+        string? bodyRowVersion,
+        out string expectedRowVersion,
+        out byte[] expectedRowVersionBytes)
+    {
+        expectedRowVersion = string.Empty;
+        expectedRowVersionBytes = [];
+
+        string? ifMatch = Request.Headers.IfMatch.FirstOrDefault()?.Trim().Trim('"');
+        string? token = string.IsNullOrWhiteSpace(ifMatch) ? bodyRowVersion : ifMatch;
+
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { message = "Missing concurrency token. Provide If-Match header or rowVersion." });
+        }
+
+        try
+        {
+            expectedRowVersionBytes = Convert.FromBase64String(token);
+            expectedRowVersion = token;
+            return null;
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new { message = "Invalid concurrency token. If-Match/rowVersion must be valid base64." });
+        }
+    }
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
