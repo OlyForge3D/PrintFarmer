@@ -28,8 +28,9 @@ public class PrintablesImportServiceTests
     [InlineData("https://www.printables.com/model/12345", "12345")]
     [InlineData("https://www.printables.com/model/12345-my-cool-model", "12345")]
     [InlineData("https://printables.com/model/99999-slug-with-many-words", "99999")]
-    [InlineData("http://www.printables.com/model/1", "1")]
     [InlineData("https://www.printables.com/model/777777?ref=search", "777777")]
+    [InlineData("https://printables.com/model/123", "123")]
+    [InlineData("https://www.printables.com/model/123", "123")]
     public void ParseModelId_ValidUrl_ExtractsId(string url, string expectedId)
     {
         string modelId = PrintablesImportService.ParseModelId(url);
@@ -42,6 +43,12 @@ public class PrintablesImportServiceTests
     [InlineData("https://www.thingiverse.com/thing:12345")]
     [InlineData("https://www.printables.com/")]
     [InlineData("not-a-url")]
+    [InlineData("https://evil.com/redirect?to=printables.com/model/123")]
+    [InlineData("http://evil.com/redirect?to=printables.com/model/123")]
+    [InlineData("https://printables.com.evil.com/model/123")]
+    [InlineData("https://printables.evil.com/model/123")]
+    [InlineData("http://www.printables.com/model/1")]
+    [InlineData("https://www.printables.com/notmodel/123")]
     public void ParseModelId_InvalidUrl_ThrowsArgumentException(string url)
     {
         Action act = () => PrintablesImportService.ParseModelId(url);

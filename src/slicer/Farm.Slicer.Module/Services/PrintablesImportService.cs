@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Dtos;
 using Microsoft.Extensions.Logging;
 
@@ -16,12 +15,7 @@ public sealed class PrintablesImportService(
     PrintablesGraphQLClient graphQlClient,
     ILogger<PrintablesImportService> logger) : IPrintablesImportService
 {
-    // Matches:
-    //   https://www.printables.com/model/12345
-    //   https://www.printables.com/model/12345-my-cool-model
-    //   https://printables.com/model/12345-slug
-    private static readonly Regex _modelUrlPattern =
-        new(@"printables\.com/model/(\d+)(?:-[^/?#]*)?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly string[] AllowedHosts = ["printables.com", "www.printables.com"];
 
     private readonly PrintablesGraphQLClient _graphQlClient = graphQlClient;
     private readonly ILogger<PrintablesImportService> _logger = logger;
@@ -59,8 +53,10 @@ public sealed class PrintablesImportService(
             throw new ArgumentException("URL must not be empty.", nameof(url));
         }
 
-        Match match = _modelUrlPattern.Match(url);
-        if (!match.Success)
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
+            !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !AllowedHosts.Contains(uri.IdnHost, StringComparer.OrdinalIgnoreCase) ||
+            !uri.AbsolutePath.StartsWith("/model/", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
                 $"'{url}' is not a recognised Printables model URL. " +
@@ -68,6 +64,29 @@ public sealed class PrintablesImportService(
                 nameof(url));
         }
 
-        return match.Groups[1].Value;
+        ReadOnlySpan<char> modelPath = uri.AbsolutePath.AsSpan("/model/".Length);
+        int end = modelPath.IndexOfAny('-', '/');
+        ReadOnlySpan<char> idSpan = end >= 0 ? modelPath[..end] : modelPath;
+
+        if (idSpan.IsEmpty)
+        {
+            throw new ArgumentException(
+                $"'{url}' is not a recognised Printables model URL. " +
+                "Expected format: https://www.printables.com/model/{{id}} or https://www.printables.com/model/{{id}}-{{slug}}",
+                nameof(url));
+        }
+
+        foreach (char c in idSpan)
+        {
+            if (!char.IsDigit(c))
+            {
+                throw new ArgumentException(
+                    $"'{url}' is not a recognised Printables model URL. " +
+                    "Expected format: https://www.printables.com/model/{{id}} or https://www.printables.com/model/{{id}}-{{slug}}",
+                    nameof(url));
+            }
+        }
+
+        return idSpan.ToString();
     }
 }
