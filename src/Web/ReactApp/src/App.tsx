@@ -54,6 +54,7 @@ import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors';
+import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -203,6 +204,7 @@ function AuthenticatedAppRoutes() {
          * must remain open to all authenticated users to avoid a regression.
          */}
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
+        <Route path="profile/notifications" element={<NotificationPreferencesPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />

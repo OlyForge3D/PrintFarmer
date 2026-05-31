@@ -134,6 +134,16 @@ public interface INotificationService
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task CleanupOldNotificationsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Save a push subscription for a user (upsert by endpoint).
+    /// </summary>
+    Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Delete a specific push subscription for a user, identified by endpoint URL.
+    /// </summary>
+    Task DeletePushSubscriptionAsync(Guid userId, string endpoint, CancellationToken cancellationToken = default);
 }
 
 public class NotificationService(
@@ -436,5 +446,45 @@ public class NotificationService(
             NotificationType.SystemAlert => true,               // always notify
             _ => true
         };
+    }
+
+    public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
+    {
+        var existing = await dbContext.PushSubscriptions
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
+
+        if (existing is not null)
+        {
+            existing.P256dh = p256dh;
+            existing.Auth = auth;
+            existing.LastUsedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            dbContext.PushSubscriptions.Add(new PushSubscription
+            {
+                UserId = userId,
+                Endpoint = endpoint,
+                P256dh = p256dh,
+                Auth = auth,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Saved push subscription for user {UserId}", userId);
+    }
+
+    public async Task DeletePushSubscriptionAsync(Guid userId, string endpoint, CancellationToken cancellationToken = default)
+    {
+        var subscription = await dbContext.PushSubscriptions
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
+
+        if (subscription is not null)
+        {
+            dbContext.PushSubscriptions.Remove(subscription);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Deleted push subscription for user {UserId} endpoint {Endpoint}", userId, endpoint);
+        }
     }
 }

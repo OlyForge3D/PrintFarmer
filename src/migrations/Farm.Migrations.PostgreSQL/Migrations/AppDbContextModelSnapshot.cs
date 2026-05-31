@@ -2402,6 +2402,43 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("NotificationPreferences");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.PushSubscription", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Endpoint")
+                        .IsUnique();
+
+                    b.ToTable("PushSubscriptions");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NozzleModelDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5405,6 +5442,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
                         .WithOne()
                         .HasForeignKey("Farm.Infrastructure.Domain.Notifications.NotificationPreferences", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.PushSubscription", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
