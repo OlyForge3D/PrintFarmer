@@ -16,6 +16,7 @@ import {
   LayersIcon,
   PrinterIcon,
   RefreshIcon,
+  EyeIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import {
@@ -25,6 +26,7 @@ import {
 } from '@/services/sliceJobService';
 import { useSliceJobsRealtime } from '@/features/slicer/hooks/useSliceJobsRealtime';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
+import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
@@ -93,6 +95,7 @@ export function SliceJobsPanel() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [sendToJobId, setSendToJobId] = useState<string | null>(null);
+  const [previewJobId, setPreviewJobId] = useState<string | null>(null);
 
   const { isConnected: isRealtimeConnected } = useSliceJobsRealtime();
 
@@ -228,6 +231,7 @@ export function SliceJobsPanel() {
           onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
           onSendToPrinter={(id) => setSendToJobId(id)}
+          onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
         />
       ) : (
@@ -237,6 +241,7 @@ export function SliceJobsPanel() {
           onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
           onSendToPrinter={(id) => setSendToJobId(id)}
+          onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
         />
       )}
@@ -245,6 +250,12 @@ export function SliceJobsPanel() {
         isOpen={sendToJobId !== null}
         onClose={() => setSendToJobId(null)}
         jobId={sendToJobId ?? ''}
+      />
+
+      <GcodePreviewModal
+        isOpen={previewJobId !== null}
+        onClose={() => setPreviewJobId(null)}
+        jobId={previewJobId ?? ''}
       />
     </div>
   );
@@ -260,6 +271,7 @@ function JobTable({
   onRetry,
   onDownload,
   onSendToPrinter,
+  onPreview,
   cancellingId,
 }: {
   jobs: SliceJobStatusResponse[];
@@ -269,6 +281,7 @@ function JobTable({
   onRetry: (id: string) => void;
   onDownload: (id: string) => void;
   onSendToPrinter: (id: string) => void;
+  onPreview: (id: string) => void;
   cancellingId: string | null;
 }) {
   return (
@@ -295,6 +308,7 @@ function JobTable({
               onRetry={() => onRetry(job.id)}
               onDownload={() => onDownload(job.id)}
               onSendToPrinter={() => onSendToPrinter(job.id)}
+              onPreview={() => onPreview(job.id)}
               isCancelling={cancellingId === job.id}
             />
           ))}
@@ -312,6 +326,7 @@ function JobTableRow({
   onRetry,
   onDownload,
   onSendToPrinter,
+  onPreview,
   isCancelling,
 }: {
   job: SliceJobStatusResponse;
@@ -321,6 +336,7 @@ function JobTableRow({
   onRetry: () => void;
   onDownload: () => void;
   onSendToPrinter: () => void;
+  onPreview: () => void;
   isCancelling: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
@@ -386,6 +402,17 @@ function JobTableRow({
             )}
             {canDownload && (
               <Button
+                variant="secondary"
+                size="sm"
+                onClick={onPreview}
+                aria-label="Preview gcode"
+                title="Preview G-code"
+              >
+                <EyeIcon className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            {canDownload && (
+              <Button
                 variant="primary"
                 size="sm"
                 onClick={onSendToPrinter}
@@ -416,6 +443,7 @@ function JobCardGrid({
   onRetry,
   onDownload,
   onSendToPrinter,
+  onPreview,
   cancellingId,
 }: {
   jobs: SliceJobStatusResponse[];
@@ -423,6 +451,7 @@ function JobCardGrid({
   onRetry: (id: string) => void;
   onDownload: (id: string) => void;
   onSendToPrinter: (id: string) => void;
+  onPreview: (id: string) => void;
   cancellingId: string | null;
 }) {
   return (
@@ -435,6 +464,7 @@ function JobCardGrid({
           onRetry={() => onRetry(job.id)}
           onDownload={() => onDownload(job.id)}
           onSendToPrinter={() => onSendToPrinter(job.id)}
+          onPreview={() => onPreview(job.id)}
           isCancelling={cancellingId === job.id}
         />
       ))}
@@ -448,6 +478,7 @@ function JobCard({
   onRetry,
   onDownload,
   onSendToPrinter,
+  onPreview,
   isCancelling,
 }: {
   job: SliceJobStatusResponse;
@@ -455,6 +486,7 @@ function JobCard({
   onRetry: () => void;
   onDownload: () => void;
   onSendToPrinter: () => void;
+  onPreview: () => void;
   isCancelling: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
@@ -540,6 +572,16 @@ function JobCard({
               iconLeft={<DownloadIcon className="w-3.5 h-3.5" />}
             >
               Download
+            </Button>
+          )}
+          {canDownload && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onPreview}
+              iconLeft={<EyeIcon className="w-3.5 h-3.5" />}
+            >
+              Preview
             </Button>
           )}
           {canDownload && (
