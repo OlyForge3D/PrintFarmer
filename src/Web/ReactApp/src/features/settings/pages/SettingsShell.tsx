@@ -9,31 +9,27 @@ export const SettingsShell: React.FC = () => {
 
   const activeTab = searchParams.get('tab') || DEFAULT_TAB;
   const query = searchParams.get('q') || '';
+  const highlight = searchParams.get('highlight') || '';
 
+  // Batched single-call updates — React Router v7 does not chain functional updaters.
   const handleTabChange = useCallback(
     (tabId: string) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('tab', tabId);
-        return next;
-      });
+      const next: Record<string, string> = { tab: tabId };
+      if (query) next.q = query;
+      if (highlight) next.highlight = highlight;
+      setSearchParams(next);
     },
-    [setSearchParams]
+    [setSearchParams, query, highlight]
   );
 
   const handleSearchChange = useCallback(
     (value: string) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (value) {
-          next.set('q', value);
-        } else {
-          next.delete('q');
-        }
-        return next;
-      });
+      const next: Record<string, string> = { tab: activeTab };
+      if (value) next.q = value;
+      if (highlight) next.highlight = highlight;
+      setSearchParams(next);
     },
-    [setSearchParams]
+    [setSearchParams, activeTab, highlight]
   );
 
   const filteredTabIds = useMemo(() => {
@@ -46,12 +42,26 @@ export const SettingsShell: React.FC = () => {
     ).map((tab) => tab.id);
   }, [query]);
 
-  // If search narrows tabs and active tab is no longer visible, switch to first match
+  // When a highlight keyword is present, prefer the owning tab over the default.
+  const highlightTab = useMemo(() => {
+    if (!highlight) return undefined;
+    const lower = highlight.toLowerCase();
+    return SETTINGS_TABS.find((tab) =>
+      tab.keywords.some((kw) => kw.includes(lower))
+    )?.id;
+  }, [highlight]);
+
+  // If search narrows tabs and active tab is no longer visible, switch to first match.
+  // If only a highlight is set with no explicit tab param, jump to the tab that owns it.
   const effectiveTab = useMemo(() => {
-    if (!filteredTabIds || filteredTabIds.length === 0) return activeTab;
-    if (filteredTabIds.includes(activeTab)) return activeTab;
-    return filteredTabIds[0];
-  }, [activeTab, filteredTabIds]);
+    if (filteredTabIds) {
+      if (filteredTabIds.length === 0) return activeTab;
+      if (filteredTabIds.includes(activeTab)) return activeTab;
+      return filteredTabIds[0];
+    }
+    if (highlightTab && !searchParams.has('tab')) return highlightTab;
+    return activeTab;
+  }, [activeTab, filteredTabIds, highlightTab, searchParams]);
 
   return (
     <div className="space-y-4">
@@ -69,6 +79,7 @@ export const SettingsShell: React.FC = () => {
           activeTab={effectiveTab}
           onTabChange={handleTabChange}
           filteredTabIds={filteredTabIds}
+          highlight={highlight}
         />
       )}
     </div>

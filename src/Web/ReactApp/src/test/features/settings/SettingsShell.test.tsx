@@ -70,4 +70,42 @@ describe('SettingsShell', () => {
     fireEvent.change(searchInput, { target: { value: 'email' } });
     expect(searchInput).toHaveValue('email');
   });
+
+  describe('highlight deep-link', () => {
+    it('navigates to the tab that owns the highlight keyword', () => {
+      // "email" is a keyword of the Notifications tab
+      renderSettings('/settings?highlight=email');
+      const notificationsTab = screen.getByRole('tab', { name: 'Notifications' });
+      expect(notificationsTab).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('renders the highlight target element when tab and highlight match', () => {
+      renderSettings('/settings?tab=notifications&highlight=email');
+      expect(screen.getByTestId('highlight-target')).toBeInTheDocument();
+    });
+
+    it('displays the highlight keyword inside the highlight target', () => {
+      renderSettings('/settings?tab=notifications&highlight=email');
+      const target = screen.getByTestId('highlight-target');
+      expect(target).toHaveTextContent('email');
+    });
+
+    it('does not render highlight target when highlight keyword does not match active tab', () => {
+      // "email" belongs to notifications; viewing general should not show the highlight target
+      renderSettings('/settings?tab=general&highlight=email');
+      expect(screen.queryByTestId('highlight-target')).not.toBeInTheDocument();
+    });
+
+    it('does not render highlight target when no highlight param is present', () => {
+      renderSettings('/settings?tab=notifications');
+      expect(screen.queryByTestId('highlight-target')).not.toBeInTheDocument();
+    });
+
+    it('explicit tab param takes priority over highlight-inferred tab', () => {
+      // Explicit tab=hardware wins even though highlight=email points at notifications
+      renderSettings('/settings?tab=hardware&highlight=email');
+      const hardwareTab = screen.getByRole('tab', { name: 'Hardware' });
+      expect(hardwareTab).toHaveAttribute('aria-selected', 'true');
+    });
+  });
 });
