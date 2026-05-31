@@ -1,3 +1,158 @@
+---
+## Merged from Inbox: 2026-05-31T09:05:00-07:00
+
+# Decision Inbox: Bambuddy Feature Adoption — Phased Rollout Plan
+
+**Author:** Dallas
+**Date:** 2026-05-31
+**Status:** Proposed (awaiting Brady approval on decision points)
+
+## Decision
+
+Adopt a subset of bambuddy features into PrintFarmer across 4 phases, prioritizing G-code preview, Quick Slice UX, notifications, and per-print cost tracking. Each phase ships independently.
+
+## Architectural Calls
+
+1. **Client-side 3MF parsing DEFERRED** — bambuddy's main-thread JSZip approach is a known performance risk. We will not copy it. When 3MF client-side parsing is needed (Phase 2 multi-plate picker), it will use a Web Worker-based design. Until then, server-side 3MF metadata extraction (already in `Model3DFileService`) is sufficient.
+
+2. **gcode-preview v2 (stable) over v3 (alpha)** — v3 has API churn and isn't production-ready. We ship on v2.18.x. Migration to v3 happens when it stabilizes.
+
+3. **No worker built into gcode-preview** — We accept main-thread parsing for v1 (files <10MB). Large-file guardrails (file-size warning, chunked loading) are Phase 1b follow-up work, not blockers.
+
+4. **Notification system uses IProvider pattern** — matches bambuddy's `ProviderType` enum + interface approach. Phased: webhook + Discord + Telegram first; remaining providers are separate PRs.
+
+5. **Quick Slice does NOT replace NewSliceJobPage** — it's an alternative entry point for simple jobs. Raw-param SlicerConfigModal is hidden behind "Advanced" but not removed.
+
+## Don't Chase List
+
+| Feature | Reason |
+|---------|--------|
+| Virtual printer emulation (MQTT/FTP/RTSP proxy) | Bambu-specific protocol debt; PrintFarmer is backend-agnostic |
+| SpoolBuddy NFC hardware (ESP32 + firmware) | Out of software-only scope |
+| MakerWorld direct import | Depends on Bambu Cloud token; not applicable to our multi-vendor users |
+| LDAP/OIDC/TOTP auth | PrintFarmer auth is out of scope for this round |
+| Multi-language i18n | Large effort, orthogonal to feature work |
+| Smart plug integration | Hardware dependency; can revisit when energy tracking demand is proven |
+| GitHub backup | Not relevant to PrintFarmer's deployment model |
+| Layer timelapse → MP4 | Deferred to post-camera-infrastructure (go2rtc sidecar must land first) |
+
+## Scope Boundary
+
+This plan covers Phases 1-4 only. Layer timelapse, print queue scheduler with SJF, and multi-plate 3MF picker are explicitly future work beyond this round.
+
+---
+
+# Decision Inbox: Bambuddy Slicing UX Comparison Findings
+
+**Author:** Brett (Researcher)
+**Date:** 2026-05-31
+**Status:** Merged from inbox
+
+### Finding 1: PrintFarmer should add a "Quick Slice" modal
+
+**Evidence:** bambuddy's `SliceModal.tsx` exposes exactly three dropdowns (printer preset, process preset, filament preset × N slots) plus a bed-type override and a plate picker. Zero individual parameter sliders. This is deliberately farm-friendly: operators pick a pre-validated config triplet and hit Slice. No per-job layer height drift, no support-checkbox accidents.
+
+PrintFarmer's `SlicerConfigModal.tsx` offers the inverse: sliders for layer height, infill, speed, nozzle temp, bed temp — but its profile selectors are secondary. For a farm context the preset-first model is safer.
+
+**Recommendation:** Add a "Quick Slice" mode (could be a separate entry point or a tab in `SlicerConfigModal`) that shows only: printer profile, process profile, filament profile(s), bed type override, plate picker. Hide sliders unless the user explicitly expands "Advanced". The current full-settings panel stays but shouldn't be the default entry point.
+
+---
+
+### Finding 2: Adopt BambuStudio Bundle (.bbscfg) import for "canonical farm config"
+
+**Evidence:** bambuddy's `SlicerBundlesPanel.tsx` + `backend/app/services/slicer_api.py` support importing a `.bbscfg` BambuStudio config bundle. In "bundle mode" the user selects the bundle (locks the printer) and picks process + filament from names within that bundle's extracted directory. This pins every slice job to the exact settings the operator validated in BambuStudio — no accidental cloud preset substitutions.
+
+`backend/app/schemas/slicer.py:SliceBundleSpec` shows the wire contract: `bundle_id`, `printer_name`, `process_name`, `filament_names[]`.
+
+**Recommendation:** Evaluate adding `.orca_printer` bundle upload to PrintFarmer's slicer settings (we already have the format spec from the 2026-04-17 research). A "Slice from bundle" mode in `NewSliceJobPage` would let farm operators lock a canonical OrcaSlicer config bundle per printer and prevent per-job profile drift.
+
+---
+
+### Finding 3: PrintFarmer's gcode upload advantage — preserve and document it
+
+**Evidence:** bambuddy **actively rejects** raw `.gcode` uploads (`backend/app/api/routes/library.py:167-180`) because Bambu printers require `.gcode.3mf` containers. Error message explicitly says "Raw .gcode files can't be printed on Bambu printers."
+
+PrintFarmer supports raw gcode upload via `apiClient.uploadGcodeFile()` → `POST /gcode-files/upload` and configurable `allowedExtensions` via `PUT /gcode-files/settings`. This is a genuine differentiator for multi-backend farms (Moonraker, PrusaLink, FlashForge, SDCP all accept raw gcode natively).
+
+**Recommendation:** Document this explicitly in PrintFarmer's feature positioning. The gcode upload pathway is a competitive advantage for non-Bambu fleets. Do NOT remove it. If we add Bambu backend support in the future, add per-printer validation at send time (not at upload time) so the library stays backend-agnostic.
+
+---
+
+### Finding 4: Smart filament auto-selection by type + color proximity
+
+**Evidence:** `frontend/src/components/SliceModal.tsx:123-164` in bambuddy scores filament presets for each AMS slot by:
+1. Type match (`PLA == PLA` → +10 points)
+2. Color proximity (exact hex match → +5, approximate → +1–3)
+3. Tier bonus (local → 1.5×, cloud → 1.0×, standard → 0.5×)
+4. Compatibility filter (rejects presets flagged as printer-incompatible)
+
+PrintFarmer's filament picker (`FilamentProfileSelector.tsx`, `CascadingMenuDropdown.tsx:FilamentProfileDropdown`) is manual — no auto-selection.
+
+**Recommendation:** Implement color+type-aware auto-pick for the filament profile selector on `NewSliceJobPage`. When a 3MF source carries filament slot metadata (type + color from `Metadata/plate_N.json`), pre-select the closest-matching filament profile automatically. This removes the most common user error in multi-color jobs (wrong filament preset for a slot).
+
+---
+
+# Decision Inbox: Bambuddy Feature Sweep — Top Adoption Candidates
+
+**Source:** brett-3 thread, 2026-05-31
+**Requested by:** Brady (Jeff Papiez)
+
+## Features Recommended for Team-Level Adoption Discussion
+
+### 1. Per-Print Cost + Energy Tracking
+
+**What:** Every print log entry records `filament_used_grams`, `cost`, `energy_kwh`, and `energy_cost`. Smart plug energy snapshots feed the energy fields automatically.
+
+**Why now:** Farm operators increasingly ask "what does this print cost me?" — materials + electricity. This is the top ROI question for commercial print farms. bambuddy tracks it in `backend/app/models/print_log.py` via a simple Float column pattern; the hard part is the smart plug polling loop, not the schema. PrintFarmer already has a print history concept — extending it with these four fields is low schema risk, medium UI effort.
+
+**Effort:** M (schema migration + smart plug polling + UI display on history page)
+
+---
+
+### 2. 8-Provider Notification System with User-Level Prefs
+
+**What:** A pluggable notification system supporting email, Telegram, Discord, generic webhook, ntfy, Pushover, CallMeBot/WhatsApp, and Home Assistant — all configurable per-user via `user_email_preferences`-style opt-ins.
+
+**Why now:** Print farm users want to know when prints finish, fail, or the queue is empty — and they want it on the channel they already use (often Telegram or Discord, not email). bambuddy's `backend/app/schemas/notification.py` ProviderType enum and `backend/app/services/notification_service.py` show a clean provider-dispatch pattern that translates directly to C#/interfaces. PrintFarmer currently has limited notification surface. This is a clear differentiator versus farm tools with email-only.
+
+**Effort:** M (provider interface + 3-4 core providers + settings UI; can ship in phases)
+
+---
+
+### 3. Layer-by-Layer Timelapse → MP4
+
+**What:** Per-print timelapse assembled from per-layer camera snapshots, stitched with ffmpeg into an MP4 and attached to the print archive.
+
+**Why now:** Timelapse is the #1 social/showcase feature users ask for, and it gives visual evidence for failure post-mortems. bambuddy does this in `backend/app/services/layer_timelapse.py`. PrintFarmer already has camera snapshot infrastructure from the camera platform work; the gap is the per-layer trigger from MQTT layer-change events and the ffmpeg stitch step. Medium effort, high user delight.
+
+**Effort:** M (layer-change MQTT trigger + frame accumulator + ffmpeg stitch + archive attach)
+
+---
+
+### 4. MakerWorld Direct Import
+
+**What:** User pastes a `makerworld.com/models/...` URL into bambuddy; bambuddy resolves the model, fetches the 3MF via the Bambu Cloud API token (same auth as printer telemetry), and imports it into the file library — no browser download step.
+
+**Why now:** MakerWorld is the dominant Bambu ecosystem model repository. Users already have a Bambu Cloud token in PrintFarmer for printer telemetry. The import path (`backend/app/services/makerworld.py`) reuses that token and talks to `api.bambulab.com/v1/design-service/*` — not the Cloudflare-gated website. Risk: Bambu could change the API; impact is isolated to the import feature.
+
+**Effort:** S-M (HTTP client + URL resolver + library ingest; no new auth needed if token already present)
+
+---
+
+## Features Recommended Against
+
+### Virtual Printer Emulation
+
+bambuddy implements a full MQTT broker + FTP server + RTSP proxy that makes itself look like a Bambu Lab printer to OrcaSlicer/BambuStudio. The goal is queue-based dispatch without changing slicer config. **PrintFarmer should not chase this.** Reasons:
+- Deep Bambu-specific protocol work with no benefit for non-Bambu backends
+- PrintFarmer's architecture dispatches via the slicer CLI and file upload, not by impersonating firmware — that's cleaner and multi-backend compatible
+- Maintenance liability: Bambu can break this silently with any firmware update
+
+### SpoolBuddy NFC Hardware Sub-System
+
+bambuddy ships a companion ESP32 device that writes NDEF tags and auto-assigns spools on scan. Cool feature, but requires hardware manufacturing/distribution support. PrintFarmer is software-only. Not in scope.
+
+---
 ## Decision Record: Consider G-code toolpath preview parity from bambuddy
 
 **Author:** Brett

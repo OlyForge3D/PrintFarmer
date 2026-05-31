@@ -41,3 +41,22 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 ### Bambuddy Review Pointer — 2026-05-31
 
 bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from bambuddy" and "Consider a richer slice progress contract" for details.
+
+## Team Assignment: Bambuddy Adoption Plan (Scribe Merge, 2026-05-31)
+
+**Incoming Work:** Notification system backend (Phase 3, ~4 work items).
+
+**Context from Research:**
+- bambuddy implements 8-provider notification system: email, Telegram, Discord, generic webhook, ntfy, Pushover, CallMeBot/WhatsApp, Home Assistant
+- IProvider pattern identified: `backend/app/schemas/notification.py` ProviderType enum + `backend/app/services/notification_service.py` dispatch logic
+- PrintFarmer phased rollout: webhook + Discord + Telegram first; remaining providers in follow-up PRs
+- Print farm users demand notifications on their preferred channel (often Telegram/Discord, not email)
+
+**Phase 3 Deliverables (scheduled, not yet assigned to sprint):**
+1. Create `INotificationProvider` interface (webhook, Discord, Telegram implementations)
+2. Add `NotificationPreferences` entity + EF migration
+3. Implement `NotificationService` dispatcher
+4. Integrate with existing print lifecycle (completion, failure, queue empty events)
+
+**Linked Decisions:** decisions.md entries "Bambuddy Feature Adoption" and "Bambuddy Feature Sweep — Top Adoption Candidates"
+

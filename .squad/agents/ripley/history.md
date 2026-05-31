@@ -113,3 +113,36 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 ### Bambuddy Review Pointer — 2026-05-31
 
 bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from bambuddy" and "Consider a richer slice progress contract" for details.
+
+## Team Assignment: Bambuddy Adoption Plan (Scribe Merge, 2026-05-31)
+
+**Incoming Work:** G-code preview viewer + Quick Slice UX (Phases 1-2, ~6 work items).
+
+**Context from Research:**
+
+**Phase 1 — G-code Preview Viewer:**
+- Integrate `gcode-preview` npm library (v2.18.x, stable; v3 deferred until stabilized)
+- Extend existing `GCodeViewer3D.tsx` component
+- Wire into artifact viewer path (`ArchivesPage` preview flow)
+- Accepts main-thread parsing for files <10MB (Phase 1b large-file guardrails are follow-up)
+- Core features: layer controls, filament color mapping, build-volume visualization
+
+**Phase 1 — Quick Slice UX Modal:**
+- Add "Quick Slice" entry point (preset-first design, NOT replacing `NewSliceJobPage`)
+- Three core dropdowns: printer profile, process profile, filament profile × N slots
+- Bed-type override + plate picker
+- Hide raw sliders behind "Advanced" toggle
+- Print farm safety: operators pick pre-validated config triplets, no per-job parameter drift
+
+**Phase 2 — Multi-Plate 3MF Picker (Deferred):**
+- Smart filament auto-selection by type + color proximity (bambuddy scoring model in decision record)
+- Multi-plate 3MF metadata extraction (Web Worker design, not main-thread JSZip copy)
+
+**Competitive Advantage (Do NOT remove):**
+- PrintFarmer's raw `.gcode` upload is a genuine differentiator vs Bambu-only tools
+- Moonraker, PrusaLink, FlashForge, SDCP all accept raw gcode natively
+- Multi-backend farms depend on this pathway
+- Per-printer validation deferred to send-time, not upload-time (library stays backend-agnostic)
+
+**Linked Decisions:** decisions.md entries "Bambuddy Feature Adoption", "Bambuddy Slicing UX Comparison Findings", and "Consider G-code toolpath preview parity from bambuddy"
+
