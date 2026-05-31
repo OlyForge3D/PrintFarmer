@@ -147,3 +147,15 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 - `IGcodePreviewService` needs both metadata-only (`parseGCode`) and rendering-ready (`parseGCodeDetailed`) methods — the component needs full XYZ point data for Three.js `Line` rendering.
 - Tool changes (T-commands) must be tracked per-point during parsing to enable per-tool filtering in the viewer.
 - ESLint `react-hooks/set-state-in-effect` fires for `setState` called synchronously at the top of a `useEffect`; moving to async/await inside the effect body silences it.
+
+## 2026-05-31 — Advanced Settings Disclosure (#340)
+
+- Created `AdvancedSettingsDisclosure` component wrapping `CollapsibleSection` from UI library.
+- Wrapped `SlicerSettingsPanel` on `NewSliceJobPage` — collapsed by default, preset dropdowns remain visible.
+- localStorage key `pf.slicer.advancedDisclosure` persists user preference.
+- Override count shown in collapsed title: compares `slicerSettings` vs `originalProcessSettings`.
+- 8 component tests passing. PR #372 → development.
+
+### Learnings
+
+- 2026-05-31 — `CollapsibleSection` supports controlled mode (`expanded` + `onToggle`) with `collapsedTitle` for custom collapsed labels and `headerActions` for right-side content. Located at `@/common/components/ui/CollapsibleSection`.
