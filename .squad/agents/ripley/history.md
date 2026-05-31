@@ -92,3 +92,14 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 
 Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, extend GCodeViewer3D.tsx, wire to ArchivesPage), Quick Slice UX modal (preset-first, 3 profile dropdowns, hide raw sliders behind "Advanced"). Phase 2 deferred: multi-plate 3MF picker with smart filament auto-selection. Settings consolidation identified 15+ candidate admin pages (Filament, Slicer Profiles, Cameras, NFC, etc.) for unified nav with 8 tabs: General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users. Key UX: cross-tab search, collapsible cards, inline modals, masked secrets. NFC tag management modal (LinkSpoolModal + AssignSpoolModal, WebSocket real-time sync) deferred to later phase.
 - **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+
+## 2026-05-31 — GcodePreviewService Abstraction (#333)
+
+- Created `IGcodePreviewService` interface + `createGcodePreviewService()` factory in `src/Web/ReactApp/src/features/slicer/services/gcodePreviewService.ts`.
+- v1 uses a lightweight standalone G-code parser (layer splitting by Z-height changes) — no WebGL dependency. The `gcode-preview` npm package (v2.18.0) is installed but its `WebGLPreview` class requires a real WebGL context (canvas + GPU), making it unsuitable for headless service/test use. v2 will use it inside a Web Worker with OffscreenCanvas.
+- Exported via `features/slicer/services/index.ts`; no direct `gcode-preview` imports allowed outside this module.
+- PR #364 → development.
+
+### Learnings
+- `gcode-preview` v2.18.0 only exports `WebGLPreview` and `init`; the `Parser` class is internal and not accessible. Creating a `WebGLPreview` always attempts to instantiate a Three.js `WebGLRenderer`, so it cannot be used in jsdom/vitest without a full WebGL mock.
+- For v2 worker swap: use `OffscreenCanvas` transferred to the worker, then `new WebGLPreview({ canvas })` works with real GPU context.
