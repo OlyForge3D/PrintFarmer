@@ -61,6 +61,20 @@ public class Model3DDto
 
     /// <summary>Gets or sets the associated tags.</summary>
     public TagDto[]? Tags { get; set; }
+
+    // Attribution fields — populated for imported models, null for locally uploaded models.
+
+    /// <summary>Gets or sets the original source URL (e.g., Printables model page).</summary>
+    public string? SourceUrl { get; set; }
+
+    /// <summary>Gets or sets the license name for the imported model.</summary>
+    public string? SourceLicense { get; set; }
+
+    /// <summary>Gets or sets the creator handle for the imported model.</summary>
+    public string? SourceCreator { get; set; }
+
+    /// <summary>Gets or sets the timestamp when this model was imported from an external source.</summary>
+    public DateTime? ImportedAt { get; set; }
 }
 
 /// <summary>

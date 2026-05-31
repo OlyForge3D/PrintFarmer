@@ -832,7 +832,11 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             ThumbnailUrl = thumbnailUrl,
             Tags = tags,
             ExtractedMetadata = metadata,
-            AutoTags = metadata?.AutoTags?.ToArray()
+            AutoTags = metadata?.AutoTags?.ToArray(),
+            SourceUrl = model.SourceUrl,
+            SourceLicense = model.SourceLicense,
+            SourceCreator = model.SourceCreator,
+            ImportedAt = model.ImportedAt,
         };
     }
 
@@ -1000,5 +1004,24 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             FileSize = geometryFile.Length,
             FileUrl = fileUrl
         };
+    }
+
+    /// <inheritdoc />
+    public async Task SetAttributionAsync(Guid modelId, string? sourceUrl, string? sourceCreator, string? sourceLicense, DateTime? importedAt, CancellationToken ct)
+    {
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(modelId, ct);
+        if (model == null)
+        {
+            throw new InvalidOperationException($"Model {modelId} not found.");
+        }
+
+        model.SourceUrl = sourceUrl;
+        model.SourceCreator = sourceCreator;
+        model.SourceLicense = sourceLicense;
+        model.ImportedAt = importedAt;
+        model.UpdatedAt = DateTime.UtcNow;
+
+        await _model3dFiles.UpdateAsync(model, ct);
+        await _model3dFiles.SaveChangesAsync(ct);
     }
 }

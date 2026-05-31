@@ -40,3 +40,6 @@ When reviewing:
 - **Project:** PrintFarmer — React TypeScript dashboard for managing multiple 3D printers
 - **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS
 - **Owner:** Jeff Papiez
+
+## STANDING RULE: adversarial all-PR review (2026-05-31, Brady directive)
+All three code reviewers (Bishop, Hicks, Vasquez) independently review EVERY open squad PR. No partitioning. Each posts a review through their own lens; Dallas then synthesizes a consolidated consensus verdict per PR. The diversity of three independent perspectives + a synthesis pass is the point.

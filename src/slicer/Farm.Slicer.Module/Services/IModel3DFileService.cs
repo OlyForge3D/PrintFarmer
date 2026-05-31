@@ -92,4 +92,16 @@ public interface IModel3DFileService
     /// <param name="geometryFile">The STL geometry file to store.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<GeometryUploadResultDto> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct);
+
+    /// <summary>
+    /// Sets attribution metadata on an existing model record.
+    /// Intended for post-import wiring when attribution is resolved separately from the initial upload.
+    /// </summary>
+    /// <param name="modelId">The model to update.</param>
+    /// <param name="sourceUrl">Original source URL (e.g., Printables model page URL).</param>
+    /// <param name="sourceCreator">Creator/author handle.</param>
+    /// <param name="sourceLicense">License name (e.g., "CC BY 4.0").</param>
+    /// <param name="importedAt">Timestamp when the model was imported.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task SetAttributionAsync(Guid modelId, string? sourceUrl, string? sourceCreator, string? sourceLicense, DateTime? importedAt, CancellationToken ct);
 }
