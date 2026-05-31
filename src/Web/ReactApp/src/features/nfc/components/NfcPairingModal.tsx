@@ -10,39 +10,42 @@ import { apiClient } from '@/services/api';
 import type { SpoolmanSpool } from '@/types/api';
 import type {
   NfcTagUnknownEvent,
-  NfcTagMismatchEvent,
   NfcLinkRequest,
   NfcLinkResponse,
   NfcPairingStep,
 } from '@/features/nfc/types';
+import type { NfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
 
 interface NfcPairingModalProps {
-  event: NfcTagUnknownEvent | null;
-  isOpen: boolean;
-  onClose: () => void;
+  session: NfcPairingSession;
 }
 
-interface NfcMismatchModalProps {
-  event: NfcTagMismatchEvent | null;
-  isOpen: boolean;
-  onClose: () => void;
-  onRelink: () => void;
-}
-
-// Stub for POST /api/nfc/link (backend #362 in flight)
 async function linkNfcTag(request: NfcLinkRequest): Promise<NfcLinkResponse> {
   const response = await apiClient.client.post('/nfc/link', request);
   return response.data as NfcLinkResponse;
 }
 
-export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps) {
-  const [step, setStep] = useState<NfcPairingStep>('detected');
+export function NfcPairingModal({ session }: NfcPairingModalProps) {
+  const { isOpen, tagEvent: event, isUnavailable, close: onClose } = session;
+
+  const [step, setStep] = useState<NfcPairingStep>(() => {
+    if (isUnavailable) return 'unavailable';
+    if (event) return 'detected';
+    return 'scanning';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSpool, setSelectedSpool] = useState<SpoolmanSpool | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Track the event to detect when a new one arrives and reset via key
+  // Track the event identity to reset state when a new tag arrives.
   const [trackedEvent, setTrackedEvent] = useState<NfcTagUnknownEvent | null>(null);
+
+  // Transition to unavailable when hub drops mid-session (derived state, not effect).
+  if (isUnavailable && isOpen && step !== 'unavailable') {
+    setStep('unavailable');
+  }
+
+  // When a new tag event arrives, reset the flow.
   if (isOpen && event && event !== trackedEvent) {
     setTrackedEvent(event);
     setStep('detected');
@@ -51,7 +54,12 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
     setErrorMessage('');
   }
 
-  // Auto-advance from detected to search after brief delay
+  // When modal opens without a tag (startScanning), show scanning step.
+  if (isOpen && !event && !isUnavailable && step !== 'scanning' && step !== 'unavailable') {
+    setStep('scanning');
+  }
+
+  // Auto-advance from detected to search.
   useEffect(() => {
     if (step === 'detected') {
       const timer = setTimeout(() => setStep('search'), 1200);
@@ -59,7 +67,7 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
     }
   }, [step]);
 
-  // Auto-close on success
+  // Auto-close on success.
   useEffect(() => {
     if (step === 'success') {
       const timer = setTimeout(() => onClose(), 2000);
@@ -67,7 +75,6 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
     }
   }, [step, onClose]);
 
-  // Fetch spools for search
   const { data: spoolsData, isLoading: spoolsLoading } = useQuery({
     queryKey: ['spoolman-spools-nfc-search', searchQuery],
     queryFn: () => apiClient.getSpools({ search: searchQuery || undefined, limit: 50 }),
@@ -76,7 +83,6 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
 
   const spools = useMemo(() => spoolsData?.items ?? [], [spoolsData]);
 
-  // Link mutation
   const linkMutation = useMutation<NfcLinkResponse, Error, NfcLinkRequest>({
     mutationFn: linkNfcTag,
     onSuccess: () => {
@@ -94,7 +100,7 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
     linkMutation.mutate({
       tagUid: event.tagUid,
       spoolId: selectedSpool.id,
-      deviceId: event.deviceId,
+      printerId: event.printerId,
     });
   }, [event, selectedSpool, linkMutation]);
 
@@ -108,33 +114,46 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
     setStep('search');
   }, []);
 
-  if (!event) return null;
+  const handleClose = useCallback(() => {
+    setStep('scanning');
+    setTrackedEvent(null);
+    setSelectedSpool(null);
+    setSearchQuery('');
+    setErrorMessage('');
+    onClose();
+  }, [onClose]);
 
-  const title = step === 'success'
-    ? 'Tag Linked'
-    : step === 'error'
-      ? 'Link Failed'
-      : 'Pair NFC Tag';
+  if (!isOpen) return null;
+
+  const title =
+    step === 'success' ? 'Tag Linked' :
+    step === 'error' ? 'Link Failed' :
+    step === 'unavailable' ? 'NFC Unavailable' :
+    'Pair NFC Tag';
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} size="lg">
+    <Modal isOpen={isOpen} onClose={handleClose} title={title} size="lg">
       <div className="space-y-4">
-        {/* Detected state */}
-        {step === 'detected' && (
+        {/* Scanning — waiting for tag */}
+        {step === 'scanning' && (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <Spinner size="lg" />
+            <p className="text-pf-text-secondary text-sm">Waiting for NFC tag…</p>
+            <p className="text-pf-text-secondary text-xs">Hold a tag near the reader to begin pairing.</p>
+          </div>
+        )}
+
+        {/* Detected — tag arrived, brief acknowledgement */}
+        {step === 'detected' && event && (
           <div className="flex flex-col items-center gap-3 py-6">
             <Spinner size="lg" />
             <p className="text-pf-text-secondary text-sm">Tag detected</p>
             <Badge variant="default">{event.tagUid}</Badge>
-            {event.deviceName && (
-              <p className="text-pf-text-secondary text-xs">
-                Reader: {event.deviceName}
-              </p>
-            )}
           </div>
         )}
 
-        {/* Search state */}
-        {step === 'search' && (
+        {/* Search — spool selection */}
+        {step === 'search' && event && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Badge variant="default">{event.tagUid}</Badge>
@@ -196,8 +215,8 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
           </div>
         )}
 
-        {/* Confirm state */}
-        {step === 'confirm' && selectedSpool && (
+        {/* Confirm */}
+        {step === 'confirm' && selectedSpool && event && (
           <div className="space-y-4">
             <p className="text-pf-text-secondary text-sm">Link this tag to the selected spool?</p>
 
@@ -238,7 +257,7 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
           </div>
         )}
 
-        {/* Success state */}
+        {/* Success */}
         {step === 'success' && (
           <div className="flex flex-col items-center gap-3 py-6">
             <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center">
@@ -247,11 +266,11 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
               </svg>
             </div>
             <p className="text-pf-text-primary font-medium">Tag linked successfully</p>
-            <p className="text-pf-text-secondary text-sm">Closing automatically...</p>
+            <p className="text-pf-text-secondary text-sm">Closing automatically…</p>
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error */}
         {step === 'error' && (
           <div className="flex flex-col items-center gap-3 py-6">
             <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
@@ -266,47 +285,27 @@ export function NfcPairingModal({ event, isOpen, onClose }: NfcPairingModalProps
             </Button>
           </div>
         )}
-      </div>
-    </Modal>
-  );
-}
 
-export function NfcMismatchModal({ event, isOpen, onClose, onRelink }: NfcMismatchModalProps) {
-  if (!event) return null;
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Tag Mismatch" size="md">
-      <div className="space-y-4">
-        <p className="text-pf-text-secondary text-sm">
-          This tag is already linked to a different spool. Would you like to relink it?
-        </p>
-
-        <div className="bg-pf-bg-2 border border-pf-border rounded-lg p-4 space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-pf-text-secondary">Tag</span>
-            <Badge variant="default">{event.tagUid}</Badge>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-pf-text-secondary">Currently linked to</span>
-            <span className="text-pf-text-primary">{event.currentSpoolName ?? `Spool #${event.currentSpoolId}`}</span>
-          </div>
-          {event.expectedSpoolName && (
-            <div className="flex justify-between text-sm">
-              <span className="text-pf-text-secondary">Expected</span>
-              <span className="text-pf-text-primary">{event.expectedSpoolName}</span>
+        {/* Unavailable — hub dropped */}
+        {step === 'unavailable' && (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center">
+              <svg className="w-6 h-6 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
             </div>
-          )}
-        </div>
-
-        <div className="flex gap-3 justify-end pt-2">
-          <Button variant="subtle" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={onRelink}>
-            Relink
-          </Button>
-        </div>
+            <p className="text-pf-text-primary font-medium">NFC reader unavailable</p>
+            <p className="text-pf-text-secondary text-sm">
+              The connection to the NFC hub was lost. Check your server connection and try again.
+            </p>
+            <Button variant="subtle" onClick={handleClose}>
+              Close
+            </Button>
+          </div>
+        )}
       </div>
     </Modal>
   );
 }
+

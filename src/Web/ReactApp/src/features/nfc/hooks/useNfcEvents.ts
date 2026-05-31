@@ -1,65 +1,42 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { toast } from 'sonner';
-import { printerSignalRService } from '@/services/printer-signalr';
-import type {
-  NfcTagUnknownEvent,
-  NfcTagKnownEvent,
-  NfcTagMismatchEvent,
-  NfcReaderOfflineEvent,
-} from '@/features/nfc/types';
+import { nfcHubService } from '@/services/nfcHubService';
+import type { NfcTagUnknownEvent, NfcTagReadEvent } from '@/features/nfc/types';
 
 interface UseNfcEventsOptions {
   onTagUnknown?: (event: NfcTagUnknownEvent) => void;
-  onTagMismatch?: (event: NfcTagMismatchEvent) => void;
 }
 
 /**
- * Subscribes to NFC SignalR events on the printer hub.
+ * Subscribes to NFC SignalR events on /hubs/nfc (PR #383 contract).
  * - `nfctagunknown` → triggers onTagUnknown callback (opens pairing modal)
- * - `nfctagknown` → silent toast confirmation
- * - `nfctagmismatch` → triggers onTagMismatch callback (warning modal)
- * - `nfcreaderoffline` → toast warning
+ * - `nfctagread`    → silent toast confirmation for known tags
  */
-export function useNfcEvents({ onTagUnknown, onTagMismatch }: UseNfcEventsOptions = {}) {
+export function useNfcEvents({ onTagUnknown }: UseNfcEventsOptions = {}) {
   const onTagUnknownRef = useRef(onTagUnknown);
-  const onTagMismatchRef = useRef(onTagMismatch);
   const [lastUnknownTag, setLastUnknownTag] = useState<NfcTagUnknownEvent | null>(null);
-  const [lastMismatch, setLastMismatch] = useState<NfcTagMismatchEvent | null>(null);
 
   useEffect(() => { onTagUnknownRef.current = onTagUnknown; }, [onTagUnknown]);
-  useEffect(() => { onTagMismatchRef.current = onTagMismatch; }, [onTagMismatch]);
 
   useEffect(() => {
-    printerSignalRService.connect();
+    nfcHubService.ensureConnected();
 
-    const unsubUnknown = printerSignalRService.onNfcTagUnknown((event: NfcTagUnknownEvent) => {
+    const unsubUnknown = nfcHubService.onTagUnknown((event: NfcTagUnknownEvent) => {
       setLastUnknownTag(event);
       onTagUnknownRef.current?.(event);
     });
 
-    const unsubKnown = printerSignalRService.onNfcTagKnown((event: NfcTagKnownEvent) => {
-      toast.success(`Spool recognized: ${event.spoolName ?? event.tagUid}`);
-    });
-
-    const unsubMismatch = printerSignalRService.onNfcTagMismatch((event: NfcTagMismatchEvent) => {
-      setLastMismatch(event);
-      onTagMismatchRef.current?.(event);
-    });
-
-    const unsubOffline = printerSignalRService.onNfcReaderOffline((event: NfcReaderOfflineEvent) => {
-      toast.warning(`Tag reader offline${event.deviceName ? `: ${event.deviceName}` : ''}`);
+    const unsubRead = nfcHubService.onTagRead((event: NfcTagReadEvent) => {
+      toast.success(`Spool recognized: ${event.spoolName ?? `#${event.spoolId}`}`);
     });
 
     return () => {
       unsubUnknown();
-      unsubKnown();
-      unsubMismatch();
-      unsubOffline();
+      unsubRead();
     };
   }, []);
 
   const clearLastUnknownTag = useCallback(() => setLastUnknownTag(null), []);
-  const clearLastMismatch = useCallback(() => setLastMismatch(null), []);
 
-  return { lastUnknownTag, lastMismatch, clearLastUnknownTag, clearLastMismatch };
+  return { lastUnknownTag, clearLastUnknownTag };
 }

@@ -1,52 +1,42 @@
-/** Payload for `nfctagunknown` SignalR event — an unrecognized tag was scanned */
+/**
+ * Payload for `nfctagunknown` from /hubs/nfc — unrecognized tag, no binding found.
+ * Matches NfcTagService.cs payload: { tagUid, printerId, readAt }
+ */
 export interface NfcTagUnknownEvent {
   tagUid: string;
-  deviceId: string;
-  deviceName?: string;
   printerId?: string;
-  printerName?: string;
-  scannedAt: string;
+  readAt: string;
 }
 
-/** Payload for `nfctagknown` SignalR event — a recognized tag was scanned */
-export interface NfcTagKnownEvent {
+/**
+ * Payload for `nfctagread` from /hubs/nfc — known tag scanned, binding exists.
+ * Matches NfcTagService.cs payload: { tagUid, spoolId, spoolName, printerId, trayId, readAt }
+ */
+export interface NfcTagReadEvent {
   tagUid: string;
   spoolId: number;
   spoolName?: string;
-  deviceId: string;
-  deviceName?: string;
-  scannedAt: string;
+  printerId?: string;
+  trayId?: string;
+  readAt: string;
 }
 
-/** Payload for `nfctagmismatch` — tag is bound to a different spool than expected */
-export interface NfcTagMismatchEvent {
-  tagUid: string;
-  deviceId: string;
-  deviceName?: string;
-  currentSpoolId: number;
-  currentSpoolName?: string;
-  expectedSpoolId?: number;
-  expectedSpoolName?: string;
-  scannedAt: string;
-}
-
-/** Payload for `nfcreaderoffline` — reader device went offline */
-export interface NfcReaderOfflineEvent {
-  deviceId: string;
-  deviceName?: string;
-}
-
-/** Request body for POST /api/nfc/link */
+/** Request body for POST /api/nfc/link (matches LinkNfcTagRequest C# DTO) */
 export interface NfcLinkRequest {
   tagUid: string;
   spoolId: number;
-  deviceId: string;
+  printerId?: string;
+  trayId?: string;
 }
 
 /** Response from POST /api/nfc/link */
 export interface NfcLinkResponse {
-  success: boolean;
-  message?: string;
+  tagUid: string;
+  spoolId?: number;
+  printerId?: string;
+  trayId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type NfcPairingStep =
@@ -55,4 +45,5 @@ export type NfcPairingStep =
   | 'search'
   | 'confirm'
   | 'success'
-  | 'error';
+  | 'error'
+  | 'unavailable';
