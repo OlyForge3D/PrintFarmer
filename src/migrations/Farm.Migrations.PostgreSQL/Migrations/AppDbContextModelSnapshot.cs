@@ -4455,6 +4455,52 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("UserBalances");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AaguidDescription")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("CredentialId")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<long>("SignCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CredentialId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("UserPasskeyCredentials");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5702,6 +5748,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
                         .WithMany()
