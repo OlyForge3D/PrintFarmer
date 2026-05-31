@@ -28,7 +28,6 @@ namespace Farm.Web.Api.Services.PowerMonitor;
 /// </remarks>
 public class PowerMonitorPollingService(
     IServiceScopeFactory scopeFactory,
-    IEnumerable<ISmartPlugProvider> providers,
     IConfiguration configuration,
     ILogger<PowerMonitorPollingService> logger) : BackgroundService
 {
@@ -59,8 +58,10 @@ public class PowerMonitorPollingService(
                 AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 IJobCostCalculationService costService =
                     scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+                IEnumerable<ISmartPlugProvider> scopedProviders =
+                    scope.ServiceProvider.GetServices<ISmartPlugProvider>();
 
-                await PollMonitorsAsync(db, stoppingToken);
+                await PollMonitorsAsync(db, scopedProviders, stoppingToken);
                 await AggregateCompletedJobsAsync(db, costService, interval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -83,7 +84,7 @@ public class PowerMonitorPollingService(
     /// <see cref="DomainPowerReading"/> row for each successful reading.
     /// Provider errors are logged and the monitor is skipped.
     /// </summary>
-    private async Task PollMonitorsAsync(AppDbContext db, CancellationToken ct)
+    private async Task PollMonitorsAsync(AppDbContext db, IEnumerable<ISmartPlugProvider> providers, CancellationToken ct)
     {
         List<DomainPowerMonitor> monitors = await db.PowerMonitors
             .Where(m => m.IsEnabled)
