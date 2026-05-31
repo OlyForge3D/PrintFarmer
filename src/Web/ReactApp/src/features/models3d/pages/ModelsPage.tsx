@@ -12,6 +12,7 @@ import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { ModelsFileBrowser } from '@/features/models3d/components/ModelsFileBrowser';
+import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
 import type { GCodeViewerProps } from '@/features/models3d/components/3d/GCodeViewer3D';
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
@@ -33,6 +34,7 @@ export const ModelsPage: React.FC = () => {
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [selectedModelForTagging, setSelectedModelForTagging] = useState<Model | null>(null);
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const [quickSliceModel, setQuickSliceModel] = useState<Model | null>(null);
 
   const { data: allTags = [] } = useQuery<ModelTag[]>({
     queryKey: ['model-tags'],
@@ -130,7 +132,7 @@ export const ModelsPage: React.FC = () => {
             onSelectionChange={setSelectedModelIds}
             onOpenModel={setViewerModel}
             onSliceModel={(model) => {
-              window.location.assign(`/slicer?modelId=${model.id}`);
+              setQuickSliceModel(model);
             }}
             onShowTagModal={() => setShowBulkTagModal(true)}
             onShowSingleTagModal={(model) => {
@@ -219,6 +221,13 @@ export const ModelsPage: React.FC = () => {
             initialTags={selectedModelForTagging.tags || []}
           />
         )}
+
+        {/* Quick Slice Modal */}
+        <QuickSliceModal
+          isOpen={quickSliceModel !== null}
+          onClose={() => setQuickSliceModel(null)}
+          model={quickSliceModel}
+        />
 
         {/* Floating Action Button for Upload */}
         <FloatingActionButton
