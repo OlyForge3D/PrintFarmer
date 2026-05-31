@@ -14,6 +14,12 @@ import {
   DispatchUploadProgressDto,
   FailureDetectionEvent,
 } from "@/types/api";
+import type {
+  NfcTagUnknownEvent,
+  NfcTagKnownEvent,
+  NfcTagMismatchEvent,
+  NfcReaderOfflineEvent,
+} from "@/features/nfc/types";
 import { apiClient } from "@/services/api";
 import { getHubUrl } from "@/common/utils/apiUrlHelpers";
 
@@ -27,6 +33,10 @@ type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
+type NfcTagUnknownCallback = (event: NfcTagUnknownEvent) => void;
+type NfcTagKnownCallback = (event: NfcTagKnownEvent) => void;
+type NfcTagMismatchCallback = (event: NfcTagMismatchEvent) => void;
+type NfcReaderOfflineCallback = (event: NfcReaderOfflineEvent) => void;
 
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
@@ -281,6 +291,20 @@ export class PrinterSignalRService {
       }
     );
 
+    // NFC event handlers (all lowercase per SignalR convention)
+    this.connection.on("nfctagunknown", (event: NfcTagUnknownEvent) => {
+      this.nfcTagUnknownCallbacks.forEach((cb) => { try { cb(event); } catch (e) { console.error("NFC tag unknown cb error:", e); } });
+    });
+    this.connection.on("nfctagknown", (event: NfcTagKnownEvent) => {
+      this.nfcTagKnownCallbacks.forEach((cb) => { try { cb(event); } catch (e) { console.error("NFC tag known cb error:", e); } });
+    });
+    this.connection.on("nfctagmismatch", (event: NfcTagMismatchEvent) => {
+      this.nfcTagMismatchCallbacks.forEach((cb) => { try { cb(event); } catch (e) { console.error("NFC tag mismatch cb error:", e); } });
+    });
+    this.connection.on("nfcreaderoffline", (event: NfcReaderOfflineEvent) => {
+      this.nfcReaderOfflineCallbacks.forEach((cb) => { try { cb(event); } catch (e) { console.error("NFC reader offline cb error:", e); } });
+    });
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -323,6 +347,10 @@ export class PrinterSignalRService {
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
   private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
+  private nfcTagUnknownCallbacks: NfcTagUnknownCallback[] = [];
+  private nfcTagKnownCallbacks: NfcTagKnownCallback[] = [];
+  private nfcTagMismatchCallbacks: NfcTagMismatchCallback[] = [];
+  private nfcReaderOfflineCallbacks: NfcReaderOfflineCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -509,6 +537,24 @@ export class PrinterSignalRService {
       const idx = this.discoveryCompletedCallbacks.indexOf(callback);
       if (idx > -1) this.discoveryCompletedCallbacks.splice(idx, 1);
     };
+  }
+
+  // NFC event subscriptions
+  public onNfcTagUnknown(callback: NfcTagUnknownCallback): () => void {
+    this.nfcTagUnknownCallbacks.push(callback);
+    return () => { const idx = this.nfcTagUnknownCallbacks.indexOf(callback); if (idx > -1) this.nfcTagUnknownCallbacks.splice(idx, 1); };
+  }
+  public onNfcTagKnown(callback: NfcTagKnownCallback): () => void {
+    this.nfcTagKnownCallbacks.push(callback);
+    return () => { const idx = this.nfcTagKnownCallbacks.indexOf(callback); if (idx > -1) this.nfcTagKnownCallbacks.splice(idx, 1); };
+  }
+  public onNfcTagMismatch(callback: NfcTagMismatchCallback): () => void {
+    this.nfcTagMismatchCallbacks.push(callback);
+    return () => { const idx = this.nfcTagMismatchCallbacks.indexOf(callback); if (idx > -1) this.nfcTagMismatchCallbacks.splice(idx, 1); };
+  }
+  public onNfcReaderOffline(callback: NfcReaderOfflineCallback): () => void {
+    this.nfcReaderOfflineCallbacks.push(callback);
+    return () => { const idx = this.nfcReaderOfflineCallbacks.indexOf(callback); if (idx > -1) this.nfcReaderOfflineCallbacks.splice(idx, 1); };
   }
 
   // Discovery group methods
