@@ -208,3 +208,7 @@ Created `.squad/decisions/inbox/brett-gcode-preview-worker-throwaway.md` with:
 - Service abstraction code sketch
 - v1→v2 LOC delta estimate (200–400 LOC rework)
 - Go/no-go recommendation (GO: ship v1 now)
+
+## Learnings
+
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.

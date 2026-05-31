@@ -94,3 +94,7 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
    - Add `AuthMethod` field to login audit
 
 **Linked Decisions:** decisions.md entries "Backlog: Electricity Cost Tracking via Smart Plugs", "Backlog: Printables.com Model Import", "Backlog: Passkey (WebAuthn) Login Support"
+
+## Learnings
+
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.

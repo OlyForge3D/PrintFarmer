@@ -41,35 +41,9 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - Slider + dropdown combo pattern for numeric + categorical parameters
 - 3D face selection pattern (click detection + visual feedback)
 
-## 2026-07-31: 4 Frontend Beads — Blob Leak, Profile Reset, Filtering, Multi-Select
+## Archived Detailed Work
 
-**Role:** Frontend / Slicer UX  
-**Status:** ✅ COMPLETE — All 4 beads fixed, build+lint+tests clean
-
-### Bead PFarm1-eidj: Blob URL Memory Leak Fix
-- `geometryToBlobUrl()` now tracks created URLs via `useRef<Set<string>>`
-- Old blob URLs revoked when models replaced by cut operations
-- All tracked URLs cleaned up on component unmount via `useEffect` return
-- **File:** `SlicerWorkspace.tsx`
-
-### Bead PFarm1-eh3a: Machine Profile Reset Fix
-- Auto-select effect now checks both system (`machineProfilesData`) AND custom (`customMachineProfiles`) for current selection validity
-- Previously: selecting a custom/imported profile triggered the effect to reset to first system profile because custom profiles weren't in `machineProfilesData`
-- **File:** `NewSliceJobPage.tsx` — useEffect at machine profile auto-select
-
-### Bead PFarm1-yigr: Filter Imported Profiles by Printer
-- Custom machine profiles filtered by selected printer using rawJson `printer_model` field + fuzzy name matching
-- Custom filament/process profiles filtered by `compatible_printers` in rawJson when available
-- Profiles without matching metadata shown as fallback (safe default)
-- **File:** `NewSliceJobPage.tsx` — `customMachineProfiles`, `customFilamentProfiles`, `customProcessProfiles` useMemo blocks
-
-### Bead PFarm1-issr: Multi-Select File Import
-- All 3 hidden file inputs (`machine`, `filament`, `process`) now have `multiple` attribute
-- Import handlers iterate over `FileList` instead of accessing `files[0]`
-- Per-file error handling with aggregate success/fail toast
-- **File:** `NewSliceJobPage.tsx` — `handleMachineFileImport`, `handleFilamentFileImport`, `handleProfileFileImport`
-
-**Validation:** ✅ Build 0 errors (7.99s), ESLint 0 errors, 1734/1734 tests pass
+**2026 Slicer UX & Profile Management:** 4 beads (blob-leak memory fix, profile-reset validation, imported-profile filtering by printer, multi-select file import). All COMPLETE, build+lint+tests clean. Profiles now filter by `compatible_printers` in rawJson and fuzzy printer-model match. See `history-archive.md` for full details. Camera management UI + login audit frontend (23 tests) completed 2026-05-26.
 
 
 ## Recent
@@ -114,67 +88,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 
 bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from bambuddy" and "Consider a richer slice progress contract" for details.
 
-## Team Assignment: Bambuddy Adoption Plan (Scribe Merge, 2026-05-31)
+### Bambuddy Adoption & Settings Consolidation
 
-**Incoming Work:** G-code preview viewer + Quick Slice UX (Phases 1-2, ~6 work items).
-
-**Context from Research:**
-
-**Phase 1 — G-code Preview Viewer:**
-- Integrate `gcode-preview` npm library (v2.18.x, stable; v3 deferred until stabilized)
-- Extend existing `GCodeViewer3D.tsx` component
-- Wire into artifact viewer path (`ArchivesPage` preview flow)
-- Accepts main-thread parsing for files <10MB (Phase 1b large-file guardrails are follow-up)
-- Core features: layer controls, filament color mapping, build-volume visualization
-
-**Phase 1 — Quick Slice UX Modal:**
-- Add "Quick Slice" entry point (preset-first design, NOT replacing `NewSliceJobPage`)
-- Three core dropdowns: printer profile, process profile, filament profile × N slots
-- Bed-type override + plate picker
-- Hide raw sliders behind "Advanced" toggle
-- Print farm safety: operators pick pre-validated config triplets, no per-job parameter drift
-
-**Phase 2 — Multi-Plate 3MF Picker (Deferred):**
-- Smart filament auto-selection by type + color proximity (bambuddy scoring model in decision record)
-- Multi-plate 3MF metadata extraction (Web Worker design, not main-thread JSZip copy)
-
-**Competitive Advantage (Do NOT remove):**
-- PrintFarmer's raw `.gcode` upload is a genuine differentiator vs Bambu-only tools
-- Moonraker, PrusaLink, FlashForge, SDCP all accept raw gcode natively
-- Multi-backend farms depend on this pathway
-- Per-printer validation deferred to send-time, not upload-time (library stays backend-agnostic)
-
-**Linked Decisions:** decisions.md entries "Bambuddy Feature Adoption", "Bambuddy Slicing UX Comparison Findings", and "Consider G-code toolpath preview parity from bambuddy"
-
-
----
-
-### Bambuddy Adoption Finalization — 2026-05-31
-
-**Brady Confirmation:** Phase 2 Quick Slice as modal confirmed (not replacing NewSliceJobPage). Raw sliders hide behind "Advanced" toggle confirmed.
-
-**Settings Consolidation Candidates Incoming:** Brett identified 15+ scattered admin pages (Filament Library, Slicer Profiles, Printer Groups, Locations, Cameras, NFC Devices, Notifications, Webhooks, User Management, Data Management, Tags, Bed Types, Custom Fields, API Keys, Admin Dashboard) as candidates for consolidation into unified Settings area with tab navigation.
-
-**Recommended Settings Tabs for Ripley:**
-- General (language, theme, display prefs, system status, tag/bed-type enums, custom fields)
-- Filament (library, Spoolman config, AMS thresholds)
-- Slicing (profiles, worker registration, default print options)
-- Hardware (cameras, NFC devices, smart plugs)
-- Notifications (providers, message templates, notification log)
-- Integrations (webhooks, API keys, external URLs, MQTT, Home Assistant)
-- Data (export, import, reset, backup)
-- Users (local users, LDAP, OIDC, 2FA, login audit)
-
-**Key UX Patterns (from Settings UX Research):**
-- Cross-tab search with tab-aware indexing
-- Collapsible cards within each tab (progressive disclosure)
-- Inline modals for smart plug add, notification provider add, user creation
-- Masked secrets + revoke pattern (never edit-in-place for tokens)
-
-**NFC Tag Management Modal Incoming (Phase TBD):**
-- LinkSpoolModal + AssignSpoolModal pattern (search-first UX)
-- WebSocket real-time sync for tag-link events
-- Passive reads for known tags (no UX noise)
-- Mismatch detection + error recovery flows
-
-**Linked Decisions:** decisions.md entries "Decision: bambuddy Settings UX Patterns & PrintFarmer Nav Consolidation", "Decision: bambuddy NFC UX Patterns for Spool Binding & Tag Management"
+Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, extend GCodeViewer3D.tsx, wire to ArchivesPage), Quick Slice UX modal (preset-first, 3 profile dropdowns, hide raw sliders behind "Advanced"). Phase 2 deferred: multi-plate 3MF picker with smart filament auto-selection. Settings consolidation identified 15+ candidate admin pages (Filament, Slicer Profiles, Cameras, NFC, etc.) for unified nav with 8 tabs: General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users. Key UX: cross-tab search, collapsible cards, inline modals, masked secrets. NFC tag management modal (LinkSpoolModal + AssignSpoolModal, WebSocket real-time sync) deferred to later phase.
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.

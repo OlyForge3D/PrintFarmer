@@ -468,3 +468,57 @@ Spaghetti detection shield says "Printer is not actively printing." on actively-
 
 Frontend is a pass-through. Per triage rule, backend-rooted bugs are not implemented by Ripley. Comment + `area:backend` label posted to #309; Lambert owns the fix. A small follow-up may be needed on the frontend label map (`failureDetectionStatus.ts`) if Lambert introduces a new `state: 'unsupported'` value, but no React changes are required for the bug itself.
 
+
+---
+
+### 2026-05-31T09:25-07:00: Brady triage — accept all defaults
+**By:** Brady (via Copilot)
+**What:** Brady accepted ALL 14 default recommendations from Dallas-3's three backlog drops. These answers should be incorporated into the corresponding GitHub issues at filing time.
+
+**Electricity tracking:**
+1. Rate granularity: per-printer rate + farm-wide fallback (TOU deferred)
+2. Idle/standby amortization: NO (defer to phase 2)
+3. HomeAssistant provider in Phase 1: YES (ship alongside Kasa/Tasmota/Shelly)
+4. PowerReading retention: 90 days hot, auto-prune
+5. Missing-data UI: "~X kWh (estimated)" with tooltip, static wattage fallback
+
+**Printables import:**
+6. Multi-file models in Phase 1: user picks ONE file from list (multi-file group import deferred)
+7. Attribution display: show on BOTH slicer job panel AND library card
+8. Private models: out of scope for Phase 1
+9. MakerWorld: file separate tracker issue NOW (as deferred/blocked on Bambu Cloud token)
+
+**Passkey login:**
+10. 2FA semantics: passkey login DOES satisfy 2FA (userVerification=required); future TOTP exempt for passkey users
+11. Recovery flow: password remains as recovery path (admin reset deferred)
+12. Device naming: OPTIONAL, default to AAGUID metadata lookup string
+13. Discoverable credentials: NO in Phase 1 — start with `residentKey: preferred` + username hint
+14. Passkey-only accounts (drop password): out of scope for Phase 1, flag for later phase
+
+**Why:** Cleared all policy gates so Dallas can file all ~30 issues with concrete scope.
+### 2026-05-31T09:42-07:00: Directive — commit messages are shipping artifacts (scrub strictly)
+**By:** Brady (via Copilot)
+**What:** Brady flagged that 3 commit subjects on `origin/development` contain "bambuddy" — `52174133c`, `3fe3ed503`, `96dbcd4aa`. The prior no-external-refs directive (2026-05-31T09:14) covered issues/PRs/source/comments but Scribe interpreted commit subjects/bodies as out-of-scope. They are NOT out of scope.
+
+**Clarification — STRICT, applies retroactively to all future commits:**
+Commit messages (subjects AND bodies AND trailers, on every branch, every commit) MUST NOT contain the strings:
+- "bambuddy" (case-insensitive)
+- "maziggy" (case-insensitive)
+- "Bambu Buddy" or any other variant
+- Any URL pointing to github.com/maziggy/bambuddy
+
+Acceptable phrasing for the same work:
+- "adoption plan" / "Phase N work breakdown"
+- "external 3D-printer-management reference adoption"
+- Or just describe the feature standalone: "g-code preview", "quick-slice UX", "notifications", etc.
+
+**Scope clarification:**
+- **In scope (must scrub):** commit subjects, commit bodies, PR titles, PR bodies, issue titles, issue bodies, source code, code comments, changelogs, release notes, any documentation under `docs/` or `README*`.
+- **Out of scope (exempt):** `.squad/` internal memory files (decisions.md, agents/*/history.md, log/, orchestration-log/, decisions-archive). These are team-private memory.
+
+**Remediation for the 3 historical dirty commits:**
+NOT rewriting history (development is a shared integration branch — force-push risk > cleanup benefit). The 3 commits remain as-is; this directive prevents future occurrences.
+
+**Action item:** Scribe charter updated this session to enforce commit-message scrub before any `git commit -F` call.
+
+**Why:** Commit history is permanent and public the moment it's pushed. The original directive was written assuming "shipping artifacts" was self-evident — Brady's flag confirms commit messages must be enumerated explicitly.
