@@ -85,6 +85,7 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 ### 2026-05-30: PR #329 iOS Unit Tests package-product failure
 
 - Failure mode: `xcodebuild test` can fail before XCTest runs with `Missing package product 'SnapshotTesting'` even when the companion app build passes. App build resolves only app dependencies; the test target also needs every test-only package registered in `PBXProject.packageReferences`.
+- Secondary failure mode: Swift 6/XCTest rejects `XCTAssertEqual(optionalDouble, expected, accuracy:)`; unwrap the optional first with `XCTUnwrap` before using the accuracy overload. Prefer helper defaults of `#filePath` over `#file` to avoid XCTest source-location warnings.
 - Fix pattern: when adding an SPM product to a test target in `project.pbxproj`, verify all three links exist: `PBXBuildFile` in test Frameworks, `XCSwiftPackageProductDependency` in target `packageProductDependencies`, and the `XCRemoteSwiftPackageReference` listed under project `packageReferences`.
 - CI coupling: PFarm1 PR #329's iOS workflow runs the checked-in `mobile/` project directly, not `/Users/jpapiez/s/PFarm-Ios`; workflow-only assumptions should be verified from `.github/workflows/ios-pr-ci.yml` before switching repos.
 
