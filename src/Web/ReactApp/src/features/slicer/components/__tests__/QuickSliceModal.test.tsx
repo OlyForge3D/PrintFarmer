@@ -188,7 +188,7 @@ describe('QuickSliceModal', () => {
       fireEvent.click(screen.getByRole('button', { name: /slice/i }));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/slicer/jobs');
+        expect(mockNavigate).toHaveBeenCalledWith('/slice-jobs');
       });
     });
   });
