@@ -146,3 +146,35 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 
 **Linked Decisions:** decisions.md entries "Bambuddy Feature Adoption", "Bambuddy Slicing UX Comparison Findings", and "Consider G-code toolpath preview parity from bambuddy"
 
+
+---
+
+### Bambuddy Adoption Finalization — 2026-05-31
+
+**Brady Confirmation:** Phase 2 Quick Slice as modal confirmed (not replacing NewSliceJobPage). Raw sliders hide behind "Advanced" toggle confirmed.
+
+**Settings Consolidation Candidates Incoming:** Brett identified 15+ scattered admin pages (Filament Library, Slicer Profiles, Printer Groups, Locations, Cameras, NFC Devices, Notifications, Webhooks, User Management, Data Management, Tags, Bed Types, Custom Fields, API Keys, Admin Dashboard) as candidates for consolidation into unified Settings area with tab navigation.
+
+**Recommended Settings Tabs for Ripley:**
+- General (language, theme, display prefs, system status, tag/bed-type enums, custom fields)
+- Filament (library, Spoolman config, AMS thresholds)
+- Slicing (profiles, worker registration, default print options)
+- Hardware (cameras, NFC devices, smart plugs)
+- Notifications (providers, message templates, notification log)
+- Integrations (webhooks, API keys, external URLs, MQTT, Home Assistant)
+- Data (export, import, reset, backup)
+- Users (local users, LDAP, OIDC, 2FA, login audit)
+
+**Key UX Patterns (from Settings UX Research):**
+- Cross-tab search with tab-aware indexing
+- Collapsible cards within each tab (progressive disclosure)
+- Inline modals for smart plug add, notification provider add, user creation
+- Masked secrets + revoke pattern (never edit-in-place for tokens)
+
+**NFC Tag Management Modal Incoming (Phase TBD):**
+- LinkSpoolModal + AssignSpoolModal pattern (search-first UX)
+- WebSocket real-time sync for tag-link events
+- Passive reads for known tags (no UX noise)
+- Mismatch detection + error recovery flows
+
+**Linked Decisions:** decisions.md entries "Decision: bambuddy Settings UX Patterns & PrintFarmer Nav Consolidation", "Decision: bambuddy NFC UX Patterns for Spool Binding & Tag Management"

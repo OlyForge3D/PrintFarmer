@@ -118,3 +118,42 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 **Newt** (#283 design spec) unblocked: Status-gating validation confirmed via PR #308 merge. Controls can safely use printing/paused blocking.
 **Gorman** (#280 capabilities) unblocked: Capabilities endpoint live; UI gating design decisions finalized.
 **Hudson/Lambert:** API guards for `/temps`, `/move`, `/moveto` now live. Skill published for future reference.
+
+## Learnings — 2026-05-31 Backlog Planning Session
+
+**Scope:** Three net-new backlog stubs filed as decision inbox entries for Brady review.
+
+### Key Findings
+
+- **Energy cost schema is already partially built.** `PrintJob` has `EnergyCostUsd`,
+  `MaterialCostUsd`, `MachineTimeCostUsd`, `TotalCostUsd`, `CostCalculatedAt`. `Printer`
+  has `Wattage` and `MachineHourlyRate`. The smart plug feature adds real measurements
+  (`KwhUsed`, `PowerMonitor` entity, `PowerReading` time-series) on top of an existing
+  cost skeleton — this reduces migration and service risk significantly.
+
+- **Smart plug "don't chase" deferral superseded.** The 2026-05-31 bambuddy adoption
+  decisions.md listed smart plug integration as deferred ("can revisit when demand is
+  proven"). Brady's 2026-05-31 explicit request to plan this item supersedes that
+  deferral. Decision files should not treat it as blocked.
+
+- **Printables GraphQL API is public.** No OAuth or personal access tokens required for
+  public model metadata + CDN file downloads. `ISmartPlugProvider` pattern (analogous to
+  `IBackendClientPlugin`) fits well for plug provider abstraction. `Model3DFile` entity
+  needs `SourceUrl`, `SourceLicense`, `SourceCreator`, `ImportedAt` attribution fields
+  (slicer context migrations only).
+
+- **MakerWorld hard-blocked.** Requires Bambu Cloud account token
+  (`api.bambulab.com/v1/design-service/*`). PrintFarmer carries no such token today.
+  Do not bundle with Printables work; file as a separate deferred issue if Brady wants.
+
+- **Passkey/WebAuthn stack is straightforward.** `Fido2NetLib` is the canonical .NET
+  library. All major browsers support passkeys natively as of 2026. The main complexity
+  is the two-ceremony flow (register + assert), challenge cache (use existing
+  `IDistributedCache`), and `UserPasskeyCredential` entity (main `AppDbContext`, not
+  slicer). rpId config must be environment-variable-driven (`PFARM__WebAuthn__RelyingPartyId`).
+
+### Files Written
+
+- `.squad/decisions/inbox/dallas-backlog-electricity-tracking.md`
+- `.squad/decisions/inbox/dallas-backlog-printables-import.md`
+- `.squad/decisions/inbox/dallas-backlog-passkey-login.md`

@@ -103,3 +103,108 @@ Created `.squad/decisions/inbox/brett-bambuddy-ux-comparison.md` with four decis
 2. Evaluate `.bbscfg` / OrcaSlicer bundle import as canonical farm config
 3. Preserve and document raw gcode upload as differentiator
 4. Implement smart filament auto-selection by type+color proximity
+
+## 2026-05-31: bambuddy Settings System & NFC UX Deep Dive
+
+**Role:** Research specialist  
+**Status:** ✅ Complete — Decision drops written to inbox
+
+### PART A: Settings UX Findings
+
+**Key Discovery:** bambuddy consolidates all admin/config into a **single `/settings` route with 12 tabs**, not scattered navigation.
+
+- **Tab Structure:** General, Plugs, Notifications, Queue, Filament, Network, APIKeys, Virtual-Printer, SpoolBuddy, Failure-Detection, Users (with sub-tabs), Backup
+- **Organization:** Semantic cards within each tab; collapsible for progressive disclosure
+- **Search:** Cross-tab search with keyword indexing; results tagged by tab (e.g., "notifications → Message Templates")
+- **Secrets:** Tokens masked + revoke-only (never edit in-place); one-time copy for display
+
+**PrintFarmer Contrast:** 25+ scattered nav items (SettingsPage, FilamentManagementPage, LocationManagementAdminPage, UserManagementPage, CamerasPage, NfcDevicesPage, WebhooksAdminPage, TagAdminPage, BedTypeAdminPage, CustomFieldsAdminPage, DataManagementPage, etc.)
+
+**Recommendation:** Collapse 15+ settings-like pages into a single Settings area with 8-9 tabs (General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users). Keep Printers, Queue, Projects, Analytics, Automation as top-level workflow destinations.
+
+**Decision Drop:** `.squad/decisions/inbox/brett-bambuddy-settings-ux.md` — Full nav consolidation strategy + tab structure.
+
+### PART B: NFC UX Findings
+
+**Architecture:** bambuddy pairs physical RFID tags (via SpoolBuddy ESP32) with spools using a **two-step modal flow**.
+
+**Binding Flow:**
+1. SpoolBuddy scans tag on tray → backend event
+2. Frontend shows `LinkSpoolModal` with tag UUID + printer/AMS/tray context
+3. User searches inventory by name/vendor/material/ID (search-first, not scroll)
+4. User clicks spool → `POST /link-spool { spoolId, tagUid, printerId, amsId, trayId }`
+5. Success: binding persisted, modal closes
+
+**Tag Reading (Happy Path):**
+- Re-scanning a known tag is **silent** (no modal)
+- System updates spool "last_read" timestamp
+- Other sessions notified via WebSocket (real-time sync)
+
+**Error Handling:**
+- **Unrecognized tag:** LinkSpoolModal appears (normal binding flow); user can search or create new spool
+- **Tag bound to different spool/printer:** Toast warning; user can relink or cancel
+- **Tag mismatch (physical vs binding):** Warning modal with details; user can override
+- **Offline SpoolBuddy:** Local queue; syncs on reconnect
+
+**Design Patterns Worth Stealing:**
+1. Search-first modal (not scroll-heavy list)
+2. Passive reads (no modal spam for known tags)
+3. WebSocket real-time sync across sessions
+4. Toast feedback (not error dialogs)
+5. One-way tag write (never edit-in-place; prevents corruption)
+
+**Decision Drop:** `.squad/decisions/inbox/brett-bambuddy-nfc-ux.md` — Full NFC binding flows, error cases, sync strategy, + PrintFarmer implementation roadmap.
+
+### Files Investigated
+
+- `maziggy/bambuddy: frontend/src/pages/SettingsPage.tsx` (Truncated; ~700 lines)
+- `maziggy/bambuddy: frontend/src/components/SpoolBuddySettings.tsx` (Device management for ESP32)
+- `maziggy/bambuddy: frontend/src/components/LinkSpoolModal.tsx` (Tag-to-spool binding UX)
+- `maziggy/bambuddy: frontend/src/components/AssignSpoolModal.tsx` (Spool-to-slot assignment)
+- `maziggy/bambuddy: frontend/src/pages/InventoryPage.tsx` (Spool inventory with NFC integration)
+- `maziggy/bambuddy: frontend/src/components/Layout.tsx` (defaultNavItems + sidebar)
+
+### Key Takeaway
+
+**Settings = Consolidation Opportunity:** PrintFarmer's scattered admin pages can collapse into a single Settings hub modeled on bambuddy. NFC UX is proven; adopt modal-based binding with real-time sync for immediate farm-level coherence.
+
+## 2026-05-31: gcode-preview v1 → v2 Worker Throwaway Risk Analysis
+
+**Role:** Research specialist (technical feasibility analysis)  
+**Status:** ✅ Complete — Decision inbox updated, learnings captured  
+**Request:** Brady asked: "Will there be unnecessary throwaway work if we implement v1 (no-worker) and v2 (with workers)?"  
+
+### Findings
+
+1. **gcode-preview v2.18.0 has NO native worker support.**
+   - `GCodePreview.processGCode()` parses G-code synchronously on main thread.
+   - No streaming API; parser and rendering are tightly coupled to Three.js.
+   - xyz-tools fork (active maintainer) lists "streaming" on roadmap but not yet shipped.
+
+2. **Throwaway risk is LOW (~200–400 LOC rework, not deletion).**
+   - UI components (layer slider, color picker, T-command filter) reuse ~95%.
+   - Parser invocation site changes (sync → async), but only 1–2 files affected.
+   - No throwaway logic; v1 code refactors cleanly to v2 service abstraction.
+
+3. **Cheapest architecture: implement `GcodeParserService` abstraction NOW.**
+   - Single point of change for parser invocation (50–60 LOC in v2).
+   - All UI remains unchanged.
+   - Estimated v1→v2 delta: +200 LOC net (worker harness + messaging).
+
+4. **v1→v2 upgrade is a 2-week sprint task**, not a multi-month refactor.
+   - Day 1–2: Extract parser into pure function.
+   - Day 3–4: Write Web Worker wrapper.
+   - Day 5–10: Service update + component test + streaming layer UI.
+
+### Recommendation
+
+**Ship v1 now.** The cost of delaying gcode preview UX is 4+ weeks; the cost of v1 main-thread is <2 weeks of lost productivity in v2. Service abstraction eliminates throwaway work.
+
+### Decision Inbox
+
+Created `.squad/decisions/inbox/brett-gcode-preview-worker-throwaway.md` with:
+- API surface analysis (xyz-tools/gcode-preview v2.18.0)
+- Worker integration feasibility (pure parser decoupling required)
+- Service abstraction code sketch
+- v1→v2 LOC delta estimate (200–400 LOC rework)
+- Go/no-go recommendation (GO: ship v1 now)

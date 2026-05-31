@@ -1273,3 +1273,457 @@ The local branch `sync/dev-to-main-2026-05-29` is ready to push — no further m
 
 - `squad-main-guard.yml` — should PASS (0 forbidden paths in index, verified)
 - All other checks (build, tests, compose validation) — expected green (same codebase as development which passed CI)
+
+---
+
+## Merged from Inbox: 2026-05-31T09:17:00-07:00
+
+# Decision: gcode-preview v1 (no-worker) → v2 (worker) Throwaway Risk
+
+**Date:** 2026-05-31  
+**Requested by:** Brady (Jeff Papiez)  
+**Scope:** Architecture decision for gcode-preview phases to minimize rework  
+
+## TL;DR
+
+**Throwaway risk: LOW for UI components (reuse 95%+), MODERATE for parser integration (~40–60% of parsing code survives).** Estimated throwaway delta: ~200–400 LOC (mostly invocation sites, state management). **Recommendation: Ship v1 now behind a service abstraction, go straight to v2 in next sprint.** The cost of v1 main-thread is <2 weeks lost productivity; the cost of delaying v1 is blocking 3D model preview UX for 4+ weeks.
+
+## Research Findings
+
+### 1. Does gcode-preview v2.18.x expose a worker-compatible API surface?
+
+**Answer: NO native worker support in v2.18.0.** However:
+
+- **Parser API is pure JS:** The library exports `GCodePreview` class with `processGCode(gcodeString)` method (single-pass, full-string parsing only).
+- **No streaming parse:** v2.18.0 has no streaming or chunked-parse API. It loads the entire G-code string into memory and parses synchronously.
+- **Rendering tightly coupled:** `processGCode()` directly updates Three.js scene geometry. **Cannot move parsing to worker without decoupling parser output from Three.js commands.**
+- **Upstream v3 alpha signals intent:** The maintained xyz-tools fork (xyz-tools/gcode-preview, moved Nov 2024) lists "streaming" and "incremental updates" as roadmap items but NOT yet in v2.18.0.
+
+### 2. If we wire WebGLPreview + layer slider + extruder colors + T-command filter on main thread in v1, how much survives?
+
+**Answer: ~60–70% reuse potential.**
+
+**Components that survive v1→v2 (reusable ~95%):**
+- React wrapper component for canvas binding
+- Layer slider
+- Extruder color palette UI
+- T-command filter toggle UI
+- File drop zone
+
+**Components that change (~40–50% rework):**
+- Parser invocation site
+- State management for parsed data
+- Progress feedback loop
+- Memory management for large file handling
+
+**Estimated reuse: 250–300 LOC survive untouched; 150–200 LOC requires rewrite.**
+
+### 3. Cheapest v1 architecture to minimize v2 throwaway
+
+**Implement a parser service abstraction NOW:**
+
+```typescript
+// v1: Synchronous main-thread parse
+export class GcodeParserService {
+  parse(gcodeString: string): ParsedGcode {
+    const preview = new GCodePreview(options);
+    preview.processGCode(gcodeString);
+    return {
+      layers: preview.parser.layers,
+      metadata: preview.parser.metadata,
+      bounds: preview.parser.bounds,
+    };
+  }
+}
+
+// v2 upgrade: Replace with async worker-based parse
+// async parse(gcodeString: string): Promise<ParsedGcode> { ... }
+```
+
+**Impact:** ONE file changes invocation logic; all UI components remain untouched.
+
+## Decision
+
+- ✅ **Proceed with v1 (no-worker, 10MB warning) in Phase 1.**
+- ✅ **Implement `GcodeParserService` as abstraction layer.**
+- ✅ **Schedule v2 (worker-based) for Sprint N+1.**
+- ⚠️ **Risk:** If v2 upstream (xyz-tools/gcode-preview) ships a breaking parser API before v2 implementation, revisit. Monitor releases.
+
+---
+
+# Decision: bambuddy Settings UX Patterns & PrintFarmer Nav Consolidation
+
+**Author:** Brett (Researcher)  
+**Date:** 2026-05-31  
+**Status:** Decision Proposal  
+
+## Executive Summary
+
+Consolidates 25+ scattered nav items into a unified Settings area with tab navigation, modeled on bambuddy's proven pattern. Keeps Printers, Queue, Projects, Analytics, Automation as top-level workflow destinations.
+
+## Proposed Settings Tabs
+
+| Tab Name | Purpose |
+|---|---|
+| **General** | Language, theme, display prefs, system status, tag/bed-type enums, custom fields |
+| **Filament** | Filament library, Spoolman config, AMS display thresholds |
+| **Slicing** | Slicer profiles, OrcaSlicer worker registration, default print options, staggered start, gcode injection |
+| **Hardware** | Camera registration, NFC device pairing, smart plugs (future) |
+| **Notifications** | Notification providers (Discord, email, webhook), message templates, notification log |
+| **Integrations** | Webhooks, API keys, external URLs, MQTT config, Home Assistant, reverse proxy |
+| **Data** | Export/import, backup, reset, data management |
+| **Users** (with sub-tabs) | Local users, LDAP, OIDC, 2FA, login audit |
+
+## Key Design Patterns
+
+- **Settings search:** Cross-tab search with tab-aware indexing and keyword-based jump-to
+- **Secrets handling:** Masked + revoke (never edit-in-place) for tokens and credentials
+- **Progressive disclosure:** Collapsible cards prevent overwhelming users
+- **Inline modals:** Smart plug add, notification provider add, user creation all use modals
+
+## Non-Adoption
+
+| Feature | Reason |
+|---|---|
+| Per-printer Settings pages | bambuddy doesn't expose this; farm defaults apply uniformly |
+| Settings sidebar (vertical nav) | Tab-based keeps Settings compact; sidebar would expand nav depth |
+
+## Recommended Path
+
+Structure Settings using 8-tab model, implement cross-tab search, consolidate 15+ scattered admin pages into Settings. Keep Printers, Queue, Projects, Analytics, and Automation as top-level workflow destinations.
+
+---
+
+# Decision: bambuddy NFC UX Patterns for Spool Binding & Tag Management
+
+**Author:** Brett (Researcher)  
+**Date:** 2026-05-31  
+**Status:** Decision Proposal  
+
+## Executive Summary
+
+bambuddy's NFC workflow pairs physical RFID/NFC tags with spools via a two-step modal flow. PrintFarmer has NFC devices registered but no user-facing tag-binding UX. Key patterns: search-first binding, WebSocket real-time sync, passive reads for known tags, and clear error recovery.
+
+## Key Winning Patterns (Adoption Recommended)
+
+- **Modal-Based Tag Linking:** LinkSpoolModal + AssignSpoolModal pattern keeps spool assignment in context
+- **Search-First UX:** Don't force users to scroll; always start with a search box
+- **WebSocket Real-Time Sync:** Broadcast tag-link events via SignalR for multi-session consistency
+- **Tag Unrecognized Flow:** Unknown tag scanned → LinkSpoolModal with search immediately
+- **Mismatch Detection:** When tag bound to spool X is scanned on tray with spool Y, warn user
+- **Passive Reads:** Successful re-reads of known tags are silent (no modal spam)
+- **One-Way Tag Creation:** Tags are written once during binding; no edit-in-place
+
+## Error Handling Flows
+
+- **Unrecognized tag:** LinkSpoolModal appears for binding or cancel
+- **Tag bound to different printer:** Toast warning with relink option
+- **Tag bound but spool removed:** Option to unlink this tag
+- **Duplicate tag detection:** Error toast, system prevents accidental reassignment
+- **Tag physically moved without unbinding:** Backend reports location mismatch
+
+## Non-Adoption (Due to PrintFarmer Differences)
+
+- SpoolBuddy hardware management (NFC hardware may be different)
+- Spoolman-specific APIs (PrintFarmer may not use Spoolman)
+
+## Implementation Roadmap
+
+| Phase | Tasks | Duration |
+|---|---|---|
+| 1 | Modal UX, trigger modals on NFC events | Weeks 1-2 |
+| 2 | Real-time WebSocket sync, inventory grid updates | Weeks 2-3 |
+| 3 | Mismatch detection, error handling, edge cases | Weeks 3-4 |
+| 4 | Polish, search optimization, i18n, a11y | Week 5 |
+
+---
+
+# Backlog: Electricity Cost Tracking via Smart Plugs
+
+**Author:** Dallas
+**Date:** 2026-05-31
+**Status:** Proposed — pending Brady decisions
+**Routes to:** Lambert (backend), Ripley (frontend)
+
+## Problem Statement
+
+`PrintJob` already stores `EnergyCostUsd`, but that value is calculated from static `Printer.Wattage` × print duration. This is an estimate, not a measurement. Smart plugs (Kasa, Tasmota, Shelly) provide real-time power readings for measured kWh instead.
+
+## Architecture Sketch
+
+### Ingest Model: Polling
+
+- Background `PowerMonitorPollingService` calls each plug's local HTTP API on configurable interval (default 10 s)
+- Polling is skippable per-printer when no job running
+
+### Provider Abstraction
+
+```csharp
+public interface ISmartPlugProvider
+{
+    string ProviderType { get; } // "Kasa", "Tasmota", "Shelly"
+    Task<PowerSample> ReadAsync(PowerMonitor monitor, CancellationToken ct);
+    Task<bool> PingAsync(PowerMonitor monitor, CancellationToken ct);
+}
+```
+
+**Phase 1 providers:**
+- `KasaSmartPlugProvider` — local REST (TP-Link Kasa LAN API)
+- `TasmotaSmartPlugProvider` — `GET /cm?cmnd=Status%208` JSON endpoint
+- `ShellySmartPlugProvider` — Gen1/Gen2 meter endpoints
+
+### Data Model
+
+**New entity — `PowerMonitor`:**
+```
+PowerMonitor
+  Id, PrinterId (unique), ProviderType, Endpoint, CredentialJson (encrypted), PollingIntervalSeconds, IsEnabled, CreatedAt/UpdatedAt
+```
+
+**New time-series table — `PowerReading`:**
+```
+PowerReading
+  Id (long PK), PrinterId (FK), PrintJobId (FK?), WattsInstant, SampledAt (UTC)
+```
+Index on `(PrinterId, SampledAt DESC)` and `(PrintJobId)`.
+
+**Hot path — existing `PrintJob` columns:**
+- `EnergyCostUsd` — updated from actual kWh on job completion
+- Add `KwhUsed (decimal?)` — the measured kWh for the job window
+
+### Electricity Rate
+
+Store at **printer level** as `Printer.ElectricityRatePerKwh (decimal?)`.  
+If null, fall back to farm-wide `CostTrackingSettings.DefaultElectricityRatePerKwh`.
+
+## Work Item Table
+
+| # | Owner | Title | Size |
+|---|-------|-------|------|
+| 1 | Lambert | `ISmartPlugProvider` + `PowerMonitor` entity + migrations | M |
+| 2 | Lambert | Kasa/Tasmota/Shelly providers | M |
+| 3 | Lambert | `PowerMonitorPollingService` | M |
+| 4 | Lambert | `PowerReading` writes + indexes | S |
+| 5 | Lambert | Add `KwhUsed` to `PrintJob` + migrations | S |
+| 6 | Lambert | `IPowerAggregationService` — job-window kWh aggregation | M |
+| 7 | Lambert | Admin CRUD endpoints for power monitors | S |
+| 8 | Lambert | `GET /api/printers/{id}/power-readings?from=&to=` paginated | S |
+| 9 | Lambert | Add `ElectricityRatePerKwh` to `Printer` + migrations | S |
+| 10 | Ripley | Printer settings form: power monitor section | M |
+| 11 | Ripley | Print history: surface `KwhUsed` + `EnergyCostUsd` per job | S |
+| 12 | Ripley | Per-printer power graph (line chart, time-range picker) | L |
+
+**Estimate:** Backend ~5 days, Frontend ~4 days.
+
+---
+
+# Backlog: Printables.com Model Import
+
+**Author:** Dallas
+**Date:** 2026-05-31
+**Status:** Proposed — pending Brady decisions
+**Routes to:** Lambert (backend download service), Ripley (frontend modal)
+
+## Problem Statement
+
+Users currently upload 3MF/STL files manually. Printables.com is the dominant open-ecosystem model repository. Goal: "paste URL → import" flow that fetches model files, thumbnail, license, and attribution directly into PrintFarmer's 3D models library.
+
+## Printables API
+
+Printables.com exposes a **public GraphQL API** at `https://api.printables.com/graphql/` (no auth required for public model metadata reads). File download URLs served from CDN with no auth token required.
+
+**No OAuth needed for public models.** A simple `HttpClient` call returns everything needed.
+
+## Architecture Sketch
+
+### Backend: `PrintablesImportService`
+
+1. Accept a Printables model URL
+2. Extract model ID from URL path
+3. Query GraphQL API for metadata (title, license, creator, thumbnail, file list)
+4. User selects which file to import if multiple available
+5. Download via CDN URL
+6. Hand off to existing `Model3DFileService.UploadFileAsync` pipeline
+7. Persist attribution fields on `Model3DFile` entity
+
+### New API Endpoints
+
+```
+POST /api/3d-models/import-url/preview
+Body: { "url": "https://www.printables.com/model/..." }
+Response: PrintablesModelPreviewDto
+
+POST /api/3d-models/import-url
+Body: { "url": "...", "fileIndex": 0 }
+Response: Model3DFileDto
+```
+
+### Schema: Attribution Fields
+
+Add to `Model3DFile` entity:
+```
+SourceUrl       string?   — canonical Printables URL
+SourceLicense   string?   — license identifier (e.g. "CC BY 4.0")
+SourceCreator   string?   — creator handle
+ImportedAt      DateTime? — UTC timestamp
+```
+
+### Frontend: Import-by-URL Modal
+
+Two-step modal:
+1. **Preview:** User pastes URL → Fetch → show thumbnail, title, creator, license, file list with sizes
+2. **Confirm:** "Import" button → calls import endpoint
+
+License prominently displayed before confirm. Yellow banner for non-commercial or NoDerivatives licenses.
+
+### MakerWorld (Deferred)
+
+MakerWorld uses Bambu Cloud API token. PrintFarmer does not currently carry a Bambu Cloud token. **Hard blocker.** File separate issue when/if Brady wants to unblock.
+
+## Work Item Table
+
+| # | Owner | Title | Size |
+|---|-------|-------|------|
+| 1 | Lambert | `IPrintablesImportService` + GraphQL fetch + CDN download | M |
+| 2 | Lambert | `POST /api/3d-models/import-url/preview` endpoint | S |
+| 3 | Lambert | `POST /api/3d-models/import-url` endpoint | S |
+| 4 | Lambert | Add `SourceUrl`, `SourceLicense`, `SourceCreator`, `ImportedAt` + migrations | S |
+| 5 | Ripley | "Import from URL" button + two-step modal on ModelsPage | M |
+| 6 | Ripley | License badge + NC/ND warning banner | S |
+| 7 | Ripley | Surface `SourceUrl` / `SourceCreator` / `SourceLicense` in model detail | S |
+
+**Estimate:** Backend ~2 days, Frontend ~2 days.
+
+---
+
+# Backlog: Passkey (WebAuthn) Login Support
+
+**Author:** Dallas
+**Date:** 2026-05-31
+**Status:** Proposed — pending Brady decisions
+**Routes to:** Lambert (backend ceremony + storage), Ripley (frontend enrollment + login)
+
+## Problem Statement
+
+PrintFarmer login is password-only. Passkeys (WebAuthn/FIDO2) are now platform default: Face ID, Touch ID, Windows Hello, YubiKey. Adding passkey support improves security (phishing-resistant) and UX (no password to remember).
+
+Goal: passkeys as **additional** login method alongside passwords — not a replacement.
+
+## Library Choice
+
+**`Fido2NetLib`** — canonical .NET WebAuthn/FIDO2 library, actively maintained, targets `net6+`.
+
+## User Flows
+
+### Enrollment (from Account Settings)
+
+1. User navigates to Account Settings → Security → "Add a Passkey"
+2. Frontend calls `POST /api/auth/passkey/register/begin` → returns `CredentialCreateOptions`
+3. Browser calls `navigator.credentials.create(options)` — platform shows biometric/PIN prompt
+4. Frontend POSTs `AuthenticatorAttestationRawResponse` to `POST /api/auth/passkey/register/complete`
+5. Server validates, stores credential, returns success
+6. UI shows new passkey in "Passkeys" list
+
+### Login (Passkey Path)
+
+1. Login page shows "Use a Passkey" button
+2. User clicks → frontend calls `POST /api/auth/passkey/login/begin`
+3. Browser calls `navigator.credentials.get(options)` → platform selects matching passkey
+4. Frontend POSTs `AuthenticatorAssertionRawResponse` to `POST /api/auth/passkey/login/complete`
+5. Server validates, issues JWT token (same as password path)
+6. `LoginAuditService` records passkey login
+
+## Storage: `UserPasskeyCredential` Entity
+
+New table in `AppDbContext`:
+
+```
+UserPasskeyCredential
+  Id, UserId (FK), CredentialId (byte[], unique), PublicKey (byte[]), SignCount (long),
+  AaGuid, DeviceName?, AttestationType, Transports?, CreatedAt, LastUsedAt, IsEnabled
+```
+
+Migrations: `Farm.Migrations.PostgreSQL` + `Farm.Migrations.SqlServer` with `AppDbContext`.
+
+## API Surface
+
+```
+POST /api/auth/passkey/register/begin    → CredentialCreateOptions
+POST /api/auth/passkey/register/complete → 201 Created
+GET  /api/auth/passkey/credentials       → list of user's passkeys
+DELETE /api/auth/passkey/credentials/{id} → 204 No Content (revoke)
+POST /api/auth/passkey/login/begin       → AssertionOptions
+POST /api/auth/passkey/login/complete    → AuthenticationResult
+```
+
+Challenge state stored server-side in distributed cache (30 s TTL).
+
+## Browser Support (2026)
+
+All platforms green — no polyfills needed:
+- Chrome 108+, Safari 16+, Firefox 122+, Edge 108+
+- Android fingerprint/face via Google Password Manager
+- iOS 17+ iCloud Keychain passkey sync
+
+## Work Item Table
+
+| # | Owner | Title | Size |
+|---|-------|-------|------|
+| 1 | Lambert | Add `Fido2NetLib` NuGet + DI registration | S |
+| 2 | Lambert | `UserPasskeyCredential` entity + repository + migrations | M |
+| 3 | Lambert | `IPasskeyService` + `PasskeyService` (ceremonies, challenge cache) | M |
+| 4 | Lambert | Register ceremony endpoints (`begin` + `complete`) | S |
+| 5 | Lambert | Assertion ceremony endpoints (`login/begin` + `login/complete`) | M |
+| 6 | Lambert | Credential management endpoints (list, revoke) | S |
+| 7 | Lambert | `AuthMethod` field on login audit | S |
+| 8 | Ripley | Add `@simplewebauthn/browser` npm + `usePasskeyRegistration` hook | S |
+| 9 | Ripley | Account Settings → Security tab: passkey list + "Add Passkey" + "Revoke" | M |
+| 10 | Ripley | Login page: "Use a Passkey" button + `usePasskeyLogin` hook | M |
+| 11 | Ripley | Friendly device name prompt during enrollment | S |
+
+**Estimate:** Backend ~4 days, Frontend ~3 days.
+
+---
+
+### 2026-05-31T09:12 PT: Bambuddy adoption plan — Brady sign-off
+
+**By:** Brady (via Copilot)
+
+**Sign-offs (5):**
+1. ✅ gcode-preview WITH web workers (v1 throwaway research confirmed → proceed v1 + service abstraction)
+2. ✅ Hide raw-param sliders behind "Advanced"
+3. ✅ Notification providers (webhook + Discord + Telegram) ship as ONE PR
+4. ✅ Filament cost source: Spoolman price first, per-material fallback
+5. ✅ Quick Slice as modal (not page)
+
+**New backlog items requested (planning in flight):**
+- Electricity cost tracking via smart plugs (Brady has plugs available for test)
+- Bambuddy NFC UX review (we have our own NFC tech — learn from their exposure pattern)
+- Printables import (priority over MakerWorld; MakerWorld stretch)
+- Passkey login support
+- Settings system overhaul — consolidate nav links into Settings area, drawing on bambuddy review
+
+**Why:** Unblocks Phase 1 dispatch + expands backlog with 5 net-new candidates.
+
+---
+
+### 2026-05-31T09:14 PT: Worktrees + reference scrubbing — Brady directives
+
+**By:** Brady (via Copilot)
+
+**Directive 1 — Worktrees mandatory:**
+
+All work items must be executed in dedicated git worktrees (SQUAD_WORKTREES=1). One worktree per GitHub issue, path `{repo-parent}/PrintFarmer-{issue-number}`, branch `squad/{issue-number}-{slug}`. Reuse existing worktrees when an agent picks up the same issue. Clean up after PR merge.
+
+**Directive 2 — No external-repo references in PrintFarmer artifacts:**
+
+NEVER reference the bambuddy repo by name in ANY of: GitHub issues, GitHub PR titles/descriptions/comments, source code, code comments, commit messages, changelogs, or user-facing docs. If a feature was inspired by external research, refer to it generically ("external 3D-printer-management reference", "research source", or simply describe the feature without attribution). The `.squad/` internal team memory (decisions.md, history.md, log/) MAY reference the source for our own context.
+
+**Coordinator enforcement:**
+- Strip "bambuddy"/"maziggy" from any issue body or PR description before filing
+- Squad-internal `.squad/` files are exempt (research notes can keep the citation)
+- Scribe should add a final scrub pass to the merge step
+
+**Why:** Hygiene + attribution boundary. Brady's call.
+
+---

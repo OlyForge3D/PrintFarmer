@@ -60,3 +60,37 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 
 **Linked Decisions:** decisions.md entries "Bambuddy Feature Adoption" and "Bambuddy Feature Sweep — Top Adoption Candidates"
 
+
+---
+
+### Bambuddy Adoption Finalization — 2026-05-31
+
+**Brady Confirmation:** Notification providers (webhook + Discord + Telegram) ship as ONE PR (Phase 3 ready for scheduling).
+
+**Spoolman Cost Source Confirmed:** Filament cost priority: Spoolman price first, per-material fallback second.
+
+**Backend Stubs Incoming (Backlog Priority):**
+
+1. **Electricity Cost Tracking (Smart Plugs) — ~5 days backend work**
+   - New entity: `PowerMonitor` (config per printer)
+   - New time-series table: `PowerReading` (watts + timestamp)
+   - New providers: `ISmartPlugProvider` (Kasa, Tasmota, Shelly)
+   - Hosted service: `PowerMonitorPollingService` (per-printer loop, 10 s intervals)
+   - Job completion trigger: `IPowerAggregationService` (kWh aggregation, cost calculation)
+   - Add `KwhUsed` to `PrintJob` + migrations
+   - Admin CRUD + graph endpoints
+
+2. **Printables.com Import Service — ~2 days backend work**
+   - New service: `IPrintablesImportService` (GraphQL fetch, CDN download)
+   - New endpoints: `POST /api/3d-models/import-url/preview`, `POST /api/3d-models/import-url`
+   - Add `SourceUrl`, `SourceLicense`, `SourceCreator`, `ImportedAt` to `Model3DFile` entity + migrations
+   - MakerWorld deferred (blocker: Bambu Cloud token auth)
+
+3. **Passkey (WebAuthn) Login — ~4 days backend work**
+   - New NuGet: `Fido2NetLib`
+   - New entity: `UserPasskeyCredential` (credential storage + audit)
+   - New service: `IPasskeyService` (ceremony orchestration, challenge cache)
+   - New endpoints: register/begin, register/complete, login/begin, login/complete, credentials list, revoke
+   - Add `AuthMethod` field to login audit
+
+**Linked Decisions:** decisions.md entries "Backlog: Electricity Cost Tracking via Smart Plugs", "Backlog: Printables.com Model Import", "Backlog: Passkey (WebAuthn) Login Support"
