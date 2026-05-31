@@ -159,3 +159,29 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 ### Learnings
 
 - 2026-05-31 — `CollapsibleSection` supports controlled mode (`expanded` + `onToggle`) with `collapsedTitle` for custom collapsed labels and `headerActions` for right-side content. Located at `@/common/components/ui/CollapsibleSection`.
+
+## 2026-05-31 — Preview Button + Artifact URL Helpers (#335)
+
+- Added `ArtifactMetadataResponse` interface and `getArtifactMetadata()`, `getArtifactDownloadUrl()`, `getArtifactGcodeUrl()` to `sliceJobService.ts`.
+- Added Preview button (EyeIcon) to completed job rows in both table and card views of `SliceJobsPanel.tsx`.
+- Created `GcodePreviewModal.tsx` — opens `GCodeViewer3D` with `/api/artifacts/job/{jobId}` URL in an xl modal.
+- 9 tests: 5 artifact URL helper unit tests + 4 preview button component tests.
+- PR #373 → stacked on PR #364 (squad/333-gcode-preview-service-abstraction).
+
+### Learnings
+- The `react-hooks/set-state-in-effect` lint rule fires on `setState` in `useEffect` cleanup/conditional returns. Use `useMemo` for derived state that only depends on props.
+- `GCodeViewer` component fetches G-code text internally via `fetch(gcodeUrl)` — the consumer just passes the URL, no need to prefetch.
+
+## 2026-05-31 — Bed-Type Override (#339)
+
+- Added `BED_TYPE_OPTIONS` export from `metadataTypes.ts` (sourced from `KNOWN_ENUMS.bed_type`).
+- Bed Type dropdown added to both `QuickSliceModal` and `NewSliceJobPage` as top-level field.
+- Default: "Inherit from profile" (empty string = no override). User selection injects `curr_bed_type` into `overrides` in `slicerProfileJson`.
+- No useEffect setState — uses simple controlled `useState('')`.
+- 7 new tests total (4 QuickSliceModal + 3 NewSliceJobPage). All 38 targeted tests pass.
+- PR #374 → squad/338-quick-slice-modal (stacked on #368).
+
+### Learnings
+
+- 2026-05-31 — OrcaSlicer bed type override key is `curr_bed_type` (not `bed_type`). The `KNOWN_ENUMS.bed_type` in `metadataTypes.ts` lists the string values OrcaSlicer accepts (e.g. "Cool Plate", "Textured PEI Plate").
+- 2026-05-31 — When tests mock `@/features/slicer/components/settings`, any new named exports from that barrel must be added to the mock object or tests will throw "No export defined on mock" errors.
