@@ -15,6 +15,7 @@ public class UserSettingsConfiguration : IEntityTypeConfiguration<UserSettings>
         _ = builder.Property(u => u.ItemsPerPage).IsRequired();
         _ = builder.Property(u => u.DefaultSlicerPreset).HasMaxLength(256);
         _ = builder.Property(u => u.UpdatedAt).IsRequired();
+        _ = builder.Property(u => u.RowVersion).IsConcurrencyToken();
 
         _ = builder.HasOne(u => u.User)
             .WithMany()

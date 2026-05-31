@@ -11,8 +11,11 @@ public interface IFarmSettingsService
     /// <summary>Gets the consolidated farm-wide settings.</summary>
     FarmSettingsDto GetFarmSettings();
 
+    /// <summary>Gets the row version of the underlying AppSettingsEntity for concurrency control.</summary>
+    string? GetFarmSettingsRowVersion();
+
     /// <summary>Updates the farm-wide cost-tracking settings.</summary>
-    void UpdateFarmSettings(UpdateFarmSettingsRequest request);
+    void UpdateFarmSettings(UpdateFarmSettingsRequest request, string? expectedRowVersion = null);
 }
 
 /// <summary>

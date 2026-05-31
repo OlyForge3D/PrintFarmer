@@ -29,4 +29,9 @@ public class UserSettings
     public string? DefaultSlicerPreset { get; set; }
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Optimistic concurrency token. Prevents silent overwrites from concurrent writers.
+    /// </summary>
+    public byte[] RowVersion { get; set; } = [];
 }

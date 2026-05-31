@@ -13,4 +13,9 @@ public class AppSettingsEntity
     public string SettingsJson { get; set; } = string.Empty;
 
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Optimistic concurrency token. Prevents silent overwrites from concurrent writers.
+    /// </summary>
+    public byte[] RowVersion { get; set; } = [];
 }

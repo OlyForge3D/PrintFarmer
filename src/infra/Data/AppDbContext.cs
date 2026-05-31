@@ -240,12 +240,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         PopulateCaseInsensitiveShadowColumns();
+        StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         PopulateCaseInsensitiveShadowColumns();
+        StampRowVersions();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -272,6 +274,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 {
                     entry.Entity.UpdatedAt = DateTime.UtcNow;
                 }
+            }
+        }
+    }
+
+    private void StampRowVersions()
+    {
+        byte[] newVersion = Guid.NewGuid().ToByteArray();
+
+        foreach (EntityEntry<UserSettings> entry in ChangeTracker.Entries<UserSettings>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.RowVersion = newVersion;
+            }
+        }
+
+        foreach (EntityEntry<AppSettingsEntity> entry in ChangeTracker.Entries<AppSettingsEntity>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.RowVersion = newVersion;
             }
         }
     }
