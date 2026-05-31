@@ -44,6 +44,7 @@ import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
+import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
 import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
 import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
@@ -185,6 +186,7 @@ function AuthenticatedAppRoutes() {
         <Route path="cameras" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="cameras/:tabId" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="nfc-devices" element={<Navigate to="/settings?tab=hardware" replace />} />
+        <Route path="nfc-bindings" element={<NfcBindingsPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />

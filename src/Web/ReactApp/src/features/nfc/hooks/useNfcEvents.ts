@@ -1,42 +1,58 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { nfcHubService } from '@/services/nfcHubService';
-import type { NfcTagUnknownEvent, NfcTagReadEvent } from '@/features/nfc/types';
+import type { NfcTagReadEvent, NfcTagUnknownEvent } from '@/features/nfc/types';
 
 interface UseNfcEventsOptions {
+  onTagRead?: (event: NfcTagReadEvent) => void;
   onTagUnknown?: (event: NfcTagUnknownEvent) => void;
+  onBindRequested?: (event: NfcTagUnknownEvent) => void;
 }
 
-/**
- * Subscribes to NFC SignalR events on /hubs/nfc (PR #383 contract).
- * - `nfctagunknown` → triggers onTagUnknown callback (opens pairing modal)
- * - `nfctagread`    → silent toast confirmation for known tags
- */
-export function useNfcEvents({ onTagUnknown }: UseNfcEventsOptions = {}) {
-  const onTagUnknownRef = useRef(onTagUnknown);
+export function useNfcEvents(options: UseNfcEventsOptions = {}) {
+  const { onTagRead, onTagUnknown, onBindRequested } = options;
+  const [lastTagRead, setLastTagRead] = useState<NfcTagReadEvent | null>(null);
   const [lastUnknownTag, setLastUnknownTag] = useState<NfcTagUnknownEvent | null>(null);
 
+  const onTagReadRef = useRef(onTagRead);
+  const onTagUnknownRef = useRef(onTagUnknown);
+  const onBindRequestedRef = useRef(onBindRequested);
+
+  useEffect(() => { onTagReadRef.current = onTagRead; }, [onTagRead]);
   useEffect(() => { onTagUnknownRef.current = onTagUnknown; }, [onTagUnknown]);
+  useEffect(() => { onBindRequestedRef.current = onBindRequested; }, [onBindRequested]);
 
   useEffect(() => {
-    nfcHubService.ensureConnected();
+    void nfcHubService.ensureConnected();
 
-    const unsubUnknown = nfcHubService.onTagUnknown((event: NfcTagUnknownEvent) => {
-      setLastUnknownTag(event);
-      onTagUnknownRef.current?.(event);
-    });
+    const unsubRead = nfcHubService.onTagRead((event) => {
+      setLastTagRead(event);
+      onTagReadRef.current?.(event);
 
-    const unsubRead = nfcHubService.onTagRead((event: NfcTagReadEvent) => {
       toast.success(`Spool recognized: ${event.spoolName ?? `#${event.spoolId}`}`);
     });
 
+    const unsubUnknown = nfcHubService.onTagUnknown((event) => {
+      setLastUnknownTag(event);
+      onTagUnknownRef.current?.(event);
+
+      toast.warning('Unknown NFC tag scanned', {
+        description: `Tag ${event.tagUid} at printer ${event.printerId}`,
+        action: onBindRequestedRef.current
+          ? {
+              label: 'Bind it',
+              onClick: () => onBindRequestedRef.current?.(event),
+            }
+          : undefined,
+        duration: 8000,
+      });
+    });
+
     return () => {
-      unsubUnknown();
       unsubRead();
+      unsubUnknown();
     };
   }, []);
 
-  const clearLastUnknownTag = useCallback(() => setLastUnknownTag(null), []);
-
-  return { lastUnknownTag, clearLastUnknownTag };
+  return { lastTagRead, lastUnknownTag };
 }

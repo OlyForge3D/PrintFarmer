@@ -122,6 +122,7 @@ export const queryKeys = {
   nfcDevices: ['nfc-devices'] as const,
   nfcDevice: (id: string) => ['nfc-devices', id] as const,
   nfcDeviceHistory: (id: string) => ['nfc-devices', id, 'history'] as const,
+  nfcBindings: ['nfc-bindings'] as const,
   notifications: ['notifications'] as const,
   unreadCount: ['notifications', 'unread-count'] as const,
   notificationPreferences: ['notifications', 'preferences'] as const,
@@ -1633,6 +1634,41 @@ export function useDeleteNfcDevice() {
       toast.success('NFC device removed');
     },
     onError: (err: ApiError) => toast.error(`Failed to remove device: ${err.message}`),
+  });
+}
+
+// ============ NFC Binding Hooks ============
+
+export function useNfcBindings(options?: QueryOptions<import('@/features/nfc/types').NfcBindingDto[]>) {
+  return useQuery({
+    queryKey: queryKeys.nfcBindings,
+    queryFn: () => apiClient.getNfcBindings(),
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+export function useLinkNfcTag() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: import('@/features/nfc/types').NfcLinkRequest) => apiClient.linkNfcTag(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcBindings });
+      toast.success('NFC tag linked successfully');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to link tag: ${err.message}`),
+  });
+}
+
+export function useDeleteNfcBinding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteNfcBinding(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcBindings });
+      toast.success('NFC tag unbound');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to unbind tag: ${err.message}`),
   });
 }
 
