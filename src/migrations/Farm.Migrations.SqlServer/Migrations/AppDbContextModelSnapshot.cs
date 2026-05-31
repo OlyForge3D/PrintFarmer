@@ -2786,6 +2786,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("bit");
 
+                    b.Property<decimal?>("KwhUsed")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("LaborCostUsd")
                         .HasColumnType("decimal(18,2)");
 

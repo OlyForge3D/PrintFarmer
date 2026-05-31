@@ -100,6 +100,13 @@ public class PrintJob
     /// </summary>
     public DateTime? CostCalculatedAt { get; set; }
 
+    /// <summary>
+    /// Measured energy consumed during this print job in kilowatt-hours.
+    /// Set by <c>PowerMonitorPollingService</c> when a smart plug is associated
+    /// with the assigned printer. Null when no monitor data is available.
+    /// </summary>
+    public decimal? KwhUsed { get; set; }
+
     public string? FailureReason { get; set; }
 
     public Guid[]? PreferredPrinterIds { get; set; } // JSON array of preferred printer IDs
