@@ -5,6 +5,7 @@ import { Select } from '@/common/components/ui/Select';
 import { FormField } from '@/common/components/ui/FormField';
 import { usePrinters, useLinkNfcTag } from '@/common/hooks/useApi';
 import type { NfcTagUnknownEvent } from '@/features/nfc/types';
+import { parseSpoolId } from '@/features/nfc/types/nfc';
 
 interface NfcBindingModalProps {
   isOpen: boolean;
@@ -26,7 +27,7 @@ export function NfcBindingModal({ isOpen, onClose, event }: NfcBindingModalProps
       {
         tagUid: event.tagUid,
         printerId: selectedPrinterId,
-        spoolId: spoolId || undefined,
+        spoolId: parseSpoolId(spoolId),
       },
       { onSuccess: () => onClose() }
     );
