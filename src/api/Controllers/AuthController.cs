@@ -496,6 +496,72 @@ public class AuthController(
         }
     }
 
+    // ─── passkey credential management ──────────────────────────────────────
+
+    /// <summary>Lists all registered passkey credentials for the current user.</summary>
+    [HttpGet("passkey/credentials")]
+    [Authorize]
+    [ProducesResponseType(typeof(IEnumerable<PasskeyCredentialDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPasskeyCredentialsAsync(CancellationToken ct)
+    {
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        var credentials = await _passkeyService.ListCredentialsAsync(userId, ct);
+        var dtos = credentials.Select(c => new PasskeyCredentialDto(
+            c.Id,
+            c.DeviceName,
+            c.AaguidDescription,
+            c.CreatedAt,
+            c.LastUsedAt));
+
+        return Ok(dtos);
+    }
+
+    /// <summary>Deletes a passkey credential owned by the current user.</summary>
+    [HttpDelete("passkey/credentials/{id:int}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeletePasskeyCredentialAsync(int id, CancellationToken ct)
+    {
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        bool deleted = await _passkeyService.DeleteCredentialAsync(userId, id, ct);
+        return deleted ? NoContent() : NotFound(new { error = "Credential not found." });
+    }
+
+    /// <summary>Renames a passkey credential owned by the current user.</summary>
+    [HttpPatch("passkey/credentials/{id:int}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RenamePasskeyCredentialAsync(int id, [FromBody] RenamePasskeyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.DeviceName))
+        {
+            return BadRequest(new { error = "DeviceName is required." });
+        }
+
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        bool renamed = await _passkeyService.RenameCredentialAsync(userId, id, request.DeviceName.Trim(), ct);
+        return renamed ? NoContent() : NotFound(new { error = "Credential not found." });
+    }
+
     // ─── helpers ────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -548,3 +614,9 @@ public record PasskeyLoginBeginRequest(string Username);
 
 /// <summary>Request body for <c>POST /api/auth/passkey/login/complete</c>.</summary>
 public record PasskeyLoginCompleteRequest(string Username, AuthenticatorAssertionRawResponse? AssertionResponse);
+
+/// <summary>DTO for listing registered passkey credentials.</summary>
+public record PasskeyCredentialDto(int Id, string? DeviceName, string? AaguidDescription, DateTime CreatedAt, DateTime? LastUsedAt);
+
+/// <summary>Request body for <c>PATCH /api/auth/passkey/credentials/{id}</c>.</summary>
+public record RenamePasskeyRequest(string? DeviceName);
