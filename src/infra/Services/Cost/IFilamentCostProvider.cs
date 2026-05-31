@@ -1,4 +1,4 @@
-﻿namespace Farm.Infrastructure.Services.Cost;
+namespace Farm.Infrastructure.Services.Cost;
 
 /// <summary>
 /// Abstraction for looking up filament cost data from an external source (e.g., Spoolman).
