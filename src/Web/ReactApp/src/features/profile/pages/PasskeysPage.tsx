@@ -9,6 +9,7 @@ import {
   listPasskeys,
   deletePasskey,
   renamePasskey,
+  registerPasskey,
   type PasskeyCredentialDto,
 } from '@/services/passkeyService';
 
@@ -47,6 +48,17 @@ export function PasskeysPage() {
     },
   });
 
+  const registerMutation = useMutation({
+    mutationFn: registerPasskey,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['passkeys'] });
+      toast.success('Passkey registered successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to register passkey');
+    },
+  });
+
   function handleStartEdit(passkey: PasskeyCredentialDto) {
     setEditTarget(passkey);
     setEditName(passkey.deviceName || passkey.aaguidDescription || '');
@@ -80,13 +92,11 @@ export function PasskeysPage() {
         <div className="flex justify-end">
           <Button
             variant="primary"
-            onClick={() => {
-              // TODO(builder): Replace this dead link with the real enrollment flow/route.
-              window.location.href = '/profile/passkeys/register';
-            }}
+            onClick={() => registerMutation.mutate()}
+            disabled={registerMutation.isPending}
           >
             <PlusIcon className="w-4 h-4" />
-            <span>Add passkey</span>
+            <span>{registerMutation.isPending ? 'Registering…' : 'Add passkey'}</span>
           </Button>
         </div>
 
