@@ -112,7 +112,80 @@ public class SettingsControllerConcurrencyTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateUserSettings_WithoutRowVersion_SucceedsNormally()
+    public async Task UpdateUserSettings_MalformedIfMatchHeader_Returns400()
+    {
+        Guid userId = Guid.NewGuid();
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var user = new User { Id = userId, Username = "badheader", Email = "header@test.com", PasswordHash = "x" };
+            db.Users.Add(user);
+            db.UserSettings.Add(new UserSettings
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Theme = "dark",
+                Locale = "en",
+                ItemsPerPage = 25
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var controller = CreateController(db, userId);
+            controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"not-base64@@\"";
+            var body = new UpdateUserSettingsBody(
+                Theme: "light",
+                Locale: null,
+                ItemsPerPage: null,
+                DefaultSlicerPreset: null,
+                RowVersion: null);
+
+            IActionResult result = await controller.UpdateUserSettingsAsync(body, CancellationToken.None);
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateUserSettings_InvalidBodyRowVersion_Returns400()
+    {
+        Guid userId = Guid.NewGuid();
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var user = new User { Id = userId, Username = "badbody", Email = "body@test.com", PasswordHash = "x" };
+            db.Users.Add(user);
+            db.UserSettings.Add(new UserSettings
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Theme = "dark",
+                Locale = "en",
+                ItemsPerPage = 25
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var controller = CreateController(db, userId);
+            var body = new UpdateUserSettingsBody(
+                Theme: "light",
+                Locale: null,
+                ItemsPerPage: null,
+                DefaultSlicerPreset: null,
+                RowVersion: "not-base64");
+
+            IActionResult result = await controller.UpdateUserSettingsAsync(body, CancellationToken.None);
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateUserSettings_WithoutConcurrencyToken_Returns428()
     {
         // Arrange
         Guid userId = Guid.NewGuid();
@@ -133,7 +206,7 @@ public class SettingsControllerConcurrencyTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        // Act: update without row version — should succeed (backward compatible)
+        // Act: update without If-Match and without rowVersion
         using (var db = new AppDbContext(_dbOptions))
         {
             var controller = CreateController(db, userId);
@@ -145,7 +218,8 @@ public class SettingsControllerConcurrencyTests : IDisposable
                 RowVersion: null);
 
             IActionResult result = await controller.UpdateUserSettingsAsync(body, CancellationToken.None);
-            Assert.IsType<OkObjectResult>(result);
+            var precondition = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status428PreconditionRequired, precondition.StatusCode);
         }
     }
 
@@ -154,14 +228,25 @@ public class SettingsControllerConcurrencyTests : IDisposable
     {
         // Arrange
         Guid userId = Guid.NewGuid();
+        string existingRowVersion;
         using (var db = new AppDbContext(_dbOptions))
         {
             var user = new User { Id = userId, Username = "rvtest", Email = "rv@test.com", PasswordHash = "x" };
             db.Users.Add(user);
+            var settings = new UserSettings
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Theme = "dark",
+                Locale = "en",
+                ItemsPerPage = 25
+            };
+            db.UserSettings.Add(settings);
             await db.SaveChangesAsync();
+            existingRowVersion = Convert.ToBase64String(settings.RowVersion);
         }
 
-        // Act: create new settings via PUT (no existing row)
+        // Act
         using (var db = new AppDbContext(_dbOptions))
         {
             var controller = CreateController(db, userId);
@@ -170,13 +255,13 @@ public class SettingsControllerConcurrencyTests : IDisposable
                 Locale: "fr",
                 ItemsPerPage: 50,
                 DefaultSlicerPreset: null,
-                RowVersion: null);
+                RowVersion: existingRowVersion);
 
             IActionResult result = await controller.UpdateUserSettingsAsync(body, CancellationToken.None);
             var okResult = Assert.IsType<OkObjectResult>(result);
             var response = Assert.IsType<UserSettingsResponse>(okResult.Value);
 
-            // RowVersion should be present for newly created settings
+            // RowVersion should be present after a successful update
             Assert.NotNull(response.RowVersion);
             Assert.NotEmpty(response.RowVersion);
         }
