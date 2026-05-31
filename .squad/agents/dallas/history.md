@@ -85,6 +85,33 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 
 ## Learnings
 
+
+### 2026-05-31 — Bambuddy adoption Phase 2: Work breakdown synthesis
+
+Produced phased rollout plan from Brett's 3 research artifacts + Dallas Phase 1 surface map. Key trade-offs:
+
+- **gcode-preview v2 over v3**: v3 alpha has API churn; v2.18.x is stable and matches bambuddy's proven pattern. Migration deferred until v3 stabilizes.
+- **No client-side 3MF parsing yet**: bambuddy's main-thread JSZip approach is a perf risk. PrintFarmer already extracts 3MF metadata server-side in `Model3DFileService`. Client-side parsing deferred pending Web Worker architecture.
+- **Quick Slice as additive entry point, not replacement**: bambuddy's preset-first modal hides all params. PrintFarmer's `NewSliceJobPage` is correct for power users. Quick Slice is a simpler alternative, not a replacement.
+- **Notifications phased**: 8 providers is too much for one PR. Ship webhook+Discord+Telegram first (covers 80% of home-lab users), then extend.
+- **Layer timelapse blocked on go2rtc**: Requires camera infrastructure (PFarm1-lzf0) that hasn't landed yet. Explicitly deferred.
+- **PrintFarmer differentiator preserved**: bambuddy rejects raw .gcode upload (Bambu constraint). PrintFarmer accepts it — this is a competitive advantage for Moonraker/PrusaLink/FlashForge users. No changes to gcode upload flow.
+
+Decision inbox file: `.squad/decisions/inbox/dallas-bambuddy-adoption-plan.md`
+
+### 2026-05-31 — Slice + 3D model integration surface map
+
+Phase 1 survey for upcoming G-code/3MF viewer integration. Key surfaces:
+- Slice submission starts in `src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx`, builds `SubmitSliceJobRequest`, then calls `src/Web/ReactApp/src/services/sliceJobService.ts` -> `POST /api/slice`.
+- Slice job monitoring is `src/Web/ReactApp/src/features/slicer/pages/SliceJobsPage.tsx` + `src/Web/ReactApp/src/features/slicer/components/SliceJobsPanel.tsx`, with cache/live updates from `src/Web/ReactApp/src/features/slicer/hooks/useSliceJobsRealtime.ts` and job-specific inline progress from `src/Web/ReactApp/src/features/slicer/hooks/useSliceJobProgress.ts`.
+- Slicer SignalR client is `src/Web/ReactApp/src/services/slicerHubService.ts`, connected to `/hubs/slicers`; backend maps hubs in `src/slicer/Farm.Slicer.Module.Api/SlicerApiExtensions.cs` and broadcasts job events from `src/slicer/Farm.Slicer.Module.Api/Services/SliceJobEventService.cs`.
+- Backend slice lifecycle is `src/slicer/Farm.Slicer.Module.Api/Controllers/Slicing/SliceJobController.cs`; contracts are `src/slicer/Farm.Slicer.Module/Contracts/SliceJobDtos.cs`; artifacts are stored via `src/slicer/Farm.Slicer.Module.Api/Controllers/ArtifactsController.cs` and `src/slicer/Farm.Slicer.Module.Api/Services/ArtifactsService.cs`.
+- G-code results are file-system artifacts rooted by `SlicerArtifactStorageSettings.RootPath` (`src/slicer/Farm.Slicer.Module/Services/Configuration/SlicerArtifactStorageSettings.cs`), exposed as `/api/artifacts/{id}/download` and `/api/artifacts/job/{jobId}`.
+- 3D model library lives in `src/Web/ReactApp/src/features/models3d/pages/ModelsPage.tsx`, with grid/list cards in `ModelGridView.tsx`/`ModelListView.tsx`; upload uses `apiClient.uploadModel3dFile`; preview uses lazy `ModelViewer3D` or `GCodeViewer3D`.
+- A separate slicer-bed workspace already exists at `src/Web/ReactApp/src/features/slicer/components/viewer/SlicerWorkspace.tsx` + `SlicerBedVisualization.tsx` for multi-model arrangement before submit.
+- Backend 3D model routes live in `src/slicer/Farm.Slicer.Module.Api/Controllers/Model3DFilesController.cs`; storage is handled by `src/slicer/Farm.Slicer.Module/Services/Model3DFileService.cs`, with URLs built in `src/infra/Services/FileManagement/StoredFileOperationsService.cs`.
+- Microservice route ownership is documented/enforced by `deploy/nginx/nginx-proxy-split.conf`: `/api/slicers`, `/api/artifacts`, `/api/3d-models`, `/api/slice`, `/api/slicer`, and `/hubs/slicers` go to `slicer-host:5246`; normal `deploy/nginx/nginx-proxy.conf` sends generic `/api` and `/hubs` to main API.
+
 ### 2026-05-28 — #290 Status-Gate Guards
 
 - **Layer choice:** 409 gate lives in the **controller** (`GatePrinterControlAsync`), not in `PrintersService`. Rationale: the cache read is a cross-cutting HTTP concern; the service shouldn't know about HTTP status codes. Service layer handles plugin-level busy signals via `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy` → 502.
