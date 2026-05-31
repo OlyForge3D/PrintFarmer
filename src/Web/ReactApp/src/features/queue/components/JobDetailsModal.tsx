@@ -257,23 +257,40 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
               onFieldChange={handleFieldChange}
             />
 
-            {/* Cost */}
+            {/* Cost Breakdown */}
             <div className="bg-pf-bg-1 rounded-lg p-4">
               <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3">Cost</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-                  <p className="text-xs text-pf-text-muted mb-1">Estimated</p>
-                  <p className="text-lg font-bold text-pf-text-primary">
-                    {displayDetails.estimatedCost != null ? `$${displayDetails.estimatedCost.toFixed(2)}` : '—'}
-                  </p>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-pf-text-muted">Energy</span>
+                  <span className="text-sm font-medium text-pf-text-primary">
+                    {displayDetails.energyCostUsd != null ? `$${displayDetails.energyCostUsd.toFixed(2)}` : '—'}
+                  </span>
                 </div>
-                <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-                  <p className="text-xs text-pf-text-muted mb-1">Actual</p>
-                  <p className="text-lg font-bold text-pf-text-primary">
-                    {displayDetails.actualCost != null ? `$${displayDetails.actualCost.toFixed(2)}` : '—'}
-                  </p>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-pf-text-muted">Material</span>
+                  <span className="text-sm font-medium text-pf-text-primary">
+                    {displayDetails.materialCostUsd != null ? `$${displayDetails.materialCostUsd.toFixed(2)}` : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-pf-text-muted">Machine Time</span>
+                  <span className="text-sm font-medium text-pf-text-primary">
+                    {displayDetails.machineTimeCostUsd != null ? `$${displayDetails.machineTimeCostUsd.toFixed(2)}` : '—'}
+                  </span>
+                </div>
+                <div className="border-t border-pf-border pt-2 mt-2 flex justify-between items-center">
+                  <span className="text-xs font-semibold text-pf-text-secondary">Total</span>
+                  <span className="text-sm font-bold text-pf-text-primary">
+                    {displayDetails.totalCostUsd != null ? `$${displayDetails.totalCostUsd.toFixed(2)}` : '—'}
+                  </span>
                 </div>
               </div>
+              {displayDetails.costCalculatedAt && (
+                <p className="text-xs text-pf-text-muted mt-2">
+                  as of {new Date(displayDetails.costCalculatedAt).toLocaleString()}
+                </p>
+              )}
             </div>
           </div>
 
