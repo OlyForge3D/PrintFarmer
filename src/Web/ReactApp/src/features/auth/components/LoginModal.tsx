@@ -6,6 +6,8 @@ import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button, Checkbox, Input } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
+import { PasskeyLoginButton } from '@/features/auth/components/PasskeyLoginButton';
+import type { PasskeyError } from '@/features/auth/types/passkey';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -19,7 +21,19 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const { login, error } = useAuth();
+
+  const handlePasskeySuccess = useCallback((token: string) => {
+    localStorage.setItem('auth-token', token);
+    setPasskeyError(null);
+    onClose();
+    window.location.reload();
+  }, [onClose]);
+
+  const handlePasskeyError = useCallback((_error: PasskeyError, message: string) => {
+    setPasskeyError(message);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +71,25 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             {error}
           </div>
         )}
+
+        {passkeyError && (
+          <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm" style={{ color: 'var(--pf-error)' }}>
+            {passkeyError}
+          </div>
+        )}
+
+        <PasskeyLoginButton
+          usernameHint={username || undefined}
+          onSuccess={handlePasskeySuccess}
+          onError={handlePasskeyError}
+          disabled={isLoading}
+        />
+
+        <div className="relative flex items-center py-1">
+          <div className="flex-grow border-t border-pf-border" />
+          <span className="mx-3 text-xs text-pf-text-secondary">or</span>
+          <div className="flex-grow border-t border-pf-border" />
+        </div>
 
         <div>
           <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-1">
