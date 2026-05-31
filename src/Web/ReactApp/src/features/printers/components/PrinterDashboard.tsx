@@ -26,6 +26,7 @@ import { RecentPrintsWidget } from './RecentPrintsWidget';
 import { CriticalAlertsBanner } from './CriticalAlertsBanner';
 import { BackgroundServicesWidget } from '@/features/admin/components/BackgroundServicesWidget';
 import { MaintenanceAlertsWidget } from '@/features/maintenance/components/MaintenanceAlertsWidget';
+import { FarmCostSummaryWidget } from './FarmCostSummaryWidget';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { dashboardTour } from '@/features/printers/tours/dashboard.tour';
 import { HelpButton } from '@/common/components/HelpButton';
@@ -150,14 +151,15 @@ export const PrinterDashboard: React.FC = () => {
             <TasksWidget />
           </div>
 
-          {/* Row 2: Active Jobs + Recent Prints */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Row 2: Active Jobs + Recent Prints + Farm Cost */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div data-tour="active-jobs">
               <ActiveJobsWidget />
             </div>
             <div data-tour="recent-prints">
               <RecentPrintsWidget />
             </div>
+            <FarmCostSummaryWidget />
           </div>
 
           {/* Row 3: Maintenance Alerts + Background Services */}

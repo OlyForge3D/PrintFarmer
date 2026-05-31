@@ -114,6 +114,11 @@ export interface JobDetails {
   // Cost
   estimatedCost?: number;
   actualCost?: number;
+  energyCostUsd?: number;
+  materialCostUsd?: number;
+  machineTimeCostUsd?: number;
+  totalCostUsd?: number;
+  costCalculatedAt?: string;
   // Thumbnail
   thumbnailUrl?: string;
   // Multi-copy
