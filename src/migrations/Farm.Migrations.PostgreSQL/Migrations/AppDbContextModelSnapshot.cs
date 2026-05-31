@@ -1644,7 +1644,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("Success")
                         .HasColumnType("boolean");
 
-                    b.Property<DateTimeOffset>("Timestamp")
+                    b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("UserAgent")
@@ -2667,6 +2667,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("boolean");
+
+                    b.Property<decimal?>("KwhUsed")
+                        .HasColumnType("numeric");
 
                     b.Property<decimal?>("LaborCostUsd")
                         .HasColumnType("numeric");
