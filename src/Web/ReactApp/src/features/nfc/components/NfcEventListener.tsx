@@ -19,10 +19,16 @@ export function NfcEventListener() {
 
   useNfcEvents({ onBindRequested: handleBindRequested });
 
+  const handleClose = useCallback(() => {
+    setModalOpen(false);
+    setBindEvent(null);
+  }, []);
+
   return (
     <NfcBindingModal
+      key={bindEvent?.tagUid ?? ''}
       isOpen={modalOpen}
-      onClose={() => setModalOpen(false)}
+      onClose={handleClose}
       event={bindEvent}
     />
   );
