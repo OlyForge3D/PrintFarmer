@@ -51,6 +51,9 @@ import { LocationDashboardPage } from '@/features/locations/pages/LocationDashbo
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
+import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
+import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
+import { PowerMonitorSettingsPage } from '@/features/power-monitors';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -204,13 +207,14 @@ function AuthenticatedAppRoutes() {
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing" replace />} />
-          <Route path="tags" element={<Navigate to="/settings?tab=data" replace />} />
-          <Route path="bed-types" element={<Navigate to="/settings?tab=slicing" replace />} />
-          <Route path="custom-fields" element={<Navigate to="/settings?tab=hardware" replace />} />
-          <Route path="webhooks" element={<Navigate to="/settings?tab=integrations" replace />} />
-          <Route path="quotas" element={<Navigate to="/settings?tab=data" replace />} />
-          <Route path="data" element={<Navigate to="/settings?tab=data" replace />} />
+          <Route path="slicer-profiles" element={<Navigate to="/slicer-profiles" replace />} />
+          <Route path="tags" element={<TagAdminPage />} />
+          <Route path="bed-types" element={<BedTypeAdminPage />} />
+          <Route path="custom-fields" element={<CustomFieldsAdminPage />} />
+          <Route path="webhooks" element={<WebhooksAdminPage />} />
+          <Route path="quotas" element={<QuotaManagementPage />} />
+          <Route path="power-monitors" element={<PowerMonitorSettingsPage />} />
+          <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
