@@ -31,4 +31,29 @@ public class NfcController(INfcTagService nfcTagService) : ControllerBase
         var result = await nfcTagService.LinkTagAsync(request, ct);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Returns all NFC tag bindings.
+    /// </summary>
+    [Authorize]
+    [HttpGet("bindings")]
+    [ProducesResponseType(typeof(IReadOnlyList<NfcTagBindingDto>), 200)]
+    public async Task<ActionResult<IReadOnlyList<NfcTagBindingDto>>> ListBindingsAsync(CancellationToken ct)
+    {
+        var bindings = await nfcTagService.ListBindingsAsync(ct);
+        return Ok(bindings);
+    }
+
+    /// <summary>
+    /// Deletes an NFC tag binding by id.
+    /// </summary>
+    [Authorize]
+    [HttpDelete("bindings/{id:guid}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> DeleteBindingAsync(Guid id, CancellationToken ct)
+    {
+        var deleted = await nfcTagService.DeleteBindingAsync(id, ct);
+        return deleted ? NoContent() : NotFound();
+    }
 }

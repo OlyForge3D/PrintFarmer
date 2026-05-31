@@ -20,6 +20,16 @@ public interface INfcTagService
     Task<NfcTagBindingDto> LinkTagAsync(LinkNfcTagRequest request, CancellationToken ct);
 
     /// <summary>
+    /// Returns all NFC tag bindings.
+    /// </summary>
+    Task<IReadOnlyList<NfcTagBindingDto>> ListBindingsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Deletes a tag binding by id. Returns false if not found.
+    /// </summary>
+    Task<bool> DeleteBindingAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
     /// Flushes any queued scan events for the device (called on heartbeat / reconnect).
     /// </summary>
     Task FlushOfflineQueueAsync(Guid nfcDeviceId, CancellationToken ct);

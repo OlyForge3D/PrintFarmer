@@ -125,6 +125,31 @@ public class NfcTagService(
         return MapToDto(binding);
     }
 
+    public async Task<IReadOnlyList<NfcTagBindingDto>> ListBindingsAsync(CancellationToken ct)
+    {
+        var bindings = await db.NfcTagBindings
+            .Include(b => b.Printer)
+            .OrderBy(b => b.CreatedAt)
+            .ToListAsync(ct);
+
+        return bindings.Select(MapToDto).ToList();
+    }
+
+    public async Task<bool> DeleteBindingAsync(Guid id, CancellationToken ct)
+    {
+        var binding = await db.NfcTagBindings.FindAsync([id], ct);
+        if (binding is null)
+        {
+            return false;
+        }
+
+        db.NfcTagBindings.Remove(binding);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("NFC tag binding {Id} (tag {TagUid}) deleted", id, binding.TagUid);
+        return true;
+    }
+
     public async Task FlushOfflineQueueAsync(Guid nfcDeviceId, CancellationToken ct)
     {
         if (!_offlineQueues.TryRemove(nfcDeviceId, out var queue) || queue.Count == 0)
