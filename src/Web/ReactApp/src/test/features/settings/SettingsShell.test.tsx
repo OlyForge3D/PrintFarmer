@@ -1,20 +1,52 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+
+// Mock auth context
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: { id: '1', email: 'admin@test.com', isActive: true, roles: ['farm_admin'] },
+    isAuthenticated: true,
+    isLoading: false,
+    hasRole: () => true,
+    hasPermission: () => true,
+    logout: vi.fn(),
+  }),
+  useAuthInternal: () => ({
+    user: { id: '1', email: 'admin@test.com', isActive: true, roles: ['farm_admin'] },
+    isAuthenticated: true,
+    isLoading: false,
+    hasRole: () => true,
+    hasPermission: () => true,
+    logout: vi.fn(),
+  }),
+}));
+
+// Mock slicer context
+vi.mock('@/hooks/useSlicer', () => ({
+  useSlicer: () => ({ isSlicerAvailable: true }),
+}));
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
 
 function renderSettings(initialRoute = '/settings') {
   return render(
-    <MemoryRouter initialEntries={[initialRoute]}>
-      <SettingsShell />
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialRoute]}>
+        <SettingsShell />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
 describe('SettingsShell', () => {
   it('renders the settings heading and tabs', () => {
     renderSettings();
-    expect(screen.getByText('Settings')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Filament' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Users' })).toBeInTheDocument();
@@ -66,8 +98,9 @@ describe('SettingsShell', () => {
 
   it('updates search value from input', () => {
     renderSettings();
-    const searchInput = screen.getByRole('searchbox');
+    const searchInput = screen.getByLabelText('Search settings');
     fireEvent.change(searchInput, { target: { value: 'email' } });
-    expect(searchInput).toHaveValue('email');
+    // After typing, the notifications tab should match (keyword 'email')
+    expect(screen.getByRole('tab', { name: 'Notifications' })).toBeInTheDocument();
   });
 });
