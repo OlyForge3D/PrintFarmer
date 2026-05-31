@@ -53,6 +53,7 @@ import { MaintenanceDashboardPage } from '@/features/maintenance/pages/Maintenan
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
+import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
 import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
 import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
@@ -194,6 +195,7 @@ function AuthenticatedAppRoutes() {
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="cameras/:tabId" element={<CamerasPage />} />
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
+        <Route path="nfc-bindings" element={<NfcBindingsPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />

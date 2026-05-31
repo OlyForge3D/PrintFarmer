@@ -1,6 +1,7 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
+import { NfcEventListener } from '@/features/nfc/components/NfcEventListener';
 import { TasksBadge } from '@/features/tasks';
 import { NotificationBell } from '@/common/components/NotificationBell';
 import { InstallBanner } from '@/common/components/InstallBanner';
@@ -153,6 +154,11 @@ const navigation: NavigationElement[] = [
   {
     name: 'NFC Devices',
     href: '/nfc-devices',
+    icon: NfcIcon
+  },
+  {
+    name: 'NFC Bindings',
+    href: '/nfc-bindings',
     icon: NfcIcon
   },
 
@@ -972,6 +978,7 @@ export function Layout() {
         onSwitchToLogin={switchToLogin}
       />
       {import.meta.env.VITE_PRINTFARMER_DEBUG && <DebugPrinterSignalRPanel />}
+      <NfcEventListener />
     </div>
   );
 }

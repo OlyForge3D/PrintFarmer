@@ -3810,6 +3810,19 @@ export class ApiClient {
     await this.client.delete(`/nfc-devices/${id}`);
   }
 
+  async linkNfcTag(request: import('@/features/nfc/types').NfcLinkRequest): Promise<void> {
+    await this.client.post('/nfc/link', request);
+  }
+
+  async getNfcBindings(): Promise<import('@/features/nfc/types').NfcBindingDto[]> {
+    const response = await this.client.get('/nfc/bindings');
+    return response.data;
+  }
+
+  async deleteNfcBinding(id: string): Promise<void> {
+    await this.client.delete(`/nfc/bindings/${id}`);
+  }
+
   async getNfcDeviceScanHistory(id: string, limit = 50): Promise<import('@/types/api').NfcScanHistoryDto[]> {
     const response = await this.client.get(`/nfc-devices/${id}/history`, { params: { limit } });
     return response.data;
