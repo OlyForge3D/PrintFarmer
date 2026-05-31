@@ -157,3 +157,38 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 - `.squad/decisions/inbox/dallas-backlog-electricity-tracking.md`
 - `.squad/decisions/inbox/dallas-backlog-printables-import.md`
 - `.squad/decisions/inbox/dallas-backlog-passkey-login.md`
+
+## Learnings — 2026-05-31 Issue Filing Session
+
+**Scope:** Filed 31 GitHub issues covering the adoption plan + 5 new backlog clusters.
+
+### Issues Filed
+
+| Cluster | Issues | Numbers |
+|---|---|---|
+| Phase 1 — G-code Preview | P1-1, P1-2, P1-3, P1-4, P1-5 (tracker) | #333–#337 |
+| Phase 2 — Quick Slice UX | P2-1, P2-2, P2-3 | #338–#340 |
+| Phase 3 — Notifications | P3-1 (combined, one PR) | #341 |
+| Phase 4 — Cost Tracking | P4-1, P4-2, P4-3 | #342–#344 |
+| Electricity Tracking | E-1, E-2, E-3, E-4 | #345–#348 |
+| Printables Import | PI-1, PI-2, PI-3, PI-4 (blocked) | #349–#352 |
+| Passkey Login | PK-1, PK-2, PK-3, PK-4 | #353–#356 |
+| Settings Consolidation | ST-1, ST-2, ST-3a, ST-3b | #357–#360 |
+| NFC UX Polish | NFC-1, NFC-2a, NFC-2b | #361–#363 |
+
+**Total: 31 issues** (#333–#363)
+
+### Deviations from Plan
+
+- **ST-3 split into ST-3a (#359, Lambert) and ST-3b (#360, Ripley)** as explicitly noted in the plan as an option. Clean frontend/backend split.
+- **NFC-2 split into NFC-2a (#362, Lambert) and NFC-2b (#363, Ripley)** per plan note "split if cleaner" — the backend SignalR routing and frontend inventory sync are independent deliverables.
+- **P3-1 (#341) filed as a combined cross-cutting issue** with both `squad:⚛️ ripley` and `squad:🔧 lambert` labels per Brady's "ONE PR" directive.
+- **PI-4 (#352, MakerWorld)** filed with `go:no` label per Brady policy — blocked on Bambu Lab cloud token strategy.
+- **Issue numbers started at #333** not #318 as pre-planned (issues #318–#332 were filed by other means between the check and filing). Worktree annotations and cross-references corrected post-filing.
+
+### Things Brady Will Want to Know
+
+- **Service abstraction is the load-bearing constraint on Phase 1.** P1-1 (#333) blocks P1-2 (#334) which blocks P1-3 (#335). Ralph should pick these up in order.
+- **E-2 migrations cover AppDbContext only** (PowerMonitor/PowerReading). PI-3 (#351) migrations cover SlicerDbContext only (Model3DFile attribution). PK-2 (#354) migrations cover AppDbContext (UserPasskeyCredential). No cross-context schema conflicts.
+- **All Brady policy answers from the 2026-05-31T09:25 triage directive are embedded in issue bodies** — HA in Phase 1, 90-day retention, attribution on both surfaces, residentKey:preferred, passkey-only out of scope, etc.
+- **The 15+ settings nav items list in ST-2 (#358)** is the one that will cause the most debate — some pages (like NfcDevicesPage) are listed in Hardware but cross-reference NFC UX work. Ralph should coordinate with Ripley on ordering.
