@@ -12,6 +12,8 @@ public sealed class KasaSmartPlugProvider(
     ILogger<KasaSmartPlugProvider> logger) : ISmartPlugProvider
 {
     private const int KasaTcpPort = 9999;
+    private const int MaxResponseBytes = 65_536; // 64 KB — no legitimate Kasa response is larger
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
 
     public string ProviderType => "Kasa";
 
@@ -22,6 +24,11 @@ public sealed class KasaSmartPlugProvider(
         {
             byte[] response = await SendKasaCommandAsync(deviceAddress, KasaCommands.EmeterRealtime, ct);
             return ParseEmeterRealtime(response);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Kasa GetCurrentReading timed out for {DeviceAddress}", deviceAddress);
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -38,6 +45,12 @@ public sealed class KasaSmartPlugProvider(
             byte[] response = await SendKasaCommandAsync(deviceAddress, KasaCommands.SysInfo, ct);
             return response.Length > 0;
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Internal read timeout expired — treat as connection failure.
+            logger.LogDebug("Kasa TestConnection timed out for {DeviceAddress}", deviceAddress);
+            return false;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogDebug(ex, "Kasa TestConnection failed for {DeviceAddress}", deviceAddress);
@@ -45,13 +58,14 @@ public sealed class KasaSmartPlugProvider(
         }
     }
 
-    private static async Task<byte[]> SendKasaCommandAsync(string host, byte[] command, CancellationToken ct)
+    internal static async Task<byte[]> SendKasaCommandAsync(string host, byte[] command, CancellationToken ct)
     {
         using System.Net.Sockets.TcpClient tcp = new();
         tcp.ReceiveTimeout = 5000;
         tcp.SendTimeout = 5000;
 
-        await tcp.ConnectAsync(host, KasaTcpPort, ct);
+        (string hostname, int port) = ParseHostPort(host, KasaTcpPort);
+        await tcp.ConnectAsync(hostname, port, ct);
         System.Net.Sockets.NetworkStream stream = tcp.GetStream();
 
         // Kasa protocol: 4-byte big-endian length prefix followed by XOR-obfuscated payload.
@@ -60,12 +74,23 @@ public sealed class KasaSmartPlugProvider(
         await stream.WriteAsync(header, ct);
         await stream.WriteAsync(encrypted, ct);
 
+        // Apply a read timeout to prevent a hung socket from blocking the polling thread.
+        using CancellationTokenSource readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        readCts.CancelAfter(ReadTimeout);
+        CancellationToken readCt = readCts.Token;
+
         byte[] lenBuf = new byte[4];
-        await ReadExactAsync(stream, lenBuf, ct);
+        await ReadExactAsync(stream, lenBuf, readCt);
         int len = System.Net.IPAddress.NetworkToHostOrder(BitConverter.ToInt32(lenBuf, 0));
 
+        if (len <= 0 || len > MaxResponseBytes)
+        {
+            throw new InvalidOperationException(
+                $"Kasa device returned invalid response length {len} (max allowed: {MaxResponseBytes})");
+        }
+
         byte[] payload = new byte[len];
-        await ReadExactAsync(stream, payload, ct);
+        await ReadExactAsync(stream, payload, readCt);
         return XorDecrypt(payload);
     }
 
@@ -82,6 +107,17 @@ public sealed class KasaSmartPlugProvider(
 
             offset += read;
         }
+    }
+
+    private static (string Host, int Port) ParseHostPort(string address, int defaultPort)
+    {
+        int lastColon = address.LastIndexOf(':');
+        if (lastColon > 0 && int.TryParse(address.AsSpan(lastColon + 1), out int port))
+        {
+            return (address[..lastColon], port);
+        }
+
+        return (address, defaultPort);
     }
 
     private static byte[] XorEncrypt(byte[] data)
