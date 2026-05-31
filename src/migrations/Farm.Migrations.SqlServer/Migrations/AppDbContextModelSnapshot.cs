@@ -35,6 +35,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
                     b.Property<string>("SettingsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -4692,6 +4697,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
 
                     b.Property<string>("Theme")
                         .IsRequired()

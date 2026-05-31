@@ -5,6 +5,7 @@ using Farm.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -41,11 +42,15 @@ public class SettingsController(
         bool isAdmin = User.IsInRole("farm_admin");
         FarmSettingsDto dto = _farmSettings.GetFarmSettings();
 
+        // Include the row version from the underlying AppSettingsEntity for concurrency control
+        string? rowVersion = _farmSettings.GetFarmSettingsRowVersion();
+
         return Ok(new FarmSettingsResponse(
             ElectricityRatePerKwh: dto.ElectricityRatePerKwh,
             DefaultMachineHourlyRate: dto.DefaultMachineHourlyRate,
             AveragePrinterWattage: dto.AveragePrinterWattage,
-            CanWrite: isAdmin));
+            CanWrite: isAdmin,
+            RowVersion: rowVersion));
     }
 
     /// <summary>Updates farm-wide settings. Requires farm_admin role.</summary>
@@ -53,6 +58,7 @@ public class SettingsController(
     [Authorize(Policy = "RequireAdmin")]
     [ProducesResponseType(typeof(FarmSettingsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult UpdateFarmSettings([FromBody] UpdateFarmSettingsBody body)
     {
         if (body.ElectricityRatePerKwh is < 0 or > 10)
@@ -70,10 +76,23 @@ public class SettingsController(
             return BadRequest("averagePrinterWattage must be between 0 and 5000.");
         }
 
-        _farmSettings.UpdateFarmSettings(new UpdateFarmSettingsRequest(
-            body.ElectricityRatePerKwh,
-            body.DefaultMachineHourlyRate,
-            body.AveragePrinterWattage));
+        // Get the expected row version from If-Match header or body
+        string? ifMatch = Request.Headers.IfMatch.FirstOrDefault()?.Trim('"');
+        string? expectedRowVersion = ifMatch ?? body.RowVersion;
+
+        try
+        {
+            _farmSettings.UpdateFarmSettings(
+                new UpdateFarmSettingsRequest(
+                    body.ElectricityRatePerKwh,
+                    body.DefaultMachineHourlyRate,
+                    body.AveragePrinterWattage),
+                expectedRowVersion);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "The farm settings were modified by another request. Please reload and retry." });
+        }
 
         _logger.LogInformation("Farm settings updated by user {UserId}", GetUserId());
 
@@ -97,6 +116,7 @@ public class SettingsController(
     [HttpPut("user")]
     [ProducesResponseType(typeof(UserSettingsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateUserSettingsAsync(
         [FromBody] UpdateUserSettingsBody body, CancellationToken ct)
     {
@@ -105,6 +125,10 @@ public class SettingsController(
             return BadRequest("itemsPerPage must be between 1 and 200.");
         }
 
+        // Get the expected row version from If-Match header or body
+        string? ifMatch = Request.Headers.IfMatch.FirstOrDefault()?.Trim('"');
+        string? expectedRowVersion = ifMatch ?? body.RowVersion;
+
         Guid userId = GetUserId();
         UserSettings? entity = await _db.UserSettings.FirstOrDefaultAsync(u => u.UserId == userId, ct);
 
@@ -112,6 +136,12 @@ public class SettingsController(
         {
             entity = new UserSettings { UserId = userId };
             _db.UserSettings.Add(entity);
+        }
+        else if (expectedRowVersion is not null)
+        {
+            // Enforce optimistic concurrency: set the original row version so EF checks it
+            byte[] expectedBytes = Convert.FromBase64String(expectedRowVersion);
+            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedBytes;
         }
 
         if (body.Theme is not null)
@@ -135,7 +165,15 @@ public class SettingsController(
         }
 
         entity.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "User settings were modified by another request. Please reload and retry." });
+        }
 
         _logger.LogInformation("User settings updated for user {UserId}", userId);
 
@@ -159,7 +197,8 @@ public class SettingsController(
             Theme: entity?.Theme ?? "system",
             Locale: entity?.Locale ?? "en",
             ItemsPerPage: entity?.ItemsPerPage ?? 25,
-            DefaultSlicerPreset: entity?.DefaultSlicerPreset);
+            DefaultSlicerPreset: entity?.DefaultSlicerPreset,
+            RowVersion: entity?.RowVersion is { Length: > 0 } rv ? Convert.ToBase64String(rv) : null);
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
@@ -169,13 +208,15 @@ public record FarmSettingsResponse(
     decimal ElectricityRatePerKwh,
     decimal DefaultMachineHourlyRate,
     decimal AveragePrinterWattage,
-    bool CanWrite);
+    bool CanWrite,
+    string? RowVersion);
 
 /// <summary>Request body for PUT /api/settings/farm.</summary>
 public record UpdateFarmSettingsBody(
     decimal? ElectricityRatePerKwh,
     decimal? DefaultMachineHourlyRate,
-    decimal? AveragePrinterWattage);
+    decimal? AveragePrinterWattage,
+    string? RowVersion = null);
 
 /// <summary>Response body for user settings endpoints.</summary>
 public record UserSettingsResponse(
@@ -183,11 +224,13 @@ public record UserSettingsResponse(
     string Theme,
     string Locale,
     int ItemsPerPage,
-    string? DefaultSlicerPreset);
+    string? DefaultSlicerPreset,
+    string? RowVersion);
 
 /// <summary>Request body for PUT /api/settings/user. All fields optional (partial update).</summary>
 public record UpdateUserSettingsBody(
     string? Theme,
     string? Locale,
     int? ItemsPerPage,
-    string? DefaultSlicerPreset);
+    string? DefaultSlicerPreset,
+    string? RowVersion = null);
