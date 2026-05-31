@@ -59,7 +59,7 @@ jobs:
           path: .
 
       - name: Setup QEMU and Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to Docker (optional)
         if: false
