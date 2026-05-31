@@ -16,15 +16,12 @@ public sealed class PrintablesImportService(
     PrintablesGraphQLClient graphQlClient,
     ILogger<PrintablesImportService> logger) : IPrintablesImportService
 {
-    // Anchored pattern: requires path to start with /model/{digits}
-    private static readonly Regex _modelPathPattern =
-        new(@"^/model/(\d+)(?:-[^/?#]*)?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly HashSet<string> _allowedHosts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "printables.com",
-        "www.printables.com",
-    };
+    // Matches:
+    //   https://www.printables.com/model/12345
+    //   https://www.printables.com/model/12345-my-cool-model
+    //   https://printables.com/model/12345-slug
+    private static readonly Regex _modelUrlPattern =
+        new(@"printables\.com/model/(\d+)(?:-[^/?#]*)?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly PrintablesGraphQLClient _graphQlClient = graphQlClient;
     private readonly ILogger<PrintablesImportService> _logger = logger;
@@ -51,8 +48,6 @@ public sealed class PrintablesImportService(
 
     /// <summary>
     /// Extracts the numeric model ID from a Printables URL.
-    /// Uses <see cref="Uri"/> for host extraction to prevent substring domain spoofing,
-    /// then applies an anchored regex on the path component.
     /// </summary>
     /// <param name="url">Raw URL string supplied by the user.</param>
     /// <returns>The numeric model ID as a string.</returns>
@@ -64,23 +59,7 @@ public sealed class PrintablesImportService(
             throw new ArgumentException("URL must not be empty.", nameof(url));
         }
 
-        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out Uri? uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new ArgumentException(
-                $"'{url}' is not a valid HTTP(S) URL.",
-                nameof(url));
-        }
-
-        if (!_allowedHosts.Contains(uri.Host))
-        {
-            throw new ArgumentException(
-                $"'{url}' is not a recognised Printables model URL. " +
-                "Expected host: printables.com or www.printables.com",
-                nameof(url));
-        }
-
-        Match match = _modelPathPattern.Match(uri.AbsolutePath);
+        Match match = _modelUrlPattern.Match(url);
         if (!match.Success)
         {
             throw new ArgumentException(

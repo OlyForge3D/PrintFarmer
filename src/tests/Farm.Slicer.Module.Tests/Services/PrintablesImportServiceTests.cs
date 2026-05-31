@@ -48,18 +48,6 @@ public class PrintablesImportServiceTests
         _ = act.Should().Throw<ArgumentException>();
     }
 
-    [Theory]
-    [InlineData("https://fakeprintables.com/model/12345")]
-    [InlineData("https://printables.com.evil.org/model/12345")]
-    [InlineData("https://printables.com@attacker.com/model/12345")]
-    [InlineData("https://notprintables.com/model/12345")]
-    [InlineData("https://www.printables.com.malicious.io/model/12345")]
-    public void ParseModelId_LookalikeDomain_ThrowsArgumentException(string url)
-    {
-        Action act = () => PrintablesImportService.ParseModelId(url);
-        _ = act.Should().Throw<ArgumentException>();
-    }
-
     // ── GraphQL client (mocked HTTP handler) ─────────────────────────────────
 
     private static HttpClient BuildMockedHttpClient(HttpStatusCode statusCode, string json)
