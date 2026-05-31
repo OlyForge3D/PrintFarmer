@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 
 export interface PushSubscriptionState {
@@ -19,6 +19,25 @@ export function usePushSubscription(): PushSubscriptionState {
     'serviceWorker' in navigator &&
     'PushManager' in window &&
     'Notification' in window;
+
+  // Sync isSubscribed with the browser's actual push subscription on mount
+  useEffect(() => {
+    if (!isSupported) return;
+
+    let cancelled = false;
+    navigator.serviceWorker.ready
+      .then((registration) => registration.pushManager.getSubscription())
+      .then((subscription) => {
+        if (!cancelled) {
+          setIsSubscribed(subscription !== null);
+        }
+      })
+      .catch(() => {
+        // Silently ignore — isSubscribed stays false
+      });
+
+    return () => { cancelled = true; };
+  }, [isSupported]);
 
   const subscribe = useCallback(async () => {
     if (!isSupported) {
