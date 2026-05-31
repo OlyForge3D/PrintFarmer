@@ -193,6 +193,61 @@ describe('QuickSliceModal', () => {
     });
   });
 
+  describe('bed type override', () => {
+    it('defaults to "Inherit from profile"', async () => {
+      renderModal();
+      await waitFor(() => {
+        const bedTypeSelect = screen.getByLabelText(/bed type/i);
+        expect(bedTypeSelect).toHaveValue('');
+      });
+    });
+
+    it('can select a bed type override', async () => {
+      renderModal();
+      await waitFor(() => {
+        expect(screen.getByLabelText(/bed type/i)).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByLabelText(/bed type/i), { target: { value: 'Cool Plate' } });
+      expect(screen.getByLabelText(/bed type/i)).toHaveValue('Cool Plate');
+    });
+
+    it('includes bed type in overrides when selected', async () => {
+      renderModal();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      fireEvent.change(screen.getByLabelText(/bed type/i), { target: { value: 'Textured PEI Plate' } });
+      fireEvent.click(screen.getByRole('button', { name: /slice/i }));
+
+      await waitFor(() => {
+        expect(mockSubmitJob).toHaveBeenCalledWith(
+          expect.objectContaining({
+            slicerProfileJson: expect.stringContaining('"curr_bed_type":"Textured PEI Plate"'),
+          })
+        );
+      });
+    });
+
+    it('omits bed type from overrides when inherit is selected', async () => {
+      renderModal();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /slice/i }));
+
+      await waitFor(() => {
+        expect(mockSubmitJob).toHaveBeenCalled();
+        const call = mockSubmitJob.mock.calls[0][0] as { slicerProfileJson: string };
+        expect(call.slicerProfileJson).not.toContain('curr_bed_type');
+      });
+    });
+  });
+
   describe('advanced settings link', () => {
     it('navigates to NewSliceJobPage with model preselected', async () => {
       const { onClose } = renderModal();

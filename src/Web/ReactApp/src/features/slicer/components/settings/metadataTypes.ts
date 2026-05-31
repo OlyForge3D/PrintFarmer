@@ -430,6 +430,9 @@ export const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; i
   ],
 };
 
+/** Bed type options for OrcaSlicer's curr_bed_type override */
+export const BED_TYPE_OPTIONS = KNOWN_ENUMS.bed_type;
+
 /** Keys that should render as multi-line textareas */
 export const TEXTAREA_KEYS = new Set([
   'machine_start_gcode', 'machine_end_gcode',
