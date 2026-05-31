@@ -213,10 +213,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
 
+<<<<<<< HEAD
     // Electricity Monitoring (power monitors + time-series readings)
     public DbSet<PowerMonitor> PowerMonitors => Set<PowerMonitor>();
 
     public DbSet<PowerReading> PowerReadings => Set<PowerReading>();
+=======
+    // Per-user settings (theme, locale, slicer defaults, etc.)
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+>>>>>>> 7be713d3d (feat(settings): per-user vs farm-wide split — backend API (#359))
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -247,12 +252,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         PopulateCaseInsensitiveShadowColumns();
+        StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         PopulateCaseInsensitiveShadowColumns();
+        StampRowVersions();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -279,6 +286,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 {
                     entry.Entity.UpdatedAt = DateTime.UtcNow;
                 }
+            }
+        }
+    }
+
+    private void StampRowVersions()
+    {
+        byte[] newVersion = Guid.NewGuid().ToByteArray();
+
+        foreach (EntityEntry<UserSettings> entry in ChangeTracker.Entries<UserSettings>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.RowVersion = newVersion;
+            }
+        }
+
+        foreach (EntityEntry<AppSettingsEntity> entry in ChangeTracker.Entries<AppSettingsEntity>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.RowVersion = newVersion;
             }
         }
     }
