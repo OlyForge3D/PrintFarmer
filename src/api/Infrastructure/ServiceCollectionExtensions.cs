@@ -582,8 +582,8 @@ public static class ServiceCollectionExtensions
         // Register NfcDeviceService from Infrastructure layer - NFC reader device management
         _ = services.AddScoped<Farm.Infrastructure.Services.NfcDevices.INfcDeviceService, Farm.Infrastructure.Services.NfcDevices.NfcDeviceService>();
 
-        // Register NfcTagService - tag binding lookup, SpoolLastSeenAt updates, SignalR broadcasts
-        _ = services.AddScoped<Farm.Infrastructure.Services.NfcDevices.INfcTagService, Farm.Infrastructure.Services.NfcDevices.NfcTagService>();
+        // Register NfcTagService as singleton so per-device in-memory offline queues persist across requests
+        _ = services.AddSingleton<Farm.Infrastructure.Services.NfcDevices.INfcTagService, Farm.Infrastructure.Services.NfcDevices.NfcTagService>();
 
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();

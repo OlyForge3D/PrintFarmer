@@ -4,6 +4,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.NfcDevices;
@@ -14,7 +15,7 @@ namespace Farm.Infrastructure.Services.NfcDevices;
 /// is considered offline (heartbeat timeout) — events are flushed when the device reconnects.
 /// </summary>
 public class NfcTagService(
-    AppDbContext db,
+    IServiceScopeFactory scopeFactory,
     IHubContext<NfcHub> hub,
     ILogger<NfcTagService> logger) : INfcTagService
 {
@@ -30,11 +31,14 @@ public class NfcTagService(
         DateTime readAt,
         CancellationToken ct)
     {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         var binding = await db.NfcTagBindings
             .Include(b => b.Printer)
             .FirstOrDefaultAsync(b => b.TagUid == tagUid, ct);
 
-        bool deviceIsOnline = await IsDeviceOnlineAsync(nfcDeviceId, ct);
+        bool deviceIsOnline = await IsDeviceOnlineAsync(db, nfcDeviceId, ct);
 
         if (binding is not null)
         {
@@ -94,6 +98,9 @@ public class NfcTagService(
 
         for (int attempt = 0; attempt < maxRetries; attempt++)
         {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
             var binding = await db.NfcTagBindings
                 .Include(b => b.Printer)
                 .FirstOrDefaultAsync(b => b.TagUid == request.TagUid, ct);
@@ -142,7 +149,10 @@ public class NfcTagService(
         }
 
         // Final fallback: return the existing binding (winner of the race)
-        var existing = await db.NfcTagBindings
+        await using var fallbackScope = scopeFactory.CreateAsyncScope();
+        var fallbackDb = fallbackScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var existing = await fallbackDb.NfcTagBindings
             .Include(b => b.Printer)
             .FirstAsync(b => b.TagUid == request.TagUid, ct);
 
@@ -151,7 +161,7 @@ public class NfcTagService(
         existing.PrinterId = request.PrinterId;
         existing.TrayId = request.TrayId;
         existing.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await fallbackDb.SaveChangesAsync(ct);
 
         logger.LogInformation(
             "NFC tag {TagUid} linked (after race resolution) → spool {SpoolId}, printer {PrinterId}",
@@ -162,6 +172,9 @@ public class NfcTagService(
 
     public async Task<IReadOnlyList<NfcTagBindingDto>> ListBindingsAsync(CancellationToken ct)
     {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         var bindings = await db.NfcTagBindings
             .Include(b => b.Printer)
             .OrderBy(b => b.CreatedAt)
@@ -172,6 +185,9 @@ public class NfcTagService(
 
     public async Task<bool> DeleteBindingAsync(Guid id, CancellationToken ct)
     {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         var binding = await db.NfcTagBindings.FindAsync([id], ct);
         if (binding is null)
         {
@@ -202,7 +218,7 @@ public class NfcTagService(
         }
     }
 
-    private async Task<bool> IsDeviceOnlineAsync(Guid nfcDeviceId, CancellationToken ct)
+    private static async Task<bool> IsDeviceOnlineAsync(AppDbContext db, Guid nfcDeviceId, CancellationToken ct)
     {
         var lastHeartbeat = await db.NfcDevices
             .Where(d => d.Id == nfcDeviceId)

@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -50,8 +51,14 @@ public class NfcTagServiceConcurrencyTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private NfcTagService CreateService(AppDbContext db) =>
-        new(db, _hubMock.Object, NullLogger<NfcTagService>.Instance);
+    private NfcTagService CreateService(AppDbContext db)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => db);
+        var provider = services.BuildServiceProvider();
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        return new NfcTagService(scopeFactory, _hubMock.Object, NullLogger<NfcTagService>.Instance);
+    }
 
     [Fact]
     public async Task LinkTagAsync_ConcurrentCalls_SameTagUid_ProducesExactlyOneBinding()
