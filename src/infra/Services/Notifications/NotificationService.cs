@@ -141,9 +141,9 @@ public interface INotificationService
     Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Delete all push subscriptions for a user.
+    /// Delete a specific push subscription for a user, identified by endpoint URL.
     /// </summary>
-    Task DeletePushSubscriptionAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task DeletePushSubscriptionAsync(Guid userId, string endpoint, CancellationToken cancellationToken = default);
 }
 
 public class NotificationService(
@@ -475,17 +475,16 @@ public class NotificationService(
         logger.LogInformation("Saved push subscription for user {UserId}", userId);
     }
 
-    public async Task DeletePushSubscriptionAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task DeletePushSubscriptionAsync(Guid userId, string endpoint, CancellationToken cancellationToken = default)
     {
-        var subscriptions = await dbContext.PushSubscriptions
-            .Where(s => s.UserId == userId)
-            .ToListAsync(cancellationToken);
+        var subscription = await dbContext.PushSubscriptions
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
 
-        if (subscriptions.Count > 0)
+        if (subscription is not null)
         {
-            dbContext.PushSubscriptions.RemoveRange(subscriptions);
+            dbContext.PushSubscriptions.Remove(subscription);
             await dbContext.SaveChangesAsync(cancellationToken);
-            logger.LogInformation("Deleted {Count} push subscription(s) for user {UserId}", subscriptions.Count, userId);
+            logger.LogInformation("Deleted push subscription for user {UserId} endpoint {Endpoint}", userId, endpoint);
         }
     }
 }

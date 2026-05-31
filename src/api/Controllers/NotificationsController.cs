@@ -331,17 +331,27 @@ public class NotificationsController(INotificationService notificationService) :
     }
 
     /// <summary>
-    /// Unsubscribe from web push notifications.
+    /// Unsubscribe from web push notifications for the current device.
     /// </summary>
+    /// <param name="request">The push subscription endpoint to remove.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [HttpDelete("push-subscription")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> UnsubscribePushAsync(CancellationToken cancellationToken = default)
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UnsubscribePushAsync(
+        [FromBody] UnsubscribePushRequest request,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             Guid userId = GetUserIdFromClaims();
-            await notificationService.DeletePushSubscriptionAsync(userId, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(request?.Endpoint))
+            {
+                return BadRequest(new { error = "Endpoint is required" });
+            }
+
+            await notificationService.DeletePushSubscriptionAsync(userId, request.Endpoint, cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException)
@@ -523,4 +533,13 @@ public class PushSubscriptionKeys
 
     /// <summary>The auth secret (Base64url encoded)</summary>
     public string Auth { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for unsubscribing a specific push subscription (device endpoint)
+/// </summary>
+public class UnsubscribePushRequest
+{
+    /// <summary>The push subscription endpoint URL to remove</summary>
+    public string Endpoint { get; set; } = string.Empty;
 }

@@ -85,8 +85,11 @@ export function usePushSubscription(): PushSubscriptionState {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
       if (subscription) {
+        const endpoint = subscription.endpoint;
         await subscription.unsubscribe();
-        await apiClient.delete('/notifications/push-subscription');
+        await apiClient.delete('/notifications/push-subscription', {
+          data: { endpoint },
+        });
       }
       setIsSubscribed(false);
     } catch (err) {

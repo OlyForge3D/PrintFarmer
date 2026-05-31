@@ -1,6 +1,17 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { usePushSubscription } from './usePushSubscription';
+
+// Mock apiClient
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    get: vi.fn().mockResolvedValue({ data: { publicKey: '' } }),
+    post: vi.fn().mockResolvedValue({}),
+    delete: vi.fn().mockResolvedValue({}),
+  },
+}));
+
+import { apiClient } from '@/services/api';
 
 function mockPushManager(existingSubscription: PushSubscription | null) {
   const pushManager = {
@@ -73,5 +84,32 @@ describe('usePushSubscription', () => {
     if (original) {
       Object.defineProperty(window, 'PushManager', original);
     }
+  });
+
+  it('unsubscribe sends endpoint in DELETE payload', async () => {
+    const fakeEndpoint = 'https://fcm.googleapis.com/fcm/send/device-token-123';
+    const fakeSubscription = {
+      endpoint: fakeEndpoint,
+      unsubscribe: vi.fn().mockResolvedValue(true),
+    } as unknown as PushSubscription;
+    mockPushManager(fakeSubscription);
+
+    const { result } = renderHook(() => usePushSubscription());
+
+    // Wait for mount effect to settle
+    await waitFor(() => {
+      expect(result.current.isSubscribed).toBe(true);
+    });
+
+    // Act: call unsubscribe
+    await act(async () => {
+      await result.current.unsubscribe();
+    });
+
+    // Assert: apiClient.delete was called with endpoint in data payload
+    expect(apiClient.delete).toHaveBeenCalledWith('/notifications/push-subscription', {
+      data: { endpoint: fakeEndpoint },
+    });
+    expect(result.current.isSubscribed).toBe(false);
   });
 });
