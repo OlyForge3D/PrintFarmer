@@ -50,6 +50,7 @@ public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
 
         EncryptPrinterCredentials(context);
         EncryptWebhookSecrets(context);
+        EncryptHomeAssistantToken(context);
     }
 
     private void EncryptPrinterCredentials(DbContext context)
@@ -98,6 +99,27 @@ public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
                 {
                     webhook.Secret = _protector.Protect(webhook.Secret);
                     _logger.LogDebug("Encrypted Secret for webhook {WebhookId}", webhook.Id);
+                }
+            }
+        }
+    }
+
+    private void EncryptHomeAssistantToken(DbContext context)
+    {
+        var entries = context.ChangeTracker.Entries<HomeAssistantSettings>()
+            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified);
+
+        foreach (var entry in entries)
+        {
+            var settings = entry.Entity;
+
+            if (entry.State == EntityState.Added || entry.Property(h => h.LongLivedAccessToken).IsModified)
+            {
+                if (!string.IsNullOrEmpty(settings.LongLivedAccessToken) &&
+                    !IsAlreadyEncrypted(settings.LongLivedAccessToken))
+                {
+                    settings.LongLivedAccessToken = _protector.Protect(settings.LongLivedAccessToken);
+                    _logger.LogDebug("Encrypted LongLivedAccessToken for HomeAssistantSettings");
                 }
             }
         }

@@ -1,23 +1,24 @@
 ﻿using System.Text.Json;
-using Microsoft.Extensions.Configuration;
+using Farm.Web.Api.Services.HomeAssistant;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SmartPlug;
 
 /// <summary>
 /// Smart plug provider that reads power state from Home Assistant entities.
-/// Requires a long-lived access token stored in configuration key
-/// <c>HomeAssistant:Token</c> (env: <c>PFARM__HomeAssistant__Token</c>).
+/// Settings (base URL + long-lived access token) are read from DB-persisted
+/// <see cref="Farm.Infrastructure.Domain.HomeAssistantSettings"/> via <see cref="IHomeAssistantSettingsProvider"/>.
 ///
 /// <para>
 /// The device address passed to <see cref="ISmartPlugProvider.GetCurrentReadingAsync"/> must be
 /// formatted as <c>{ha_base_url}|{entity_id}</c>, e.g.
 /// <c>http://homeassistant.local:8123|sensor.plug_power</c>.
+/// When no pipe separator is present, the base URL from DB settings is used.
 /// </para>
 /// </summary>
 public sealed class HomeAssistantSmartPlugProvider(
     IHttpClientFactory httpClientFactory,
-    IConfiguration configuration,
+    IHomeAssistantSettingsProvider settingsProvider,
     ILogger<HomeAssistantSmartPlugProvider> logger) : ISmartPlugProvider
 {
     public string ProviderType => "HomeAssistant";
@@ -25,20 +26,20 @@ public sealed class HomeAssistantSmartPlugProvider(
     /// <inheritdoc/>
     public async Task<PowerReading?> GetCurrentReadingAsync(string deviceAddress, CancellationToken ct)
     {
-        (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
-        string? token = configuration["HomeAssistant:Token"];
-
-        if (string.IsNullOrWhiteSpace(token))
+        HomeAssistantConnectionConfig? config = await settingsProvider.GetEnabledConfigAsync(ct);
+        if (config == null)
         {
-            logger.LogWarning("HomeAssistant token not configured (PFARM__HomeAssistant__Token). Skipping reading for {EntityId}", entityId);
+            logger.LogDebug("HomeAssistant integration not configured or disabled. Skipping reading for {DeviceAddress}", deviceAddress);
             return null;
         }
+
+        (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress, config.BaseUrl);
 
         try
         {
             HttpClient client = httpClientFactory.CreateClient("SmartPlug");
             client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.Token);
 
             string url = $"{baseUrl.TrimEnd('/')}/api/states/{entityId}";
             using HttpResponseMessage response = await client.GetAsync(url, ct);
@@ -57,20 +58,20 @@ public sealed class HomeAssistantSmartPlugProvider(
     /// <inheritdoc/>
     public async Task<bool> TestConnectionAsync(string deviceAddress, CancellationToken ct)
     {
-        (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
-        string? token = configuration["HomeAssistant:Token"];
-
-        if (string.IsNullOrWhiteSpace(token))
+        HomeAssistantConnectionConfig? config = await settingsProvider.GetEnabledConfigAsync(ct);
+        if (config == null)
         {
-            logger.LogWarning("HomeAssistant token not configured. Cannot test connection for {EntityId}", entityId);
+            logger.LogDebug("HomeAssistant integration not configured or disabled. Cannot test for {DeviceAddress}", deviceAddress);
             return false;
         }
+
+        (string baseUrl, _) = ParseDeviceAddress(deviceAddress, config.BaseUrl);
 
         try
         {
             HttpClient client = httpClientFactory.CreateClient("SmartPlug");
             client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.Token);
 
             string url = $"{baseUrl.TrimEnd('/')}/api/";
             using HttpResponseMessage response = await client.GetAsync(url, ct);
@@ -85,15 +86,14 @@ public sealed class HomeAssistantSmartPlugProvider(
 
     /// <summary>
     /// Parses deviceAddress formatted as "{baseUrl}|{entityId}".
-    /// Falls back to treating the whole string as an entity ID with no base URL when no pipe is present.
+    /// Falls back to <paramref name="defaultBaseUrl"/> when no pipe separator is present.
     /// </summary>
-    private static (string BaseUrl, string EntityId) ParseDeviceAddress(string deviceAddress)
+    private static (string BaseUrl, string EntityId) ParseDeviceAddress(string deviceAddress, string defaultBaseUrl)
     {
         int sep = deviceAddress.IndexOf('|', StringComparison.Ordinal);
         if (sep < 0)
         {
-            // Legacy / simple: treat whole string as entity; caller must have base URL in config.
-            return ("http://homeassistant.local:8123", deviceAddress);
+            return (defaultBaseUrl, deviceAddress);
         }
 
         return (deviceAddress[..sep], deviceAddress[(sep + 1)..]);

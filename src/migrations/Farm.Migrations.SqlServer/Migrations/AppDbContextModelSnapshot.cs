@@ -1302,6 +1302,45 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("HarvestFileGcodeFileMappings");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.HomeAssistantSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BaseUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LongLivedAccessToken")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("HomeAssistantSettings");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Enabled = false,
+                            UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.HotendModelDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1645,8 +1684,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("Success")
                         .HasColumnType("bit");
 
-                    b.Property<DateTimeOffset>("Timestamp")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("UserAgent")
                         .HasMaxLength(512)

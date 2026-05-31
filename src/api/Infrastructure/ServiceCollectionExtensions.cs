@@ -671,6 +671,12 @@ public static class ServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(5);
         });
+
+        // Dedicated HomeAssistant client with a longer timeout (HA can be slow on first request)
+        _ = services.AddHttpClient("HomeAssistant", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
     }
 
     #endregion
@@ -722,7 +728,15 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.KasaSmartPlugProvider>();
         _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.TasmotaSmartPlugProvider>();
         _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.ShellySmartPlugProvider>();
-        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.HomeAssistantSmartPlugProvider>();
+
+        // HA settings provider and client are Scoped (DB access); the smart plug provider
+        // wraps them and is also Scoped so it participates in the same DI scope.
+        _ = services.AddScoped<Farm.Web.Api.Services.HomeAssistant.IHomeAssistantSettingsProvider,
+            Farm.Web.Api.Services.HomeAssistant.HomeAssistantSettingsProvider>();
+        _ = services.AddScoped<Farm.Web.Api.Services.HomeAssistant.IHomeAssistantClient,
+            Farm.Web.Api.Services.HomeAssistant.HomeAssistantClient>();
+        _ = services.AddScoped<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider,
+            Farm.Web.Api.Services.SmartPlug.HomeAssistantSmartPlugProvider>();
     }
 
     #endregion
