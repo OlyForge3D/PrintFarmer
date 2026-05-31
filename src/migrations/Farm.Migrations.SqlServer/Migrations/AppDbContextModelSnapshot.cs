@@ -2551,6 +2551,72 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PlanTasks");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("DeviceAddress")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<decimal>("ElectricityRateUsdPerKwh")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProviderType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("PowerMonitors");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerReading", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal?>("KwhTotal")
+                        .HasPrecision(14, 4)
+                        .HasColumnType("decimal(14,4)");
+
+                    b.Property<int>("PowerMonitorId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("WattsNow")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("decimal(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PowerMonitorId");
+
+                    b.HasIndex("RecordedAt");
+
+                    b.ToTable("PowerReadings");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintApproval", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5283,6 +5349,28 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("MaintenanceTask");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerReading", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PowerMonitor", "PowerMonitor")
+                        .WithMany("Readings")
+                        .HasForeignKey("PowerMonitorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PowerMonitor");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintApproval", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
@@ -5912,6 +6000,11 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
                 {
                     b.Navigation("PrinterServiceStates");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
+                {
+                    b.Navigation("Readings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJob", b =>
