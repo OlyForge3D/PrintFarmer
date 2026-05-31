@@ -117,3 +117,33 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 ### Learnings
 - The project's `Tabs` component supports controlled mode (`activeTab` + `onTabChange`) which makes URL sync straightforward — no need for external state management.
 - `setSearchParams` with a functional updater that builds a fresh `URLSearchParams` from `prev` is the cleanest batching pattern (single call, reads current params, returns new).
+
+## 2026-05-31 — Quick Slice Modal (#338)
+
+- Created `QuickSliceModal` in `src/Web/ReactApp/src/features/slicer/components/QuickSliceModal.tsx`.
+- Cascading preset-first flow: Printer → Machine Profile → Process Profile → Filament Profile.
+- Uses effective-value derivation pattern (no `useEffect` setState) to satisfy `react-hooks/set-state-in-effect` lint rule.
+- Integrated on ModelsPage: the existing Slice action button now opens the modal instead of navigating away.
+- "Advanced Settings →" link closes modal and navigates to `/slicer?modelId=<id>` (NewSliceJobPage).
+- 11 component tests covering open/close, profile dropdown loading, submit, and navigation.
+- PR #368 → development.
+
+### Learnings
+
+- 2026-05-31 — The project eslint config enforces `react-hooks/set-state-in-effect`: no `setState` in `useEffect` bodies. Use derived/effective values (fallback to first item from query data) instead of auto-select effects.
+- 2026-05-31 — `slicerProfilesService.getMachineProfilesForModel(modelId)` takes a printer catalog modelId (from `printerDetails.modelId`) and returns `OrcaMachineProfile[]`. Then `getFilamentProfilesForMachines` and `getProcessProfilesForMachines` take `machineNames: string[]` to get compatible profiles.
+
+## 2026-05-31 — GCodeViewer3D via GcodePreviewService (#334)
+
+- Refactored `GCodeViewer3D.tsx` to consume `IGcodePreviewService.parseGCodeDetailed()` instead of inline parser. No direct `gcode-preview` or `WebGLPreview` imports remain in the component.
+- Extended `gcodePreviewService.ts` with `parseGCodeDetailed()` returning `DetailedParsedGCode` (full point coords + tool tracking per layer) for Three.js rendering.
+- Added T-command filter UI (tool/filament toggle buttons, only shown for multi-tool G-code).
+- Added loading spinner (`role="status"`) and error boundary (`role="alert"`) states.
+- Component accepts optional `service` prop for DI in tests.
+- 8 new tests mock the service interface; tests do not touch the parser directly.
+- PR #369 → stacked on PR #364 (squad/333 branch).
+
+### Learnings
+- `IGcodePreviewService` needs both metadata-only (`parseGCode`) and rendering-ready (`parseGCodeDetailed`) methods — the component needs full XYZ point data for Three.js `Line` rendering.
+- Tool changes (T-commands) must be tracked per-point during parsing to enable per-tool filtering in the viewer.
+- ESLint `react-hooks/set-state-in-effect` fires for `setState` called synchronously at the top of a `useEffect`; moving to async/await inside the effect body silences it.
