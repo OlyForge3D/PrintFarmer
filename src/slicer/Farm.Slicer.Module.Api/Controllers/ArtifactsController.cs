@@ -96,6 +96,7 @@ public class ArtifactsController(
             fileName = a.FileName,
             contentType = a.ContentType,
             sizeBytes = a.SizeBytes,
+            downloadUrl = $"/api/artifacts/{a.Id}",
             createdAt = a.CreatedAt,
         }).ToList();
 
@@ -123,6 +124,7 @@ public class ArtifactsController(
             fileName = artifact.FileName,
             contentType = artifact.ContentType,
             sizeBytes = artifact.SizeBytes,
+            downloadUrl = $"/api/artifacts/{artifact.Id}",
             createdAt = artifact.CreatedAt,
         });
     }

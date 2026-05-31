@@ -11,6 +11,17 @@ export interface ArtifactMetadataResponse {
   createdAt: string;
 }
 
+// Artifact list item DTO (from slicer-host GET /api/artifacts/job/{jobId})
+export interface ArtifactListItemResponse {
+  id: string;
+  jobId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  createdAt: string;
+}
+
 // Slice Job DTOs matching backend
 export interface SubmitSliceJobRequest {
   userId: string;
@@ -260,6 +271,17 @@ export class SliceJobService {
   }
 
   /**
+   * List all artifacts for a slice job (calls slicer-host GET /api/artifacts/job/{jobId}).
+   */
+  async getArtifactsByJob(jobId: string): Promise<ArtifactListItemResponse[]> {
+    const response = await apiClient.request<ArtifactListItemResponse[]>({
+      url: `/artifacts/job/${jobId}`,
+      method: 'GET',
+    });
+    return response;
+  }
+
+  /**
    * Get artifact metadata (calls slicer-host GET /api/artifacts/{id}/metadata)
    */
   async getArtifactMetadata(artifactId: string): Promise<ArtifactMetadataResponse> {
@@ -272,10 +294,10 @@ export class SliceJobService {
 
   /**
    * Build the download URL for an artifact (no network call — just path construction).
-   * Use when you already know the artifact ID and just need the download path.
+   * Maps to GET /api/artifacts/{id} which streams the file as PhysicalFile.
    */
   getArtifactDownloadUrl(artifactId: string): string {
-    return `/api/artifacts/${artifactId}/download`;
+    return `/api/artifacts/${artifactId}`;
   }
 
   /**

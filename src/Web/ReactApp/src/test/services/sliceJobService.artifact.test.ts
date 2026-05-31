@@ -20,12 +20,12 @@ describe('SliceJobService artifact URL helpers', () => {
   describe('getArtifactDownloadUrl', () => {
     it('builds correct download URL from artifact ID', () => {
       const url = service.getArtifactDownloadUrl('abc-123');
-      expect(url).toBe('/api/artifacts/abc-123/download');
+      expect(url).toBe('/api/artifacts/abc-123');
     });
 
     it('handles UUIDs', () => {
       const url = service.getArtifactDownloadUrl('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-      expect(url).toBe('/api/artifacts/f47ac10b-58cc-4372-a567-0e02b2c3d479/download');
+      expect(url).toBe('/api/artifacts/f47ac10b-58cc-4372-a567-0e02b2c3d479');
     });
   });
 
@@ -80,7 +80,38 @@ describe('SliceJobService artifact URL helpers', () => {
       });
 
       const url = await service.getArtifactGcodeUrl('art-2');
-      expect(url).toBe('/api/artifacts/art-2/download');
+      expect(url).toBe('/api/artifacts/art-2');
+    });
+  });
+
+  describe('getArtifactsByJob', () => {
+    it('calls GET /artifacts/job/{jobId} and returns artifact list', async () => {
+      const mockList = [
+        {
+          id: 'art-1',
+          jobId: 'job-1',
+          fileName: 'model.gcode',
+          contentType: 'application/octet-stream',
+          sizeBytes: 12345,
+          downloadUrl: '/api/artifacts/art-1',
+          createdAt: '2026-05-31T10:00:00Z',
+        },
+      ];
+      mockRequest.mockResolvedValue(mockList);
+
+      const result = await service.getArtifactsByJob('job-1');
+
+      expect(mockRequest).toHaveBeenCalledWith({
+        url: '/artifacts/job/job-1',
+        method: 'GET',
+      });
+      expect(result).toEqual(mockList);
+    });
+
+    it('returns empty array when job has no artifacts', async () => {
+      mockRequest.mockResolvedValue([]);
+      const result = await service.getArtifactsByJob('job-empty');
+      expect(result).toEqual([]);
     });
   });
 });
