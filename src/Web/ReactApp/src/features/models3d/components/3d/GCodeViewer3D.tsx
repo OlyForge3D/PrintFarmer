@@ -4,22 +4,13 @@ import { Line, OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { GearIcon, SkipForwardIcon, PlayIcon, PauseIcon } from '@/common/components/icons/MdiIcons';
-
-interface GCodePoint {
-  x: number;
-  y: number;
-  z: number;
-  e?: number;
-  f?: number;
-  type: 'move' | 'extrude';
-  feedRate?: number;
-}
-
-interface GCodeLayer {
-  z: number;
-  points: GCodePoint[];
-  color: THREE.Color;
-}
+import {
+  createGcodePreviewService,
+  type IGcodePreviewService,
+  type DetailedParsedGCode,
+  type DetailedLayer,
+  type GCodePoint,
+} from '@/features/slicer/services';
 
 interface ColorMode {
   id: number;
@@ -31,75 +22,8 @@ interface RenderQuality {
   label: string;
 }
 
-function parseGCode(gcode: string): GCodeLayer[] {
-  const lines = gcode.split('\n');
-  const layers: Map<number, GCodePoint[]> = new Map();
-  let currentPos = { x: 0, y: 0, z: 0, e: 0, f: 0 };
-  let minFeed = Infinity;
-  let maxFeed = 0;
-  
-  // First pass: collect feed rates to normalize colors
-  lines.forEach(line => {
-    const cleanLine = line.split(';')[0].trim();
-    if (!cleanLine.startsWith('G1') && !cleanLine.startsWith('G0')) return;
-    
-    const f = cleanLine.match(/F([\d.]+)/)?.[1];
-    if (f) {
-      const feedRate = parseFloat(f);
-      minFeed = Math.min(minFeed, feedRate);
-      maxFeed = Math.max(maxFeed, feedRate);
-    }
-  });
-  
-  if (minFeed === Infinity) minFeed = 20;
-  if (maxFeed === 0) maxFeed = 100;
-  
-  // Second pass: parse points with normalized feed rates
-  lines.forEach(line => {
-    const cleanLine = line.split(';')[0].trim();
-    if (!cleanLine.startsWith('G1') && !cleanLine.startsWith('G0')) return;
-    
-    const x = cleanLine.match(/X([-\d.]+)/)?.[1];
-    const y = cleanLine.match(/Y([-\d.]+)/)?.[1];
-    const z = cleanLine.match(/Z([-\d.]+)/)?.[1];
-    const e = cleanLine.match(/E([-\d.]+)/)?.[1];
-    const f = cleanLine.match(/F([\d.]+)/)?.[1];
-    
-    const newPos = {
-      x: x ? parseFloat(x) : currentPos.x,
-      y: y ? parseFloat(y) : currentPos.y,
-      z: z ? parseFloat(z) : currentPos.z,
-      e: e ? parseFloat(e) : currentPos.e,
-      f: f ? parseFloat(f) : currentPos.f,
-    };
-    
-    const point: GCodePoint = {
-      ...newPos,
-      type: e && parseFloat(e) > currentPos.e ? 'extrude' : 'move',
-      feedRate: newPos.f,
-    };
-    
-    const layerZ = Math.round(newPos.z * 100) / 100;
-    if (!layers.has(layerZ)) {
-      layers.set(layerZ, []);
-    }
-    layers.get(layerZ)!.push(point);
-    
-    currentPos = newPos;
-  });
-  
-  // Convert to layers with colors based on feed rates
-  return Array.from(layers.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([z, points], index) => ({
-      z,
-      points,
-      color: new THREE.Color().setHSL((index * 0.1) % 1, 0.8, 0.6),
-    }));
-}
-
-function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: { 
-  layer: GCodeLayer; 
+function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
+  layer: DetailedLayer;
   visible: boolean;
   colorMode: number;
   minFeedColor: string;
@@ -108,32 +32,30 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
   const { extrudeSegments, moveSegments } = useMemo(() => {
     const extrudeSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
     const moveSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
-    
-    // Group consecutive points of same type
+
     let currentSegment: GCodePoint[] = [];
     let lastType: string = '';
-    
+
     layer.points.forEach((point, idx) => {
       if (point.type !== lastType && currentSegment.length > 0) {
         const color = getPointColor(currentSegment, colorMode, minFeedColor, maxFeedColor);
         const vectors = currentSegment.map(p => new THREE.Vector3(p.x, p.y, p.z));
-        
+
         if (lastType === 'extrude') {
           extrudeSegments.push({ points: vectors, color });
         } else {
           moveSegments.push({ points: vectors, color });
         }
-        
+
         currentSegment = [];
-        lastType = point.type;
       }
-      
+      lastType = point.type;
       currentSegment.push(point);
-      
+
       if (idx === layer.points.length - 1) {
         const color = getPointColor(currentSegment, colorMode, minFeedColor, maxFeedColor);
         const vectors = currentSegment.map(p => new THREE.Vector3(p.x, p.y, p.z));
-        
+
         if (point.type === 'extrude') {
           extrudeSegments.push({ points: vectors, color });
         } else {
@@ -141,7 +63,7 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
         }
       }
     });
-    
+
     return { extrudeSegments, moveSegments };
   }, [layer, colorMode, minFeedColor, maxFeedColor]);
 
@@ -149,7 +71,6 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
 
   return (
     <>
-      {/* Extrusion lines */}
       {extrudeSegments.map((segment, idx) => (
         segment.points.length > 1 && (
           <Line
@@ -160,8 +81,7 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
           />
         )
       ))}
-      
-      {/* Travel moves */}
+
       {moveSegments.map((segment, idx) => (
         segment.points.length > 1 && (
           <Line
@@ -181,33 +101,32 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
 
 function getPointColor(points: GCodePoint[], colorMode: number, minFeedColor: string, maxFeedColor: string): THREE.Color {
   const color = new THREE.Color();
-  
+
   if (colorMode === 0) {
-    // Layer color (default hue)
     return color.setHSL(Math.random(), 0.8, 0.6);
   } else if (colorMode === 1) {
-    // Speed-based color
     const avgFeed = points.reduce((sum, p) => sum + (p.feedRate || 0), 0) / points.length;
     const minFeed = 20;
     const maxFeed = 150;
     const normalized = Math.max(0, Math.min(1, (avgFeed - minFeed) / (maxFeed - minFeed)));
-    
+
     const min = new THREE.Color(minFeedColor);
     const max = new THREE.Color(maxFeedColor);
-    
+
     return color.lerpColors(min, max, normalized);
   } else if (colorMode === 2) {
-    // Extrusion color
     const hasExtrusion = points.some(p => p.type === 'extrude');
     return color.set(hasExtrusion ? '#FF6B35' : '#666666');
   }
-  
+
   return color;
 }
 
 export interface GCodeViewerProps {
   gcodeUrl: string;
   className?: string;
+  /** Optional pre-created service instance (for testing/DI). */
+  service?: IGcodePreviewService;
 }
 
 const COLOR_MODES: ColorMode[] = [
@@ -223,12 +142,17 @@ const RENDER_QUALITIES: RenderQuality[] = [
   { value: 4, label: 'Ultra' },
 ];
 
-export const GCodeViewer: React.FC<GCodeViewerProps> = ({ 
-  gcodeUrl, 
-  className = "h-96 w-full" 
+const TOOL_COLORS = ['#FF6B35', '#4ECDC4', '#C77DFF', '#FFD93D', '#6BCB77', '#FF6B6B'];
+
+export const GCodeViewer: React.FC<GCodeViewerProps> = ({
+  gcodeUrl,
+  className = "h-96 w-full",
+  service: externalService,
 }) => {
-  const [gcode, setGCode] = useState<string>('');
-  const [layers, setLayers] = useState<GCodeLayer[]>([]);
+  const serviceRef = useRef<IGcodePreviewService>(externalService ?? createGcodePreviewService());
+  const [parseResult, setParseResult] = useState<DetailedParsedGCode | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [currentLayer, setCurrentLayer] = useState<number>(0);
   const [playAnimation, setPlayAnimation] = useState(false);
   const [showMoves, setShowMoves] = useState(false);
@@ -242,74 +166,128 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   const [transparency, setTransparency] = useState(false);
   const [hdRendering, setHdRendering] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [enabledTools, setEnabledTools] = useState<Set<number>>(new Set());
   const settingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(gcodeUrl)
-      .then(res => res.text())
-      .then(code => {
-        setGCode(code);
-        const parsedLayers = parseGCode(code);
-        setLayers(parsedLayers);
-        setCurrentLayer(parsedLayers.length - 1);
-      })
-      .catch(error => {
-        console.error('Failed to load G-code:', error);
-      });
+    let cancelled = false;
+    const service = serviceRef.current;
+
+    const loadGCode = async () => {
+      try {
+        const res = await fetch(gcodeUrl);
+        if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+        const code = await res.text();
+        const result = await service.parseGCodeDetailed(code);
+        if (cancelled) return;
+        setParseResult(result);
+        setCurrentLayer(result.layerCount - 1);
+        setEnabledTools(new Set(result.tools));
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to parse G-code');
+        setLoading(false);
+      }
+    };
+
+    loadGCode();
+    return () => { cancelled = true; };
   }, [gcodeUrl]);
 
   useEffect(() => {
-    if (!playAnimation) return;
-    
+    const service = serviceRef.current;
+    return () => { service.dispose(); };
+  }, []);
+
+  useEffect(() => {
+    if (!playAnimation || !parseResult) return;
+
     const interval = setInterval(() => {
       setCurrentLayer(prev => {
-        if (prev >= layers.length - 1) {
+        if (prev >= parseResult.layerCount - 1) {
           setPlayAnimation(false);
           return prev;
         }
         return prev + 1;
       });
     }, 100);
-    
+
     return () => clearInterval(interval);
-  }, [playAnimation, layers.length]);
+  }, [playAnimation, parseResult]);
+
+  // Filter layers by enabled tools
+  const filteredLayers = useMemo(() => {
+    if (!parseResult) return [];
+    return parseResult.layers.map(layer => ({
+      ...layer,
+      points: layer.points.filter(p => enabledTools.has(p.tool)),
+    }));
+  }, [parseResult, enabledTools]);
 
   const printStats = useMemo(() => {
-    if (layers.length === 0) return null;
-    
-    const totalPoints = layers.reduce((sum, layer) => sum + layer.points.length, 0);
-    const printVolume = {
-      x: { min: Infinity, max: -Infinity },
-      y: { min: Infinity, max: -Infinity },
-      z: { min: Infinity, max: -Infinity }
-    };
-    
-    layers.forEach(layer => {
-      layer.points.forEach(point => {
-        printVolume.x.min = Math.min(printVolume.x.min, point.x);
-        printVolume.x.max = Math.max(printVolume.x.max, point.x);
-        printVolume.y.min = Math.min(printVolume.y.min, point.y);
-        printVolume.y.max = Math.max(printVolume.y.max, point.y);
-        printVolume.z.min = Math.min(printVolume.z.min, point.z);
-        printVolume.z.max = Math.max(printVolume.z.max, point.z);
-      });
-    });
-    
+    if (!parseResult || parseResult.layerCount === 0) return null;
+
+    const totalPoints = parseResult.layers.reduce((sum, layer) => sum + layer.points.length, 0);
+    const volume = { x: { min: Infinity, max: -Infinity }, y: { min: Infinity, max: -Infinity }, z: { min: Infinity, max: -Infinity } };
+
+    for (const layer of parseResult.layers) {
+      for (const point of layer.points) {
+        volume.x.min = Math.min(volume.x.min, point.x);
+        volume.x.max = Math.max(volume.x.max, point.x);
+        volume.y.min = Math.min(volume.y.min, point.y);
+        volume.y.max = Math.max(volume.y.max, point.y);
+        volume.z.min = Math.min(volume.z.min, point.z);
+        volume.z.max = Math.max(volume.z.max, point.z);
+      }
+    }
+
     return {
-      layers: layers.length,
+      layers: parseResult.layerCount,
       points: totalPoints,
       dimensions: {
-        x: Math.round((printVolume.x.max - printVolume.x.min) * 10) / 10,
-        y: Math.round((printVolume.y.max - printVolume.y.min) * 10) / 10,
-        z: Math.round((printVolume.z.max - printVolume.z.min) * 10) / 10,
-      }
+        x: Math.round((volume.x.max - volume.x.min) * 10) / 10,
+        y: Math.round((volume.y.max - volume.y.min) * 10) / 10,
+        z: Math.round((volume.z.max - volume.z.min) * 10) / 10,
+      },
     };
-  }, [layers]);
+  }, [parseResult]);
 
-  if (!gcode) {
+  const toggleTool = (tool: number) => {
+    setEnabledTools(prev => {
+      const next = new Set(prev);
+      if (next.has(tool)) {
+        next.delete(tool);
+      } else {
+        next.add(tool);
+      }
+      return next;
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className={`${className} flex items-center justify-center`} role="status" aria-label="Loading G-code">
+        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={`${className} flex items-center justify-center`} role="alert">
+        <div className="text-center p-4">
+          <p className="text-red-400 font-medium">Failed to load G-code</p>
+          <p className="text-pf-text-tertiary text-sm mt-1">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!parseResult || parseResult.layerCount === 0) {
     return (
       <div className={`${className} flex items-center justify-center`}>
-        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
+        <p className="text-pf-text-tertiary">No layers found in G-code file.</p>
       </div>
     );
   }
@@ -327,7 +305,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
               </p>
             )}
           </div>
-          
+
           <div className="flex items-center space-x-2">
             <div className="relative">
               <Button
@@ -340,10 +318,10 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
               >
                 <GearIcon className="w-5 h-5" />
               </Button>
-              
+
               {/* Settings Dropdown */}
               {showSettings && (
-                <div 
+                <div
                   ref={settingsRef}
                   className="absolute right-0 top-full mt-2 w-72 bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border p-4 z-50 space-y-3"
                 >
@@ -370,7 +348,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                       />
                     </div>
                   </div>
-                  
+
                   <div className="border-b border-pf-border pb-3">
                     <h4 className="text-sm font-semibold text-white mb-2">Display</h4>
                     <div className="space-y-2 text-sm">
@@ -400,14 +378,14 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                       />
                     </div>
                   </div>
-                  
+
                   <div className="pb-3">
                     <h4 className="text-sm font-semibold text-white mb-2">Colors</h4>
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center space-x-2">
                         <label className="text-pf-text-secondary flex-1">Background</label>
-                        <input 
-                          type="color" 
+                        <input
+                          type="color"
                           value={backgroundColor}
                           onChange={(e) => setBackgroundColor(e.target.value)}
                           className="w-8 h-8 rounded-sm cursor-pointer"
@@ -415,8 +393,8 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                       </div>
                       <div className="flex items-center space-x-2">
                         <label className="text-pf-text-secondary flex-1">Grid</label>
-                        <input 
-                          type="color" 
+                        <input
+                          type="color"
                           value={gridColor}
                           onChange={(e) => setGridColor(e.target.value)}
                           className="w-8 h-8 rounded-sm cursor-pointer"
@@ -426,8 +404,8 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                         <>
                           <div className="flex items-center space-x-2">
                             <label className="text-pf-text-secondary flex-1">Min Speed</label>
-                            <input 
-                              type="color" 
+                            <input
+                              type="color"
                               value={minFeedColor}
                               onChange={(e) => setMinFeedColor(e.target.value)}
                               className="w-8 h-8 rounded-sm cursor-pointer"
@@ -435,8 +413,8 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                           </div>
                           <div className="flex items-center space-x-2">
                             <label className="text-pf-text-secondary flex-1">Max Speed</label>
-                            <input 
-                              type="color" 
+                            <input
+                              type="color"
                               value={maxFeedColor}
                               onChange={(e) => setMaxFeedColor(e.target.value)}
                               className="w-8 h-8 rounded-sm cursor-pointer"
@@ -451,7 +429,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
             </div>
           </div>
         </div>
-        
+
         {/* Main Controls */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -463,17 +441,17 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
             >
               {playAnimation ? 'Pause' : 'Play'}
             </Button>
-            
+
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => setCurrentLayer(layers.length - 1)}
+              onClick={() => setCurrentLayer(parseResult.layerCount - 1)}
               iconLeft={<SkipForwardIcon className="h-4 w-4" />}
             >
               Show All
             </Button>
           </div>
-          
+
           <Checkbox
             id="show-moves"
             label="Travel Moves"
@@ -483,41 +461,71 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
           />
         </div>
       </div>
-      
+
+      {/* Tool/Filament Filter */}
+      {parseResult.tools.length > 1 && (
+        <div className="bg-pf-bg-1 rounded-lg shadow-sm p-4 border border-pf-border">
+          <h4 className="text-sm font-semibold text-white mb-2">Filament / Tool Filter</h4>
+          <div className="flex flex-wrap gap-2">
+            {parseResult.tools.map(tool => (
+              <Button
+                key={tool}
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={() => toggleTool(tool)}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-opacity ${
+                  enabledTools.has(tool) ? 'opacity-100' : 'opacity-40'
+                }`}
+                aria-pressed={enabledTools.has(tool)}
+                aria-label={`Toggle tool ${tool}`}
+              >
+                <span
+                  className="w-3 h-3 rounded-full inline-block"
+                  style={{ backgroundColor: TOOL_COLORS[tool % TOOL_COLORS.length] }}
+                />
+                T{tool}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Layer Slider */}
       <div className="bg-pf-bg-1 rounded-lg shadow-sm p-4 border border-pf-border">
         <div className="flex items-center justify-between text-sm text-pf-text-secondary mb-2">
-          <span>Layer {currentLayer + 1} / {layers.length}</span>
-          <span>Z: {layers[currentLayer]?.z.toFixed(2)}mm</span>
+          <span>Layer {currentLayer + 1} / {parseResult.layerCount}</span>
+          <span>Z: {parseResult.layers[currentLayer]?.z.toFixed(2)}mm</span>
         </div>
-        
+
         <input
           type="range"
           min={0}
-          max={Math.max(0, layers.length - 1)}
+          max={Math.max(0, parseResult.layerCount - 1)}
           value={currentLayer}
           onChange={(e) => {
             setCurrentLayer(parseInt(e.target.value));
             setPlayAnimation(false);
           }}
           className="w-full h-2 bg-pf-bg-1 rounded-lg appearance-none cursor-pointer accent-pf-accent"
+          aria-label="Layer slider"
         />
       </div>
 
       {/* 3D Viewer */}
       <div className={`${className} border border-pf-border rounded-lg overflow-hidden`}>
-        <Canvas 
+        <Canvas
           camera={{ position: [100, 100, 100], fov: 45 }}
           style={{ background: backgroundColor }}
         >
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
           <pointLight position={[-10, -10, -10]} intensity={0.5} />
-          
+
           {showGrid && <Grid args={[200, 200]} cellColor={gridColor} sectionColor={gridColor} />}
-          
-          {layers.slice(0, currentLayer + 1).map((layer, index) => (
-            <GCodePath 
+
+          {filteredLayers.slice(0, currentLayer + 1).map((layer, index) => (
+            <GCodePath
               key={index}
               layer={layer}
               visible={true}
@@ -526,7 +534,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
               maxFeedColor={maxFeedColor}
             />
           ))}
-          
+
           <OrbitControls />
         </Canvas>
       </div>
