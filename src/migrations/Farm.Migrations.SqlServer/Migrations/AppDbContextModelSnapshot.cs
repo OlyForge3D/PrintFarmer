@@ -1310,6 +1310,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AllowPrivateNetworkTargets")
+                        .HasColumnType("bit");
+
                     b.Property<string>("BaseUrl")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -1335,6 +1338,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                         new
                         {
                             Id = 1,
+                            AllowPrivateNetworkTargets = false,
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Enabled = false,
                             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
