@@ -202,6 +202,48 @@ public class PasskeyService(
         return new AuthenticationResult(true, token, DateTime.UtcNow.AddDays(7), userDto);
     }
 
+    public async Task<List<UserPasskeyCredential>> ListCredentialsAsync(Guid userId, CancellationToken ct = default)
+    {
+        return await db.UserPasskeyCredentials
+            .Where(c => c.UserId == userId)
+            .OrderByDescending(c => c.CreatedAt)
+            .ToListAsync(ct);
+    }
+
+    public async Task<bool> DeleteCredentialAsync(Guid userId, int credentialId, CancellationToken ct = default)
+    {
+        UserPasskeyCredential? credential = await db.UserPasskeyCredentials
+            .FirstOrDefaultAsync(c => c.Id == credentialId && c.UserId == userId, ct);
+
+        if (credential is null)
+        {
+            return false;
+        }
+
+        db.UserPasskeyCredentials.Remove(credential);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Passkey credential {CredentialId} deleted for user {UserId}", credentialId, userId);
+        return true;
+    }
+
+    public async Task<bool> RenameCredentialAsync(Guid userId, int credentialId, string newName, CancellationToken ct = default)
+    {
+        UserPasskeyCredential? credential = await db.UserPasskeyCredentials
+            .FirstOrDefaultAsync(c => c.Id == credentialId && c.UserId == userId, ct);
+
+        if (credential is null)
+        {
+            return false;
+        }
+
+        credential.DeviceName = newName;
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Passkey credential {CredentialId} renamed to '{NewName}' for user {UserId}", credentialId, newName, userId);
+        return true;
+    }
+
     // ─── helpers ─────────────────────────────────────────────────────────────
 
     /// <summary>
