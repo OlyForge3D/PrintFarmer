@@ -77,13 +77,20 @@ public class SettingsController(
             return BadRequest("averagePrinterWattage must be between 0 and 5000.");
         }
 
-        IActionResult? tokenValidationError = TryGetValidatedConcurrencyToken(
-            body.RowVersion,
-            out string expectedRowVersion,
-            out _);
-        if (tokenValidationError is not null)
+        string? existingRowVersion = _farmSettings.GetFarmSettingsRowVersion();
+        string? expectedRowVersion = null;
+        if (!string.IsNullOrWhiteSpace(existingRowVersion))
         {
-            return tokenValidationError;
+            IActionResult? tokenValidationError = TryGetValidatedConcurrencyToken(
+                body.RowVersion,
+                out string validatedRowVersion,
+                out _);
+            if (tokenValidationError is not null)
+            {
+                return tokenValidationError;
+            }
+
+            expectedRowVersion = validatedRowVersion;
         }
 
         try
@@ -132,17 +139,22 @@ public class SettingsController(
             return BadRequest("itemsPerPage must be between 1 and 200.");
         }
 
-        IActionResult? tokenValidationError = TryGetValidatedConcurrencyToken(
-            body.RowVersion,
-            out _,
-            out byte[] expectedRowVersionBytes);
-        if (tokenValidationError is not null)
-        {
-            return tokenValidationError;
-        }
-
         Guid userId = GetUserId();
         UserSettings? entity = await _db.UserSettings.FirstOrDefaultAsync(u => u.UserId == userId, ct);
+        byte[]? expectedRowVersionBytes = null;
+        if (entity is not null)
+        {
+            IActionResult? tokenValidationError = TryGetValidatedConcurrencyToken(
+                body.RowVersion,
+                out _,
+                out byte[] validatedRowVersionBytes);
+            if (tokenValidationError is not null)
+            {
+                return tokenValidationError;
+            }
+
+            expectedRowVersionBytes = validatedRowVersionBytes;
+        }
 
         if (entity is null)
         {
@@ -152,7 +164,7 @@ public class SettingsController(
         else
         {
             // Enforce optimistic concurrency: set the original row version so EF checks it
-            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedRowVersionBytes;
+            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedRowVersionBytes!;
         }
 
         if (body.Theme is not null)
