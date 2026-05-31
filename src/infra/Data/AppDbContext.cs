@@ -131,6 +131,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
 
+    // WebAuthn/FIDO2 passkey credentials
+    public DbSet<UserPasskeyCredential> UserPasskeyCredentials => Set<UserPasskeyCredential>();
+
     // API Keys for OctoPrint API
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
