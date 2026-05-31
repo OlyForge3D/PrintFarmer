@@ -213,10 +213,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
 
+<<<<<<< HEAD
     // Electricity Monitoring (power monitors + time-series readings)
     public DbSet<PowerMonitor> PowerMonitors => Set<PowerMonitor>();
 
     public DbSet<PowerReading> PowerReadings => Set<PowerReading>();
+=======
+    // Per-user settings (theme, locale, slicer defaults, etc.)
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+>>>>>>> 7be713d3d (feat(settings): per-user vs farm-wide split — backend API (#359))
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
