@@ -6,7 +6,7 @@
 
 ## Summary
 
-Three historical commits on `origin/development` contained "bambuddy" in their subjects:
+Three historical commits on `origin/development` contained "external-reference-app" in their subjects:
 - `52174133c`
 - `3fe3ed503`
 - `96dbcd4aa`
@@ -16,10 +16,10 @@ The prior no-external-refs directive (2026-05-31T09:14) was interpreted as cover
 ## Directive Scope
 
 Forbidden strings (case-insensitive, all branches, all future commits):
-- `bambuddy`
-- `maziggy`
-- `Bambu Buddy` (any variant)
-- URLs to `github.com/maziggy/bambuddy`
+- `external-reference-app`
+- `external-author`
+- `external reference app` (any variant)
+- URLs to `[external reference repo]`
 
 Acceptable alternatives:
 - "adoption plan" / "Phase N work breakdown"
@@ -34,7 +34,7 @@ Acceptable alternatives:
 
 - Scribe charter updated with strict pre-commit procedure:
   1. Compose message into temp file
-  2. Run grep scrub: `grep -iE 'bambuddy|maziggy|bambu buddy|github\.com/maziggy'`
+  2. Run grep scrub: `grep -iE 'external-reference-app|external-author|external reference app|github\.com/external-author'`
   3. If found: rewrite before committing
   4. Log gate trigger to orchestration log
 

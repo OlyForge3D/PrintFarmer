@@ -86,18 +86,18 @@ See `.squad/decisions-archive.md` for detailed decision records from archived se
 ## Learnings
 
 
-### 2026-05-31 — Bambuddy adoption Phase 2: Work breakdown synthesis
+### 2026-05-31 — External-reference-app adoption Phase 2: Work breakdown synthesis
 
 Produced phased rollout plan from Brett's 3 research artifacts + Dallas Phase 1 surface map. Key trade-offs:
 
-- **gcode-preview v2 over v3**: v3 alpha has API churn; v2.18.x is stable and matches bambuddy's proven pattern. Migration deferred until v3 stabilizes.
-- **No client-side 3MF parsing yet**: bambuddy's main-thread JSZip approach is a perf risk. PrintFarmer already extracts 3MF metadata server-side in `Model3DFileService`. Client-side parsing deferred pending Web Worker architecture.
-- **Quick Slice as additive entry point, not replacement**: bambuddy's preset-first modal hides all params. PrintFarmer's `NewSliceJobPage` is correct for power users. Quick Slice is a simpler alternative, not a replacement.
+- **gcode-preview v2 over v3**: v3 alpha has API churn; v2.18.x is stable and matches external-reference-app's proven pattern. Migration deferred until v3 stabilizes.
+- **No client-side 3MF parsing yet**: external-reference-app's main-thread JSZip approach is a perf risk. PrintFarmer already extracts 3MF metadata server-side in `Model3DFileService`. Client-side parsing deferred pending Web Worker architecture.
+- **Quick Slice as additive entry point, not replacement**: external-reference-app's preset-first modal hides all params. PrintFarmer's `NewSliceJobPage` is correct for power users. Quick Slice is a simpler alternative, not a replacement.
 - **Notifications phased**: 8 providers is too much for one PR. Ship webhook+Discord+Telegram first (covers 80% of home-lab users), then extend.
 - **Layer timelapse blocked on go2rtc**: Requires camera infrastructure (PFarm1-lzf0) that hasn't landed yet. Explicitly deferred.
-- **PrintFarmer differentiator preserved**: bambuddy rejects raw .gcode upload (Bambu constraint). PrintFarmer accepts it — this is a competitive advantage for Moonraker/PrusaLink/FlashForge users. No changes to gcode upload flow.
+- **PrintFarmer differentiator preserved**: external-reference-app rejects raw .gcode upload (Bambu constraint). PrintFarmer accepts it — this is a competitive advantage for Moonraker/PrusaLink/FlashForge users. No changes to gcode upload flow.
 
-Decision inbox file: `.squad/decisions/inbox/dallas-bambuddy-adoption-plan.md`
+Decision inbox file: `.squad/decisions/inbox/dallas-external-reference-app-adoption-plan.md`
 
 ### 2026-05-31 — Slice + 3D model integration surface map
 

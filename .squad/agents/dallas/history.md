@@ -131,7 +131,7 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
   (`KwhUsed`, `PowerMonitor` entity, `PowerReading` time-series) on top of an existing
   cost skeleton — this reduces migration and service risk significantly.
 
-- **Smart plug "don't chase" deferral superseded.** The 2026-05-31 bambuddy adoption
+- **Smart plug "don't chase" deferral superseded.** The 2026-05-31 external-reference-app adoption
   decisions.md listed smart plug integration as deferred ("can revisit when demand is
   proven"). Brady's 2026-05-31 explicit request to plan this item supersedes that
   deferral. Decision files should not treat it as blocked.
@@ -192,4 +192,4 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 - **E-2 migrations cover AppDbContext only** (PowerMonitor/PowerReading). PI-3 (#351) migrations cover SlicerDbContext only (Model3DFile attribution). PK-2 (#354) migrations cover AppDbContext (UserPasskeyCredential). No cross-context schema conflicts.
 - **All Brady policy answers from the 2026-05-31T09:25 triage directive are embedded in issue bodies** — HA in Phase 1, 90-day retention, attribution on both surfaces, residentKey:preferred, passkey-only out of scope, etc.
 - **The 15+ settings nav items list in ST-2 (#358)** is the one that will cause the most debate — some pages (like NfcDevicesPage) are listed in Hardware but cross-reference NFC UX work. Ralph should coordinate with Ripley on ordering.
-- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "external-reference-app", "external-author", "external reference app", [external reference repo]. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.

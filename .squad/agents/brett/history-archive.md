@@ -116,14 +116,14 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 
 ## Learnings
 
-## 2026-05-31: bambuddy Broad Feature Sweep (brett-3)
+## 2026-05-31: external-reference-app Broad Feature Sweep (brett-3)
 
-**Scope:** Feature inventory of maziggy/bambuddy excluding slicing UI and 3D/gcode viewers.
+**Scope:** Feature inventory of [external-reference-app] excluding slicing UI and 3D/gcode viewers.
 
 **Architecture notes:**
-- bambuddy is a single Python FastAPI monolith (`backend/app/main.py`, 274 KB) with React frontend; Bambu-specific MQTT-only transport (no OctoPrint/Klipper/Moonraker backends).
+- external-reference-app is a single Python FastAPI monolith (`backend/app/main.py`, 274 KB) with React frontend; Bambu-specific MQTT-only transport (no OctoPrint/Klipper/Moonraker backends).
 - Default DB is SQLite; optional PostgreSQL via `DATABASE_URL` env. Single Docker container with host networking for discovery.
-- "Virtual printer" feature makes bambuddy impersonate a Bambu Lab printer (MQTT broker + FTP server + RTSP proxy) so OrcaSlicer/BambuStudio treat bambuddy as the target printer — queue-based dispatch model.
+- "Virtual printer" feature makes external-reference-app impersonate a Bambu Lab printer (MQTT broker + FTP server + RTSP proxy) so OrcaSlicer/BambuStudio treat external-reference-app as the target printer — queue-based dispatch model.
 - i18n supported natively in 10+ languages (`frontend/src/i18n/locales/`).
 
 **Standout features worth remembering:**
@@ -132,7 +132,7 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 3. **8-provider notification system** (`backend/app/schemas/notification.py`, `frontend/src/components/AddNotificationModal.tsx`): email, Telegram, Discord, webhook, ntfy, Pushover, CallMeBot/WhatsApp, Home Assistant. User-level opt-in prefs.
 4. **Layer timelapse → MP4** (`backend/app/services/layer_timelapse.py`): Per-print ffmpeg-based timelapse, attached to archive on print complete.
 5. **MakerWorld direct import** (`backend/app/services/makerworld.py`): Resolves MakerWorld URL, fetches 3MF via Bambu Cloud token — no separate OAuth needed. 200 MB cap.
-6. **SpoolBuddy NFC sub-system** (`frontend/src/pages/spoolbuddy/`, `backend/app/api/routes/spoolbuddy.py`): Companion ESP32 device writes NDEF tags; bambuddy serves tag payloads to the device and auto-assigns spools when tags are scanned.
+6. **SpoolBuddy NFC sub-system** (`frontend/src/pages/spoolbuddy/`, `backend/app/api/routes/spoolbuddy.py`): Companion ESP32 device writes NDEF tags; external-reference-app serves tag payloads to the device and auto-assigns spools when tags are scanned.
 7. **Filament shopping list** (`backend/app/models/shopping_list.py`): Tracks filament SKUs with pending/purchased/received status.
 8. **HMS error modal** (`frontend/src/components/HMSErrorModal.tsx`): Decodes Bambu firmware error codes into human-readable messages inline in the printer card.
 9. **Print calendar / forecast** (`frontend/src/components/CalendarView.tsx`, `ForecastPanel.tsx`): Prints shown on a calendar; forecast panel for capacity planning.
@@ -149,30 +149,30 @@ Jeff Papiez reported slicer UI was missing in live deployment despite slicer-hos
 - `backend/app/services/layer_timelapse.py` — timelapse assembly
 - `frontend/src/components/AddNotificationModal.tsx` — notification provider UX
 
-## 2026-05-31: bambuddy Deep-Dive Follow-up
+## 2026-05-31: external-reference-app Deep-Dive Follow-up
 
 - `gcode-preview` npm latest is `2.18.0` (MIT, ~39 KB package / 128.5 KB unpacked) while the upstream develop branch is already `3.0.0-alpha.4`; adoption should pin v2 initially or deliberately evaluate the v3 API split.
 - `gcode-preview` v2 is a Three.js/WebGL renderer with `WebGLPreview`, full-string parsing, an experimental stream reader, G0/G1/G2/G3 and T-code handling, and color arrays indexed by tool number; no built-in worker integration was found.
-- bambuddy's `GcodeViewer.tsx` fetches raw G-code with auth headers, remaps Bambu/AMS tool IDs into T0-T7, filters high-number special T commands, and uses layer slider/buttons by setting `preview.endLayer`.
-- bambuddy's `ModelViewer.tsx` parses 3MF client-side with JSZip + DOMParser, reading standard `3D/3dmodel.model` geometry plus Bambu/Orca-specific `Metadata/model_settings.config` and `Metadata/plate_*.json` for extruders, plates, offsets, and bounds.
+- external-reference-app's `GcodeViewer.tsx` fetches raw G-code with auth headers, remaps Bambu/AMS tool IDs into T0-T7, filters high-number special T commands, and uses layer slider/buttons by setting `preview.endLayer`.
+- external-reference-app's `ModelViewer.tsx` parses 3MF client-side with JSZip + DOMParser, reading standard `3D/3dmodel.model` geometry plus Bambu/Orca-specific `Metadata/model_settings.config` and `Metadata/plate_*.json` for extruders, plates, offsets, and bounds.
 - The 3MF viewer contains useful responsiveness workarounds: `setTimeout(0)` yielding in vertex/triangle/component loops and geometry merging by extruder with `mergeGeometries`, but it remains main-thread parsing and should be workerized before PrintFarmer-scale adoption.
 
-## 2026-05-31: bambuddy Architecture Review
+## 2026-05-31: external-reference-app Architecture Review
 
 **Role:** Research specialist  
 **Status:** ✅ Complete — focused external-repo review
 
-**Scope:** Reviewed `maziggy/bambuddy` only through OrcaSlicer integration / slicing pipeline and 3D model visualization lenses.
+**Scope:** Reviewed `[external-reference-app]` only through OrcaSlicer integration / slicing pipeline and 3D model visualization lenses.
 
 **Key Findings:**
-- bambuddy uses an optional Docker Compose sidecar stack (`slicer-api/`) that wraps OrcaSlicer and Bambu Studio CLIs behind HTTP, rather than embedding slicer logic in the main FastAPI app.
+- external-reference-app uses an optional Docker Compose sidecar stack (`slicer-api/`) that wraps OrcaSlicer and Bambu Studio CLIs behind HTTP, rather than embedding slicer logic in the main FastAPI app.
 - Profiles are hybrid: local/imported presets live in the app database, Orca base profiles are cached in the database with a 7-day TTL, bundled/standard profiles can be materialized by the sidecar from slicer resources, and `.bbscfg` bundles are stored/extracted on the sidecar.
 - Slice jobs are in-memory backend jobs: library/archive endpoints enqueue work, call the sidecar `/slice` endpoint, poll sidecar progress by request ID, and persist `.gcode.3mf` artifacts back to the library/archive tables.
 - Visualization uses Three.js for source STL/3MF mesh preview and `gcode-preview` for sliced G-code toolpath preview. The mesh viewer parses 3MFs client-side with JSZip and includes event-loop yielding plus geometry merging for responsiveness.
 
 **Adoption candidates recorded:**
-- `.squad/decisions/inbox/brett-bambuddy-gcode-toolpath-preview.md`
-- `.squad/decisions/inbox/brett-bambuddy-slice-progress-contract.md`
+- `.squad/decisions/inbox/brett-external-reference-app-gcode-toolpath-preview.md`
+- `.squad/decisions/inbox/brett-external-reference-app-slice-progress-contract.md`
 
 **Reusable pattern:** External repo triage workflow captured in `.squad/skills/external-repo-triage/SKILL.md`.
 
