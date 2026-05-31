@@ -162,6 +162,7 @@ public static class ServiceCollectionExtensions
         RegisterCatalogServices(services);
 
         // Cost tracking
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IFilamentCostProvider, Farm.Infrastructure.Services.Cost.SpoolmanFilamentCostProvider>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IJobCostCalculationService, Farm.Infrastructure.Services.Cost.JobCostCalculationService>();
 
         // Statistics services (depends on database)
@@ -204,6 +205,7 @@ public static class ServiceCollectionExtensions
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
+        RegisterSmartPlugProviders(services);
 
         return services;
     }
@@ -681,6 +683,12 @@ public static class ServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(15);
         });
+
+        // Smart plug HTTP client shared by Tasmota, Shelly, and HomeAssistant providers (5s timeout for LAN devices)
+        _ = services.AddHttpClient("SmartPlug", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+        });
     }
 
     #endregion
@@ -721,6 +729,18 @@ public static class ServiceCollectionExtensions
             // - OctoPrintPollingService (HTTP polling every 10 seconds)
             // This keeps backend-specific logic encapsulated in plugins
         }
+    }
+
+    #endregion
+
+    #region Smart Plug Providers
+
+    private static void RegisterSmartPlugProviders(IServiceCollection services)
+    {
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.KasaSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.TasmotaSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.ShellySmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.HomeAssistantSmartPlugProvider>();
     }
 
     #endregion

@@ -31,6 +31,7 @@ import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroups
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
 import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
@@ -204,7 +205,8 @@ function AuthenticatedAppRoutes() {
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
-        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsShell /></ProtectedRoute>} />
+        <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="printers" element={<PrintersPage />} />

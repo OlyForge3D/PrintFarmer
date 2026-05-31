@@ -362,14 +362,14 @@ public class AuthController(
     // ─── passkey / WebAuthn ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Begins a passkey registration ceremony. Returns <c>PublicKeyCredentialCreationOptions</c>
+    /// Starts a passkey registration ceremony. Returns <c>PublicKeyCredentialCreationOptions</c>
     /// for the browser's <c>navigator.credentials.create()</c> call.
     /// </summary>
-    [HttpPost("passkey/register/begin")]
+    [HttpPost("passkey/register/start")]
     [Authorize]
     [ProducesResponseType(typeof(CredentialCreateOptions), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> PasskeyRegisterBeginAsync(CancellationToken ct)
+    public async Task<IActionResult> PasskeyRegisterStartAsync(CancellationToken ct)
     {
         string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
         string? username = User.FindFirstValue(ClaimTypes.Name);
@@ -386,7 +386,7 @@ public class AuthController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Passkey register/begin failed for {Username}", username);
+            _logger.LogError(ex, "Passkey register/start failed for {Username}", username);
             return BadRequest(new { error = ex.Message });
         }
     }
@@ -415,7 +415,7 @@ public class AuthController(
         try
         {
             RegisteredPublicKeyCredential credential = await _passkeyService.CompleteRegistrationAsync(username, attestationResponse, ct);
-            return Ok(new { message = "Passkey registered successfully", credentialId = Convert.ToBase64String(credential.Id) });
+            return Ok(new { success = true, credentialId = Convert.ToBase64String(credential.Id) });
         }
         catch (PasskeyChallengeNotFoundException ex)
         {
@@ -430,15 +430,15 @@ public class AuthController(
     }
 
     /// <summary>
-    /// Begins a passkey login ceremony. Returns <c>PublicKeyCredentialRequestOptions</c>
+    /// Starts a passkey login ceremony. Returns <c>PublicKeyCredentialRequestOptions</c>
     /// for the browser's <c>navigator.credentials.get()</c> call.
     /// </summary>
-    [HttpPost("passkey/login/begin")]
+    [HttpPost("passkey/login/start")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(AssertionOptions), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> PasskeyLoginBeginAsync(
-        [FromBody] PasskeyLoginBeginRequest request,
+    public async Task<IActionResult> PasskeyLoginStartAsync(
+        [FromBody] PasskeyLoginStartRequest request,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -454,7 +454,7 @@ public class AuthController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Passkey login/begin failed for {Username}", request.Username);
+            _logger.LogError(ex, "Passkey login/start failed for {Username}", request.Username);
             return BadRequest(new { error = ex.Message });
         }
     }
@@ -543,8 +543,8 @@ public record ConfirmEmailResponse(bool Success, string Message);
 
 public record ResendConfirmationResponse(bool Success, string Message);
 
-/// <summary>Request body for <c>POST /api/auth/passkey/login/begin</c>.</summary>
-public record PasskeyLoginBeginRequest(string Username);
+/// <summary>Request body for <c>POST /api/auth/passkey/login/start</c>.</summary>
+public record PasskeyLoginStartRequest(string Username);
 
 /// <summary>Request body for <c>POST /api/auth/passkey/login/complete</c>.</summary>
 public record PasskeyLoginCompleteRequest(string Username, AuthenticatorAssertionRawResponse? AssertionResponse);

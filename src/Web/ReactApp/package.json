@@ -47,6 +47,7 @@
     "date-fns": "^4.1.0",
     "driver.js": "^1.4.0",
     "fflate": "^0.8.2",
+    "gcode-preview": "^2.18.0",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",

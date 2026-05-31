@@ -39,7 +39,7 @@ public class PasskeyControllerTests
         return controller;
     }
 
-    // ─── register/begin ──────────────────────────────────────────────────────
+    // ─── register/start ──────────────────────────────────────────────────────
 
     [Fact]
     public async Task RegisterBegin_HappyPath_Returns200WithOptions()
@@ -50,7 +50,7 @@ public class PasskeyControllerTests
             .ReturnsAsync(fakeOptions);
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
-        IActionResult result = await controller.PasskeyRegisterBeginAsync(CancellationToken.None);
+        IActionResult result = await controller.PasskeyRegisterStartAsync(CancellationToken.None);
 
         OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
         ok.Value.Should().BeSameAs(fakeOptions);
@@ -64,7 +64,7 @@ public class PasskeyControllerTests
             .ThrowsAsync(new Exception("fido2 error"));
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
-        IActionResult result = await controller.PasskeyRegisterBeginAsync(CancellationToken.None);
+        IActionResult result = await controller.PasskeyRegisterStartAsync(CancellationToken.None);
 
         result.Should().BeOfType<BadRequestObjectResult>();
     }
@@ -117,7 +117,7 @@ public class PasskeyControllerTests
         result.Should().BeOfType<UnprocessableEntityObjectResult>();
     }
 
-    // ─── login/begin ─────────────────────────────────────────────────────────
+    // ─── login/start ─────────────────────────────────────────────────────────
 
     [Fact]
     public async Task LoginBegin_HappyPath_Returns200WithOptions()
@@ -128,8 +128,8 @@ public class PasskeyControllerTests
             .ReturnsAsync(fakeOptions);
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
-        IActionResult result = await controller.PasskeyLoginBeginAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginBeginRequest("testuser"),
+        IActionResult result = await controller.PasskeyLoginStartAsync(
+            new Farm.Web.Api.Controllers.PasskeyLoginStartRequest("testuser"),
             CancellationToken.None);
 
         OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
@@ -140,8 +140,8 @@ public class PasskeyControllerTests
     public async Task LoginBegin_MissingUsername_Returns400()
     {
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
-        IActionResult result = await controller.PasskeyLoginBeginAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginBeginRequest(string.Empty),
+        IActionResult result = await controller.PasskeyLoginStartAsync(
+            new Farm.Web.Api.Controllers.PasskeyLoginStartRequest(string.Empty),
             CancellationToken.None);
 
         result.Should().BeOfType<BadRequestObjectResult>();

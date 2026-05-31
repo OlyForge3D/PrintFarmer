@@ -92,3 +92,112 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 
 Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, extend GCodeViewer3D.tsx, wire to ArchivesPage), Quick Slice UX modal (preset-first, 3 profile dropdowns, hide raw sliders behind "Advanced"). Phase 2 deferred: multi-plate 3MF picker with smart filament auto-selection. Settings consolidation identified 15+ candidate admin pages (Filament, Slicer Profiles, Cameras, NFC, etc.) for unified nav with 8 tabs: General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users. Key UX: cross-tab search, collapsible cards, inline modals, masked secrets. NFC tag management modal (LinkSpoolModal + AssignSpoolModal, WebSocket real-time sync) deferred to later phase.
 - **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+
+## 2026-05-31 — GcodePreviewService Abstraction (#333)
+
+- Created `IGcodePreviewService` interface + `createGcodePreviewService()` factory in `src/Web/ReactApp/src/features/slicer/services/gcodePreviewService.ts`.
+- v1 uses a lightweight standalone G-code parser (layer splitting by Z-height changes) — no WebGL dependency. The `gcode-preview` npm package (v2.18.0) is installed but its `WebGLPreview` class requires a real WebGL context (canvas + GPU), making it unsuitable for headless service/test use. v2 will use it inside a Web Worker with OffscreenCanvas.
+- Exported via `features/slicer/services/index.ts`; no direct `gcode-preview` imports allowed outside this module.
+- PR #364 → development.
+
+### Learnings
+- `gcode-preview` v2.18.0 only exports `WebGLPreview` and `init`; the `Parser` class is internal and not accessible. Creating a `WebGLPreview` always attempts to instantiate a Three.js `WebGLRenderer`, so it cannot be used in jsdom/vitest without a full WebGL mock.
+- For v2 worker swap: use `OffscreenCanvas` transferred to the worker, then `new WebGLPreview({ canvas })` works with real GPU context.
+
+## 2026-05-31 — Settings Shell (#357)
+
+- Built `/settings` route with tabbed layout using existing `Tabs` UI component (controlled mode + `onTabChange`).
+- 8 tabs: General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users — empty placeholders for ST-2 migration.
+- Cross-tab keyword search: filters tab strip by label + keyword array; shows empty state when no match.
+- URL deep-link via `useSearchParams`: `?tab={id}&q={query}`.
+- Old `/settings` (SettingsPage) preserved at `/admin/settings-legacy` for backward compat during migration.
+- 9 tests covering tab switching, search filter, URL sync, deep-link.
+- PR #367 → development.
+
+### Learnings
+- The project's `Tabs` component supports controlled mode (`activeTab` + `onTabChange`) which makes URL sync straightforward — no need for external state management.
+- `setSearchParams` with a functional updater that builds a fresh `URLSearchParams` from `prev` is the cleanest batching pattern (single call, reads current params, returns new).
+
+## 2026-05-31 — Quick Slice Modal (#338)
+
+- Created `QuickSliceModal` in `src/Web/ReactApp/src/features/slicer/components/QuickSliceModal.tsx`.
+- Cascading preset-first flow: Printer → Machine Profile → Process Profile → Filament Profile.
+- Uses effective-value derivation pattern (no `useEffect` setState) to satisfy `react-hooks/set-state-in-effect` lint rule.
+- Integrated on ModelsPage: the existing Slice action button now opens the modal instead of navigating away.
+- "Advanced Settings →" link closes modal and navigates to `/slicer?modelId=<id>` (NewSliceJobPage).
+- 11 component tests covering open/close, profile dropdown loading, submit, and navigation.
+- PR #368 → development.
+
+### Learnings
+
+- 2026-05-31 — The project eslint config enforces `react-hooks/set-state-in-effect`: no `setState` in `useEffect` bodies. Use derived/effective values (fallback to first item from query data) instead of auto-select effects.
+- 2026-05-31 — `slicerProfilesService.getMachineProfilesForModel(modelId)` takes a printer catalog modelId (from `printerDetails.modelId`) and returns `OrcaMachineProfile[]`. Then `getFilamentProfilesForMachines` and `getProcessProfilesForMachines` take `machineNames: string[]` to get compatible profiles.
+
+## 2026-05-31 — GCodeViewer3D via GcodePreviewService (#334)
+
+- Refactored `GCodeViewer3D.tsx` to consume `IGcodePreviewService.parseGCodeDetailed()` instead of inline parser. No direct `gcode-preview` or `WebGLPreview` imports remain in the component.
+- Extended `gcodePreviewService.ts` with `parseGCodeDetailed()` returning `DetailedParsedGCode` (full point coords + tool tracking per layer) for Three.js rendering.
+- Added T-command filter UI (tool/filament toggle buttons, only shown for multi-tool G-code).
+- Added loading spinner (`role="status"`) and error boundary (`role="alert"`) states.
+- Component accepts optional `service` prop for DI in tests.
+- 8 new tests mock the service interface; tests do not touch the parser directly.
+- PR #369 → stacked on PR #364 (squad/333 branch).
+
+### Learnings
+- `IGcodePreviewService` needs both metadata-only (`parseGCode`) and rendering-ready (`parseGCodeDetailed`) methods — the component needs full XYZ point data for Three.js `Line` rendering.
+- Tool changes (T-commands) must be tracked per-point during parsing to enable per-tool filtering in the viewer.
+- ESLint `react-hooks/set-state-in-effect` fires for `setState` called synchronously at the top of a `useEffect`; moving to async/await inside the effect body silences it.
+
+## 2026-05-31 — Advanced Settings Disclosure (#340)
+
+- Created `AdvancedSettingsDisclosure` component wrapping `CollapsibleSection` from UI library.
+- Wrapped `SlicerSettingsPanel` on `NewSliceJobPage` — collapsed by default, preset dropdowns remain visible.
+- localStorage key `pf.slicer.advancedDisclosure` persists user preference.
+- Override count shown in collapsed title: compares `slicerSettings` vs `originalProcessSettings`.
+- 8 component tests passing. PR #372 → development.
+
+### Learnings
+
+- 2026-05-31 — `CollapsibleSection` supports controlled mode (`expanded` + `onToggle`) with `collapsedTitle` for custom collapsed labels and `headerActions` for right-side content. Located at `@/common/components/ui/CollapsibleSection`.
+
+## 2026-05-31 — Preview Button + Artifact URL Helpers (#335)
+
+- Added `ArtifactMetadataResponse` interface and `getArtifactMetadata()`, `getArtifactDownloadUrl()`, `getArtifactGcodeUrl()` to `sliceJobService.ts`.
+- Added Preview button (EyeIcon) to completed job rows in both table and card views of `SliceJobsPanel.tsx`.
+- Created `GcodePreviewModal.tsx` — opens `GCodeViewer3D` with `/api/artifacts/job/{jobId}` URL in an xl modal.
+- 9 tests: 5 artifact URL helper unit tests + 4 preview button component tests.
+- PR #373 → stacked on PR #364 (squad/333-gcode-preview-service-abstraction).
+
+### Learnings
+- The `react-hooks/set-state-in-effect` lint rule fires on `setState` in `useEffect` cleanup/conditional returns. Use `useMemo` for derived state that only depends on props.
+- `GCodeViewer` component fetches G-code text internally via `fetch(gcodeUrl)` — the consumer just passes the URL, no need to prefetch.
+
+## 2026-05-31 — Bed-Type Override (#339)
+
+- Added `BED_TYPE_OPTIONS` export from `metadataTypes.ts` (sourced from `KNOWN_ENUMS.bed_type`).
+- Bed Type dropdown added to both `QuickSliceModal` and `NewSliceJobPage` as top-level field.
+- Default: "Inherit from profile" (empty string = no override). User selection injects `curr_bed_type` into `overrides` in `slicerProfileJson`.
+- No useEffect setState — uses simple controlled `useState('')`.
+- 7 new tests total (4 QuickSliceModal + 3 NewSliceJobPage). All 38 targeted tests pass.
+- PR #374 → squad/338-quick-slice-modal (stacked on #368).
+
+### Learnings
+
+- 2026-05-31 — OrcaSlicer bed type override key is `curr_bed_type` (not `bed_type`). The `KNOWN_ENUMS.bed_type` in `metadataTypes.ts` lists the string values OrcaSlicer accepts (e.g. "Cool Plate", "Textured PEI Plate").
+- 2026-05-31 — When tests mock `@/features/slicer/components/settings`, any new named exports from that barrel must be added to the mock object or tests will throw "No export defined on mock" errors.
+
+## 2026-05-31 — Settings Nav Migration (#358)
+
+- Migrated 16 nav items into Settings tabs (PR #376, stacked on #367).
+- Tab assignments: General (1), Filament (1), Slicing (2), Hardware (4), Integrations (1), Data (3), Users (3), Notifications (placeholder).
+- Created `SettingsSection` wrapper component for consistent tab panel content layout.
+- All old routes redirect to `/settings?tab=X` preserving bookmarks.
+- Removed: Filament Inventory, Cameras, NFC Devices, Slicer Profiles, API Keys, Locations, User Accounts, Tags, Bed Types, Custom Fields, Webhooks, Quotas, Data Management, Login Audit from sidebar nav.
+- Kept in nav: Dashboard, Printers, Files, Projects, Slice, Print Queue, Auto-Dispatch, Maintenance, Statistics, Cost Analytics, Analytics, Scheduling, Printer Groups, Catalog, Workers, System, Settings.
+- Sidebar now has 3 sections: Operations, Management, Admin (removed Hardware and Security section headers).
+- 16 redirect tests + updated existing SettingsShell/nav/routing tests.
+
+### Learnings
+- Rendering full page components inside tab panels requires wrapping test helpers with QueryClientProvider + Auth mocks since pages typically call hooks that need providers.
+- The `SettingsPage` (admin config) rendered an h2 "Settings" which collided with the h1 shell heading in tests — use `level` matcher for disambiguation.
+- `SettingsTabStrip` now accepts optional `tabContent` record for rendering real content vs placeholder — backward compatible with empty tabs.

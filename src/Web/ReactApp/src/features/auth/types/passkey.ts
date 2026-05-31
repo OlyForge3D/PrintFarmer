@@ -82,7 +82,7 @@ export interface PasskeyRegisterCompleteRequest {
 
 export interface PasskeyRegisterCompleteResponse {
   success: boolean;
-  credentialId?: string;
+  credentialId: string;
   error?: string;
 }
 

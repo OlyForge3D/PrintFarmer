@@ -33,7 +33,7 @@ export async function passkeyLogin(
   try {
     const startResponse = await apiClient.post<PasskeyLoginStartResponse>(
       '/auth/passkey/login/start',
-      usernameHint ? { usernameOrEmail: usernameHint } : {},
+      usernameHint ? { username: usernameHint } : {},
     );
     const options = startResponse.data;
 
@@ -43,7 +43,7 @@ export async function passkeyLogin(
 
     const completeResponse = await apiClient.post<PasskeyLoginCompleteResponse>(
       '/auth/passkey/login/complete',
-      assertion,
+      { username: usernameHint ?? '', assertionResponse: assertion },
     );
 
     const result = completeResponse.data;
