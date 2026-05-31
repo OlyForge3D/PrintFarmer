@@ -280,6 +280,81 @@ public class NotificationsController(INotificationService notificationService) :
     }
 
     /// <summary>
+    /// Get the VAPID public key for push subscription enrollment.
+    /// </summary>
+    [HttpGet("push-subscription/vapid-key")]
+    [ProducesResponseType(typeof(VapidKeyResponse), StatusCodes.Status200OK)]
+    public ActionResult<VapidKeyResponse> GetVapidKey()
+    {
+        // TODO: Move to configuration once VAPID keys are generated for deployment
+        string? publicKey = Environment.GetEnvironmentVariable("VAPID_PUBLIC_KEY");
+        if (string.IsNullOrEmpty(publicKey))
+        {
+            return Ok(new VapidKeyResponse { PublicKey = string.Empty });
+        }
+
+        return Ok(new VapidKeyResponse { PublicKey = publicKey });
+    }
+
+    /// <summary>
+    /// Subscribe to web push notifications. Stores the browser push subscription.
+    /// </summary>
+    /// <param name="request">The push subscription data from the browser.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpPost("push-subscription")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SubscribePushAsync(
+        [FromBody] PushSubscriptionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Guid userId = GetUserIdFromClaims();
+
+            if (string.IsNullOrWhiteSpace(request?.Endpoint))
+            {
+                return BadRequest(new { error = "Endpoint is required" });
+            }
+
+            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys?.P256dh ?? string.Empty, request.Keys?.Auth ?? string.Empty, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException)
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Unsubscribe from web push notifications.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpDelete("push-subscription")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> UnsubscribePushAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Guid userId = GetUserIdFromClaims();
+            await notificationService.DeletePushSubscriptionAsync(userId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException)
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Helper: Extract user ID from JWT claims
     /// </summary>
     private Guid GetUserIdFromClaims()
@@ -415,4 +490,37 @@ public class NotificationPreferencesDto
 
     /// <summary>Retention days for notification history</summary>
     public int RetentionDays { get; set; }
+}
+
+/// <summary>
+/// VAPID public key response for push subscription enrollment
+/// </summary>
+public class VapidKeyResponse
+{
+    /// <summary>The VAPID public key (Base64url encoded)</summary>
+    public string PublicKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for creating a push subscription
+/// </summary>
+public class PushSubscriptionRequest
+{
+    /// <summary>The push subscription endpoint URL</summary>
+    public string Endpoint { get; set; } = string.Empty;
+
+    /// <summary>Subscription keys</summary>
+    public PushSubscriptionKeys? Keys { get; set; }
+}
+
+/// <summary>
+/// Push subscription cryptographic keys
+/// </summary>
+public class PushSubscriptionKeys
+{
+    /// <summary>The p256dh key (Base64url encoded)</summary>
+    public string P256dh { get; set; } = string.Empty;
+
+    /// <summary>The auth secret (Base64url encoded)</summary>
+    public string Auth { get; set; } = string.Empty;
 }

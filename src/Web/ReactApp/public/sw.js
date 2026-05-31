@@ -78,3 +78,39 @@ self.addEventListener('fetch', (event) => {
     }
   })());
 });
+
+// Web Push notification handler
+self.addEventListener('push', (event) => {
+  const defaultPayload = { title: 'PrintFarmer', body: 'You have a new notification.' };
+  let data = defaultPayload;
+  try {
+    if (event.data) {
+      data = { ...defaultPayload, ...event.data.json() };
+    }
+  } catch {
+    if (event.data) {
+      data = { ...defaultPayload, body: event.data.text() };
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/favicon.png',
+      badge: '/favicon-16x16.png',
+      data: data,
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      if (clients.length > 0) {
+        return clients[0].focus();
+      }
+      return self.clients.openWindow('/');
+    })
+  );
+});

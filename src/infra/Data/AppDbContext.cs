@@ -103,6 +103,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
 
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
+
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
 
