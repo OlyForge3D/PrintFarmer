@@ -78,8 +78,6 @@ jobs:
                 if (f === '.ai-team' || f.startsWith('.ai-team/') || f === '.squad' || f.startsWith('.squad/')) return true;
                 // .ai-team-templates/** — Squad's own templates, stay on dev
                 if (f === '.ai-team-templates' || f.startsWith('.ai-team-templates/')) return true;
-                // .beads/** — work tracking moved to GitHub issues, stay on dev
-                if (f === '.beads' || f.startsWith('.beads/')) return true;
                 // team-docs/** — ALL internal team docs, zero exceptions
                 if (f.startsWith('team-docs/')) return true;
                 // docs/proposals/** — internal design proposals, stay on dev
@@ -99,7 +97,6 @@ jobs:
               'The following files must NOT be merged into `main`.',
               '`.ai-team/` and `.squad/` are runtime team state — they belong on dev branches only.',
               '`.ai-team-templates/` is Squad\'s internal planning — it belongs on dev branches only.',
-              '`.beads/` is local work tracking — work moved to GitHub issues, belongs on dev only.',
               '`team-docs/` is internal team content — it belongs on dev branches only.',
               '`docs/proposals/` is internal design proposals — it belongs on dev branches only.',
               '',
@@ -116,9 +113,6 @@ jobs:
               '# Remove tracked .squad/ files (keeps local copies):',
               'git rm --cached -r .squad/',
               '',
-              '# Remove tracked .beads/ files (keeps local copies):',
-              'git rm --cached -r .beads/',
-              '',
               '# Remove tracked team-docs/ files:',
               'git rm --cached -r team-docs/',
               '',
@@ -127,7 +121,7 @@ jobs:
               'git push',
               '```',
               '',
-              '> ℹ️ `.ai-team/`, `.squad/`, and `.beads/` are committed on `development` and feature branches by design.',
+              '> ℹ️ `.ai-team/`, `.squad/`, and `.ai-team-templates/` are committed on `development` and feature branches by design.',
               '> The guard workflow is the enforcement mechanism that keeps these files off `main`.',
               '> `git rm --cached` untracks them from this PR without deleting your local copies.',
             ];
