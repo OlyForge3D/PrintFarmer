@@ -90,39 +90,74 @@ public class NfcTagService(
 
     public async Task<NfcTagBindingDto> LinkTagAsync(LinkNfcTagRequest request, CancellationToken ct)
     {
-        var binding = await db.NfcTagBindings
-            .Include(b => b.Printer)
-            .FirstOrDefaultAsync(b => b.TagUid == request.TagUid, ct);
+        const int maxRetries = 3;
 
-        if (binding is null)
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            binding = new NfcTagBinding
+            var binding = await db.NfcTagBindings
+                .Include(b => b.Printer)
+                .FirstOrDefaultAsync(b => b.TagUid == request.TagUid, ct);
+
+            if (binding is null)
             {
-                Id = Guid.NewGuid(),
-                TagUid = request.TagUid,
-                CreatedAt = DateTime.UtcNow
-            };
-            db.NfcTagBindings.Add(binding);
+                binding = new NfcTagBinding
+                {
+                    Id = Guid.NewGuid(),
+                    TagUid = request.TagUid,
+                    CreatedAt = DateTime.UtcNow
+                };
+                db.NfcTagBindings.Add(binding);
+            }
+
+            binding.SpoolId = request.SpoolId;
+            binding.SpoolName = request.SpoolName;
+            binding.PrinterId = request.PrinterId;
+            binding.TrayId = request.TrayId;
+            binding.UpdatedAt = DateTime.UtcNow;
+
+            if (request.PrinterId.HasValue)
+            {
+                await db.Entry(binding).Reference(b => b.Printer).LoadAsync(ct);
+            }
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+
+                logger.LogInformation(
+                    "NFC tag {TagUid} linked → spool {SpoolId}, printer {PrinterId}",
+                    request.TagUid, request.SpoolId, request.PrinterId);
+
+                return MapToDto(binding);
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Another concurrent caller inserted first — detach the failed entity and retry
+                logger.LogDebug(
+                    "Unique constraint race on TagUid {TagUid}, attempt {Attempt} — retrying",
+                    request.TagUid, attempt + 1);
+
+                db.Entry(binding).State = EntityState.Detached;
+            }
         }
 
-        binding.SpoolId = request.SpoolId;
-        binding.SpoolName = request.SpoolName;
-        binding.PrinterId = request.PrinterId;
-        binding.TrayId = request.TrayId;
-        binding.UpdatedAt = DateTime.UtcNow;
+        // Final fallback: return the existing binding (winner of the race)
+        var existing = await db.NfcTagBindings
+            .Include(b => b.Printer)
+            .FirstAsync(b => b.TagUid == request.TagUid, ct);
 
-        if (request.PrinterId.HasValue)
-        {
-            await db.Entry(binding).Reference(b => b.Printer).LoadAsync(ct);
-        }
-
+        existing.SpoolId = request.SpoolId;
+        existing.SpoolName = request.SpoolName;
+        existing.PrinterId = request.PrinterId;
+        existing.TrayId = request.TrayId;
+        existing.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(
-            "NFC tag {TagUid} linked → spool {SpoolId}, printer {PrinterId}",
+            "NFC tag {TagUid} linked (after race resolution) → spool {SpoolId}, printer {PrinterId}",
             request.TagUid, request.SpoolId, request.PrinterId);
 
-        return MapToDto(binding);
+        return MapToDto(existing);
     }
 
     public async Task<IReadOnlyList<NfcTagBindingDto>> ListBindingsAsync(CancellationToken ct)
@@ -204,6 +239,41 @@ public class NfcTagService(
         CreatedAt = b.CreatedAt,
         UpdatedAt = b.UpdatedAt
     };
+
+    /// <summary>
+    /// Detects unique constraint violations across database providers.
+    /// </summary>
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        var inner = ex.InnerException;
+        if (inner is null)
+        {
+            return false;
+        }
+
+        var message = inner.Message;
+
+        // PostgreSQL: duplicate key value violates unique constraint
+        if (message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // SQL Server: violation of UNIQUE KEY constraint / cannot insert duplicate key
+        if (message.Contains("unique", StringComparison.OrdinalIgnoreCase) &&
+            message.Contains("duplicate", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // SQLite: UNIQUE constraint failed
+        if (message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
 
     private sealed record PendingNfcEvent(string EventName, object Payload);
 }
