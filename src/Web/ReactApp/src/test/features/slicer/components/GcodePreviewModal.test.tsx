@@ -101,6 +101,67 @@ describe('GcodePreviewModal URL contract', () => {
     expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-gcode');
   });
 
+  it('recognizes .bgcode and .g extensions as G-code', async () => {
+    mockGetArtifactsByJob.mockResolvedValue([
+      {
+        id: 'art-stl',
+        jobId: 'job-4',
+        fileName: 'model.stl',
+        contentType: 'model/stl',
+        sizeBytes: 20000,
+        downloadUrl: '/api/artifacts/art-stl',
+        createdAt: '2026-05-31T10:00:00Z',
+      },
+      {
+        id: 'art-bgcode',
+        jobId: 'job-4',
+        fileName: 'output.bgcode',
+        contentType: 'application/octet-stream',
+        sizeBytes: 40000,
+        downloadUrl: '/api/artifacts/art-bgcode',
+        createdAt: '2026-05-31T10:01:00Z',
+      },
+    ]);
+
+    renderModal({ isOpen: true, jobId: 'job-4' });
+
+    const viewer = await screen.findByTestId('gcode-viewer');
+    expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-bgcode');
+  });
+
+  it('does not render viewer when only non-G-code artifacts exist', async () => {
+    mockGetArtifactsByJob.mockResolvedValue([
+      {
+        id: 'art-img',
+        jobId: 'job-5',
+        fileName: 'thumbnail.png',
+        contentType: 'image/png',
+        sizeBytes: 3000,
+        downloadUrl: '/api/artifacts/art-img',
+        createdAt: '2026-05-31T10:00:00Z',
+      },
+      {
+        id: 'art-3mf',
+        jobId: 'job-5',
+        fileName: 'project.3mf',
+        contentType: 'application/octet-stream',
+        sizeBytes: 15000,
+        downloadUrl: '/api/artifacts/art-3mf',
+        createdAt: '2026-05-31T10:01:00Z',
+      },
+    ]);
+
+    renderModal({ isOpen: true, jobId: 'job-5' });
+
+    // Wait for loading to finish and message to appear
+    await waitFor(() => {
+      expect(screen.getByText(/no g-code artifact available/i)).toBeDefined();
+    });
+
+    // Viewer should NOT be rendered
+    expect(screen.queryByTestId('gcode-viewer')).toBeNull();
+  });
+
   it('does not fetch when modal is closed', () => {
     renderModal({ isOpen: false, jobId: 'job-3' });
     expect(mockGetArtifactsByJob).not.toHaveBeenCalled();
