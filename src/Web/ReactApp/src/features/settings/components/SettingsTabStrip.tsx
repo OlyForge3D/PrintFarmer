@@ -5,12 +5,14 @@ interface SettingsTabStripProps {
   activeTab: string;
   onTabChange: (tabId: string) => void;
   filteredTabIds?: string[];
+  tabContent?: Record<string, React.ReactNode>;
 }
 
 export const SettingsTabStrip: React.FC<SettingsTabStripProps> = ({
   activeTab,
   onTabChange,
   filteredTabIds,
+  tabContent,
 }) => {
   const visibleTabs = filteredTabIds
     ? SETTINGS_TABS.filter((t) => filteredTabIds.includes(t.id))
@@ -28,14 +30,13 @@ export const SettingsTabStrip: React.FC<SettingsTabStripProps> = ({
       <Tabs.Panels>
         {SETTINGS_TABS.map((tab) => (
           <Tabs.Panel key={tab.id} id={tab.id}>
-            <div className="py-8 text-center text-pf-text-secondary">
-              <p className="text-sm">
-                {tab.label} settings will be available here.
-              </p>
-              <p className="text-xs mt-1 text-pf-text-tertiary">
-                Content migrated in ST-2.
-              </p>
-            </div>
+            {tabContent?.[tab.id] ?? (
+              <div className="py-8 text-center text-pf-text-secondary">
+                <p className="text-sm">
+                  {tab.label} settings will be available here.
+                </p>
+              </div>
+            )}
           </Tabs.Panel>
         ))}
       </Tabs.Panels>

@@ -76,11 +76,12 @@ describe('Navigation Section Headers', () => {
   };
 
   describe('Slicer profile browsing', () => {
-    it('shows slice entry points including slicer profiles in the nav', () => {
+    it('shows slice entry point in the nav (slicer profiles moved to settings)', () => {
       renderLayout();
 
       expect(screen.getByRole('link', { name: /^slice$/i })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /slicer profiles/i })).toBeInTheDocument();
+      // Slicer Profiles is now inside the Settings tab, not in the nav
+      expect(screen.queryByRole('link', { name: /slicer profiles/i })).not.toBeInTheDocument();
     });
   });
 

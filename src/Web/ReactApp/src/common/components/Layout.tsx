@@ -17,27 +17,17 @@ import {
   LogoutIcon,
   LoginIcon,
   ChevronDownIcon,
-  UsersIcon,
   GearIcon,
   FolderOpenIcon,
   HistoryIcon,
-  TagIcon,
   WrenchIcon,
   TrendingUpIcon,
-  LocationIcon,
-  KeyIcon,
-  DatabaseIcon,
   CheckIcon,
-  CameraIcon,
-  NfcIcon,
   ChartIcon,
-  ExternalLinkIcon,
   AlertIcon,
   ClipboardListIcon,
-  ListIcon,
   PlayIcon,
   CalendarIcon,
-  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -51,7 +41,7 @@ import type { AutoDispatchStatus } from '@/types/api';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
 import { printerSignalRService } from '@/services/printer-signalr';
-import { BoxIcon, SpoolIcon } from 'lucide-react';
+import { BoxIcon } from 'lucide-react';
 // Layout now uses <Outlet /> for nested routes
 
 interface NavigationItem {
@@ -118,14 +108,6 @@ const navigation: NavigationElement[] = [
     requiresSlicingCapability: true
   },
   {
-    name: 'Slicer Profiles',
-    href: '/slicer-profiles',
-    icon: GearIcon,
-    requiredPermission: { resource: 'models', action: 'read' },
-    requiresSlicer: true,
-    requiresSlicingCapability: true
-  },
-  {
     name: 'Print Queue',
     href: '/printQueue',
     icon: HistoryIcon,
@@ -136,24 +118,6 @@ const navigation: NavigationElement[] = [
     href: '/auto-dispatch',
     icon: PlayIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
-  },
-
-  // — Hardware —
-  { name: 'Hardware', isSectionHeader: true },
-  { 
-    name: 'Filament Inventory', 
-    href: '/spools', 
-    icon: SpoolIcon
-  },
-  {
-    name: 'Cameras',
-    href: '/cameras',
-    icon: CameraIcon
-  },
-  {
-    name: 'NFC Devices',
-    href: '/nfc-devices',
-    icon: NfcIcon
   },
 
   // — Management —
@@ -184,12 +148,6 @@ const navigation: NavigationElement[] = [
     href: '/scheduling',
     icon: CalendarIcon,
   },
-  {
-    name: 'API Keys',
-    href: '/profile/api-keys',
-    icon: KeyIcon
-  },
-
   // — Admin —
   { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
   {
@@ -199,51 +157,9 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Locations',
-    href: '/locations',
-    icon: LocationIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
     name: 'Catalog',
     href: '/catalog',
     icon: LayersIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'User Accounts',
-    href: '/users',
-    icon: UsersIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Tags',
-    href: '/admin/tags',
-    icon: TagIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Bed Types',
-    href: '/admin/bed-types',
-    icon: LayersIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Custom Fields',
-    href: '/admin/custom-fields',
-    icon: ListIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Webhooks',
-    href: '/admin/webhooks',
-    icon: ExternalLinkIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Quotas',
-    href: '/admin/quotas',
-    icon: ClipboardListIcon,
     requiredRole: 'farm_admin'
   },
   {
@@ -262,24 +178,9 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Data Management',
-    href: '/admin/data',
-    icon: DatabaseIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
     name: 'Settings',
     href: '/settings',
     icon: GearIcon,
-    requiredRole: 'farm_admin'
-  },
-
-  // — Security —
-  { name: 'Security', isSectionHeader: true, requiredRole: 'farm_admin' },
-  {
-    name: 'Login Audit',
-    href: '/admin/security/login-audit',
-    icon: ShieldIcon,
     requiredRole: 'farm_admin'
   },
 ];
