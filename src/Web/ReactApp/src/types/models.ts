@@ -24,6 +24,8 @@ export interface Model {
   }>;
   extractedMetadata?: ThreeMfMetadata | null;
   autoTags?: string[];
+  sourceUrl?: string;
+  sourceCreator?: string;
 }
 
 /**

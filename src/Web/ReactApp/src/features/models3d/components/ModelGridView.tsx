@@ -99,6 +99,18 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                   </div>
                 )}
 
+                {/* Attribution */}
+                {model.sourceUrl && (
+                  <a
+                    href={model.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-pf-text-tertiary hover:text-pf-accent truncate block mb-1.5"
+                  >
+                    from Printables{model.sourceCreator ? ` by ${model.sourceCreator}` : ''}
+                  </a>
+                )}
+
                 {/* Metadata */}
                 <div className="text-xs text-pf-text-secondary space-y-0.5 mb-2 flex-1">
                   {model.fileType && <div className="flex justify-between gap-1"><span>Type:</span> <span className="font-medium text-right">{model.fileType.toUpperCase()}</span></div>}
