@@ -37,3 +37,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - **2026-05-28 — Backend busy-error propagation:** Plugin-specific firmware signals (HTTP 409/503 for Moonraker; status round-trip on Ack for SDCP; `~M119` echo for FlashForge) translated into `PrinterBackendBusyException`. Moonraker `SendGcodePrivateAsync` throws on HTTP 409/503; SDCP round-trips status on Ack failure; FlashForge echoes `~M119` check on rejection. All backends map to `BackendBusy` → 502 Bad Gateway. Archived older learnings for this pattern (2025-11-23, 2025-11-24) in history-archive.md.
 
 - **2026-05-28 — Plugin-propagation gap deferred (follow-up #317):** Moonraker, SDCP, and FlashForge plugins do not translate firmware busy responses into `PrinterBackendBusyException`. Controller gate is sufficient as primary defense; race-condition gap tracked as P2 in issue #317.
+
+### Bambuddy Review Pointer — 2026-05-31
+
+bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from bambuddy" and "Consider a richer slice progress contract" for details.

@@ -167,3 +167,7 @@ Detailed entries from this period were summarized to reduce file size. See orche
 
 ---
 
+
+### Learnings — 2026-05-31
+
+When asked for `git branch -d` only, never silently escalate to `-D`. If `-d` refuses, report and let the coordinator decide. (PR #329 cleanup, 2026-05-31)
