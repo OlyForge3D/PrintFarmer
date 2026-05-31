@@ -264,6 +264,52 @@ public class LoginAuditEntry
 }
 
 /// <summary>
+/// Registered WebAuthn/FIDO2 passkey credential for a user.
+/// Each row represents one authenticator registered to an account.
+/// </summary>
+public class UserPasskeyCredential
+{
+    /// <summary>Surrogate primary key.</summary>
+    public int Id { get; set; }
+
+    /// <summary>ID of the owning user (foreign key into <see cref="User"/>).</summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>Navigation property to the owning user.</summary>
+    public User User { get; set; } = null!;
+
+    /// <summary>
+    /// FIDO2 credential ID — uniquely identifies the key pair on the authenticator.
+    /// Stored as a byte array; a unique index enforces one-to-one mapping across users.
+    /// </summary>
+    public byte[] CredentialId { get; set; } = [];
+
+    /// <summary>COSE-encoded public key returned by the authenticator at registration.</summary>
+    public byte[] PublicKey { get; set; } = [];
+
+    /// <summary>
+    /// Monotonically increasing signature counter used to detect cloned authenticators.
+    /// Updated on every successful assertion ceremony.
+    /// </summary>
+    public uint SignCount { get; set; }
+
+    /// <summary>Optional human-supplied label for this credential (e.g. "MacBook Touch ID").</summary>
+    public string? DeviceName { get; set; }
+
+    /// <summary>
+    /// Human-readable device description resolved from the FIDO MDS AAGUID metadata.
+    /// Populated at registration time if <see cref="DeviceName"/> is not provided.
+    /// </summary>
+    public string? AaguidDescription { get; set; }
+
+    /// <summary>UTC timestamp when this credential was first registered.</summary>
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>UTC timestamp of the most recent successful assertion. Null if never used since registration.</summary>
+    public DateTime? LastUsedAt { get; set; }
+}
+
+/// <summary>
 /// Password policy configuration entity.
 /// Defines password complexity requirements for the system.
 /// </summary>
