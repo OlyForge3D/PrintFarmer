@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -195,15 +195,23 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
 
         var first = new CameraSnapshot
         {
-            Id = Guid.NewGuid(), PrinterId = printerId, CameraId = cameraId,
-            PrintJobId = printJobId, EventType = "PrintStarted",
-            FilePath = $"{printerId}/c.jpg", CapturedAt = DateTime.UtcNow.AddMinutes(-5),
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            CameraId = cameraId,
+            PrintJobId = printJobId,
+            EventType = "PrintStarted",
+            FilePath = $"{printerId}/c.jpg",
+            CapturedAt = DateTime.UtcNow.AddMinutes(-5),
         };
         var second = new CameraSnapshot
         {
-            Id = Guid.NewGuid(), PrinterId = printerId, CameraId = cameraId,
-            PrintJobId = printJobId, EventType = "PrintCompleted",
-            FilePath = $"{printerId}/d.jpg", CapturedAt = DateTime.UtcNow,
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            CameraId = cameraId,
+            PrintJobId = printJobId,
+            EventType = "PrintCompleted",
+            FilePath = $"{printerId}/d.jpg",
+            CapturedAt = DateTime.UtcNow,
         };
         db.CameraSnapshots.AddRange(second, first); // inserted out of order intentionally
         await db.SaveChangesAsync();
