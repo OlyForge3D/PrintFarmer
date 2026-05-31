@@ -88,6 +88,7 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - Secondary failure mode: Swift 6/XCTest rejects `XCTAssertEqual(optionalDouble, expected, accuracy:)`; unwrap the optional first with `XCTUnwrap` before using the accuracy overload. Prefer helper defaults of `#filePath` over `#file` to avoid XCTest source-location warnings.
 - Fix pattern: when adding an SPM product to a test target in `project.pbxproj`, verify all three links exist: `PBXBuildFile` in test Frameworks, `XCSwiftPackageProductDependency` in target `packageProductDependencies`, and the `XCRemoteSwiftPackageReference` listed under project `packageReferences`.
 - CI coupling: PFarm1 PR #329's iOS workflow runs the checked-in `mobile/` project directly, not `/Users/jpapiez/s/PFarm-Ios`; workflow-only assumptions should be verified from `.github/workflows/ios-pr-ci.yml` before switching repos.
+- Environmental follow-up: a macOS job can fail with no steps/logs if the account has failed payments or a spending-limit block. Check the check-run annotations when `gh run view --log-failed` says `log not found`.
 
 ## Milestone Summary
 - 2026-05-20: iOS squad merged; mobile controls v1 issues assigned (#274 role gate, #275 drift, #284–#286 controls, #288 polish).
