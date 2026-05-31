@@ -1,5 +1,27 @@
 import { apiClient } from './api';
 
+// Artifact metadata DTO (from slicer-host GET /api/artifacts/{id}/metadata)
+export interface ArtifactMetadataResponse {
+  id: string;
+  sliceJobId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  createdAt: string;
+}
+
+// Artifact list item DTO (from slicer-host GET /api/artifacts/job/{jobId})
+export interface ArtifactListItemResponse {
+  id: string;
+  jobId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  createdAt: string;
+}
+
 // Slice Job DTOs matching backend
 export interface SubmitSliceJobRequest {
   userId: string;
@@ -246,6 +268,45 @@ export class SliceJobService {
     } else {
       return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
     }
+  }
+
+  /**
+   * List all artifacts for a slice job (calls slicer-host GET /api/artifacts/job/{jobId}).
+   */
+  async getArtifactsByJob(jobId: string): Promise<ArtifactListItemResponse[]> {
+    const response = await apiClient.request<ArtifactListItemResponse[]>({
+      url: `/artifacts/job/${jobId}`,
+      method: 'GET',
+    });
+    return response;
+  }
+
+  /**
+   * Get artifact metadata (calls slicer-host GET /api/artifacts/{id}/metadata)
+   */
+  async getArtifactMetadata(artifactId: string): Promise<ArtifactMetadataResponse> {
+    const response = await apiClient.request<ArtifactMetadataResponse>({
+      url: `/artifacts/${artifactId}/metadata`,
+      method: 'GET',
+    });
+    return response;
+  }
+
+  /**
+   * Build the download URL for an artifact (no network call — just path construction).
+   * Maps to GET /api/artifacts/{id} which streams the file as PhysicalFile.
+   */
+  getArtifactDownloadUrl(artifactId: string): string {
+    return `/api/artifacts/${artifactId}`;
+  }
+
+  /**
+   * Resolve the G-code download URL for a completed slice job.
+   * Fetches artifact metadata and returns the download URL.
+   */
+  async getArtifactGcodeUrl(artifactId: string): Promise<string> {
+    const metadata = await this.getArtifactMetadata(artifactId);
+    return metadata.downloadUrl || this.getArtifactDownloadUrl(artifactId);
   }
 }
 

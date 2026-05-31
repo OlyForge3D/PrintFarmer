@@ -130,6 +130,7 @@ public class ArtifactsController(
             fileName = a.FileName,
             contentType = a.ContentType,
             sizeBytes = a.SizeBytes,
+            downloadUrl = $"/api/artifacts/{a.Id}",
             createdAt = a.CreatedAt,
         }).ToList();
 
