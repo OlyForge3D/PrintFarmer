@@ -50,6 +50,7 @@ import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDash
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
+import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -191,7 +192,14 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<Navigate to="/settings?tab=users" replace />} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsShell /></ProtectedRoute>} />
         <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
-        <Route path="profile/api-keys" element={<Navigate to="/settings?tab=users" replace />} />
+        {/*
+         * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
+         * API key management is a per-user feature — every authenticated user needs
+         * access to create/revoke their own keys. Admins can also reach ApiKeysPage
+         * via the Settings shell (users tab), but the direct /profile/api-keys route
+         * must remain open to all authenticated users to avoid a regression.
+         */}
+        <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
