@@ -21,6 +21,7 @@ import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessP
 import { AdvancedSettingsDisclosure } from '@/features/slicer/components/AdvancedSettingsDisclosure';
 import {
   SlicerSettingsPanel,
+  BED_TYPE_OPTIONS,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
@@ -225,6 +226,9 @@ export const NewSliceJobPage: React.FC = () => {
   // === Multi-extruder filament selection (for multi-toolhead printers) ===
   // Maps extruder index → filament profile name. Only used when printer has >1 physical toolhead.
   const [extruderFilamentProfileIds, setExtruderFilamentProfileIds] = useState<Record<number, string>>({});
+
+  // === Bed Type Override ===
+  const [selectedBedType, setSelectedBedType] = useState<string>('');
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
@@ -1459,6 +1463,7 @@ export const NewSliceJobPage: React.FC = () => {
             overrides: {
               ...slicerSettings,
               ...advancedProcessSettings,
+              ...(selectedBedType ? { curr_bed_type: selectedBedType } : {}),
             },
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
@@ -1491,6 +1496,7 @@ export const NewSliceJobPage: React.FC = () => {
     modelFileUrl,
     physicalToolheads,
     printerIsMultiToolhead,
+    selectedBedType,
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
@@ -2253,6 +2259,23 @@ export const NewSliceJobPage: React.FC = () => {
                  <span className="italic">No process profiles available</span>}
               </div>
             )}
+          </div>
+
+          {/* BED TYPE OVERRIDE */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
+            <label htmlFor="nsj-bed-type" className="block text-sm font-semibold text-pf-text-primary">
+              Bed Type
+            </label>
+            <Select
+              id="nsj-bed-type"
+              value={selectedBedType}
+              onChange={(e) => setSelectedBedType(e.target.value)}
+            >
+              <option value="">Inherit from profile</option>
+              {BED_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </Select>
           </div>
 
           {/* ORCASLICER-STYLE SETTINGS PANEL — behind Advanced disclosure */}

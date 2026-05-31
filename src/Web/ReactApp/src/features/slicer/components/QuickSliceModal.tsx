@@ -18,6 +18,7 @@ import {
 } from '@/services/slicerProfilesService';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { BED_TYPE_OPTIONS } from '@/features/slicer/components/settings';
 import type { Model } from '@/types/models';
 
 export interface QuickSliceModalProps {
@@ -57,6 +58,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState('');
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState('');
   const [selectedProcessProfileId, setSelectedProcessProfileId] = useState('');
+  const [selectedBedType, setSelectedBedType] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // Fetch printers
@@ -181,7 +183,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
         machineProfileName: effectiveMachineProfileId,
         filamentProfileName: effectiveFilamentProfileId,
         processProfileName: effectiveProcessProfileId,
-        overrides: {},
+        overrides: {
+          ...(selectedBedType ? { curr_bed_type: selectedBedType } : {}),
+        },
       }),
       requiredCapabilitiesJson: '[]',
       priority: 1,
@@ -193,6 +197,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     effectiveMachineProfileId,
     effectiveFilamentProfileId,
     effectiveProcessProfileId,
+    selectedBedType,
     submitMutation,
     user?.id,
   ]);
@@ -268,6 +273,19 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
             </option>
             {filamentProfiles.map((p) => (
               <option key={p.name} value={p.name}>{p.name}</option>
+            ))}
+          </Select>
+        </FormField>
+
+        <FormField label="Bed Type" htmlFor="qs-bed-type">
+          <Select
+            id="qs-bed-type"
+            value={selectedBedType}
+            onChange={(e) => setSelectedBedType(e.target.value)}
+          >
+            <option value="">Inherit from profile</option>
+            {BED_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </Select>
         </FormField>
