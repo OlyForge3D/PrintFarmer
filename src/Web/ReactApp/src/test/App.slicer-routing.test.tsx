@@ -109,13 +109,14 @@ describe('App slicer route consolidation', () => {
     vi.clearAllMocks();
   });
 
-  it('redirects the old admin slicer profiles route to the slicer profiles page', async () => {
+  it('redirects the old admin slicer profiles route to the settings slicing tab', async () => {
     window.history.pushState({}, '', '/admin/slicer-profiles');
 
     render(<App />);
 
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/slicer-profiles');
+      expect(window.location.pathname).toBe('/settings');
+      expect(window.location.search).toContain('tab=slicing');
     });
   });
 

@@ -25,19 +25,11 @@ import { apiClient } from '@/services/api';
 
 // Feature Pages
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
-import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
-import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
-import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
-import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
-import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
-import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
-import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
-import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
@@ -52,17 +44,13 @@ import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
-import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
-import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
 import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
 import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
-import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
-import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
-import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
+import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -79,9 +67,6 @@ const LazyWorkerManagementPage = lazy(() =>
 
 const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
-);
-const LazySlicerProfilesPage = lazy(() =>
-  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
 );
 
 function RouteLoader() {
@@ -190,43 +175,50 @@ function AuthenticatedAppRoutes() {
         <Route path="files/projects" element={<Navigate to="/projects" replace />} />
         <Route path="files/*" element={<FilesPage />} />
         <Route path="projects" element={<ProjectsPage />} />
-        <Route path="spools" element={<FilamentManagementPage />} />
-        <Route path="spools/:tabId" element={<FilamentManagementPage />} />
-        <Route path="cameras" element={<CamerasPage />} />
-        <Route path="cameras/:tabId" element={<CamerasPage />} />
-        <Route path="nfc-devices" element={<NfcDevicesPage />} />
+        <Route path="spools" element={<Navigate to="/settings?tab=filament" replace />} />
+        <Route path="spools/:tabId" element={<Navigate to="/settings?tab=filament" replace />} />
+        <Route path="cameras" element={<Navigate to="/settings?tab=hardware" replace />} />
+        <Route path="cameras/:tabId" element={<Navigate to="/settings?tab=hardware" replace />} />
+        <Route path="nfc-devices" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
         <Route path="statistics/costs" element={<CostDashboardPage />} />
         <Route path="analytics" element={<AnalyticsDashboardPage />} />
         <Route path="scheduling" element={<SchedulingPage />} />
-        <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
+        <Route path="locations" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
-        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
+        <Route path="users" element={<Navigate to="/settings?tab=users" replace />} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsShell /></ProtectedRoute>} />
         <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
+        {/*
+         * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
+         * API key management is a per-user feature — every authenticated user needs
+         * access to create/revoke their own keys. Admins can also reach ApiKeysPage
+         * via the Settings shell (users tab), but the direct /profile/api-keys route
+         * must remain open to all authenticated users to avoid a regression.
+         */}
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<Navigate to="/slicer-profiles" replace />} />
-          <Route path="tags" element={<TagAdminPage />} />
-          <Route path="bed-types" element={<BedTypeAdminPage />} />
-          <Route path="custom-fields" element={<CustomFieldsAdminPage />} />
-          <Route path="webhooks" element={<WebhooksAdminPage />} />
-          <Route path="quotas" element={<QuotaManagementPage />} />
-          <Route path="data" element={<DataManagementPage />} />
+          <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing" replace />} />
+          <Route path="tags" element={<Navigate to="/settings?tab=data" replace />} />
+          <Route path="bed-types" element={<Navigate to="/settings?tab=slicing" replace />} />
+          <Route path="custom-fields" element={<Navigate to="/settings?tab=hardware" replace />} />
+          <Route path="webhooks" element={<Navigate to="/settings?tab=integrations" replace />} />
+          <Route path="quotas" element={<Navigate to="/settings?tab=data" replace />} />
+          <Route path="data" element={<Navigate to="/settings?tab=data" replace />} />
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
-        <Route path="security/login-audit" element={<LoginAuditPage />} />
+        <Route path="security/login-audit" element={<Navigate to="/settings?tab=users" replace />} />
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<Navigate to="/admin/workers?tab=jobs" replace />} />
-        <Route path="slicer-profiles" element={<FeatureGate feature="slicing"><RouteSuspense><LazySlicerProfilesPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing" replace />} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>
