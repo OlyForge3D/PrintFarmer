@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Security;
 using Farm.Web.Api.Services.HomeAssistant;
 using Microsoft.AspNetCore.Authorization;
@@ -44,14 +45,23 @@ public class HomeAssistantSettingsController(
             return BadRequest(ModelState);
         }
 
-        if (dto.BaseUrl != null &&
-            (!Uri.TryCreate(dto.BaseUrl, UriKind.Absolute, out Uri? uri) ||
-             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+        HomeAssistantSettings settings = await GetOrCreateSingletonAsync(ct);
+
+        // Apply AllowPrivateNetworkTargets first so URL validation uses the new value.
+        if (dto.AllowPrivateNetworkTargets.HasValue)
         {
-            return BadRequest("baseUrl must be a valid HTTP or HTTPS URL.");
+            settings.AllowPrivateNetworkTargets = dto.AllowPrivateNetworkTargets.Value;
         }
 
-        HomeAssistantSettings settings = await GetOrCreateSingletonAsync(ct);
+        if (dto.BaseUrl != null)
+        {
+            UrlSsrfValidationResult ssrfResult = UrlSsrfValidator.Validate(
+                dto.BaseUrl, settings.AllowPrivateNetworkTargets);
+            if (!ssrfResult.IsValid)
+            {
+                return BadRequest(ssrfResult.ErrorMessage);
+            }
+        }
 
         if (dto.Enabled.HasValue)
         {
@@ -91,11 +101,11 @@ public class HomeAssistantSettingsController(
         string? baseUrl = dto?.BaseUrl;
         string? token = dto?.LongLivedAccessToken;
 
+        HomeAssistantSettings stored = await GetOrCreateSingletonAsync(ct);
+
         // Fall back to stored settings when the caller didn't supply values inline.
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token))
         {
-            HomeAssistantSettings stored = await GetOrCreateSingletonAsync(ct);
-
             if (string.IsNullOrWhiteSpace(baseUrl))
             {
                 baseUrl = stored.BaseUrl;
@@ -113,6 +123,14 @@ public class HomeAssistantSettingsController(
         {
             return Ok(new HomeAssistantTestResultDto(false, null, null,
                 "baseUrl and longLivedAccessToken are required for a connection test."));
+        }
+
+        // SSRF validation before making any outbound request
+        UrlSsrfValidationResult ssrfResult = UrlSsrfValidator.Validate(
+            baseUrl, stored.AllowPrivateNetworkTargets);
+        if (!ssrfResult.IsValid)
+        {
+            return Ok(new HomeAssistantTestResultDto(false, null, null, ssrfResult.ErrorMessage));
         }
 
         Services.HomeAssistant.HomeAssistantConnectionResult result =
@@ -175,6 +193,7 @@ public class HomeAssistantSettingsController(
         s.Enabled,
         s.BaseUrl,
         HasToken: !string.IsNullOrWhiteSpace(s.LongLivedAccessToken),
+        s.AllowPrivateNetworkTargets,
         s.UpdatedAt);
 }
 
@@ -183,6 +202,7 @@ public sealed record HomeAssistantSettingsDto(
     bool Enabled,
     string? BaseUrl,
     bool HasToken,
+    bool AllowPrivateNetworkTargets,
     DateTime UpdatedAt);
 
 /// <summary>DTO for updating Home Assistant settings. Null fields are not changed.</summary>
@@ -196,6 +216,12 @@ public sealed class UpdateHomeAssistantSettingsDto
     /// <summary>Set to empty string to clear the token; null to leave unchanged.</summary>
     [MaxLength(2000)]
     public string? LongLivedAccessToken { get; init; }
+
+    /// <summary>
+    /// When true, allows private/internal network targets (RFC1918, unique-local IPv6).
+    /// Required for typical Home Assistant deployments on a home LAN.
+    /// </summary>
+    public bool? AllowPrivateNetworkTargets { get; init; }
 }
 
 /// <summary>Optional inline credentials for the test endpoint.</summary>

@@ -26,6 +26,13 @@ public class HomeAssistantSettings
     [MaxLength(2000)]
     public string? LongLivedAccessToken { get; set; }
 
+    /// <summary>
+    /// When true, allows the Home Assistant base URL to target private/internal network addresses
+    /// (RFC1918, unique-local IPv6). Required for typical home-lab deployments where HA runs on the LAN.
+    /// Loopback and link-local are always rejected regardless of this setting.
+    /// </summary>
+    public bool AllowPrivateNetworkTargets { get; set; } = false;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

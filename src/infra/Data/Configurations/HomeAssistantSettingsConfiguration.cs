@@ -23,6 +23,7 @@ public class HomeAssistantSettingsConfiguration : IEntityTypeConfiguration<HomeA
             Enabled = false,
             BaseUrl = null,
             LongLivedAccessToken = null,
+            AllowPrivateNetworkTargets = false,
             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
         });
