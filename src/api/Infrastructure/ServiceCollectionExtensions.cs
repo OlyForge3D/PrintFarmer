@@ -160,6 +160,7 @@ public static class ServiceCollectionExtensions
         RegisterCatalogServices(services);
 
         // Cost tracking
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IFilamentCostProvider, Farm.Infrastructure.Services.Cost.SpoolmanFilamentCostProvider>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IJobCostCalculationService, Farm.Infrastructure.Services.Cost.JobCostCalculationService>();
 
         // Statistics services (depends on database)
