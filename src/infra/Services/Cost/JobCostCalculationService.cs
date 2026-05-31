@@ -18,16 +18,21 @@ public class JobCostCalculationService : IJobCostCalculationService
     private readonly ISettingsService _settingsService;
     private readonly ILogger<JobCostCalculationService> _logger;
 
+    // Optional: when registered, provides cached Spoolman price lookups.
+    private readonly IFilamentCostProvider? _filamentCostProvider;
+
     public JobCostCalculationService(
         AppDbContext db,
         ISpoolmanService spoolmanService,
         ISettingsService settingsService,
-        ILogger<JobCostCalculationService> logger)
+        ILogger<JobCostCalculationService> logger,
+        IFilamentCostProvider? filamentCostProvider = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _filamentCostProvider = filamentCostProvider;
     }
 
     /// <inheritdoc />
@@ -303,58 +308,49 @@ public class JobCostCalculationService : IJobCostCalculationService
 
     /// <summary>
     /// Calculates material cost for a single spool given its Spoolman ID and filament usage.
-    /// Uses the standard price cascade: spool price → filament price → material default → global default.
+    /// Price cascade:
+    ///   1. <see cref="IFilamentCostProvider"/> (cached Spoolman spool price / initial weight)
+    ///   2. Direct Spoolman filament lookup for material type (settings fallback only)
+    ///   3. Per-material-type default from settings
+    ///   4. Global default filament price from settings
     /// Used by the multi-toolhead path to calculate per-toolhead costs independently.
     /// </summary>
     private async Task<decimal?> CalculateSingleSpoolCostAsync(
         int? spoolmanSpoolId, double usageGrams, PrintJob job, CancellationToken ct)
     {
         CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
-        double? effectivePrice = null;
-        double spoolWeightGrams = 1000.0;
         string? materialType = null;
 
         if (spoolmanSpoolId.HasValue)
         {
+            // Fast path: cached cost provider returns cost per gram when Spoolman has price data.
+            if (_filamentCostProvider is not null)
+            {
+                decimal? costPerGram = await _filamentCostProvider.GetSpoolCostPerGramAsync(spoolmanSpoolId.Value, ct);
+                if (costPerGram.HasValue)
+                {
+                    return Math.Round(costPerGram.Value * (decimal)usageGrams, 2);
+                }
+            }
+
+            // No Spoolman pricing available — fetch material type for settings-based fallback.
             try
             {
                 SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolmanSpoolId.Value, ct);
-                if (spool is not null)
+                if (spool?.FilamentId is int filamentId)
                 {
-                    if (spool.Price is > 0)
-                    {
-                        effectivePrice = spool.Price;
-                    }
-
-                    if (spool.InitialWeightG is > 0)
-                    {
-                        spoolWeightGrams = spool.InitialWeightG.Value;
-                    }
-
-                    // Try filament product for price/weight fallback
-                    if (spool.FilamentId.HasValue)
-                    {
-                        SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(spool.FilamentId.Value, ct);
-                        if (filament is not null)
-                        {
-                            materialType = filament.Material;
-                            effectivePrice ??= filament.Price;
-                            if (spoolWeightGrams <= 0)
-                            {
-                                spoolWeightGrams = filament.Weight ?? 1000.0;
-                            }
-                        }
-                    }
+                    SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(filamentId, ct);
+                    materialType = filament?.Material;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to look up spool {SpoolId} for per-toolhead cost.", spoolmanSpoolId.Value);
+                _logger.LogDebug(ex, "Failed to look up spool {SpoolId} for per-toolhead material type.", spoolmanSpoolId.Value);
             }
         }
 
-        // Price cascade: material type default → global default
-        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings is not null)
+        // Settings price cascade: material type default → global default (pricePerKg × usageKg).
+        if (settings is not null)
         {
             string? resolvedMaterial = materialType ?? job.RequiredMaterialType ?? job.FilamentName;
             if (!string.IsNullOrEmpty(resolvedMaterial))
@@ -362,27 +358,17 @@ public class JobCostCalculationService : IJobCostCalculationService
                 decimal matchedPrice = LookupMaterialPrice(resolvedMaterial, settings.MaterialPriceDefaults);
                 if (matchedPrice > 0)
                 {
-                    effectivePrice = (double)matchedPrice;
+                    return Math.Round((decimal)(usageGrams / 1000.0) * matchedPrice, 2);
                 }
             }
         }
 
-        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings?.DefaultFilamentPricePerKg > 0)
+        if (settings?.DefaultFilamentPricePerKg > 0)
         {
-            effectivePrice = (double)settings.DefaultFilamentPricePerKg;
+            return Math.Round((decimal)(usageGrams / 1000.0) * settings.DefaultFilamentPricePerKg, 2);
         }
 
-        if (!effectivePrice.HasValue || effectivePrice.Value <= 0)
-        {
-            return null;
-        }
-
-        if (spoolWeightGrams <= 0)
-        {
-            spoolWeightGrams = 1000.0;
-        }
-
-        return Math.Round((decimal)(usageGrams / spoolWeightGrams) * (decimal)effectivePrice.Value, 2);
+        return null;
     }
 
     /// <summary>

@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
-using Farm.Web.Api.Services.HomeAssistant;
 using Farm.Web.Api.Services.SmartPlug;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -9,16 +9,15 @@ using Moq.Protected;
 namespace Farm.Web.Api.Tests.Services.SmartPlug;
 
 /// <summary>
-/// Unit tests for <see cref="HomeAssistantSmartPlugProvider"/> covering settings resolution,
+/// Unit tests for <see cref="HomeAssistantSmartPlugProvider"/> covering token validation,
 /// entity state parsing, and connectivity checks.
 /// </summary>
 public class HomeAssistantSmartPlugProviderTests
 {
-    private const string DefaultBaseUrl = "http://homeassistant.local:8123";
     private const string ValidToken = "test-ha-token-abc123";
 
     private static (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider(
-        bool hasConfig = true, string baseUrl = DefaultBaseUrl)
+        string? token = ValidToken)
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
 #pragma warning disable CA2000
@@ -28,15 +27,16 @@ public class HomeAssistantSmartPlugProviderTests
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
 
-        Mock<IHomeAssistantSettingsProvider> settingsProvider = new();
-        settingsProvider
-            .Setup(s => s.GetEnabledConfigAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(hasConfig
-                ? new HomeAssistantConnectionConfig(baseUrl, ValidToken)
-                : null);
+        Dictionary<string, string?> configData = new()
+        {
+            ["HomeAssistant:Token"] = token
+        };
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(configData)
+            .Build();
 
         HomeAssistantSmartPlugProvider provider = new(
-            factory.Object, settingsProvider.Object, NullLogger<HomeAssistantSmartPlugProvider>.Instance);
+            factory.Object, config, NullLogger<HomeAssistantSmartPlugProvider>.Instance);
 
         return (provider, handler);
     }
@@ -83,9 +83,9 @@ public class HomeAssistantSmartPlugProviderTests
     }
 
     [Fact]
-    public async Task GetCurrentReadingAsync_WhenSettingsNotConfigured_ReturnsNull()
+    public async Task GetCurrentReadingAsync_WhenTokenMissing_ReturnsNull()
     {
-        (HomeAssistantSmartPlugProvider provider, _) = CreateProvider(hasConfig: false);
+        (HomeAssistantSmartPlugProvider provider, _) = CreateProvider(token: null);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -127,9 +127,9 @@ public class HomeAssistantSmartPlugProviderTests
     }
 
     [Fact]
-    public async Task TestConnectionAsync_WhenSettingsNotConfigured_ReturnsFalse()
+    public async Task TestConnectionAsync_WhenTokenMissing_ReturnsFalse()
     {
-        (HomeAssistantSmartPlugProvider provider, _) = CreateProvider(hasConfig: false);
+        (HomeAssistantSmartPlugProvider provider, _) = CreateProvider(token: null);
 
         bool result = await provider.TestConnectionAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -155,10 +155,9 @@ public class HomeAssistantSmartPlugProviderTests
     }
 
     [Fact]
-    public async Task GetCurrentReadingAsync_WithLegacyAddressFormat_UsesBaseUrlFromSettings()
+    public async Task GetCurrentReadingAsync_WithLegacyAddressFormat_UsesDefaultBaseUrl()
     {
-        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider(
-            baseUrl: DefaultBaseUrl);
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
 
         string json = """{"entity_id":"sensor.plug_power","state":"10.0","attributes":{}}""";
         handler.Protected()

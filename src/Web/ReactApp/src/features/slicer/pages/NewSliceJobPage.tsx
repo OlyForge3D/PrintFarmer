@@ -18,6 +18,7 @@ import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
+import { AdvancedSettingsDisclosure } from '@/features/slicer/components/AdvancedSettingsDisclosure';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -2254,16 +2255,21 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* ORCASLICER-STYLE SETTINGS PANEL */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
-            <SlicerSettingsPanel
-              settings={slicerSettings}
-              onChange={handleSlicerSettingsChange}
-              advancedSettings={advancedProcessSettings}
-              onAdvancedSettingsChange={setAdvancedProcessSettings}
-              originalSettings={originalProcessSettings}
-            />
-          </div>
+          {/* ORCASLICER-STYLE SETTINGS PANEL — behind Advanced disclosure */}
+          <AdvancedSettingsDisclosure
+            currentSettings={slicerSettings as unknown as Record<string, unknown>}
+            originalSettings={originalProcessSettings}
+          >
+            <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
+              <SlicerSettingsPanel
+                settings={slicerSettings}
+                onChange={handleSlicerSettingsChange}
+                advancedSettings={advancedProcessSettings}
+                onAdvancedSettingsChange={setAdvancedProcessSettings}
+                originalSettings={originalProcessSettings}
+              />
+            </div>
+          </AdvancedSettingsDisclosure>
 
           {/* Model picker modal — opened by workspace "+" button */}
           <SearchablePickerModal<Model3DBasic>

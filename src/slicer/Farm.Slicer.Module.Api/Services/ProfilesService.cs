@@ -3494,51 +3494,51 @@ public class ProfilesService(
             switch (profileType)
             {
                 case "machine":
+                {
+                    // Prefer the explicit printer_model field; fall back to name / inherits when absent.
+                    string? candidate = TryGetString(root, "printer_model")
+                        ?? TryGetString(root, "name")
+                        ?? TryGetString(root, "inherits");
+                    if (string.IsNullOrWhiteSpace(candidate))
                     {
-                        // Prefer the explicit printer_model field; fall back to name / inherits when absent.
-                        string? candidate = TryGetString(root, "printer_model")
-                            ?? TryGetString(root, "name")
-                            ?? TryGetString(root, "inherits");
-                        if (string.IsNullOrWhiteSpace(candidate))
-                        {
-                            return null;
-                        }
-
-                        return await _aliasService.ResolveModelAliasAsync(candidate, "OrcaSlicer");
-                    }
-
-                case "process":
-                    {
-                        // Process profiles reference compatible printers (machine variant names).
-                        // Return the first one that resolves to a known catalog model.
-                        if (!root.TryGetProperty("compatible_printers", out JsonElement compatibleElem)
-                            || compatibleElem.ValueKind != JsonValueKind.Array)
-                        {
-                            return null;
-                        }
-
-                        foreach (JsonElement entry in compatibleElem.EnumerateArray())
-                        {
-                            if (entry.ValueKind != JsonValueKind.String)
-                            {
-                                continue;
-                            }
-
-                            string? name = entry.GetString();
-                            if (string.IsNullOrWhiteSpace(name))
-                            {
-                                continue;
-                            }
-
-                            Guid? resolved = await _aliasService.ResolveModelAliasAsync(name, "OrcaSlicer");
-                            if (resolved.HasValue)
-                            {
-                                return resolved;
-                            }
-                        }
-
                         return null;
                     }
+
+                    return await _aliasService.ResolveModelAliasAsync(candidate, "OrcaSlicer");
+                }
+
+                case "process":
+                {
+                    // Process profiles reference compatible printers (machine variant names).
+                    // Return the first one that resolves to a known catalog model.
+                    if (!root.TryGetProperty("compatible_printers", out JsonElement compatibleElem)
+                        || compatibleElem.ValueKind != JsonValueKind.Array)
+                    {
+                        return null;
+                    }
+
+                    foreach (JsonElement entry in compatibleElem.EnumerateArray())
+                    {
+                        if (entry.ValueKind != JsonValueKind.String)
+                        {
+                            continue;
+                        }
+
+                        string? name = entry.GetString();
+                        if (string.IsNullOrWhiteSpace(name))
+                        {
+                            continue;
+                        }
+
+                        Guid? resolved = await _aliasService.ResolveModelAliasAsync(name, "OrcaSlicer");
+                        if (resolved.HasValue)
+                        {
+                            return resolved;
+                        }
+                    }
+
+                    return null;
+                }
 
                 default:
                     // Filament and unknown types do not carry a PrinterModelId association.
