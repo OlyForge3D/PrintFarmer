@@ -185,3 +185,19 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 
 - 2026-05-31 — OrcaSlicer bed type override key is `curr_bed_type` (not `bed_type`). The `KNOWN_ENUMS.bed_type` in `metadataTypes.ts` lists the string values OrcaSlicer accepts (e.g. "Cool Plate", "Textured PEI Plate").
 - 2026-05-31 — When tests mock `@/features/slicer/components/settings`, any new named exports from that barrel must be added to the mock object or tests will throw "No export defined on mock" errors.
+
+## 2026-05-31 — Settings Nav Migration (#358)
+
+- Migrated 16 nav items into Settings tabs (PR #376, stacked on #367).
+- Tab assignments: General (1), Filament (1), Slicing (2), Hardware (4), Integrations (1), Data (3), Users (3), Notifications (placeholder).
+- Created `SettingsSection` wrapper component for consistent tab panel content layout.
+- All old routes redirect to `/settings?tab=X` preserving bookmarks.
+- Removed: Filament Inventory, Cameras, NFC Devices, Slicer Profiles, API Keys, Locations, User Accounts, Tags, Bed Types, Custom Fields, Webhooks, Quotas, Data Management, Login Audit from sidebar nav.
+- Kept in nav: Dashboard, Printers, Files, Projects, Slice, Print Queue, Auto-Dispatch, Maintenance, Statistics, Cost Analytics, Analytics, Scheduling, Printer Groups, Catalog, Workers, System, Settings.
+- Sidebar now has 3 sections: Operations, Management, Admin (removed Hardware and Security section headers).
+- 16 redirect tests + updated existing SettingsShell/nav/routing tests.
+
+### Learnings
+- Rendering full page components inside tab panels requires wrapping test helpers with QueryClientProvider + Auth mocks since pages typically call hooks that need providers.
+- The `SettingsPage` (admin config) rendered an h2 "Settings" which collided with the h1 shell heading in tests — use `level` matcher for disambiguation.
+- `SettingsTabStrip` now accepts optional `tabContent` record for rendering real content vs placeholder — backward compatible with empty tabs.

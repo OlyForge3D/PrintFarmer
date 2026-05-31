@@ -81,6 +81,14 @@ public static class SlicerApiExtensions
         // Background services
         _ = services.AddHostedService<ProfileTaskCheckService>();
 
+        // Printables import (preview, #349)
+        _ = services.AddHttpClient<PrintablesGraphQLClient>(client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer/1.0");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        _ = services.AddScoped<IPrintablesImportService, PrintablesImportService>();
+
         return services;
     }
 

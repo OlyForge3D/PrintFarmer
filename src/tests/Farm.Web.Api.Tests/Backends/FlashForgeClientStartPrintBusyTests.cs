@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Farm.Backend.Plugin.FlashForge;
@@ -165,7 +165,9 @@ public sealed class FlashForgeClientStartPrintBusyTests
 
         public async ValueTask DisposeAsync()
         {
-            try { listener.Stop(); } catch { /* already stopped */ }
+            try
+            { listener.Stop(); }
+            catch { /* already stopped */ }
             await serverTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
     }
