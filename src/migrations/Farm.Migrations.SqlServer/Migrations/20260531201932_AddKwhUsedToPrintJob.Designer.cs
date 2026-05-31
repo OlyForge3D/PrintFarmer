@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260531180701_AddKwhUsedToPrintJob")]
+    [Migration("20260531201932_AddKwhUsedToPrintJob")]
     partial class AddKwhUsedToPrintJob
     {
         /// <inheritdoc />

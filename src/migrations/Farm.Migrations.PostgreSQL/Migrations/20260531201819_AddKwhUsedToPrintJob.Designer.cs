@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260531180646_AddKwhUsedToPrintJob")]
+    [Migration("20260531201819_AddKwhUsedToPrintJob")]
     partial class AddKwhUsedToPrintJob
     {
         /// <inheritdoc />
