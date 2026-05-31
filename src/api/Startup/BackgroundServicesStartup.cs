@@ -62,6 +62,9 @@ public static class BackgroundServicesStartup
                 gcodeStoragePath);
         });
 
+        // Electricity Module - prune PowerReading rows older than 90 days, runs daily
+        services.AddHostedService<Farm.Infrastructure.Services.Electricity.PowerReadingPruneService>();
+
         return services;
     }
 }

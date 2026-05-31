@@ -208,6 +208,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
 
+    // Electricity Monitoring (power monitors + time-series readings)
+    public DbSet<PowerMonitor> PowerMonitors => Set<PowerMonitor>();
+
+    public DbSet<PowerReading> PowerReadings => Set<PowerReading>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
