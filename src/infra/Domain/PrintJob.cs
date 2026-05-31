@@ -76,7 +76,14 @@ public class PrintJob
     public decimal? MaterialCostUsd { get; set; }
 
     /// <summary>
-    /// Energy cost in USD (print duration × printer wattage × electricity rate). Calculated on job completion.
+    /// Kilowatt-hours consumed during this print job, as measured by a power monitor.
+    /// When set, energy cost is computed directly as KwhUsed × ElectricityRatePerKwh.
+    /// When null, energy cost falls back to an estimate: (ActualPrintTime × Wattage / 1000) × rate.
+    /// </summary>
+    public decimal? KwhUsed { get; set; }
+
+    /// <summary>
+    /// Energy cost in USD (KwhUsed × electricity rate, or estimated from wattage × duration). Calculated on job completion.
     /// </summary>
     public decimal? EnergyCostUsd { get; set; }
 

@@ -114,6 +114,17 @@ public class JobCostCalculationTests : IAsyncLifetime
         TimeSpan? printTime = null,
         int? spoolmanFilamentId = null)
     {
+        return await CreateTestJobWithKwhAsync(printer, filamentUsage: filamentUsage, printTime: printTime,
+            spoolmanFilamentId: spoolmanFilamentId, kwhUsed: null);
+    }
+
+    private async Task<PrintJob> CreateTestJobWithKwhAsync(
+        Printer printer,
+        decimal? kwhUsed = null,
+        double? filamentUsage = null,
+        TimeSpan? printTime = null,
+        int? spoolmanFilamentId = null)
+    {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -126,6 +137,7 @@ public class JobCostCalculationTests : IAsyncLifetime
             ActualFilamentUsage = filamentUsage,
             ActualPrintTime = printTime,
             SpoolmanFilamentId = spoolmanFilamentId,
+            KwhUsed = kwhUsed,
             ActualStartTime = DateTime.UtcNow.AddHours(-2),
             ActualEndTime = DateTime.UtcNow
         };
@@ -336,6 +348,77 @@ public class JobCostCalculationTests : IAsyncLifetime
         updatedJob.MachineTimeCostUsd.Should().Be(5m);
         updatedJob.LaborCostUsd.Should().Be(3m);
         updatedJob.TotalCostUsd.Should().Be(18.50m);
+    }
+
+    [Fact]
+    public async Task CalculateEnergyCost_WithKwhUsed_UsesMeasuredKwhDirectly()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.12m,
+            AveragePrinterWattage = 500m, // Should be ignored when KwhUsed is set
+            DefaultMachineHourlyRate = 0m,
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("kwh-measured", wattage: 500m);
+
+        // Create a job with KwhUsed measured by a power monitor (1.5 kWh consumed)
+        var job = await CreateTestJobWithKwhAsync(printer, kwhUsed: 1.5m, printTime: TimeSpan.FromHours(3));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+
+        // Energy cost: 1.5 kWh × $0.12/kWh = $0.18 (measured value used, not wattage estimate)
+        updatedJob!.EnergyCostUsd.Should().Be(0.18m);
+        updatedJob.CostCalculatedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CalculateEnergyCost_KwhUsedTakesPrecedenceOverWattageEstimate()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.10m,
+            AveragePrinterWattage = 1000m, // 1000W × 2h / 1000 × $0.10 = $0.20 estimated
+            DefaultMachineHourlyRate = 0m,
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("kwh-precedence");
+
+        // KwhUsed = 0.5 kWh → $0.05 (direct); estimated would be $0.20 (wattage-based)
+        var job = await CreateTestJobWithKwhAsync(printer, kwhUsed: 0.5m, printTime: TimeSpan.FromHours(2));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+
+        // KwhUsed path: 0.5 kWh × $0.10/kWh = $0.05 (not the $0.20 wattage estimate)
+        updatedJob!.EnergyCostUsd.Should().Be(0.05m);
     }
 
     [Fact]
