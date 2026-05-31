@@ -103,3 +103,17 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 ### Learnings
 - `gcode-preview` v2.18.0 only exports `WebGLPreview` and `init`; the `Parser` class is internal and not accessible. Creating a `WebGLPreview` always attempts to instantiate a Three.js `WebGLRenderer`, so it cannot be used in jsdom/vitest without a full WebGL mock.
 - For v2 worker swap: use `OffscreenCanvas` transferred to the worker, then `new WebGLPreview({ canvas })` works with real GPU context.
+
+## 2026-05-31 — Settings Shell (#357)
+
+- Built `/settings` route with tabbed layout using existing `Tabs` UI component (controlled mode + `onTabChange`).
+- 8 tabs: General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users — empty placeholders for ST-2 migration.
+- Cross-tab keyword search: filters tab strip by label + keyword array; shows empty state when no match.
+- URL deep-link via `useSearchParams`: `?tab={id}&q={query}`.
+- Old `/settings` (SettingsPage) preserved at `/admin/settings-legacy` for backward compat during migration.
+- 9 tests covering tab switching, search filter, URL sync, deep-link.
+- PR #367 → development.
+
+### Learnings
+- The project's `Tabs` component supports controlled mode (`activeTab` + `onTabChange`) which makes URL sync straightforward — no need for external state management.
+- `setSearchParams` with a functional updater that builds a fresh `URLSearchParams` from `prev` is the cleanest batching pattern (single call, reads current params, returns new).
