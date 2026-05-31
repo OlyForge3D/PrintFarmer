@@ -2,41 +2,40 @@
 
 #nullable disable
 
-namespace Farm.Migrations.PostgreSQL.Migrations
+namespace Farm.Migrations.PostgreSQL.Migrations;
+
+/// <inheritdoc />
+public partial class FixCameraSnapshotCascade : Migration
 {
     /// <inheritdoc />
-    public partial class FixCameraSnapshotCascade : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropForeignKey(
-                name: "FK_CameraSnapshots_Cameras_CameraId",
-                table: "CameraSnapshots");
+        migrationBuilder.DropForeignKey(
+            name: "FK_CameraSnapshots_Cameras_CameraId",
+            table: "CameraSnapshots");
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_CameraSnapshots_Cameras_CameraId",
-                table: "CameraSnapshots",
-                column: "CameraId",
-                principalTable: "Cameras",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
-        }
+        migrationBuilder.AddForeignKey(
+            name: "FK_CameraSnapshots_Cameras_CameraId",
+            table: "CameraSnapshots",
+            column: "CameraId",
+            principalTable: "Cameras",
+            principalColumn: "Id",
+            onDelete: ReferentialAction.Restrict);
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropForeignKey(
-                name: "FK_CameraSnapshots_Cameras_CameraId",
-                table: "CameraSnapshots");
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropForeignKey(
+            name: "FK_CameraSnapshots_Cameras_CameraId",
+            table: "CameraSnapshots");
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_CameraSnapshots_Cameras_CameraId",
-                table: "CameraSnapshots",
-                column: "CameraId",
-                principalTable: "Cameras",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Cascade);
-        }
+        migrationBuilder.AddForeignKey(
+            name: "FK_CameraSnapshots_Cameras_CameraId",
+            table: "CameraSnapshots",
+            column: "CameraId",
+            principalTable: "Cameras",
+            principalColumn: "Id",
+            onDelete: ReferentialAction.Cascade);
     }
 }
