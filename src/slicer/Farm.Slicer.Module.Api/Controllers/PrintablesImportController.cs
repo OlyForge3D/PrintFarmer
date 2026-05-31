@@ -64,4 +64,44 @@ public sealed class PrintablesImportController(
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to fetch Printables preview.");
         }
     }
+
+    /// <summary>
+    /// Imports a Printables model URL by validating it and fetching metadata for the selected file workflow.
+    /// </summary>
+    /// <param name="request">Import request containing the Printables URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("/api/3d-models/import/printables")]
+    [ProducesResponseType(typeof(PrintablesPreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> ImportAsync([FromBody] PrintablesImportRequest? request, CancellationToken ct)
+    {
+        string? url = request?.Url;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return BadRequest("url is required.");
+        }
+
+        try
+        {
+            _ = PrintablesImportService.ParseModelId(url);
+            PrintablesPreviewDto preview = await _importService.PreviewAsync(url, ct);
+            return Ok(preview);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogInformation("Bad Printables import URL supplied: {Url} — {Message}", url, ex.Message);
+            return BadRequest(ex.Message);
+        }
+        catch (PrintablesApiException ex)
+        {
+            _logger.LogWarning(ex, "Printables API error during import workflow for URL {Url}", url);
+            return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error importing Printables model for {Url}", url);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to import Printables model.");
+        }
+    }
 }
