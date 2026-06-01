@@ -58,6 +58,11 @@ import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
+import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
+import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
+import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
+import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
+import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
