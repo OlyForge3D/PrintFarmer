@@ -14,6 +14,7 @@ Use these instructions for durable repo conventions only. Prefer the specialized
 - Build and test validation: `.github/skills/testing/SKILL.md`
 - OrcaSlicer profile lookup issues: `.github/skills/orcaslicer-profiles/SKILL.md`
 - OrcaSlicer upgrades: `.github/skills/orcaslicer-upgrade/SKILL.md`
+- PR issue-linkage: `.squad/skills/pr-issue-linkage/SKILL.md`
 
 ## Working Directories
 
@@ -85,6 +86,42 @@ Route ownership in microservices mode:
 |---|---|
 | Main API | Most `/api/*` endpoints |
 | Slicer host | `/api/workers`, `/api/slicers`, `/api/slicer`, `/api/slice`, `/api/3d-models`, `/api/artifacts`, `/api/admin/slicer`, `/hubs/slicer` |
+
+## Pre-PR Review Gate
+
+**All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.
+
+Flow:
+
+1. Commit code to a feature branch (do not push yet).
+2. Request review from Bishop, Hicks, Vasquez (mention all three).
+3. Reviewers converge adversarially on the branch — no serial review or independence.
+4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
+5. Once APPROVED, open the PR via `gh pr create`.
+
+This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
+
+## Pull Request Issue Linkage
+
+When opening a PR, the body **MUST** include `Closes #N` (or `Fixes #N` / `Resolves #N`) for every GitHub issue the PR resolves. GitHub will auto-close the issue when the PR merges.
+
+**What works (GitHub auto-closes on merge):**
+
+```
+Closes #350
+Closes #351
+```
+
+**What does NOT work (no auto-close):**
+
+- Parenthetical in title: `feat(x): thing (#350)` — GitHub ignores this.
+- Bead-style syntax: `[closes PFarm1-350]` — legacy, GitHub does not recognize.
+- `relates to #350` — informational only, no auto-close.
+- Issue number only in commit message, not in PR body.
+
+**Verification:** After creating a PR, run `gh pr view <number> --json closingIssuesReferences` to confirm the issues are detected. If empty, update the PR body.
+
+See `.squad/skills/pr-issue-linkage/SKILL.md` for full details and recovery procedures.
 
 ## Serialization Rules
 
