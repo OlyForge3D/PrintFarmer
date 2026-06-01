@@ -8,7 +8,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 
 /// <summary>
 /// Endpoints for previewing Printables.com models and persisting attribution metadata.
-/// File upload is handled via the standard model upload endpoint; call <c>POST /import/attribution</c>
+/// File upload is handled via the standard model upload endpoint; call <c>POST /api/3d-models/printables/attribution</c>
 /// afterward to attach Printables attribution fields to the uploaded record.
 /// </summary>
 [ApiController]
