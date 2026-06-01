@@ -54,7 +54,8 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
         setPassword('');
       }
     } catch (err: unknown) {
-      setPasskeyError(err instanceof Error ? err.message : 'Passkey sign-in failed');
+      const apiErr = err as { details?: string; message?: string };
+      setPasskeyError(apiErr?.details ?? apiErr?.message ?? 'Passkey sign-in failed');
     } finally {
       setPasskeyLoading(false);
     }

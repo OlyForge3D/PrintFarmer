@@ -100,10 +100,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setError(result.error || 'Passkey login failed');
         return false;
       }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Passkey login failed';
-      setError(errorMessage);
-      return false;
     } finally {
       setIsLoading(false);
     }

@@ -293,8 +293,11 @@ export class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
-        // Handle 401 Unauthorized - clear token and redirect to login
-        if (error.response?.status === 401) {
+        // Handle 401 Unauthorized - clear token and redirect to login.
+        // Passkey login/complete legitimately returns 401 on a failed assertion
+        // (wrong credential) — the caller handles this inline, so skip the global
+        // redirect and token-clear for that endpoint.
+        if (error.response?.status === 401 && !error.config?.url?.endsWith('/auth/passkey/login/complete')) {
           localStorage.removeItem("auth-token");
           // Only redirect if not already on auth pages
           if (

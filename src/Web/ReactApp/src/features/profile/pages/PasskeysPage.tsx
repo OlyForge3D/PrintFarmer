@@ -52,16 +52,9 @@ export function PasskeysPage() {
 
   const registerMutation = useMutation({
     mutationFn: async (deviceName?: string) => {
-      const beforeIds = new Set(
-        (queryClient.getQueryData<PasskeyCredentialDto[]>(['passkeys']) ?? []).map((p) => p.id),
-      );
-      await registerPasskey();
+      const result = await registerPasskey();
       if (deviceName?.trim()) {
-        const updated = await listPasskeys();
-        const newCred = updated.find((p) => !beforeIds.has(p.id));
-        if (newCred) {
-          await renamePasskey(newCred.id, deviceName.trim());
-        }
+        await renamePasskey(result.newCredentialId, deviceName.trim());
       }
     },
     onSuccess: () => {

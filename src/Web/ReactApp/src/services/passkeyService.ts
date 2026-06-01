@@ -46,7 +46,7 @@ export async function renamePasskey(id: number, deviceName: string): Promise<voi
  * 2. Invokes the browser WebAuthn API via startRegistration().
  * 3. Sends the attestation response back to the server for verification.
  */
-export async function registerPasskey(): Promise<{ credentialId: string }> {
+export async function registerPasskey(): Promise<{ credentialId: string; newCredentialId: number }> {
   const optionsJSON = await apiClient.request<PublicKeyCredentialCreationOptionsJSON>({
     method: 'POST',
     url: '/auth/passkey/register/begin',
