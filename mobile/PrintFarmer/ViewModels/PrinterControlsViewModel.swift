@@ -176,6 +176,8 @@ final class PrinterControlsViewModel: ObservableObject {
 
     // MARK: - Computed
 
+    var isExecuting: Bool { pendingCommand != nil }
+
     var canControl: Bool {
         printer.isOnline && !isPrintingOrPaused
     }

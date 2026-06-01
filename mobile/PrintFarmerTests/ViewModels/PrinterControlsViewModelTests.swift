@@ -219,6 +219,25 @@ final class PrinterControlsViewModelTests: XCTestCase {
         vm.dismissError()
         XCTAssertNil(vm.lastError)
     }
+
+    func test_isExecuting_trueWhileInFlight_falseAfterError() async throws {
+        // isExecuting is a computed alias for pendingCommand != nil.
+        let gate = AsyncGate()
+        mockService.beforeSetTemperatures = { await gate.wait() }
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        async let first: Void = vm.preheat(.pla)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertTrue(vm.isExecuting)
+
+        // Fail the command so pendingCommand (and isExecuting) clears.
+        mockService.errorToThrow = NetworkError.serverError(500)
+        await gate.open()
+        await first
+        XCTAssertFalse(vm.isExecuting)
+    }
 }
 
 // MARK: - Test gate helper
