@@ -1,9 +1,14 @@
 import { lazy, Suspense, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { SettingsSearch } from '@/features/settings/components/SettingsSearch';
-import { SettingsTabStrip } from '@/features/settings/components/SettingsTabStrip';
+import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
+import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
-import { SETTINGS_TABS, DEFAULT_TAB } from '@/features/settings/types';
+import {
+  SETTINGS_CATEGORIES,
+  DEFAULT_CATEGORY,
+  getDefaultSubPage,
+} from '@/features/settings/types';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
@@ -20,7 +25,7 @@ import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 
 const LazySlicerProfilesPage = lazy(() =>
-  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
+  import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage }))
 );
 
 function TabLoader() {
@@ -31,17 +36,88 @@ function TabLoader() {
   );
 }
 
+/** Content mapping for categories with no sub-pages */
+const SINGLE_PAGE_CONTENT: Record<string, React.ReactNode> = {
+  general: (
+    <SettingsSection title="General Settings" description="Farm name, timezone, and system configuration.">
+      <SettingsPage />
+    </SettingsSection>
+  ),
+  filament: (
+    <SettingsSection title="Filament Management" description="Manage spools, materials, and inventory.">
+      <FilamentManagementPage />
+    </SettingsSection>
+  ),
+  notifications: (
+    <SettingsSection title="Notifications" description="Configure alerts, email, and push notifications.">
+      <div className="py-8 text-center text-pf-text-secondary">
+        <p className="text-sm">Notification settings coming soon.</p>
+      </div>
+    </SettingsSection>
+  ),
+  integrations: (
+    <SettingsSection title="Integrations" description="Webhooks, external APIs, and automation endpoints.">
+      <WebhooksAdminPage />
+    </SettingsSection>
+  ),
+};
+
+/** Content mapping for sub-pages (category.subPage) */
+const SUB_PAGE_CONTENT: Record<string, React.ReactNode> = {
+  'slicing.bed-types': <BedTypeAdminPage />,
+  'slicing.profiles': (
+    <Suspense fallback={<TabLoader />}>
+      <LazySlicerProfilesPage />
+    </Suspense>
+  ),
+  'hardware.cameras': <CamerasPage />,
+  'hardware.nfc': <NfcDevicesPage />,
+  'hardware.locations': <LocationManagementAdminPage />,
+  'hardware.custom-fields': <CustomFieldsAdminPage />,
+  'data.tags': <TagAdminPage />,
+  'data.quotas': <QuotaManagementPage />,
+  'data.management': <DataManagementPage />,
+  'users.accounts': <UserManagementPage />,
+  'users.api-keys': <ApiKeysPage />,
+  'users.audit': <LoginAuditPage />,
+};
+
 export const SettingsShell: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const activeTab = searchParams.get('tab') || DEFAULT_TAB;
+  // Read state from URL params (will migrate to path-based routes in Phase 2)
+  const activeCategory = searchParams.get('tab') || DEFAULT_CATEGORY;
+  const activeSubPage = searchParams.get('sub') || getDefaultSubPage(activeCategory);
   const query = searchParams.get('q') || '';
 
-  const handleTabChange = useCallback(
-    (tabId: string) => {
+  const currentCategory = useMemo(
+    () => SETTINGS_CATEGORIES.find((c) => c.id === activeCategory) ?? SETTINGS_CATEGORIES[0],
+    [activeCategory]
+  );
+
+  const handleCategoryChange = useCallback(
+    (categoryId: string) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        next.set('tab', tabId);
+        next.set('tab', categoryId);
+        // Set default sub-page for the new category
+        const defaultSub = getDefaultSubPage(categoryId);
+        if (defaultSub) {
+          next.set('sub', defaultSub);
+        } else {
+          next.delete('sub');
+        }
+        return next;
+      });
+    },
+    [setSearchParams]
+  );
+
+  const handleSubPageChange = useCallback(
+    (subPageId: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('sub', subPageId);
         return next;
       });
     },
@@ -63,140 +139,129 @@ export const SettingsShell: React.FC = () => {
     [setSearchParams]
   );
 
-  const filteredTabIds = useMemo(() => {
-    if (!query.trim()) return undefined;
+  // Filter categories and sub-pages based on search query
+  const { matchingCategoryIds, matchingSubPageIds, isFiltering } = useMemo(() => {
+    if (!query.trim()) {
+      return { matchingCategoryIds: undefined, matchingSubPageIds: undefined, isFiltering: false };
+    }
+
     const lower = query.toLowerCase();
-    return SETTINGS_TABS.filter(
-      (tab) =>
-        tab.label.toLowerCase().includes(lower) ||
-        tab.keywords.some((kw) => kw.includes(lower))
-    ).map((tab) => tab.id);
+    const categoryIds: string[] = [];
+    const subPageIds: string[] = [];
+
+    for (const cat of SETTINGS_CATEGORIES) {
+      const categoryMatches =
+        cat.label.toLowerCase().includes(lower) || cat.keywords.some((kw) => kw.includes(lower));
+
+      if (categoryMatches) {
+        categoryIds.push(cat.id);
+      }
+
+      for (const sub of cat.subPages) {
+        const subMatches =
+          sub.label.toLowerCase().includes(lower) || sub.keywords.some((kw) => kw.includes(lower));
+
+        if (subMatches) {
+          subPageIds.push(sub.id);
+          if (!categoryIds.includes(cat.id)) {
+            categoryIds.push(cat.id);
+          }
+        }
+      }
+    }
+
+    return { matchingCategoryIds: categoryIds, matchingSubPageIds: subPageIds, isFiltering: true };
   }, [query]);
 
-  const effectiveTab = useMemo(() => {
-    if (!filteredTabIds || filteredTabIds.length === 0) return activeTab;
-    if (filteredTabIds.includes(activeTab)) return activeTab;
-    return filteredTabIds[0];
-  }, [activeTab, filteredTabIds]);
+  // Auto-navigate to first matching category if current is not in results
+  const effectiveCategory = useMemo(() => {
+    if (!isFiltering || !matchingCategoryIds || matchingCategoryIds.length === 0) {
+      return activeCategory;
+    }
+    if (matchingCategoryIds.includes(activeCategory)) {
+      return activeCategory;
+    }
+    return matchingCategoryIds[0];
+  }, [activeCategory, matchingCategoryIds, isFiltering]);
 
-  const tabContent = useMemo<Record<string, React.ReactNode>>(() => ({
-    general: (
-      <SettingsSection title="General Settings" description="Farm name, timezone, and system configuration.">
-        <SettingsPage />
-      </SettingsSection>
-    ),
-    filament: (
-      <SettingsSection title="Filament Management" description="Manage spools, materials, and inventory.">
-        <FilamentManagementPage />
-      </SettingsSection>
-    ),
-    slicing: (
-      <SettingsSection>
-        <div className="space-y-8">
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Bed Types</h3>
-            <BedTypeAdminPage />
+  // Render content based on current category and sub-page
+  const content = useMemo(() => {
+    // Categories with no sub-pages use SINGLE_PAGE_CONTENT
+    if (currentCategory.subPages.length === 0) {
+      return SINGLE_PAGE_CONTENT[currentCategory.id] ?? (
+        <SettingsSection>
+          <div className="py-8 text-center text-pf-text-secondary">
+            <p className="text-sm">{currentCategory.label} settings will be available here.</p>
           </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Slicer Profiles</h3>
-            <Suspense fallback={<TabLoader />}>
-              <LazySlicerProfilesPage />
-            </Suspense>
-          </div>
+        </SettingsSection>
+      );
+    }
+
+    // Categories with sub-pages use SUB_PAGE_CONTENT
+    const contentKey = `${currentCategory.id}.${activeSubPage}`;
+    return SUB_PAGE_CONTENT[contentKey] ?? (
+      <div className="py-8 text-center text-pf-text-secondary">
+        <p className="text-sm">Content not found for {contentKey}</p>
+      </div>
+    );
+  }, [currentCategory, activeSubPage]);
+
+  // Show no results message if search returns nothing
+  if (isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <h1 className="text-xl font-semibold text-pf-text-primary">Settings</h1>
+          <SettingsSearch value={query} onChange={handleSearchChange} />
         </div>
-      </SettingsSection>
-    ),
-    hardware: (
-      <SettingsSection>
-        <div className="space-y-8">
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Cameras</h3>
-            <CamerasPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">NFC Devices</h3>
-            <NfcDevicesPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Locations</h3>
-            <LocationManagementAdminPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Custom Fields</h3>
-            <CustomFieldsAdminPage />
-          </div>
+        <div className="py-12 text-center text-pf-text-secondary">
+          <p className="text-sm">No settings found matching &ldquo;{query}&rdquo;</p>
         </div>
-      </SettingsSection>
-    ),
-    notifications: (
-      <SettingsSection title="Notifications" description="Configure alerts, email, and push notifications.">
-        <div className="py-8 text-center text-pf-text-secondary">
-          <p className="text-sm">Notification settings coming soon.</p>
-        </div>
-      </SettingsSection>
-    ),
-    integrations: (
-      <SettingsSection title="Integrations" description="Webhooks, external APIs, and automation endpoints.">
-        <WebhooksAdminPage />
-      </SettingsSection>
-    ),
-    data: (
-      <SettingsSection>
-        <div className="space-y-8">
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Tags</h3>
-            <TagAdminPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Quotas</h3>
-            <QuotaManagementPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Data Management</h3>
-            <DataManagementPage />
-          </div>
-        </div>
-      </SettingsSection>
-    ),
-    users: (
-      <SettingsSection>
-        <div className="space-y-8">
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">User Accounts</h3>
-            <UserManagementPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">API Keys</h3>
-            <ApiKeysPage />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-pf-text-primary mb-3">Login Audit</h3>
-            <LoginAuditPage />
-          </div>
-        </div>
-      </SettingsSection>
-    ),
-  }), []);
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
+      {/* Header with title and search */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-xl font-semibold text-pf-text-primary">Settings</h1>
         <SettingsSearch value={query} onChange={handleSearchChange} />
       </div>
 
-      {filteredTabIds && filteredTabIds.length === 0 ? (
-        <div className="py-12 text-center text-pf-text-secondary">
-          <p className="text-sm">No settings found matching &ldquo;{query}&rdquo;</p>
-        </div>
-      ) : (
-        <SettingsTabStrip
-          activeTab={effectiveTab}
-          onTabChange={handleTabChange}
-          filteredTabIds={filteredTabIds}
-          tabContent={tabContent}
+      {/* Main layout: sidebar + content */}
+      <div className="flex flex-col md:flex-row gap-0 md:gap-0 min-h-[500px] border border-pf-border rounded-lg overflow-hidden bg-pf-bg-0">
+        {/* Sidebar navigation */}
+        <SettingsSidebar
+          categories={SETTINGS_CATEGORIES}
+          activeCategory={effectiveCategory}
+          onCategoryChange={handleCategoryChange}
+          matchingCategoryIds={matchingCategoryIds}
+          isFiltering={isFiltering}
         />
-      )}
+
+        {/* Content area */}
+        <div className="flex-1 p-4 md:p-6">
+          {/* Sub-tabs (only for categories with 2+ sub-pages) */}
+          <SettingsSubTabs
+            subPages={currentCategory.subPages}
+            activeSubPage={activeSubPage}
+            onSubPageChange={handleSubPageChange}
+            matchingSubPageIds={matchingSubPageIds}
+            isFiltering={isFiltering}
+            ariaLabel={`${currentCategory.label} settings`}
+          />
+
+          {/* Page content */}
+          <div
+            role="tabpanel"
+            id={`panel-${activeSubPage || currentCategory.id}`}
+            aria-labelledby={activeSubPage ? `tab-${activeSubPage}` : undefined}
+          >
+            {content}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
