@@ -22,9 +22,14 @@ import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
+import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
 
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage }))
+);
+
+const LazyWorkerManagementPage = lazy(() =>
+  import('@/features/slicer/pages/WorkerManagementPage').then((mod) => ({ default: mod.WorkerManagementPage }))
 );
 
 function TabLoader() {
@@ -68,6 +73,12 @@ const SUB_PAGE_CONTENT: Record<string, React.ReactNode> = {
   'hardware.nfc': <NfcDevicesPage />,
   'hardware.locations': <LocationManagementAdminPage />,
   'hardware.custom-fields': <CustomFieldsAdminPage />,
+  'system.status': <SystemStatusPage />,
+  'system.workers': (
+    <Suspense fallback={<TabLoader />}>
+      <LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />
+    </Suspense>
+  ),
   'data.tags': <TagAdminPage />,
   'data.quotas': <QuotaManagementPage />,
   'data.management': <DataManagementPage />,

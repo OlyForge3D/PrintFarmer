@@ -16,9 +16,14 @@ import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } 
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 
-export function WorkerManagementPage() {
+interface WorkerManagementPageProps {
+  tabQueryParamName?: string;
+  embedded?: boolean;
+}
+
+export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = false }: WorkerManagementPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get('tab');
+  const tabParam = searchParams.get(tabQueryParamName);
   const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>(tabParam === 'jobs' ? 'jobs' : 'workers');
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,8 +42,20 @@ export function WorkerManagementPage() {
 
   const handleTabChange = (tab: 'workers' | 'jobs') => {
     setActiveTab(tab);
-    setSearchParams(tab === 'jobs' ? { tab: 'jobs' } : {}, { replace: true });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'jobs') {
+        next.set(tabQueryParamName, 'jobs');
+      } else {
+        next.delete(tabQueryParamName);
+      }
+      return next;
+    }, { replace: true });
   };
+
+  useEffect(() => {
+    setActiveTab(tabParam === 'jobs' ? 'jobs' : 'workers');
+  }, [tabParam]);
 
   useEffect(() => {
     let isMounted = true;
@@ -256,25 +273,29 @@ export function WorkerManagementPage() {
   };
 
   if (loading) {
+    const loadingContent = (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+      </div>
+    );
+
+    if (embedded) {
+      return loadingContent;
+    }
+
     return (
       <PageTemplate
         title="Worker Management"
         subtitle="Monitor and manage your Slicer workers"
         icon={WrenchIcon}
       >
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
-        </div>
+        {loadingContent}
       </PageTemplate>
     );
   }
 
-  return (
-    <PageTemplate
-      title="Worker Management"
-      subtitle="Monitor and manage your Slicer workers"
-      icon={WrenchIcon}
-    >
+  const pageContent = (
+    <>
       {/* Tab buttons */}
       <div className="mb-4 flex items-center gap-2">
         <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('workers')}>Workers</Button>
@@ -631,6 +652,20 @@ export function WorkerManagementPage() {
         onConfirm={confirmDeleteWorker}
         onCancel={() => setWorkerToDelete(null)}
       />
+    </>
+  );
+
+  if (embedded) {
+    return pageContent;
+  }
+
+  return (
+    <PageTemplate
+      title="Worker Management"
+      subtitle="Monitor and manage your Slicer workers"
+      icon={WrenchIcon}
+    >
+      {pageContent}
     </PageTemplate>
   );
 }

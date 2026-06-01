@@ -104,6 +104,7 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
+  SystemInfo,
     DispatchHistoryPageDto,
     FailureDetectionEvent,
     NotificationDto,
@@ -2340,6 +2341,11 @@ export class ApiClient {
 
   async getSystemCapabilities(): Promise<SystemCapabilities> {
     const response = await this.client.get<SystemCapabilities>('/system/capabilities');
+    return response.data;
+  }
+
+  async getSystemInfo(): Promise<SystemInfo> {
+    const response = await this.client.get<SystemInfo>('/system/info');
     return response.data;
   }
 

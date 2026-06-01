@@ -91,6 +91,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - 2026-05-26 — `Badge` component does not spread HTML attributes (only `children`, `variant`, `size`, `dot`, `className`). Don't put `aria-label` on `<Badge>`; wrap in a `<span>` or test by text content instead.
 - 2026-05-26 — `apiClient.get<T>()` is a public method on the ApiClient singleton returning `Promise<AxiosResponse<T>>`. Use it in services for new endpoints not yet wired into named methods on `apiClient` (e.g., while Lambert builds the backend in parallel). Access response body via `.data`.
 - 2026-06-01 — Main-nav cleanup for the settings fold-in belongs in `src/Web/ReactApp/src/common/components/Layout.tsx`: keep one `Analytics` link to `/analytics`, remove standalone `API Keys`, `NFC Bindings`, `Printer Groups`, and `Workers`, keep `Filament Inventory` standalone, and preserve the direct `/profile/api-keys`, `/nfc-bindings`, `/printer-groups`, and `/admin/workers` routes. Only the retired analytics URLs should hard-redirect: `/statistics` → `/analytics?lens=production` and `/statistics/costs` → `/analytics?lens=cost`.
+- 2026-06-01 — `SettingsShell` owns the `tab` and `sub` search params. Embedded pages that also need tab state, like `WorkerManagementPage`, should use a separate query param such as `workerTab` and support an `embedded` mode so they can render inside the settings content area without nesting `PageTemplate`.
 
 ### External-reference-app Review Pointer — 2026-05-31
 

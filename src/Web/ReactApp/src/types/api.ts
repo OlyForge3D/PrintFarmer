@@ -3425,6 +3425,57 @@ export interface SystemCapabilities {
   platformNote?: string;
 }
 
+export enum SystemServiceHealth {
+  Healthy = 'Healthy',
+  Degraded = 'Degraded',
+  Critical = 'Critical',
+}
+
+export interface SystemAppInfo {
+  version: string;
+  uptime: string;
+  hostname: string;
+}
+
+export interface SystemCpuInfo {
+  cores: number;
+  usagePercent: number;
+}
+
+export interface SystemMemoryInfo {
+  usedBytes: number;
+  totalBytes: number;
+}
+
+export interface SystemDiskInfo {
+  usedBytes: number;
+  totalBytes: number;
+  archiveBytes: number;
+  databaseBytes: number;
+}
+
+export interface SystemServiceInfo {
+  name: string;
+  version: string;
+  health: SystemServiceHealth;
+}
+
+export interface SystemDatabaseInfo {
+  engine: string;
+  version: string;
+  printerCount: number;
+  archiveCount: number;
+}
+
+export interface SystemInfo {
+  app: SystemAppInfo;
+  cpu: SystemCpuInfo;
+  memory: SystemMemoryInfo;
+  disk: SystemDiskInfo;
+  services: SystemServiceInfo[];
+  database: SystemDatabaseInfo;
+}
+
 // ============ Dispatch History Types ============
 
 export interface DispatchHistoryDto {

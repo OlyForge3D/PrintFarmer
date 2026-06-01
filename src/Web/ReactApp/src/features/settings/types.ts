@@ -62,6 +62,15 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     subPages: [],
   },
   {
+    id: 'system',
+    label: 'System',
+    keywords: ['system', 'status', 'health', 'workers', 'services', 'cpu', 'memory', 'disk', 'database'],
+    subPages: [
+      { id: 'status', label: 'Status', keywords: ['status', 'health', 'uptime', 'cpu', 'memory', 'disk', 'database', 'services'] },
+      { id: 'workers', label: 'Workers', keywords: ['workers', 'slicer', 'jobs', 'queue', 'processing'] },
+    ],
+  },
+  {
     id: 'data',
     label: 'Data',
     keywords: ['data', 'backup', 'export', 'import', 'storage', 'tag', 'label', 'quota', 'cleanup'],
