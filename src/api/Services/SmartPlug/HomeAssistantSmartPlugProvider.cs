@@ -1,13 +1,17 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Services.Security;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SmartPlug;
 
 /// <summary>
 /// Smart plug provider that reads power state from Home Assistant entities.
-/// Requires a long-lived access token stored in configuration key
-/// <c>HomeAssistant:Token</c> (env: <c>PFARM__HomeAssistant__Token</c>).
+/// Token resolution order:
+/// 1. <c>HomeAssistant:Token</c> configuration key (env: <c>PFARM__HomeAssistant__Token</c>)
+/// 2. Persisted <see cref="HomeAssistantSettings.EncryptedToken"/> (decrypted via <see cref="ISensitiveDataProtector"/>)
 ///
 /// <para>
 /// The device address passed to <see cref="ISmartPlugProvider.GetCurrentReadingAsync"/> must be
@@ -18,6 +22,8 @@ namespace Farm.Web.Api.Services.SmartPlug;
 public sealed class HomeAssistantSmartPlugProvider(
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
+    IServiceScopeFactory scopeFactory,
+    ISensitiveDataProtector dataProtector,
     ILogger<HomeAssistantSmartPlugProvider> logger) : ISmartPlugProvider
 {
     public string ProviderType => "HomeAssistant";
@@ -26,7 +32,7 @@ public sealed class HomeAssistantSmartPlugProvider(
     public async Task<PowerReading?> GetCurrentReadingAsync(string deviceAddress, CancellationToken ct)
     {
         (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
-        string? token = configuration["HomeAssistant:Token"];
+        string? token = ResolveToken();
 
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -58,7 +64,7 @@ public sealed class HomeAssistantSmartPlugProvider(
     public async Task<bool> TestConnectionAsync(string deviceAddress, CancellationToken ct)
     {
         (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
-        string? token = configuration["HomeAssistant:Token"];
+        string? token = ResolveToken();
 
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -97,6 +103,33 @@ public sealed class HomeAssistantSmartPlugProvider(
         }
 
         return (deviceAddress[..sep], deviceAddress[(sep + 1)..]);
+    }
+
+    /// <summary>
+    /// Resolves the HA long-lived access token.
+    /// Prefers the raw configuration key; falls back to the encrypted token in persisted settings.
+    /// Uses a short-lived DI scope to access the scoped <see cref="ISettingsService"/>.
+    /// </summary>
+    private string? ResolveToken()
+    {
+        string? configToken = configuration["HomeAssistant:Token"];
+        if (!string.IsNullOrWhiteSpace(configToken))
+        {
+            return configToken;
+        }
+
+        // ISettingsService is scoped; create a short-lived scope from the singleton provider.
+        using IServiceScope scope = scopeFactory.CreateScope();
+        HomeAssistantSettings settings = scope.ServiceProvider
+            .GetRequiredService<ISettingsService>()
+            .Get<HomeAssistantSettings>();
+
+        if (!string.IsNullOrWhiteSpace(settings.EncryptedToken))
+        {
+            return dataProtector.Unprotect(settings.EncryptedToken);
+        }
+
+        return null;
     }
 
     private PowerReading? ParseStateResponse(System.IO.Stream stream, string entityId)

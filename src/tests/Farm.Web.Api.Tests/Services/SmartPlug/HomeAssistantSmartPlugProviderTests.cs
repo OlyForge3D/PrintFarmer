@@ -1,7 +1,10 @@
 using System.Net;
 using System.Text;
+using Farm.Infrastructure.Services.Security;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.SmartPlug;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -35,8 +38,71 @@ public class HomeAssistantSmartPlugProviderTests
             .AddInMemoryCollection(configData)
             .Build();
 
+        // Scope factory is only used when IConfiguration token is absent.
+        // Always wire it up to return empty settings so the fallback path returns null cleanly.
+        HomeAssistantSettings emptySettings = new();
+        Mock<ISettingsService> emptySettingsService = new();
+        emptySettingsService.Setup(s => s.Get<HomeAssistantSettings>()).Returns(emptySettings);
+
+        Mock<IServiceProvider> emptyServiceProvider = new();
+        emptyServiceProvider.Setup(sp => sp.GetService(typeof(ISettingsService))).Returns(emptySettingsService.Object);
+
+        Mock<IServiceScope> emptyScope = new();
+        emptyScope.Setup(s => s.ServiceProvider).Returns(emptyServiceProvider.Object);
+
+        Mock<IServiceScopeFactory> scopeFactory = new();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(emptyScope.Object);
+
+        Mock<ISensitiveDataProtector> dataProtector = new();
+
         HomeAssistantSmartPlugProvider provider = new(
-            factory.Object, config, NullLogger<HomeAssistantSmartPlugProvider>.Instance);
+            factory.Object,
+            config,
+            scopeFactory.Object,
+            dataProtector.Object,
+            NullLogger<HomeAssistantSmartPlugProvider>.Instance);
+
+        return (provider, handler);
+    }
+
+    /// <summary>
+    /// Creates a provider that has no config token but has a persisted encrypted token via settings.
+    /// </summary>
+    private static (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProviderWithPersistedToken(
+        string plainToken)
+    {
+        Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
+#pragma warning disable CA2000
+        HttpClient httpClient = new(handler.Object);
+#pragma warning restore CA2000
+
+        Mock<IHttpClientFactory> factory = new();
+        factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
+
+        IConfiguration config = new ConfigurationBuilder().Build(); // no token in config
+
+        string fakeEncrypted = $"enc:{plainToken}";
+
+        Mock<ISensitiveDataProtector> dataProtector = new();
+        dataProtector.Setup(p => p.Unprotect(fakeEncrypted)).Returns(plainToken);
+
+        HomeAssistantSettings settingsWithToken = new() { EncryptedToken = fakeEncrypted, BaseUrl = "http://ha.local:8123", Enabled = true };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(s => s.Get<HomeAssistantSettings>()).Returns(settingsWithToken);
+
+        Mock<IServiceScope> scope = new();
+        scope.Setup(s => s.ServiceProvider.GetService(typeof(ISettingsService))).Returns(settingsService.Object);
+
+        Mock<IServiceScopeFactory> scopeFactory = new();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+
+        HomeAssistantSmartPlugProvider provider = new(
+            factory.Object,
+            config,
+            scopeFactory.Object,
+            dataProtector.Object,
+            NullLogger<HomeAssistantSmartPlugProvider>.Instance);
 
         return (provider, handler);
     }
@@ -173,5 +239,25 @@ public class HomeAssistantSmartPlugProviderTests
 
         reading.Should().NotBeNull();
         reading!.WattsNow.Should().BeApproximately(10.0, 0.001);
+    }
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenTokenFromPersistedSettings_ReturnsPowerReading()
+    {
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProviderWithPersistedToken(ValidToken);
+
+        string json = """{"entity_id":"sensor.plug_power","state":"55.0","attributes":{}}""";
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://ha.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().NotBeNull();
+        reading!.WattsNow.Should().BeApproximately(55.0, 0.001);
     }
 }
