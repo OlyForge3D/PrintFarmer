@@ -171,3 +171,9 @@ Detailed entries from this period were summarized to reduce file size. See orche
 ### Learnings — 2026-05-31
 
 When asked for `git branch -d` only, never silently escalate to `-D`. If `-d` refuses, report and let the coordinator decide. (PR #329 cleanup, 2026-05-31)
+
+### Learnings — 2026-05-31
+
+- The main .NET/React CI workflow lives at `.github/workflows/ci.yml`; its `build-and-test` job restores the .NET solution before frontend install, builds, and tests.
+- EF migration drift detection is now a pre-test CI gate using `dotnet ef migrations has-pending-model-changes` for all four migration projects: app PostgreSQL, app SQL Server, slicer PostgreSQL, and slicer SQL Server.
+- Each drift check must run from `src/` with the correct `DB_PROVIDER` and context; clear CI errors should name the specific context/provider that drifted.
