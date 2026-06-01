@@ -4152,6 +4152,7 @@ public class PrintersService(
             if (existing.StreamUrl != rtspUrl)
             {
                 existing.StreamUrl = rtspUrl;
+                existing.IsEnabled = true;
                 existing.HealthStatus = CameraHealthStatus.Unknown;
                 existing.ConsecutiveFailures = 0;
                 existing.HealthMessage = null;
