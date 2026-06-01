@@ -47,9 +47,7 @@ import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
-import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
-import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
-import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
+import { AnalyticsHubPage } from '@/features/analytics/pages/AnalyticsHubPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
@@ -195,9 +193,9 @@ function AuthenticatedAppRoutes() {
         <Route path="nfc-bindings" element={<NfcBindingsPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
-        <Route path="statistics" element={<StatisticsPage />} />
-        <Route path="statistics/costs" element={<CostDashboardPage />} />
-        <Route path="analytics" element={<AnalyticsDashboardPage />} />
+        <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
+        <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
+        <Route path="analytics" element={<AnalyticsHubPage />} />
         <Route path="scheduling" element={<SchedulingPage />} />
         <Route path="locations" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />

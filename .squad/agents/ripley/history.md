@@ -90,6 +90,9 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - 2026-05-26 — URL filter state + pagination: use `useUrlFilterState` with `filterable: false` on `page`/`pageSize` params, then call `setMany({ ...filterUpdate, page: 1 })` to reset pagination on filter changes. For debounced username input use the individual setter from `useUrlFilterState` — debounce is configured per-param in the config object.
 - 2026-05-26 — `Badge` component does not spread HTML attributes (only `children`, `variant`, `size`, `dot`, `className`). Don't put `aria-label` on `<Badge>`; wrap in a `<span>` or test by text content instead.
 - 2026-05-26 — `apiClient.get<T>()` is a public method on the ApiClient singleton returning `Promise<AxiosResponse<T>>`. Use it in services for new endpoints not yet wired into named methods on `apiClient` (e.g., while Lambert builds the backend in parallel). Access response body via `.data`.
+- 2026-06-01T15:18:38-07:00 — Unified analytics hub: `src/Web/ReactApp/src/features/analytics/pages/AnalyticsHubPage.tsx` is now the single analytics destination. It owns the shared `TimePeriodFilter`, KPI summary row, and controlled `?lens=production|cost|fleet` tab state.
+- 2026-06-01T15:18:38-07:00 — Analytics consolidation pattern: keep legacy route-level pages as `PageTemplate` wrappers, but export reusable body components (`StatisticsDashboardContent`, `CostDashboardContent`, `AnalyticsDashboardContent`) so a new hub page can compose them without nested page chrome.
+- 2026-06-01T15:18:38-07:00 — Shared tabs accessibility: `src/Web/ReactApp/src/common/components/ui/Tabs.tsx` now uses roving `tabIndex` plus ArrowLeft/ArrowRight/Home/End keyboard navigation. When testing collapsed sidebar navigation, assert on `href` targets instead of visible link labels because the icon-first layout can hide text.
 
 ### External-reference-app Review Pointer — 2026-05-31
 

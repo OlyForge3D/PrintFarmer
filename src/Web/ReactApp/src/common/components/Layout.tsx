@@ -25,7 +25,6 @@ import {
   KeyIcon,
   CheckIcon,
   NfcIcon,
-  ChartIcon,
   AlertIcon,
   ClipboardListIcon,
   PlayIcon,
@@ -144,16 +143,6 @@ const navigation: NavigationElement[] = [
     href: '/maintenance',
     icon: WrenchIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
-  },
-  {
-    name: 'Statistics',
-    href: '/statistics',
-    icon: ChartIcon,
-  },
-  {
-    name: 'Cost Analytics',
-    href: '/statistics/costs',
-    icon: TrendingUpIcon,
   },
   {
     name: 'Analytics',
