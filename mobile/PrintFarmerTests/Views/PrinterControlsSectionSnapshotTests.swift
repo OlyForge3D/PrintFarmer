@@ -104,10 +104,21 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     /// Disabled stripe modifier from #288: triggered when the printer is
     /// online but not in an idle/ready state that accepts control input.
-    /// `"error"` is not in the hidden-state set (`printing`/`paused`/`starting`)
-    /// so the section renders, but per-subgroup gating disables controls.
+    /// `"error"` is not in the hidden-state set (offline only); the section
+    /// renders with disabled subgroup controls per spec §2.4.
     func test_snapshot_disabledState_printerInError() throws {
         let printer = try makePrinter(backend: .moonraker, state: "error")
+        let svc = makeService(caps: Self.moonrakerCaps)
+        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+    }
+    // MARK: - Lockout banner (spec §2.2 — visible during print with disabled controls)
+
+    /// Section remains visible during a print; a lockout banner is shown and
+    /// all subgroup controls are disabled. The section is NOT hidden — only
+    /// the offline state hides it (spec §2.2, §2.4).
+    func test_snapshot_lockoutBanner_printingState() throws {
+        let printer = try makePrinter(backend: .moonraker, state: "printing")
         let svc = makeService(caps: Self.moonrakerCaps)
         let section = PrinterControlsSection(printer: printer, printerService: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
