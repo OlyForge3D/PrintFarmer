@@ -133,3 +133,10 @@
 **Issue relabelling:** Removed `squad:🔧 lambert` (mis-routed, Lambert is backend-only), added `squad:gorman`.
 
 **Branch contamination recurred** — commit initially landed on `squad/284-preheat-subgroup`. Recovered via `git cherry-pick` onto `squad/278-remove-dead-int-decoders`, then deleted the contaminated branch. Always verify `git branch` immediately before `git add/commit`.
+
+### 2026-05-31: Issue #282 — isExecuting property gap (PR #419)
+- Code was already on development from Phase 1 (PR #298, 2026-05-21). Issue remained open because target was development not default branch (no auto-close).
+- **Gap identified**: AC required @Published var isExecuting: Bool; VM exposed pendingCommand: ControlCommand? only.
+- **Fix**: Added ar isExecuting: Bool { pendingCommand != nil } in Computed section of PrinterControlsViewModel.swift — read-only Bool alias backed by the already-@Published pendingCommand.
+- **Test added**: 	est_isExecuting_trueWhileInFlight_falseAfterError (15th test) — uses AsyncGate to assert isExecuting=true mid-flight, isExecuting=false after error clears pendingCommand.
+- Branch: squad/282-controls-viewmodel; PR: https://github.com/OlyForge3D/PrintFarmer/pull/419
