@@ -85,6 +85,26 @@ describe('Navigation Section Headers', () => {
     });
   });
 
+  describe('Nav cleanup for settings and analytics', () => {
+    it('shows a single Analytics nav entry, keeps Filament Inventory, and removes folded items', () => {
+      renderLayout();
+
+      const analyticsLink = screen.getByRole('link', { name: /analytics/i });
+
+      expect(analyticsLink).toBeInTheDocument();
+      expect(analyticsLink).toHaveAttribute('href', '/analytics');
+      expect(screen.getByRole('link', { name: /filament inventory/i })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /settings/i })).toBeInTheDocument();
+
+      expect(screen.queryByRole('link', { name: /statistics/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /cost analytics/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /api keys/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /nfc bindings/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /printer groups/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /workers/i })).not.toBeInTheDocument();
+    });
+  });
+
   // NOTE: These tests validate the FUTURE implementation of section headers
   // They may fail until PFarm1-egw is merged
   describe('Section Header Rendering (Future Validation)', () => {

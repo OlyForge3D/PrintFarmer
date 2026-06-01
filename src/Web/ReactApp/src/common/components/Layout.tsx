@@ -22,10 +22,7 @@ import {
   HistoryIcon,
   WrenchIcon,
   TrendingUpIcon,
-  KeyIcon,
   CheckIcon,
-  NfcIcon,
-  ChartIcon,
   AlertIcon,
   ClipboardListIcon,
   PlayIcon,
@@ -131,11 +128,6 @@ const navigation: NavigationElement[] = [
     href: '/spools', 
     icon: SpoolIcon
   },
-  {
-    name: 'NFC Bindings',
-    href: '/nfc-bindings',
-    icon: NfcIcon
-  },
 
   // — Management —
   { name: 'Management', isSectionHeader: true },
@@ -144,16 +136,6 @@ const navigation: NavigationElement[] = [
     href: '/maintenance',
     icon: WrenchIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
-  },
-  {
-    name: 'Statistics',
-    href: '/statistics',
-    icon: ChartIcon,
-  },
-  {
-    name: 'Cost Analytics',
-    href: '/statistics/costs',
-    icon: TrendingUpIcon,
   },
   {
     name: 'Analytics',
@@ -165,35 +147,15 @@ const navigation: NavigationElement[] = [
     href: '/scheduling',
     icon: CalendarIcon,
   },
-  {
-    name: 'API Keys',
-    href: '/profile/api-keys',
-    icon: KeyIcon
-  },
 
   // — Admin —
   { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
-  {
-    name: 'Printer Groups',
-    href: '/printer-groups',
-    icon: PrinterIcon,
-    requiredRole: 'farm_admin'
-  },
   {
     name: 'Catalog',
     href: '/catalog',
     icon: LayersIcon,
     requiredRole: 'farm_admin'
   },
-  {
-    name: 'Workers',
-    href: '/admin/workers',
-    icon: WrenchIcon,
-    requiredRole: 'farm_admin',
-    requiresSlicer: true,
-    requiresSlicingCapability: true
-  },
-
   {
     name: 'System',
     href: '/admin/system',
