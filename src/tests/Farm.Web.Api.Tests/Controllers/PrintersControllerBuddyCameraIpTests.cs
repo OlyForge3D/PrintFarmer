@@ -426,4 +426,21 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         cameras[0].StreamUrl.Should().Be("rtsp://10.0.0.2:554/live/",
             because: "the stream URL must be updated to reflect the new IP");
     }
+
+    // Bishop blocker B: bracketed IPv4 must be rejected (#428)
+
+    [Theory]
+    [InlineData("[127.0.0.1]")]
+    [InlineData("[192.168.1.100]")]
+    [InlineData("[10.0.0.1]")]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenBracketedIpv4_ReturnsBadRequest(string bracketedIpv4)
+    {
+        Guid id = await SeedPrinterAsync();
+        var dto = new UpdatePrinterDto(BuddyCameraIp: bracketedIpv4);
+
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            because: "brackets are only valid around an IPv6 address");
+    }
 }

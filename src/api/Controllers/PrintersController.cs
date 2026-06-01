@@ -1783,8 +1783,16 @@ public class PrintersController(
                     : ip;
 
                 bool isValidHost;
-                if (IPAddress.TryParse(candidateForParse, out _))
+                if (IPAddress.TryParse(candidateForParse, out IPAddress? parsedIp))
                 {
+                    // Brackets are only valid around an IPv6 address (RFC 3986 §3.2.2).
+                    // Reject [v4-addr] — it passes TryParse but breaks URL construction
+                    // and is never a valid user intent (admin sees 200, camera never works).
+                    if (ip.StartsWith('[') && parsedIp.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    {
+                        return BadRequest("Invalid BuddyCameraIp: brackets are only valid around an IPv6 address.");
+                    }
+
                     // Valid IP address; downstream SSRF validation handles range checks.
                     isValidHost = true;
                 }
@@ -1804,6 +1812,9 @@ public class PrintersController(
                     return BadRequest("Invalid BuddyCameraIp: must be a plain IP address or hostname.");
                 }
 
+                // TODO(#428 follow-up): extract a shared CameraHostNormalizer helper that
+                // validates + canonicalizes BuddyCameraIp in one place, removing the split
+                // between controller validation and service URL construction.
                 await _printersService.SyncBuddyCameraAsync(p, ip, ct);
             }
         }
