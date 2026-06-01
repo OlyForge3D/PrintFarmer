@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -7,6 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -203,5 +205,87 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
             db.CameraSnapshots.Where(s => s.PrinterId == printerId).Should().BeEmpty(
                 because: "snapshots must be pre-deleted to avoid FK violation on the Restrict constraint");
         }
+    }
+
+    [Fact]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenValidIp_CreatesCameraRowInDb()
+    {
+        // Arrange
+        Guid printerId = await SeedPrinterAsync();
+        const string ip = "192.168.10.55";
+        var dto = new UpdatePrinterDto(BuddyCameraIp: ip);
+
+        // Act
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", dto);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert: re-query in a fresh scope to avoid first-level cache hits
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        List<Camera> cameras = await db.Cameras
+            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .ToListAsync();
+
+        cameras.Should().ContainSingle(because: "a single Buddy camera row must be created for the printer");
+        Camera cam = cameras[0];
+        cam.StreamUrl.Should().Be($"rtsp://{ip}:554/live/",
+            because: "the RTSP stream URL must encode the supplied IP on the standard buddy port");
+        cam.IsEnabled.Should().BeTrue(because: "newly created Buddy cameras must be enabled by default");
+
+        Printer? printer = await db.Printers.FindAsync(printerId);
+        printer!.BuddyCameraIp.Should().Be(ip,
+            because: "BuddyCameraIp on the Printer row must be persisted after the update");
+    }
+
+    [Fact]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenCleared_RemovesCameraRowFromDb()
+    {
+        // Arrange: set an IP first so a camera row exists
+        Guid printerId = await SeedPrinterAsync();
+        await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
+
+        // Act: clear the IP
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: ""));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert: camera row must be gone and BuddyCameraIp must be null
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        List<Camera> cameras = await db.Cameras
+            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .ToListAsync();
+
+        cameras.Should().BeEmpty(because: "clearing BuddyCameraIp must delete the Buddy camera row from the Cameras table");
+
+        Printer? printer = await db.Printers.FindAsync(printerId);
+        printer!.BuddyCameraIp.Should().BeNull(because: "BuddyCameraIp on the Printer row must be nulled after the clear");
+    }
+
+    [Fact]
+    public async Task UpdatePrinter_BuddyCameraIp_DoesNotAffectOtherPrintersCameras()
+    {
+        // Arrange: two independent printers; give printer A an existing Buddy camera
+        Guid printerAId = await SeedPrinterAsync();
+        Guid printerBId = await SeedPrinterAsync();
+
+        await _client!.PutAsJsonAsync($"/api/printers/{printerAId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.1"));
+
+        // Act: update printer B's BuddyCameraIp — must not touch printer A
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerBId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.2"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert: printer A's Buddy camera is unaffected
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        List<Camera> camerasA = await db.Cameras
+            .Where(c => c.PrinterId == printerAId && c.Source == CameraSource.PrusaLink)
+            .ToListAsync();
+
+        camerasA.Should().ContainSingle(because: "printer A's Buddy camera must not be touched when printer B is updated");
+        camerasA[0].StreamUrl.Should().Be("rtsp://172.16.0.1:554/live/",
+            because: "printer A's stream URL must remain unchanged after printer B is updated");
     }
 }
