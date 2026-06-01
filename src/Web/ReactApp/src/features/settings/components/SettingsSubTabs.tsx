@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import { useCallback, useRef } from 'react';
 import clsx from 'clsx';
+import { Badge } from '@/common/components/ui';
 import type { SettingsSubPage } from '@/features/settings/types';
 
 interface SettingsSubTabsProps {
@@ -70,11 +71,13 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
     [subPages]
   );
 
-  // Determine if a sub-page should be dimmed (search active but not matching)
-  const isDimmed = useCallback(
+  const isMatchingSubPage = useCallback(
     (subPageId: string) => {
-      if (!isFiltering || !matchingSubPageIds) return false;
-      return !matchingSubPageIds.includes(subPageId);
+      if (!isFiltering || !matchingSubPageIds) {
+        return false;
+      }
+
+      return matchingSubPageIds.includes(subPageId);
     },
     [isFiltering, matchingSubPageIds]
   );
@@ -92,7 +95,7 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
     >
       {subPages.map((subPage, index) => {
         const isActive = activeSubPage === subPage.id;
-        const dimmed = isDimmed(subPage.id);
+        const isMatching = isMatchingSubPage(subPage.id);
 
         return (
           <button
@@ -107,14 +110,15 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
             onClick={() => onSubPageChange(subPage.id)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={clsx(
-              'px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors',
+              'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors rounded-t-md',
               'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
               isActive && 'text-pf-text-primary border-b-2 border-pf-accent -mb-px',
               !isActive && 'text-pf-text-secondary hover:text-pf-text-primary',
-              dimmed && 'opacity-40'
+              isMatching && !isActive && 'bg-pf-accent-bg text-pf-text-primary'
             )}
           >
-            {subPage.label}
+            <span>{subPage.label}</span>
+            {isMatching ? <Badge variant="info">Match</Badge> : null}
           </button>
         );
       })}

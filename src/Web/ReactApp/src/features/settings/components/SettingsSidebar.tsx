@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useCallback, useRef, useEffect, useState } from 'react';
 import clsx from 'clsx';
+import { Badge } from '@/common/components/ui';
 import {
   GearIcon,
   PackageIcon,
@@ -49,20 +50,16 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   // Handle keyboard navigation within sidebar
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-      const visibleCategories = isFiltering && matchingCategoryIds
-        ? categories.filter((c) => matchingCategoryIds.includes(c.id))
-        : categories;
-
       let nextIndex: number | null = null;
 
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          nextIndex = index < visibleCategories.length - 1 ? index + 1 : 0;
+          nextIndex = index < categories.length - 1 ? index + 1 : 0;
           break;
         case 'ArrowUp':
           e.preventDefault();
-          nextIndex = index > 0 ? index - 1 : visibleCategories.length - 1;
+          nextIndex = index > 0 ? index - 1 : categories.length - 1;
           break;
         case 'Home':
           e.preventDefault();
@@ -70,17 +67,17 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
           break;
         case 'End':
           e.preventDefault();
-          nextIndex = visibleCategories.length - 1;
+          nextIndex = categories.length - 1;
           break;
       }
 
       if (nextIndex !== null) {
-        const nextCategory = visibleCategories[nextIndex];
+        const nextCategory = categories[nextIndex];
         const nextButton = itemRefs.current.get(nextCategory.id);
         nextButton?.focus();
       }
     },
-    [categories, isFiltering, matchingCategoryIds]
+    [categories]
   );
 
   // Store ref for each nav item
@@ -92,11 +89,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     }
   }, []);
 
-  // Determine if a category should be dimmed (search active but not matching)
-  const isDimmed = useCallback(
+  const isMatchingCategory = useCallback(
     (categoryId: string) => {
-      if (!isFiltering || !matchingCategoryIds) return false;
-      return !matchingCategoryIds.includes(categoryId);
+      if (!isFiltering || !matchingCategoryIds) {
+        return false;
+      }
+
+      return matchingCategoryIds.includes(categoryId);
     },
     [isFiltering, matchingCategoryIds]
   );
@@ -111,7 +110,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         <ul ref={navRef} role="list" className="py-2">
           {categories.map((category, index) => {
             const isActive = activeCategory === category.id;
-            const dimmed = isDimmed(category.id);
+            const isMatching = isMatchingCategory(category.id);
 
             return (
               <li key={category.id}>
@@ -126,13 +125,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
                     isActive && 'bg-pf-accent-bg text-pf-text-primary border-l-2 border-pf-accent',
                     !isActive && 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary border-l-2 border-transparent',
-                    dimmed && 'opacity-40'
+                    isMatching && !isActive && 'bg-pf-accent-bg text-pf-text-primary'
                   )}
                 >
                   <span className="shrink-0" aria-hidden="true">
                     {CATEGORY_ICONS[category.id] ?? <GearIcon className="w-5 h-5" />}
                   </span>
-                  <span className="truncate">{category.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{category.label}</span>
+                  {isMatching ? <Badge variant="info">Match</Badge> : null}
                 </button>
               </li>
             );
@@ -205,12 +205,14 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   const handleSelect = (categoryId: string) => {
     onCategoryChange(categoryId);
     setIsOpen(false);
-    buttonRef.current?.focus();
   };
 
-  const isDimmed = (categoryId: string) => {
-    if (!isFiltering || !matchingCategoryIds) return false;
-    return !matchingCategoryIds.includes(categoryId);
+  const isMatchingCategory = (categoryId: string) => {
+    if (!isFiltering || !matchingCategoryIds) {
+      return false;
+    }
+
+    return matchingCategoryIds.includes(categoryId);
   };
 
   return (
@@ -220,7 +222,8 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-expanded={isOpen}
-        aria-haspopup="listbox"
+        aria-controls="settings-category-menu"
+        aria-label={`Settings category: ${activeLabel}`}
         className={clsx(
           'w-full flex items-center justify-between gap-2 px-4 py-3',
           'bg-pf-bg-1 border border-pf-border rounded-lg',
@@ -241,7 +244,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
 
       {isOpen && (
         <ul
-          role="listbox"
+          id="settings-category-menu"
           aria-label="Settings categories"
           className={clsx(
             'absolute z-50 w-full mt-1',
@@ -251,30 +254,30 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         >
           {categories.map((category) => {
             const isActive = activeCategory === category.id;
-            const dimmed = isDimmed(category.id);
+            const isMatching = isMatchingCategory(category.id);
 
             return (
               <li key={category.id}>
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={isActive}
                   onClick={() => handleSelect(category.id)}
+                  aria-current={isActive ? 'page' : undefined}
                   className={clsx(
                     'w-full flex items-center gap-3 px-4 py-2.5 text-sm',
-                    'focus:outline-hidden focus-visible:bg-pf-bg-1',
+                    'focus:outline-hidden focus-visible:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
                     isActive && 'bg-pf-accent-bg text-pf-text-primary font-medium',
                     !isActive && 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
-                    dimmed && 'opacity-40'
+                    isMatching && !isActive && 'bg-pf-accent-bg text-pf-text-primary'
                   )}
                 >
                   <span aria-hidden="true">
-                      {CATEGORY_ICONS[category.id] ?? <GearIcon className="w-5 h-5" />}
+                    {CATEGORY_ICONS[category.id] ?? <GearIcon className="w-5 h-5" />}
                   </span>
-                  {category.label}
+                  <span className="min-w-0 flex-1 truncate">{category.label}</span>
+                  {isMatching ? <Badge variant="info">Match</Badge> : null}
                 </button>
               </li>
-              );
+            );
           })}
         </ul>
       )}

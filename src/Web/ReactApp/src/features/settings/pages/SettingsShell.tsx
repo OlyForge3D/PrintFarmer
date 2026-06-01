@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useMemo } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { SettingsSearch } from '@/features/settings/components/SettingsSearch';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
@@ -85,14 +85,13 @@ const SUB_PAGE_CONTENT: Record<string, React.ReactNode> = {
 export const SettingsShell: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Read state from URL params (will migrate to path-based routes in Phase 2)
-  const activeCategory = searchParams.get('tab') || DEFAULT_CATEGORY;
-  const activeSubPage = searchParams.get('sub') || getDefaultSubPage(activeCategory);
+  const requestedCategory = searchParams.get('tab');
+  const requestedSubPage = searchParams.get('sub');
   const query = searchParams.get('q') || '';
 
-  const currentCategory = useMemo(
-    () => SETTINGS_CATEGORIES.find((c) => c.id === activeCategory) ?? SETTINGS_CATEGORIES[0],
-    [activeCategory]
+  const activeCategory = useMemo(
+    () => SETTINGS_CATEGORIES.some((category) => category.id === requestedCategory) ? requestedCategory : DEFAULT_CATEGORY,
+    [requestedCategory]
   );
 
   const handleCategoryChange = useCallback(
@@ -184,6 +183,62 @@ export const SettingsShell: React.FC = () => {
     return matchingCategoryIds[0];
   }, [activeCategory, matchingCategoryIds, isFiltering]);
 
+  const currentCategory = useMemo(
+    () => SETTINGS_CATEGORIES.find((category) => category.id === effectiveCategory) ?? SETTINGS_CATEGORIES[0],
+    [effectiveCategory]
+  );
+
+  const activeSubPage = useMemo(() => {
+    if (currentCategory.subPages.length === 0) {
+      return '';
+    }
+
+    if (requestedSubPage && currentCategory.subPages.some((subPage) => subPage.id === requestedSubPage)) {
+      return requestedSubPage;
+    }
+
+    return getDefaultSubPage(currentCategory.id);
+  }, [currentCategory, requestedSubPage]);
+
+  const hasSubTabs = currentCategory.subPages.length >= 2;
+  const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const previousCategoryRef = useRef<string | null>(null);
+
+  const sectionAnnouncement = useMemo(() => {
+    if (!hasSubTabs) {
+      return `${currentCategory.label} settings selected`;
+    }
+
+    const activeSubPageLabel = currentCategory.subPages.find((subPage) => subPage.id === activeSubPage)?.label;
+    return activeSubPageLabel
+      ? `${currentCategory.label} settings, ${activeSubPageLabel} section selected`
+      : `${currentCategory.label} settings selected`;
+  }, [currentCategory, activeSubPage, hasSubTabs]);
+
+  useEffect(() => {
+    if (previousCategoryRef.current === null) {
+      previousCategoryRef.current = currentCategory.id;
+      return;
+    }
+
+    if (previousCategoryRef.current === currentCategory.id) {
+      return;
+    }
+
+    if (hasSubTabs && activeSubPage) {
+      const activeTab = document.getElementById(`tab-${activeSubPage}`);
+      if (activeTab instanceof HTMLElement) {
+        activeTab.focus();
+      } else {
+        sectionHeadingRef.current?.focus();
+      }
+    } else {
+      sectionHeadingRef.current?.focus();
+    }
+
+    previousCategoryRef.current = currentCategory.id;
+  }, [currentCategory.id, hasSubTabs, activeSubPage]);
+
   // Render content based on current category and sub-page
   const content = useMemo(() => {
     // Categories with no sub-pages use SINGLE_PAGE_CONTENT
@@ -242,6 +297,21 @@ export const SettingsShell: React.FC = () => {
 
         {/* Content area */}
         <div className="flex-1 p-4 md:p-6">
+          <p className="sr-only" aria-live="polite">
+            {sectionAnnouncement}
+          </p>
+
+          <div className="mb-4">
+            <h2
+              id="settings-content-heading"
+              ref={sectionHeadingRef}
+              tabIndex={-1}
+              className="text-lg font-semibold text-pf-text-primary"
+            >
+              {currentCategory.label}
+            </h2>
+          </div>
+
           {/* Sub-tabs (only for categories with 2+ sub-pages) */}
           <SettingsSubTabs
             subPages={currentCategory.subPages}
@@ -253,13 +323,13 @@ export const SettingsShell: React.FC = () => {
           />
 
           {/* Page content */}
-          <div
-            role="tabpanel"
-            id={`panel-${activeSubPage || currentCategory.id}`}
-            aria-labelledby={activeSubPage ? `tab-${activeSubPage}` : undefined}
-          >
-            {content}
-          </div>
+          {hasSubTabs ? (
+            <section role="tabpanel" id={`panel-${activeSubPage}`} aria-labelledby={`tab-${activeSubPage}`}>
+              {content}
+            </section>
+          ) : (
+            <section aria-labelledby="settings-content-heading">{content}</section>
+          )}
         </div>
       </div>
     </div>
