@@ -232,6 +232,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
+        // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
+        // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
+        // on LoginAuditEntry round-trip correctly through the SQLite text store.
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            _ = modelBuilder.Entity<LoginAuditEntry>()
+                .Property(e => e.Timestamp)
+                .HasConversion(
+                    v => v.UtcDateTime,
+                    v => new DateTimeOffset(v, TimeSpan.Zero));
+        }
+
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
         {

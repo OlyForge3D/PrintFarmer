@@ -244,8 +244,8 @@ public class LoginAuditEntry
     /// <summary>Unique identifier for this entry.</summary>
     public Guid Id { get; set; }
 
-    /// <summary>UTC timestamp when the attempt occurred. Stored as DateTime UTC per project conventions.</summary>
-    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    /// <summary>UTC timestamp when the attempt occurred. Stored as DateTimeOffset to match the datetimeoffset/timestamptz column type.</summary>
+    public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>Username or email as submitted by the client. Nullable — attacker junk is allowed.</summary>
     public string? Username { get; set; }

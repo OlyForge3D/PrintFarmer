@@ -27,8 +27,8 @@ public class SecurityAuditController(AppDbContext db) : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<LoginAuditPageDto>> GetLoginAuditAsync(
-        [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to,
+        [FromQuery] DateTimeOffset? from,
+        [FromQuery] DateTimeOffset? to,
         [FromQuery] string? username,
         [FromQuery] bool? success,
         [FromQuery] int page = 1,
@@ -96,7 +96,7 @@ public class SecurityAuditController(AppDbContext db) : ControllerBase
 /// <param name="FailureReason">Normalized failure code; null on success.</param>
 public record LoginAuditItemDto(
     Guid Id,
-    DateTime Timestamp,
+    DateTimeOffset Timestamp,
     string? Username,
     bool Success,
     string IpAddress,

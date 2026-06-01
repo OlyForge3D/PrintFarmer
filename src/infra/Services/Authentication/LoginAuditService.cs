@@ -27,7 +27,7 @@ public class LoginAuditService(AppDbContext db, ILogger<LoginAuditService> logge
             LoginAuditEntry entry = new()
             {
                 Id = Guid.NewGuid(),
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTimeOffset.UtcNow,
                 Username = username is { Length: > 256 } ? username[..256] : username,
                 Success = success,
                 IpAddress = ipAddress.Length > 64 ? ipAddress[..64] : ipAddress,

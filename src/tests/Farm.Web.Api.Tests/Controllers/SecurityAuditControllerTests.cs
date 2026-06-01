@@ -112,7 +112,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetLoginAudit_WithEntries_ReturnsOrderedNewestFirst()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         await SeedEntriesAsync(
         [
             new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = now.AddMinutes(-10), Username = "old", Success = true, IpAddress = "1.1.1.1" },
@@ -131,8 +131,8 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     {
         await SeedEntriesAsync(
         [
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "alice", Success = true, IpAddress = "1.1.1.1" },
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "eve", Success = false, IpAddress = "2.2.2.2" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "alice", Success = true, IpAddress = "1.1.1.1" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "eve", Success = false, IpAddress = "2.2.2.2" },
         ]);
 
         LoginAuditPageDto? page = await GetPageAsync("?success=false");
@@ -146,8 +146,8 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     {
         await SeedEntriesAsync(
         [
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "alice@example.com", Success = true, IpAddress = "1.1.1.1" },
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "bob@example.com", Success = false, IpAddress = "2.2.2.2" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "alice@example.com", Success = true, IpAddress = "1.1.1.1" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "bob@example.com", Success = false, IpAddress = "2.2.2.2" },
         ]);
 
         LoginAuditPageDto? page = await GetPageAsync("?username=alice");
@@ -159,7 +159,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetLoginAudit_Pagination_RespectsPageAndPageSize()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         List<LoginAuditEntry> entries = Enumerable.Range(0, 10)
             .Select(i => new LoginAuditEntry
             {
@@ -196,7 +196,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
             new LoginAuditEntry
             {
                 Id = Guid.NewGuid(),
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTimeOffset.UtcNow,
                 Username = "tester",
                 Success = false,
                 IpAddress = "10.0.0.42",
@@ -220,7 +220,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetLoginAudit_FilterByDateRange_ReturnsOnlyEntriesWithinRange()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         await SeedEntriesAsync(
         [
             new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = now.AddHours(-2), Username = "too_old", Success = true, IpAddress = "1.1.1.1" },
