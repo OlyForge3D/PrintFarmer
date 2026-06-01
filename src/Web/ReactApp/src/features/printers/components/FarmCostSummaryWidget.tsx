@@ -53,7 +53,7 @@ export function FarmCostSummaryWidget({ className = '' }: { className?: string }
       iconBgClass="bg-pf-accent/10"
       subtitle={`Last ${period} days`}
       headerAction={periodToggle}
-      moreInfoLink="/statistics/costs"
+      moreInfoLink="/analytics?lens=cost"
       moreInfoText="Details"
       className={className}
       isLoading={isLoading}

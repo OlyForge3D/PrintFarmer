@@ -2,7 +2,6 @@
 import React, { createContext, useContext, useState } from 'react';
 import clsx from 'clsx';
 
-// Context for Tabs state
 interface TabsContextValue {
   activeTab: string;
   setActiveTab: (id: string) => void;
@@ -18,17 +17,11 @@ const useTabsContext = () => {
   return context;
 };
 
-// Main Tabs container
 export interface TabsProps {
-  /** Default active tab ID */
   defaultTab?: string;
-  /** Controlled active tab ID */
   activeTab?: string;
-  /** Callback when tab changes */
   onTabChange?: (tabId: string) => void;
-  /** Tab content */
   children: React.ReactNode;
-  /** Additional className */
   className?: string;
 }
 
@@ -45,9 +38,9 @@ export const Tabs: React.FC<TabsProps> & {
   className,
 }) => {
   const [internalActiveTab, setInternalActiveTab] = useState(defaultTab || '');
-  
+
   const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
-  
+
   const setActiveTab = (id: string) => {
     if (controlledActiveTab === undefined) {
       setInternalActiveTab(id);
@@ -62,7 +55,6 @@ export const Tabs: React.FC<TabsProps> & {
   );
 };
 
-// Tab List container
 export interface TabListProps {
   children: React.ReactNode;
   className?: string;
@@ -71,29 +63,20 @@ export interface TabListProps {
 const TabList: React.FC<TabListProps> = ({ children, className }) => {
   return (
     <div
-      className={clsx(
-        // keep background, no rounded corners so tabs are square
-        'flex items-center gap-2 bg-pf-bg-1 px-2 pt-2 pb-0',
-        className
-      )}
+      className={clsx('flex items-center gap-2 bg-pf-bg-1 px-2 pt-2 pb-0', className)}
       role="tablist"
+      aria-orientation="horizontal"
     >
       {children}
     </div>
   );
 };
 
-// Individual Tab button
 export interface TabProps {
-  /** Unique identifier for this tab */
   id: string;
-  /** Tab label */
   children: React.ReactNode;
-  /** Whether the tab is disabled */
   disabled?: boolean;
-  /** Icon to show before label */
   icon?: React.ReactNode;
-  /** Additional className */
   className?: string;
 }
 
@@ -108,31 +91,69 @@ const Tab: React.FC<TabProps> = ({
   const isActive = activeTab === id;
   const btnRef = React.useRef<HTMLButtonElement | null>(null);
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+
+    const tabButtons = Array.from(
+      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)') ?? [],
+    );
+
+    const currentIndex = tabButtons.indexOf(event.currentTarget);
+    if (currentIndex === -1 || tabButtons.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % tabButtons.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = tabButtons.length - 1;
+    }
+
+    const nextTab = tabButtons[nextIndex];
+    const nextId = nextTab.dataset.tabId;
+    if (!nextId) {
+      return;
+    }
+
+    setActiveTab(nextId);
+    nextTab.focus();
+  };
+
   return (
     <button
+      ref={btnRef}
       type="button"
       role="tab"
+      id={`tab-${id}`}
+      data-tab-id={id}
       aria-selected={isActive}
       aria-controls={`panel-${id}`}
-      id={`tab-${id}`}
+      tabIndex={disabled ? -1 : isActive ? 0 : -1}
       disabled={disabled}
       onClick={() => !disabled && setActiveTab(id)}
+      onKeyDown={handleKeyDown}
       onMouseUp={() => {
-        // remove focus when clicked with mouse so focus outline doesn't persist
         if (btnRef.current && document.activeElement === btnRef.current) {
           btnRef.current.blur();
         }
       }}
-      ref={btnRef}
       className={clsx(
         'px-4 py-2 text-sm font-medium transition-colors rounded-none',
         'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-        // when active: left/top/right border, no bottom border, background matches panel
         isActive
-          ? 'relative z-20 bg-pf-bg-0 border-l-0 border-t border-r-0 border-pf-border border-b-0 -mb-px text-pf-text-primary rounded-none'
-          : 'relative z-0 border-l-0 border-t border-r-0 border-pf-border border-b-0 text-pf-text-secondary rounded-none',
-        disabled && 'opacity-50 cursor-not-allowed',
-        className
+          ? 'relative z-20 -mb-px border-l-0 border-t border-r-0 border-b-0 border-pf-border bg-pf-bg-0 text-pf-text-primary rounded-none'
+          : 'relative z-0 border-l-0 border-t border-r-0 border-b-0 border-pf-border text-pf-text-secondary rounded-none',
+        disabled && 'cursor-not-allowed opacity-50',
+        className,
       )}
     >
       <span className="inline-flex items-center gap-2">
@@ -143,7 +164,6 @@ const Tab: React.FC<TabProps> = ({
   );
 };
 
-// Tab Panels container
 export interface TabPanelsProps {
   children: React.ReactNode;
   className?: string;
@@ -157,13 +177,9 @@ const TabPanels: React.FC<TabPanelsProps> = ({ children, className }) => {
   );
 };
 
-// Individual Tab Panel
 export interface TabPanelProps {
-  /** Must match the corresponding Tab id */
   id: string;
-  /** Panel content */
   children: React.ReactNode;
-  /** Additional className */
   className?: string;
 }
 
@@ -185,7 +201,6 @@ const TabPanel: React.FC<TabPanelProps> = ({ id, children, className }) => {
   );
 };
 
-// Attach sub-components
 Tabs.List = TabList;
 Tabs.Tab = Tab;
 Tabs.Panels = TabPanels;

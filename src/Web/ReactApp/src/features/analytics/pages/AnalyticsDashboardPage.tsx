@@ -21,36 +21,31 @@ import { CorrelationChartsSection } from '../components/CorrelationChartsSection
 import { useMaintenanceForecast } from '../hooks/usePredictiveAnalytics';
 import type { TimePeriodFilterValue } from '@/common/components/ui/timePeriodOptions';
 
-export const AnalyticsDashboardPage: React.FC = () => {
-  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
-  const days = period.type === 'preset' ? period.days : undefined;
-  const startDate = period.type === 'custom' ? period.startDate : undefined;
-  const endDate = period.type === 'custom' ? period.endDate : undefined;
+export interface AnalyticsDashboardContentProps {
+  days?: number;
+  startDate?: string;
+  endDate?: string;
+  showSummaryCards?: boolean;
+}
 
+export function AnalyticsDashboardContent({
+  days,
+  startDate,
+  endDate,
+  showSummaryCards = true,
+}: AnalyticsDashboardContentProps) {
   const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days, startDate, endDate);
-  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365, startDate, endDate);
-  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365, startDate, endDate);
+  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days, startDate, endDate);
+  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days, startDate, endDate);
   const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days, startDate, endDate);
   const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days, startDate, endDate);
   const { data: forecasts = [] } = useMaintenanceForecast(days);
 
   return (
-    <PageTemplate
-      title="Business Analytics"
-      subtitle="Comprehensive print farm performance insights"
-      icon={TrendingUpIcon}
-      actions={
-        <div className="flex items-center gap-3">
-          <TimePeriodFilter value={period} onChange={setPeriod} />
-          <ExportMenu days={days} />
-        </div>
-      }
-    >
-      <div className="space-y-6">
-        {/* Predictive Alerts */}
-        <PredictiveAlertsPanel />
+    <div className="space-y-6">
+      <PredictiveAlertsPanel />
 
-        {/* KPI Cards */}
+      {showSummaryCards && (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <KpiCard label="Total Jobs" value={summary?.totalJobs ?? 0} loading={summaryLoading} />
           <KpiCard
@@ -58,8 +53,11 @@ export const AnalyticsDashboardPage: React.FC = () => {
             value={`${summary?.successRate ?? 0}%`}
             loading={summaryLoading}
             color={
-              (summary?.successRate ?? 0) >= 90 ? 'text-pf-success' :
-              (summary?.successRate ?? 0) >= 70 ? 'text-pf-warning' : 'text-pf-error'
+              (summary?.successRate ?? 0) >= 90
+                ? 'text-pf-success'
+                : (summary?.successRate ?? 0) >= 70
+                  ? 'text-pf-warning'
+                  : 'text-pf-error'
             }
           />
           <KpiCard label="Total Cost" value={`$${(summary?.totalCost ?? 0).toFixed(2)}`} loading={summaryLoading} />
@@ -73,36 +71,58 @@ export const AnalyticsDashboardPage: React.FC = () => {
             loading={summaryLoading}
           />
         </div>
+      )}
 
-        {/* Tab Navigation */}
-        <Tabs defaultTab="overview">
-          <Tabs.List>
-            <Tabs.Tab id="overview">Overview</Tabs.Tab>
-            <Tabs.Tab id="correlations">Performance Correlations</Tabs.Tab>
-            <Tabs.Tab id="maintenance">Maintenance Forecast</Tabs.Tab>
-          </Tabs.List>
-          <Tabs.Panels>
-            <Tabs.Panel id="overview">
-              <div className="grid grid-cols-1 gap-6 pt-4 lg:grid-cols-2">
-                <JobsOverTimeChart data={jobsData ?? []} isLoading={jobsLoading} error={jobsError} />
-                <CostOverTimeChart data={costData ?? []} isLoading={costLoading} error={costError} />
-                <FilamentByMaterialChart data={filamentData ?? []} isLoading={filamentLoading} error={filamentError} />
-                <PrinterUtilizationChart data={utilizationData ?? []} isLoading={utilizationLoading} error={utilizationError} />
-              </div>
-            </Tabs.Panel>
-            <Tabs.Panel id="correlations">
-              <div className="pt-4">
-                <CorrelationChartsSection days={days} />
-              </div>
-            </Tabs.Panel>
-            <Tabs.Panel id="maintenance">
-              <div className="pt-4">
-                <MaintenanceForecastSection forecasts={forecasts} />
-              </div>
-            </Tabs.Panel>
-          </Tabs.Panels>
-        </Tabs>
-      </div>
+      <Tabs defaultTab="overview">
+        <Tabs.List>
+          <Tabs.Tab id="overview">Overview</Tabs.Tab>
+          <Tabs.Tab id="correlations">Performance Correlations</Tabs.Tab>
+          <Tabs.Tab id="maintenance">Maintenance Forecast</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panels>
+          <Tabs.Panel id="overview">
+            <div className="grid grid-cols-1 gap-6 pt-4 lg:grid-cols-2">
+              <JobsOverTimeChart data={jobsData ?? []} isLoading={jobsLoading} error={jobsError} />
+              <CostOverTimeChart data={costData ?? []} isLoading={costLoading} error={costError} />
+              <FilamentByMaterialChart data={filamentData ?? []} isLoading={filamentLoading} error={filamentError} />
+              <PrinterUtilizationChart data={utilizationData ?? []} isLoading={utilizationLoading} error={utilizationError} />
+            </div>
+          </Tabs.Panel>
+          <Tabs.Panel id="correlations">
+            <div className="pt-4">
+              <CorrelationChartsSection days={days} />
+            </div>
+          </Tabs.Panel>
+          <Tabs.Panel id="maintenance">
+            <div className="pt-4">
+              <MaintenanceForecastSection forecasts={forecasts} />
+            </div>
+          </Tabs.Panel>
+        </Tabs.Panels>
+      </Tabs>
+    </div>
+  );
+}
+
+export const AnalyticsDashboardPage: React.FC = () => {
+  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+  const days = period.type === 'preset' ? period.days : undefined;
+  const startDate = period.type === 'custom' ? period.startDate : undefined;
+  const endDate = period.type === 'custom' ? period.endDate : undefined;
+
+  return (
+    <PageTemplate
+      title="Business Analytics"
+      subtitle="Comprehensive print farm performance insights"
+      icon={TrendingUpIcon}
+      actions={
+        <div className="flex items-center gap-3">
+          <TimePeriodFilter value={period} onChange={setPeriod} />
+          <ExportMenu days={days} />
+        </div>
+      }
+    >
+      <AnalyticsDashboardContent days={days} startDate={startDate} endDate={endDate} />
     </PageTemplate>
   );
 };
