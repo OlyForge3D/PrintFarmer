@@ -74,14 +74,14 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal? laborCost = CalculateLaborCost(subtotal, settings);
 
         // Calculate total cost
-        decimal? totalCost = subtotal + (laborCost ?? 0m);
+        decimal totalCost = subtotal + (laborCost ?? 0m);
 
         // Store results
         job.MaterialCostUsd = materialCost;
         job.EnergyCostUsd = energyCost;
         job.MachineTimeCostUsd = machineTimeCost;
         job.LaborCostUsd = laborCost;
-        job.TotalCostUsd = totalCost > 0 ? totalCost : null;
+        job.TotalCostUsd = totalCost;
         job.CostCalculatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -93,7 +93,7 @@ public class JobCostCalculationService : IJobCostCalculationService
             energyCost ?? 0m,
             machineTimeCost ?? 0m,
             laborCost ?? 0m,
-            totalCost ?? 0m);
+            totalCost);
 
         return true;
     }
@@ -133,14 +133,14 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal? finalLaborCost = laborCost ?? CalculateLaborCost(subtotal, settings);
 
         // Calculate total
-        decimal? totalCost = subtotal + (finalLaborCost ?? 0m);
+        decimal totalCost = subtotal + (finalLaborCost ?? 0m);
 
         // Store results
         job.MaterialCostUsd = finalMaterialCost;
         job.EnergyCostUsd = finalEnergyCost;
         job.MachineTimeCostUsd = finalMachineTimeCost;
         job.LaborCostUsd = finalLaborCost;
-        job.TotalCostUsd = totalCost > 0 ? totalCost : null;
+        job.TotalCostUsd = totalCost;
         job.CostCalculatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -198,6 +198,26 @@ public class JobCostCalculationService : IJobCostCalculationService
         }
 
         CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
+
+        if (_filamentCostProvider is not null)
+        {
+            decimal? costPerGram = null;
+
+            if (job.SpoolmanSpoolId.HasValue)
+            {
+                costPerGram = await _filamentCostProvider.GetSpoolCostPerGramAsync(job.SpoolmanSpoolId.Value, ct);
+            }
+
+            if (!costPerGram.HasValue && job.SpoolmanFilamentId.HasValue)
+            {
+                costPerGram = await _filamentCostProvider.GetFilamentCostPerGramAsync(job.SpoolmanFilamentId.Value, ct);
+            }
+
+            if (costPerGram.HasValue)
+            {
+                return Math.Round(costPerGram.Value * (decimal)filamentUsageGrams.Value, 2);
+            }
+        }
 
         double? effectivePrice = null;
         double spoolWeightGrams = 1000.0;

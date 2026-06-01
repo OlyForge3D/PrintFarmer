@@ -112,10 +112,11 @@ public class JobCostCalculationTests : IAsyncLifetime
         Printer printer,
         double? filamentUsage = null,
         TimeSpan? printTime = null,
-        int? spoolmanFilamentId = null)
+        int? spoolmanFilamentId = null,
+        int? spoolmanSpoolId = null)
     {
         return await CreateTestJobWithKwhAsync(printer, filamentUsage: filamentUsage, printTime: printTime,
-            spoolmanFilamentId: spoolmanFilamentId, kwhUsed: null);
+            spoolmanFilamentId: spoolmanFilamentId, spoolmanSpoolId: spoolmanSpoolId, kwhUsed: null);
     }
 
     private async Task<PrintJob> CreateTestJobWithKwhAsync(
@@ -123,7 +124,8 @@ public class JobCostCalculationTests : IAsyncLifetime
         decimal? kwhUsed = null,
         double? filamentUsage = null,
         TimeSpan? printTime = null,
-        int? spoolmanFilamentId = null)
+        int? spoolmanFilamentId = null,
+        int? spoolmanSpoolId = null)
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -137,6 +139,7 @@ public class JobCostCalculationTests : IAsyncLifetime
             ActualFilamentUsage = filamentUsage,
             ActualPrintTime = printTime,
             SpoolmanFilamentId = spoolmanFilamentId,
+            SpoolmanSpoolId = spoolmanSpoolId,
             KwhUsed = kwhUsed,
             ActualStartTime = DateTime.UtcNow.AddHours(-2),
             ActualEndTime = DateTime.UtcNow
@@ -145,6 +148,13 @@ public class JobCostCalculationTests : IAsyncLifetime
         context.PrintJobs.Add(job);
         await context.SaveChangesAsync();
         return job;
+    }
+
+    private sealed class TestFilamentCostProvider(decimal? spoolCostPerGram, decimal? filamentCostPerGram = null) : IFilamentCostProvider
+    {
+        public Task<decimal?> GetSpoolCostPerGramAsync(int spoolId, CancellationToken ct = default) => Task.FromResult(spoolCostPerGram);
+
+        public Task<decimal?> GetFilamentCostPerGramAsync(int filamentId, CancellationToken ct = default) => Task.FromResult(filamentCostPerGram);
     }
 
     #region Cost Calculation Service Tests
@@ -204,6 +214,234 @@ public class JobCostCalculationTests : IAsyncLifetime
 
         // Total: 1.25 + 0.05 + 20.00 + 5.32 = $26.62
         updatedJob.TotalCostUsd.Should().Be(26.62m);
+    }
+
+    [Fact]
+    public async Task CalculateAndStoreCostsAsync_WithAllComponentsPresent_SumsEnergyMaterialAndMachineTime()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+        var spoolmanService = scope.ServiceProvider.GetRequiredService<ISpoolmanService>();
+        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JobCostCalculationService>>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.20m,
+            DefaultMachineHourlyRate = 0m,
+            DefaultFilamentPricePerKg = 0m,
+            MaterialPriceDefaults = [],
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("all-components", machineHourlyRate: 8m);
+        context.PowerMonitors.Add(new PowerMonitor
+        {
+            PrinterId = printer.Id,
+            ProviderType = "Test",
+            DeviceAddress = "test-monitor",
+            ElectricityRateUsdPerKwh = 0.30m,
+            IsEnabled = true
+        });
+        await context.SaveChangesAsync();
+
+        var job = await CreateTestJobWithKwhAsync(
+            printer,
+            kwhUsed: 3m,
+            filamentUsage: 100,
+            printTime: TimeSpan.FromHours(2),
+            spoolmanSpoolId: 123);
+        var service = new JobCostCalculationService(
+            context,
+            spoolmanService,
+            settingsService,
+            logger,
+            new TestFilamentCostProvider(spoolCostPerGram: 0.04m));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+        updatedJob!.EnergyCostUsd.Should().Be(0.90m);
+        updatedJob.MaterialCostUsd.Should().Be(4.00m);
+        updatedJob.MachineTimeCostUsd.Should().Be(16.00m);
+        updatedJob.TotalCostUsd.Should().Be(20.90m);
+    }
+
+    [Fact]
+    public async Task CalculateAndStoreCostsAsync_WithNoPowerMonitor_UsesFarmWideEnergyRate()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.20m,
+            DefaultMachineHourlyRate = 0m,
+            DefaultFilamentPricePerKg = 0m,
+            MaterialPriceDefaults = [],
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("farm-rate-fallback");
+        var job = await CreateTestJobWithKwhAsync(printer, kwhUsed: 2m);
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+        updatedJob!.EnergyCostUsd.Should().Be(0.40m);
+    }
+
+    [Fact]
+    public async Task CalculateAndStoreCostsAsync_WithNoEnergyRate_SetsEnergyCostNull()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0m,
+            DefaultMachineHourlyRate = 0m,
+            DefaultFilamentPricePerKg = 0m,
+            MaterialPriceDefaults = [],
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("missing-energy-rate");
+        var job = await CreateTestJobWithKwhAsync(printer, kwhUsed: 2m);
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+        updatedJob!.EnergyCostUsd.Should().BeNull();
+        updatedJob.TotalCostUsd.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task CalculateAndStoreCostsAsync_WithMaterialProviderMissing_SetsMaterialCostNull()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var spoolmanService = scope.ServiceProvider.GetRequiredService<ISpoolmanService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JobCostCalculationService>>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0m,
+            DefaultMachineHourlyRate = 0m,
+            DefaultFilamentPricePerKg = 0m,
+            MaterialPriceDefaults = [],
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("missing-material-provider");
+        var job = await CreateTestJobAsync(printer, filamentUsage: 100, spoolmanSpoolId: 123);
+        var service = new JobCostCalculationService(context, spoolmanService, settingsService, logger, filamentCostProvider: null);
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+        updatedJob!.MaterialCostUsd.Should().BeNull();
+        updatedJob.TotalCostUsd.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task CalculateAndStoreCostsAsync_WithMissingMachineTime_SetsMachineTimeCostNull()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0m,
+            DefaultMachineHourlyRate = 10m,
+            DefaultFilamentPricePerKg = 0m,
+            MaterialPriceDefaults = [],
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("missing-machine-time", machineHourlyRate: 10m);
+        var job = await CreateTestJobAsync(printer, printTime: TimeSpan.Zero);
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+        updatedJob!.MachineTimeCostUsd.Should().BeNull();
+        updatedJob.TotalCostUsd.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task CalculateAndStoreCostsAsync_WithAllComponentsNull_SetsZeroTotalAndUtcTimestamp()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0m,
+            DefaultMachineHourlyRate = 0m,
+            DefaultFilamentPricePerKg = 0m,
+            MaterialPriceDefaults = [],
+            LaborMarkupPercent = 0m
+        });
+
+        var printer = await CreateTestPrinterAsync("all-null-components");
+        var job = await CreateTestJobAsync(printer);
+        DateTime beforeCalculationUtc = DateTime.UtcNow;
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+        updatedJob!.MaterialCostUsd.Should().BeNull();
+        updatedJob.EnergyCostUsd.Should().BeNull();
+        updatedJob.MachineTimeCostUsd.Should().BeNull();
+        updatedJob.TotalCostUsd.Should().Be(0m);
+        updatedJob.CostCalculatedAt.Should().NotBeNull();
+        updatedJob.CostCalculatedAt!.Value.Should().BeOnOrAfter(beforeCalculationUtc).And.BeOnOrBefore(DateTime.UtcNow);
     }
 
     [Fact]
@@ -272,7 +510,7 @@ public class JobCostCalculationTests : IAsyncLifetime
         updatedJob!.EnergyCostUsd.Should().BeNull();
         updatedJob.MachineTimeCostUsd.Should().BeNull();
         updatedJob.LaborCostUsd.Should().BeNull();
-        updatedJob.TotalCostUsd.Should().BeNull();
+        updatedJob.TotalCostUsd.Should().Be(0m);
     }
 
     [Fact]
