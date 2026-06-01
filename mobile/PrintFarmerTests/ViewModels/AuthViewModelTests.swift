@@ -278,4 +278,27 @@ extension AuthViewModelTests {
         viewModel.currentUser = makeUser(roles: [])
         XCTAssertNil(viewModel.currentUserRole)
     }
+    // MARK: - Maintenance Toggle Gating (#274)
+
+    /// Admin: currentUserRole == "farm_admin" -> the maintenance toggle is shown.
+    func testMaintenanceToggleVisibleForAdmin() {
+        viewModel.currentUser = makeUser(roles: ["farm_admin"])
+        XCTAssertEqual(viewModel.currentUserRole, "farm_admin",
+            "Admin must have currentUserRole == farm_admin so the maintenance toggle is shown")
+    }
+
+    /// Non-admin: currentUserRole != "farm_admin" -> the maintenance toggle is hidden.
+    func testMaintenanceToggleHiddenForNonAdmin() {
+        viewModel.currentUser = makeUser(roles: ["operator"])
+        XCTAssertNotEqual(viewModel.currentUserRole, "farm_admin",
+            "Non-admin must not have currentUserRole == farm_admin so the maintenance toggle is hidden")
+    }
+
+    /// Unauthenticated: currentUserRole is nil -> the maintenance toggle is hidden.
+    func testMaintenanceToggleHiddenWhenUnauthenticated() {
+        viewModel.currentUser = nil
+        XCTAssertNil(viewModel.currentUserRole,
+            "Unauthenticated user must have nil currentUserRole so the maintenance toggle is hidden")
+    }
+
 }
