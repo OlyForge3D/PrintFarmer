@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Dtos;
+﻿namespace Farm.Slicer.Module.Dtos;
 
 /// <summary>
 /// Artifact metadata returned by GET /api/artifacts/{id}/metadata.

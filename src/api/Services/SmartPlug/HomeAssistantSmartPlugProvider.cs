@@ -151,31 +151,36 @@ public sealed class HomeAssistantSmartPlugProvider(
 
     /// <summary>
     /// Resolves the HA base URL and long-lived access token.
-    /// Token priority: raw configuration key (<c>HomeAssistant:Token</c>) → persisted encrypted token.
-    /// Blocker 2: returns a null token when <see cref="HomeAssistantSettings.Enabled"/> is false
-    /// and no config-level override is present, so the provider stops polling.
+    /// <para>
+    /// <c>Enabled=false</c> is a hard off-switch and takes priority over every token source,
+    /// including the <c>PFARM__HomeAssistant__Token</c> env-var override. This ensures that
+    /// disabling the integration via the admin UI stops all background polling immediately,
+    /// regardless of deployment configuration.
+    /// </para>
+    /// Token priority (when enabled): raw configuration key (<c>HomeAssistant:Token</c>) →
+    /// persisted encrypted token.
     /// </summary>
     private (string? ConfiguredBaseUrl, string? Token) ResolveConnectionParams()
     {
-        string? configToken = configuration["HomeAssistant:Token"];
-
         // ISettingsService is scoped; create a short-lived scope from the singleton provider.
         using IServiceScope scope = scopeFactory.CreateScope();
         HomeAssistantSettings settings = scope.ServiceProvider
             .GetRequiredService<ISettingsService>()
             .Get<HomeAssistantSettings>();
 
-        // Config-level token overrides the enabled toggle (useful for dev/admin scenarios).
-        if (!string.IsNullOrWhiteSpace(configToken))
-        {
-            return (settings.BaseUrl, configToken);
-        }
-
-        // Honor the Enabled toggle when relying on persisted settings.
+        // Enabled=false is checked first — before any token source — so that the admin
+        // toggle reliably stops polling even when PFARM__HomeAssistant__Token is set.
         if (!settings.Enabled)
         {
             logger.LogDebug("HomeAssistant integration is disabled — skipping token resolution");
             return (settings.BaseUrl, null);
+        }
+
+        // Config-level token allows access in dev/admin scenarios without persisted settings.
+        string? configToken = configuration["HomeAssistant:Token"];
+        if (!string.IsNullOrWhiteSpace(configToken))
+        {
+            return (settings.BaseUrl, configToken);
         }
 
         string? token = !string.IsNullOrWhiteSpace(settings.EncryptedToken)
@@ -214,6 +219,14 @@ public sealed class HomeAssistantSmartPlugProvider(
 
             if (root.TryGetProperty("attributes", out JsonElement attrs))
             {
+                // Unit-aware conversion: HA may report in kW; the rest of the system stores watts.
+                // Only kW needs conversion — W entities are already in the correct unit.
+                if (attrs.TryGetProperty("unit_of_measurement", out JsonElement uomEl)
+                    && (uomEl.GetString() ?? string.Empty) == "kW")
+                {
+                    watts *= 1000.0;
+                }
+
                 if (attrs.TryGetProperty("total_increasing", out JsonElement ti))
                 {
                     kwh = ti.GetDouble();

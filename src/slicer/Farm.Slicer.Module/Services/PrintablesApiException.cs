@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services;
+﻿namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Raised when the Printables GraphQL API returns an error response, the model is not found,

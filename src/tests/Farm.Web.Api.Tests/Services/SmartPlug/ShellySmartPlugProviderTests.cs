@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using Farm.Web.Api.Services.SmartPlug;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
@@ -364,6 +364,122 @@ public class HomeAssistantSmartPlugProviderTests
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().BeNull();
+    }
+
+    // ─── Blocker 1 (round-3): kW → watts conversion ───────────────────────────
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenStateInKilowatts_ConvertsToWatts()
+    {
+        // HA entity reporting unit_of_measurement="kW" with state 1.5 must be stored as 1500 W.
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+
+        string stateJson = """
+            {
+                "entity_id": "sensor.plug_power",
+                "state": "1.5",
+                "attributes": {
+                    "unit_of_measurement": "kW"
+                }
+            }
+            """;
+
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+            });
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().NotBeNull();
+        reading!.WattsNow.Should().BeApproximately(1500.0, 0.001);
+    }
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenStateInWatts_DoesNotConvert()
+    {
+        // HA entity reporting unit_of_measurement="W" with state 250 must be stored as 250 W (no conversion).
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+
+        string stateJson = """
+            {
+                "entity_id": "sensor.plug_power",
+                "state": "250.0",
+                "attributes": {
+                    "unit_of_measurement": "W"
+                }
+            }
+            """;
+
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+            });
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().NotBeNull();
+        reading!.WattsNow.Should().BeApproximately(250.0, 0.001);
+    }
+
+    // ─── Blocker 2 (round-3): Enabled=false + env var set → provider is inert ─
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenIntegrationDisabledAndEnvVarSet_ReturnsNullWithoutHttpCall()
+    {
+        // Enabled=false must take priority over PFARM__HomeAssistant__Token.
+        // The strict HttpMessageHandler proves that no outbound HTTP call is attempted.
+        Dictionary<string, string?> configData = new()
+        {
+            ["HomeAssistant:Token"] = "env-override-token"
+        };
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(configData)
+            .Build();
+
+        HomeAssistantSettings disabledSettings = new()
+        {
+            Enabled = false,
+            BaseUrl = "http://ha.local:8123"
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(s => s.Get<HomeAssistantSettings>()).Returns(disabledSettings);
+
+        Mock<IServiceProvider> serviceProvider = new();
+        serviceProvider.Setup(sp => sp.GetService(typeof(ISettingsService))).Returns(settingsService.Object);
+
+        Mock<IServiceScope> scope = new();
+        scope.Setup(s => s.ServiceProvider).Returns(serviceProvider.Object);
+
+        Mock<IServiceScopeFactory> scopeFactory = new();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+
+        // Strict mock: any HTTP call throws, proving the provider is completely inert when disabled.
+        Mock<HttpMessageHandler> strictHandler = new(MockBehavior.Strict);
+#pragma warning disable CA2000
+        HttpClient httpClient = new(strictHandler.Object);
+#pragma warning restore CA2000
+        Mock<IHttpClientFactory> factory = new();
+        factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
+
+        HomeAssistantSmartPlugProvider provider = new(
+            factory.Object,
+            config,
+            scopeFactory.Object,
+            new Mock<ISensitiveDataProtector>().Object,
+            NullLogger<HomeAssistantSmartPlugProvider>.Instance);
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://ha.local:8123|sensor.plug_power", CancellationToken.None);
 
         reading.Should().BeNull();
     }

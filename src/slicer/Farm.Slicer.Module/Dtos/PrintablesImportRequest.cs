@@ -1,3 +1,3 @@
-namespace Farm.Slicer.Module.Dtos;
+﻿namespace Farm.Slicer.Module.Dtos;
 
 public sealed record PrintablesImportRequest(string Url);

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;

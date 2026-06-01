@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Services.Notifications;
 using FluentAssertions;
@@ -83,7 +83,10 @@ public class NotificationServicePushSubscriptionTests : IDisposable
         var userId = Guid.NewGuid();
         _dbContext.PushSubscriptions.Add(new PushSubscription
         {
-            UserId = userId, Endpoint = "https://push.example.com/existing", P256dh = "k", Auth = "a"
+            UserId = userId,
+            Endpoint = "https://push.example.com/existing",
+            P256dh = "k",
+            Auth = "a"
         });
         await _dbContext.SaveChangesAsync();
 

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Settings;
+﻿using Farm.Infrastructure.Settings;
 
 namespace Farm.Infrastructure.Services;
 

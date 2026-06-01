@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.NfcDevices;
+﻿namespace Farm.Infrastructure.Services.NfcDevices;
 
 /// <summary>
 /// Handles NFC tag binding lookup, SpoolLastSeenAt updates, and SignalR event broadcasting.

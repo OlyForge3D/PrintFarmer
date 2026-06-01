@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.SmartPlug;
+﻿using Farm.Web.Api.Services.SmartPlug;
 
 namespace Farm.Web.Api.Tests.Services.SmartPlug;
 

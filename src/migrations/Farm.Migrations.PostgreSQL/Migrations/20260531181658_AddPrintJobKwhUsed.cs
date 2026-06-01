@@ -2,27 +2,26 @@
 
 #nullable disable
 
-namespace Farm.Migrations.PostgreSQL.Migrations
+namespace Farm.Migrations.PostgreSQL.Migrations;
+
+/// <inheritdoc />
+public partial class AddPrintJobKwhUsed : Migration
 {
     /// <inheritdoc />
-    public partial class AddPrintJobKwhUsed : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<decimal>(
-                name: "KwhUsed",
-                table: "PrintJobs",
-                type: "numeric",
-                nullable: true);
-        }
+        migrationBuilder.AddColumn<decimal>(
+            name: "KwhUsed",
+            table: "PrintJobs",
+            type: "numeric",
+            nullable: true);
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "KwhUsed",
-                table: "PrintJobs");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "KwhUsed",
+            table: "PrintJobs");
     }
 }

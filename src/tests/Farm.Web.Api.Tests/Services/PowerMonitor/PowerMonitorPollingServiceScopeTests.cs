@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.PowerMonitor;
+﻿using Farm.Web.Api.Services.PowerMonitor;
 using Farm.Web.Api.Services.SmartPlug;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

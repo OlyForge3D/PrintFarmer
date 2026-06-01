@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain.Notifications;
+﻿using Farm.Infrastructure.Domain.Notifications;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
