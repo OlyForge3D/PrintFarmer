@@ -326,6 +326,30 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(MotionType.unknown.rawValue, "Unknown")
     }
 
+    // MARK: - String-only enum decoder coverage (#278)
+
+    func testAutoDispatchStateDecodesFromString() throws {
+        // Backend uses JsonStringEnumConverter; no int branch should exist.
+        let cases: [(Data, AutoDispatchState)] = [
+            (Data("\"None\"".utf8), .none),
+            (Data("\"PendingReady\"".utf8), .pendingReady),
+            (Data("\"Ready\"".utf8), .ready),
+            (Data("\"Dismissed\"".utf8), .dismissed),
+        ]
+        for (json, expected) in cases {
+            let state = try decoder.decode(AutoDispatchState.self, from: json)
+            XCTAssertEqual(state, expected)
+        }
+    }
+
+    func testAutoDispatchStateUnknownStringFallsBackToNone() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"totally_unknown\"".utf8)
+        )
+        XCTAssertEqual(state, .none)
+    }
+
     // MARK: - Edge Cases
 
     func testEmptyPrinterArrayDecodes() throws {
