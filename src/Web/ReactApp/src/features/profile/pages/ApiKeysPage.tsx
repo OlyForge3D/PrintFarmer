@@ -15,7 +15,11 @@ import {
   type ApiKeyDto,
 } from '@/services/apiKeysService';
 
-export function ApiKeysPage() {
+interface ApiKeysPageProps {
+  embedded?: boolean;
+}
+
+export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [newKeyName, setNewKeyName] = useState('');
@@ -160,13 +164,8 @@ export function ApiKeysPage() {
     return new Date(dateString).toLocaleString();
   };
 
-  return (
-    <PageTemplate
-      title="API Keys"
-      subtitle="Manage API keys for OctoPrint-compatible slicer integration"
-      icon={KeyIcon}
-    >
-      <div className="space-y-6">
+  const content = (
+    <div className="space-y-6">
         {/* Information Banner */}
         <div className="bg-pf-info/10 border border-pf-info rounded-lg p-4">
           <h3 className="font-semibold text-pf-text-primary mb-2">What are API Keys?</h3>
@@ -361,6 +360,15 @@ export function ApiKeysPage() {
           </p>
         </div>
       </div>
+  );
+
+  return embedded ? content : (
+    <PageTemplate
+      title="API Keys"
+      subtitle="Manage API keys for OctoPrint-compatible slicer integration"
+      icon={KeyIcon}
+    >
+      {content}
     </PageTemplate>
   );
 }

@@ -90,6 +90,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - 2026-05-26 — URL filter state + pagination: use `useUrlFilterState` with `filterable: false` on `page`/`pageSize` params, then call `setMany({ ...filterUpdate, page: 1 })` to reset pagination on filter changes. For debounced username input use the individual setter from `useUrlFilterState` — debounce is configured per-param in the config object.
 - 2026-05-26 — `Badge` component does not spread HTML attributes (only `children`, `variant`, `size`, `dot`, `className`). Don't put `aria-label` on `<Badge>`; wrap in a `<span>` or test by text content instead.
 - 2026-05-26 — `apiClient.get<T>()` is a public method on the ApiClient singleton returning `Promise<AxiosResponse<T>>`. Use it in services for new endpoints not yet wired into named methods on `apiClient` (e.g., while Lambert builds the backend in parallel). Access response body via `.data`.
+- 2026-06-01T15:18:38-07:00 — `SettingsShell` filtered search should narrow visible categories/sub-pages and keep the rendered page aligned with the normalized `tab`/`sub` params. Keep the standalone route components mapped in `SUB_PAGE_CONTENT` so search-driven deep links render the same page content as contextual `/printer-groups` and `/nfc-bindings` routes, and do not steal focus from the search box when the active category changes because of typing.
 
 ### External-reference-app Review Pointer — 2026-05-31
 

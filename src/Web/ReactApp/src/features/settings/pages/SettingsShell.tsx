@@ -22,6 +22,8 @@ import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
+import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
+import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage }))
@@ -66,13 +68,15 @@ const SUB_PAGE_CONTENT: Record<string, React.ReactNode> = {
   ),
   'hardware.cameras': <CamerasPage />,
   'hardware.nfc': <NfcDevicesPage />,
+  'hardware.printer-groups': <PrinterGroupsPage embedded />,
+  'hardware.nfc-bindings': <NfcBindingsPage embedded />,
   'hardware.locations': <LocationManagementAdminPage />,
   'hardware.custom-fields': <CustomFieldsAdminPage />,
   'data.tags': <TagAdminPage />,
   'data.quotas': <QuotaManagementPage />,
   'data.management': <DataManagementPage />,
   'users.accounts': <UserManagementPage />,
-  'users.api-keys': <ApiKeysPage />,
+  'users.api-keys': <ApiKeysPage embedded />,
   'users.audit': <LoginAuditPage />,
 };
 
@@ -82,28 +86,47 @@ export const SettingsShell: React.FC = () => {
   const requestedCategory = searchParams.get('tab');
   const requestedSubPage = searchParams.get('sub');
   const query = searchParams.get('q') || '';
+  const normalizedQuery = query.trim().toLowerCase();
 
   const activeCategory = useMemo(
     () => SETTINGS_CATEGORIES.some((category) => category.id === requestedCategory) ? requestedCategory : DEFAULT_CATEGORY,
     [requestedCategory]
   );
 
+  const shouldFocusSectionRef = useRef(false);
+
   const handleCategoryChange = useCallback(
     (categoryId: string) => {
+      shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('tab', categoryId);
-        // Set default sub-page for the new category
-        const defaultSub = getDefaultSubPage(categoryId);
-        if (defaultSub) {
-          next.set('sub', defaultSub);
+
+        const targetCategory = SETTINGS_CATEGORIES.find((category) => category.id === categoryId);
+        const matchingTargetSubPage = !normalizedQuery || !targetCategory
+          ? undefined
+          : targetCategory.subPages.find((subPage) =>
+              subPage.label.toLowerCase().includes(normalizedQuery)
+              || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
+            );
+
+        if (matchingTargetSubPage) {
+          next.set('sub', matchingTargetSubPage.id);
+        } else if (!normalizedQuery) {
+          const defaultSub = getDefaultSubPage(categoryId);
+          if (defaultSub) {
+            next.set('sub', defaultSub);
+          } else {
+            next.delete('sub');
+          }
         } else {
           next.delete('sub');
         }
+
         return next;
       });
     },
-    [setSearchParams]
+    [normalizedQuery, setSearchParams]
   );
 
   const handleSubPageChange = useCallback(
@@ -127,20 +150,21 @@ export const SettingsShell: React.FC = () => {
           next.delete('q');
         }
         return next;
-      });
+      }, { replace: true });
     },
     [setSearchParams]
   );
 
   // Filter categories and sub-pages based on search query
-  const { matchingCategoryIds, matchingSubPageIds, isFiltering } = useMemo(() => {
-    if (!query.trim()) {
-      return { matchingCategoryIds: undefined, matchingSubPageIds: undefined, isFiltering: false };
+  const { matchingCategoryIds, matchingSubPageIds, firstMatchingSubPageCategoryId, isFiltering } = useMemo(() => {
+    if (!normalizedQuery) {
+      return { matchingCategoryIds: undefined, matchingSubPageIds: undefined, firstMatchingSubPageCategoryId: undefined, isFiltering: false };
     }
 
-    const lower = query.toLowerCase();
+    const lower = normalizedQuery;
     const categoryIds: string[] = [];
     const subPageIds: string[] = [];
+    let firstSubPageCategoryId: string | undefined;
 
     for (const cat of SETTINGS_CATEGORIES) {
       const categoryMatches =
@@ -156,6 +180,7 @@ export const SettingsShell: React.FC = () => {
 
         if (subMatches) {
           subPageIds.push(sub.id);
+          firstSubPageCategoryId ??= cat.id;
           if (!categoryIds.includes(cat.id)) {
             categoryIds.push(cat.id);
           }
@@ -163,8 +188,13 @@ export const SettingsShell: React.FC = () => {
       }
     }
 
-    return { matchingCategoryIds: categoryIds, matchingSubPageIds: subPageIds, isFiltering: true };
-  }, [query]);
+    return {
+      matchingCategoryIds: categoryIds,
+      matchingSubPageIds: subPageIds,
+      firstMatchingSubPageCategoryId: firstSubPageCategoryId,
+      isFiltering: true,
+    };
+  }, [normalizedQuery]);
 
   // Auto-navigate to first matching category if current is not in results
   const effectiveCategory = useMemo(() => {
@@ -174,25 +204,66 @@ export const SettingsShell: React.FC = () => {
     if (matchingCategoryIds.includes(activeCategory)) {
       return activeCategory;
     }
+    if (firstMatchingSubPageCategoryId && matchingCategoryIds.includes(firstMatchingSubPageCategoryId)) {
+      return firstMatchingSubPageCategoryId;
+    }
     return matchingCategoryIds[0];
-  }, [activeCategory, matchingCategoryIds, isFiltering]);
+  }, [activeCategory, firstMatchingSubPageCategoryId, isFiltering, matchingCategoryIds]);
 
   const currentCategory = useMemo(
     () => SETTINGS_CATEGORIES.find((category) => category.id === effectiveCategory) ?? SETTINGS_CATEGORIES[0],
     [effectiveCategory]
   );
 
+  const currentCategoryMatchesQuery = useMemo(() => {
+    if (!normalizedQuery) {
+      return false;
+    }
+
+    return currentCategory.label.toLowerCase().includes(normalizedQuery)
+      || currentCategory.keywords.some((keyword) => keyword.includes(normalizedQuery));
+  }, [currentCategory, normalizedQuery]);
+
+  const directMatchingCurrentSubPageIds = useMemo(() => {
+    if (!isFiltering || !matchingSubPageIds) {
+      return [];
+    }
+
+    return currentCategory.subPages
+      .map((subPage) => subPage.id)
+      .filter((subPageId) => matchingSubPageIds.includes(subPageId));
+  }, [currentCategory, isFiltering, matchingSubPageIds]);
+
+  const matchingCurrentSubPageIds = useMemo(() => {
+    if (directMatchingCurrentSubPageIds.length > 0) {
+      return directMatchingCurrentSubPageIds;
+    }
+
+    if (currentCategoryMatchesQuery) {
+      return currentCategory.subPages.map((subPage) => subPage.id);
+    }
+
+    return [];
+  }, [currentCategory, currentCategoryMatchesQuery, directMatchingCurrentSubPageIds]);
+
   const activeSubPage = useMemo(() => {
     if (currentCategory.subPages.length === 0) {
       return '';
     }
 
-    if (requestedSubPage && currentCategory.subPages.some((subPage) => subPage.id === requestedSubPage)) {
-      return requestedSubPage;
+    const requestedSubPageIsValid = requestedSubPage && currentCategory.subPages.some((subPage) => subPage.id === requestedSubPage);
+    if (requestedSubPageIsValid) {
+      if (!isFiltering || matchingCurrentSubPageIds.length === 0 || matchingCurrentSubPageIds.includes(requestedSubPage)) {
+        return requestedSubPage;
+      }
+    }
+
+    if (matchingCurrentSubPageIds.length > 0) {
+      return matchingCurrentSubPageIds[0];
     }
 
     return getDefaultSubPage(currentCategory.id);
-  }, [currentCategory, requestedSubPage]);
+  }, [currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage]);
 
   const hasSubTabs = currentCategory.subPages.length >= 2;
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -210,12 +281,66 @@ export const SettingsShell: React.FC = () => {
   }, [currentCategory, activeSubPage, hasSubTabs]);
 
   useEffect(() => {
+    if (isFiltering && matchingCategoryIds?.length === 0) {
+      if (requestedCategory === null && requestedSubPage === null) {
+        return;
+      }
+
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('tab');
+        next.delete('sub');
+        return next;
+      }, { replace: true });
+      return;
+    }
+
+    const shouldSyncCategory = isFiltering || requestedCategory !== null;
+    const shouldSyncSub = requestedSubPage !== null
+      || (activeSubPage !== '' && currentCategory.subPages.length > 0 && (requestedCategory !== null || isFiltering));
+    const categoryMismatch = shouldSyncCategory && requestedCategory !== effectiveCategory;
+    const subMismatch = shouldSyncSub && (requestedSubPage ?? '') !== activeSubPage;
+    if (!categoryMismatch && !subMismatch) {
+      return;
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (shouldSyncCategory) {
+        next.set('tab', effectiveCategory);
+      }
+      if (shouldSyncSub) {
+        if (activeSubPage) {
+          next.set('sub', activeSubPage);
+        } else {
+          next.delete('sub');
+        }
+      }
+      return next;
+    }, { replace: true });
+  }, [
+    activeSubPage,
+    currentCategory.subPages.length,
+    effectiveCategory,
+    isFiltering,
+    matchingCategoryIds,
+    requestedCategory,
+    requestedSubPage,
+    setSearchParams,
+  ]);
+
+  useEffect(() => {
     if (previousCategoryRef.current === null) {
       previousCategoryRef.current = currentCategory.id;
       return;
     }
 
     if (previousCategoryRef.current === currentCategory.id) {
+      return;
+    }
+
+    if (!shouldFocusSectionRef.current) {
+      previousCategoryRef.current = currentCategory.id;
       return;
     }
 
@@ -230,6 +355,7 @@ export const SettingsShell: React.FC = () => {
       sectionHeadingRef.current?.focus();
     }
 
+    shouldFocusSectionRef.current = false;
     previousCategoryRef.current = currentCategory.id;
   }, [currentCategory.id, hasSubTabs, activeSubPage]);
 
@@ -311,7 +437,7 @@ export const SettingsShell: React.FC = () => {
             subPages={currentCategory.subPages}
             activeSubPage={activeSubPage}
             onSubPageChange={handleSubPageChange}
-            matchingSubPageIds={matchingSubPageIds}
+            matchingSubPageIds={matchingCurrentSubPageIds}
             isFiltering={isFiltering}
             ariaLabel={`${currentCategory.label} settings`}
           />

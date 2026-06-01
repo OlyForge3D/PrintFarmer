@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import clsx from 'clsx';
 import { Badge } from '@/common/components/ui';
 import type { SettingsSubPage } from '@/features/settings/types';
@@ -29,6 +29,14 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
 }) => {
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
+  const visibleSubPages = useMemo(() => {
+    if (!isFiltering || !matchingSubPageIds) {
+      return subPages;
+    }
+
+    return subPages.filter((subPage) => matchingSubPageIds.includes(subPage.id));
+  }, [isFiltering, matchingSubPageIds, subPages]);
+
   // Store ref for each tab
   const setTabRef = useCallback((id: string, el: HTMLButtonElement | null) => {
     if (el) {
@@ -46,11 +54,11 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
       switch (e.key) {
         case 'ArrowRight':
           e.preventDefault();
-          nextIndex = index < subPages.length - 1 ? index + 1 : 0;
+          nextIndex = index < visibleSubPages.length - 1 ? index + 1 : 0;
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          nextIndex = index > 0 ? index - 1 : subPages.length - 1;
+          nextIndex = index > 0 ? index - 1 : visibleSubPages.length - 1;
           break;
         case 'Home':
           e.preventDefault();
@@ -58,17 +66,17 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
           break;
         case 'End':
           e.preventDefault();
-          nextIndex = subPages.length - 1;
+          nextIndex = visibleSubPages.length - 1;
           break;
       }
 
       if (nextIndex !== null) {
-        const nextSubPage = subPages[nextIndex];
+        const nextSubPage = visibleSubPages[nextIndex];
         const nextTab = tabRefs.current.get(nextSubPage.id);
         nextTab?.focus();
       }
     },
-    [subPages]
+    [visibleSubPages]
   );
 
   const isMatchingSubPage = useCallback(
@@ -82,8 +90,8 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
     [isFiltering, matchingSubPageIds]
   );
 
-  // Don't render if only one or zero sub-pages
-  if (subPages.length < 2) {
+  // During filtering, keep a single matching result visible so search behaves like navigation.
+  if (visibleSubPages.length === 0 || (!isFiltering && visibleSubPages.length < 2)) {
     return null;
   }
 
@@ -93,7 +101,7 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
       aria-label={ariaLabel}
       className="flex items-center gap-1 border-b border-pf-border mb-4 overflow-x-auto"
     >
-      {subPages.map((subPage, index) => {
+      {visibleSubPages.map((subPage, index) => {
         const isActive = activeSubPage === subPage.id;
         const isMatching = isMatchingSubPage(subPage.id);
 

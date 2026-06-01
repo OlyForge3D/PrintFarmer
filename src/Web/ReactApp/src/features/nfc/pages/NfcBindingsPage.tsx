@@ -15,32 +15,31 @@ function formatTimeAgo(dateStr?: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function NfcBindingsPage() {
+interface NfcBindingsPageProps {
+  embedded?: boolean;
+}
+
+export function NfcBindingsPage({ embedded = false }: NfcBindingsPageProps) {
   const { data: bindings = [], isLoading, error } = useNfcBindings();
   const deleteMutation = useDeleteNfcBinding();
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   if (isLoading) {
-    return <PageTemplate title="NFC Tag Bindings"><Spinner size="lg" /></PageTemplate>;
+    const loadingContent = <Spinner size="lg" />;
+    return embedded ? loadingContent : <PageTemplate title="NFC Tag Bindings">{loadingContent}</PageTemplate>;
   }
 
   if (error) {
-    return (
-      <PageTemplate title="NFC Tag Bindings">
-        <div className="p-4 text-pf-error">Failed to load NFC bindings: {String(error)}</div>
-      </PageTemplate>
-    );
+    const errorContent = <div className="p-4 text-pf-error">Failed to load NFC bindings: {String(error)}</div>;
+    return embedded ? errorContent : <PageTemplate title="NFC Tag Bindings">{errorContent}</PageTemplate>;
   }
 
   const handleUnbind = (id: string) => {
     deleteMutation.mutate(id, { onSuccess: () => setConfirmId(null) });
   };
 
-  return (
-    <PageTemplate
-      title="NFC Tag Bindings"
-      subtitle={`${bindings.length} bound tag${bindings.length !== 1 ? 's' : ''}`}
-    >
+  const content = (
+    <>
       {bindings.length === 0 ? (
         <Card>
           <div className="p-8 text-center text-pf-text-secondary">
@@ -93,6 +92,15 @@ export function NfcBindingsPage() {
           ))}
         </div>
       )}
+    </>
+  );
+
+  return embedded ? content : (
+    <PageTemplate
+      title="NFC Tag Bindings"
+      subtitle={`${bindings.length} bound tag${bindings.length !== 1 ? 's' : ''}`}
+    >
+      {content}
     </PageTemplate>
   );
 }

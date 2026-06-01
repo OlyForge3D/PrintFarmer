@@ -41,10 +41,12 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     id: 'hardware',
     label: 'Hardware',
-    keywords: ['printer', 'hardware', 'nozzle', 'bed', 'camera', 'nfc', 'location', 'custom field', 'device', 'webcam'],
+    keywords: ['printer', 'hardware', 'nozzle', 'bed', 'camera', 'nfc', 'location', 'custom field', 'device', 'webcam', 'group', 'binding'],
     subPages: [
       { id: 'cameras', label: 'Cameras', keywords: ['camera', 'webcam', 'stream', 'video'] },
       { id: 'nfc', label: 'NFC Devices', keywords: ['nfc', 'tag', 'reader', 'rfid'] },
+      { id: 'printer-groups', label: 'Printer Groups', keywords: ['printer', 'group', 'grouping', 'cluster'] },
+      { id: 'nfc-bindings', label: 'NFC Bindings', keywords: ['nfc', 'binding', 'bind', 'tag', 'assignment'] },
       { id: 'locations', label: 'Locations', keywords: ['location', 'room', 'area', 'zone'] },
       { id: 'custom-fields', label: 'Custom Fields', keywords: ['custom', 'field', 'attribute', 'metadata'] },
     ],
