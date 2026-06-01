@@ -191,6 +191,11 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 ### Learnings
 
 - 2026-05-31 — OrcaSlicer bed type override key is `curr_bed_type` (not `bed_type`). The `KNOWN_ENUMS.bed_type` in `metadataTypes.ts` lists the string values OrcaSlicer accepts (e.g. "Cool Plate", "Textured PEI Plate").
+## 2026-05-31 — Archive Summary
+
+Frontend architect work through 2026-05-31 archived. Recent focus: Settings UI migration (16 nav items → tabs), bed-type overrides, preview modals, and advanced disclosure controls.
+
+S.bed_type` in `metadataTypes.ts` lists the string values OrcaSlicer accepts (e.g. "Cool Plate", "Textured PEI Plate").
 - 2026-05-31 — When tests mock `@/features/slicer/components/settings`, any new named exports from that barrel must be added to the mock object or tests will throw "No export defined on mock" errors.
 
 ## 2026-05-31 — Settings Nav Migration (#358)
@@ -209,3 +214,27 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 - The `SettingsPage` (admin config) rendered an h2 "Settings" which collided with the h1 shell heading in tests — use `level` matcher for disambiguation.
 - `SettingsTabStrip` now accepts optional `tabContent` record for rendering real content vs placeholder — backward compatible with empty tabs.
 For full historical context, see `.squad/decisions.md` and `.squad/orchestration-log.md`.
+# Ripley Summary — Archive (through 2026-05-31)
+
+**Context:** Frontend architect and API integration specialist. Owns printer-card UX, BedClearBanner behavior, frontend cache/signal updates, and React integration testing patterns.
+
+**Key Work Areas:**
+- Printer card and banner components: Compact-card refactoring, BedClearBanner auto-dispatch, stale payload handling
+- Settings migration: 16 nav items → tabbed interface (PR #376)
+- UI components: CollapsibleSection controls, PreviewModal, GcodePreviewModal
+- Bed-type overrides: OrcaSlicer integration (PR #374)
+- Quick-slice modal: Advanced settings disclosure (PR #372)
+- Artifact URL helpers: Preview button with artifact metadata (PR #373)
+
+**Recent PRs (2026-05-31):**
+- PR #376: Settings nav migration (16 items to tabs)
+- PR #374: Bed-type override with OrcaSlicer
+- PR #373: G-code preview button + artifact URL helpers
+- PR #372: Advanced settings disclosure control
+
+**Test Patterns:** Focused React integration tests with controlled component patterns. MSW setup for API mocking. localStorage persistence testing.
+
+**Next Focus:** Settings UI completion, preview modal integration, test coverage expansion.
+
+---
+

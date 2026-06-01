@@ -143,7 +143,7 @@ struct JogSubgroup: View {
         .disabled(!isInteractive && !shouldRevealDisabledTooltipOnTap)
         .disabledControlStyle(isDisabled: !isInteractive && !isPending)
         .errorBorderHighlight(isActive: hasError)
-        .accessibilityLabel(jogAccessibilityLabel(direction: direction, stepLabelText: stepLabelText))
+        .accessibilityLabel(jogAccessibilityLabel(direction: direction))
         .accessibilityHint(jogAccessibilityHint(direction: direction, stepLabelText: stepLabelText, hasError: hasError))
         .accessibilityValue(jogAccessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : .isButton)
@@ -177,28 +177,28 @@ struct JogSubgroup: View {
         action()
     }
 
-    private func jogAccessibilityLabel(direction: Double, stepLabelText: String) -> String {
+    func jogAccessibilityLabel(direction: Double) -> String {
         if direction > 0 {
-            return String(localized: "Jog \(selectedAxis) plus \(stepLabelText) millimeters", comment: "VoiceOver label for positive jog")
+            return String(localized: "Jog forward", comment: "VoiceOver label for positive jog per spec §4.1")
         }
-        return String(localized: "Jog \(selectedAxis) minus \(stepLabelText) millimeters", comment: "VoiceOver label for negative jog")
+        return String(localized: "Jog backward", comment: "VoiceOver label for negative jog per spec §4.1")
     }
 
-    private func jogAccessibilityHint(direction: Double, stepLabelText: String, hasError: Bool) -> String {
+    func jogAccessibilityHint(direction: Double, stepLabelText: String, hasError: Bool) -> String {
         if hasError, let message = viewModel.lastError?.message {
             return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last jog command failed")
         }
-        if !viewModel.canControl, let reason = viewModel.blockedReason {
-            return String(localized: "Disabled. \(reason)", comment: "VoiceOver hint when jog is disabled")
+        if !viewModel.canControl {
+            return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
         if direction > 0 {
-            return String(localized: "Moves \(selectedAxis) plus \(stepLabelText) millimeters.", comment: "VoiceOver hint for positive jog")
+            return String(localized: "Moves \(selectedAxis) positive \(stepLabelText) millimeters.", comment: "VoiceOver hint for positive jog per spec §4.1")
         }
-        return String(localized: "Moves \(selectedAxis) minus \(stepLabelText) millimeters.", comment: "VoiceOver hint for negative jog")
+        return String(localized: "Moves \(selectedAxis) negative \(stepLabelText) millimeters.", comment: "VoiceOver hint for negative jog per spec §4.1")
     }
 
-    private func jogAccessibilityValue(isPending: Bool, hasError: Bool) -> String {
-        if isPending { return String(localized: "Sending command", comment: "VoiceOver value while a jog command is in flight") }
+    func jogAccessibilityValue(isPending: Bool, hasError: Bool) -> String {
+        if isPending { return String(localized: "Pending", comment: "VoiceOver value while a jog command is in flight per spec §4.1") }
         if hasError { return String(localized: "Failed", comment: "VoiceOver value when last jog failed") }
         return ""
     }

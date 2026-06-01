@@ -19,6 +19,7 @@ struct PreheatSubgroup: View {
     @State private var disabledTapMessage: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Fixed display order matching the UX spec.
     static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
@@ -78,8 +79,16 @@ struct PreheatSubgroup: View {
     }
 
     private var gridColumns: [GridItem] {
-        // iPad (regular width): 1×4 row. Phone / compact: 2×2 grid.
-        let count = horizontalSizeClass == .regular ? 4 : 2
+        // iPad regular: 4 columns. Accessibility type sizes: 1 column.
+        // Phone / compact: 2 columns per spec §4.1 (collapses at accessibility sizes).
+        let count: Int
+        if dynamicTypeSize.isAccessibilitySize {
+            count = 1
+        } else if horizontalSizeClass == .regular {
+            count = 4
+        } else {
+            count = 2
+        }
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
     }
 
@@ -109,7 +118,7 @@ struct PreheatSubgroup: View {
         .disabledControlStyle(isDisabled: !isInteractive && !isPending, cornerRadius: 8)
         .errorBorderHighlight(isActive: hasError, cornerRadius: 8)
         .accessibilityLabel(accessibilityLabel(preset: preset, isPending: isPending))
-        .accessibilityHint(accessibilityHint(canControl: canControl, hasError: hasError))
+        .accessibilityHint(accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
         .help(viewModel.blockedReason ?? "")
@@ -179,33 +188,32 @@ struct PreheatSubgroup: View {
 
     // MARK: - Accessibility strings
 
-    private func accessibilityLabel(preset: PreheatPreset, isPending: Bool) -> String {
+    // Exposed internal (not private) so accessibility tests can validate
+    // that label and hint strings match spec §4.1 exactly.
+    func accessibilityLabel(preset: PreheatPreset, isPending: Bool) -> String {
         if isPending {
             return preset == .coolDown
-                ? String(localized: "Cooling down, in progress", comment: "VoiceOver: Cool Down button while command is in flight")
-                : String(localized: "Preheating to \(preset.spokenName), in progress", comment: "VoiceOver: preheat button while command is in flight")
+                ? String(localized: "Cooling down, in progress", comment: "VoiceOver: Cool Down while in flight")
+                : String(localized: "Preheat for \(preset.spokenName), in progress", comment: "VoiceOver: preheat button while in flight")
         }
         if preset == .coolDown {
-            return String(localized: "Cool down, 0 degrees hotend, 0 degrees bed", comment: "VoiceOver: Cool Down button idle state")
+            return String(localized: "Cool down", comment: "VoiceOver: Cool Down idle label per spec §4.1")
         }
-        let bedSegment = (viewModel.capabilities?.supportsBedTemperature == false)
-            ? String(localized: "no heated bed", comment: "VoiceOver bed segment when printer has no heated bed")
-            : String(localized: "\(Int(preset.bed)) degrees bed", comment: "VoiceOver bed segment temperature")
-        return String(localized: "Preheat to \(preset.spokenName), \(Int(preset.hotend)) degrees hotend, \(bedSegment)", comment: "VoiceOver: preheat button idle state")
+        return String(localized: "Preheat for \(preset.spokenName)", comment: "VoiceOver: preheat button idle label per spec §4.1")
     }
 
-    private func accessibilityHint(canControl: Bool, hasError: Bool) -> String {
+    func accessibilityHint(preset: PreheatPreset, canControl: Bool, hasError: Bool) -> String {
         if hasError, let message = viewModel.lastError?.message {
             return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last preheat command failed")
         }
-        if !canControl, let reason = viewModel.blockedReason {
-            return String(localized: "Disabled. \(reason)", comment: "VoiceOver hint when controls are disabled")
+        if !canControl {
+            return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        return ""
+        return preset.a11yHint(hasBed: viewModel.capabilities?.supportsBedTemperature != false)
     }
 
-    private func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
-        if isPending { return String(localized: "Sending command", comment: "VoiceOver value while a control command is in flight") }
+    func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
+        if isPending { return String(localized: "Pending", comment: "VoiceOver value while a control command is in flight per spec §4.1") }
         if hasError { return String(localized: "Failed", comment: "VoiceOver value when last command failed") }
         return ""
     }
@@ -247,6 +255,20 @@ private extension PreheatPreset {
 
     var temperatureLabel: String {
         "\(Int(hotend))° / \(Int(bed))°"
+    }
+
+    /// VoiceOver idle hint per spec §4.1. Omits bed segment when printer has no heated bed.
+    func a11yHint(hasBed: Bool) -> String {
+        switch self {
+        case .coolDown:
+            return String(localized: "Sets hotend and bed to 0 degrees.", comment: "VoiceOver: Cool Down idle hint")
+        case .pla, .petg, .abs:
+            if hasBed {
+                return String(localized: "Sets hotend to \(Int(hotend)) degrees, bed to \(Int(bed)) degrees.", comment: "VoiceOver: preheat idle hint with bed")
+            } else {
+                return String(localized: "Sets hotend to \(Int(hotend)) degrees.", comment: "VoiceOver: preheat idle hint, hotend-only")
+            }
+        }
     }
 }
 
