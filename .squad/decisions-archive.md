@@ -6819,3 +6819,813 @@ PR #321 (sync/main-to-dev-2026-05-29) was broken — it would have deleted 14,54
 - PR #321 (broken sync, closed)
 - PR #329 (corrected sync, preserves .squad/)
 - Parker history entry: 2026-05-30 main→dev sync redo
+---
+## Merged from Inbox: 2026-05-31T09:05:00-07:00
+
+# Decision Inbox: Bambuddy Feature Adoption — Phased Rollout Plan
+
+**Author:** Dallas
+**Date:** 2026-05-31
+**Status:** Proposed (awaiting Brady approval on decision points)
+
+## Decision
+
+Adopt a subset of bambuddy features into PrintFarmer across 4 phases, prioritizing G-code preview, Quick Slice UX, notifications, and per-print cost tracking. Each phase ships independently.
+
+## Architectural Calls
+
+1. **Client-side 3MF parsing DEFERRED** — bambuddy's main-thread JSZip approach is a known performance risk. We will not copy it. When 3MF client-side parsing is needed (Phase 2 multi-plate picker), it will use a Web Worker-based design. Until then, server-side 3MF metadata extraction (already in `Model3DFileService`) is sufficient.
+
+2. **gcode-preview v2 (stable) over v3 (alpha)** — v3 has API churn and isn't production-ready. We ship on v2.18.x. Migration to v3 happens when it stabilizes.
+
+3. **No worker built into gcode-preview** — We accept main-thread parsing for v1 (files <10MB). Large-file guardrails (file-size warning, chunked loading) are Phase 1b follow-up work, not blockers.
+
+4. **Notification system uses IProvider pattern** — matches bambuddy's `ProviderType` enum + interface approach. Phased: webhook + Discord + Telegram first; remaining providers are separate PRs.
+
+5. **Quick Slice does NOT replace NewSliceJobPage** — it's an alternative entry point for simple jobs. Raw-param SlicerConfigModal is hidden behind "Advanced" but not removed.
+
+## Don't Chase List
+
+| Feature | Reason |
+|---------|--------|
+| Virtual printer emulation (MQTT/FTP/RTSP proxy) | Bambu-specific protocol debt; PrintFarmer is backend-agnostic |
+| SpoolBuddy NFC hardware (ESP32 + firmware) | Out of software-only scope |
+| MakerWorld direct import | Depends on Bambu Cloud token; not applicable to our multi-vendor users |
+| LDAP/OIDC/TOTP auth | PrintFarmer auth is out of scope for this round |
+| Multi-language i18n | Large effort, orthogonal to feature work |
+| Smart plug integration | Hardware dependency; can revisit when energy tracking demand is proven |
+| GitHub backup | Not relevant to PrintFarmer's deployment model |
+| Layer timelapse → MP4 | Deferred to post-camera-infrastructure (go2rtc sidecar must land first) |
+
+## Scope Boundary
+
+This plan covers Phases 1-4 only. Layer timelapse, print queue scheduler with SJF, and multi-plate 3MF picker are explicitly future work beyond this round.
+
+---
+
+# Decision Inbox: Bambuddy Slicing UX Comparison Findings
+
+**Author:** Brett (Researcher)
+**Date:** 2026-05-31
+**Status:** Merged from inbox
+
+### Finding 1: PrintFarmer should add a "Quick Slice" modal
+
+**Evidence:** bambuddy's `SliceModal.tsx` exposes exactly three dropdowns (printer preset, process preset, filament preset × N slots) plus a bed-type override and a plate picker. Zero individual parameter sliders. This is deliberately farm-friendly: operators pick a pre-validated config triplet and hit Slice. No per-job layer height drift, no support-checkbox accidents.
+
+PrintFarmer's `SlicerConfigModal.tsx` offers the inverse: sliders for layer height, infill, speed, nozzle temp, bed temp — but its profile selectors are secondary. For a farm context the preset-first model is safer.
+
+**Recommendation:** Add a "Quick Slice" mode (could be a separate entry point or a tab in `SlicerConfigModal`) that shows only: printer profile, process profile, filament profile(s), bed type override, plate picker. Hide sliders unless the user explicitly expands "Advanced". The current full-settings panel stays but shouldn't be the default entry point.
+
+---
+
+### Finding 2: Adopt BambuStudio Bundle (.bbscfg) import for "canonical farm config"
+
+**Evidence:** bambuddy's `SlicerBundlesPanel.tsx` + `backend/app/services/slicer_api.py` support importing a `.bbscfg` BambuStudio config bundle. In "bundle mode" the user selects the bundle (locks the printer) and picks process + filament from names within that bundle's extracted directory. This pins every slice job to the exact settings the operator validated in BambuStudio — no accidental cloud preset substitutions.
+
+`backend/app/schemas/slicer.py:SliceBundleSpec` shows the wire contract: `bundle_id`, `printer_name`, `process_name`, `filament_names[]`.
+
+**Recommendation:** Evaluate adding `.orca_printer` bundle upload to PrintFarmer's slicer settings (we already have the format spec from the 2026-04-17 research). A "Slice from bundle" mode in `NewSliceJobPage` would let farm operators lock a canonical OrcaSlicer config bundle per printer and prevent per-job profile drift.
+
+---
+
+### Finding 3: PrintFarmer's gcode upload advantage — preserve and document it
+
+**Evidence:** bambuddy **actively rejects** raw `.gcode` uploads (`backend/app/api/routes/library.py:167-180`) because Bambu printers require `.gcode.3mf` containers. Error message explicitly says "Raw .gcode files can't be printed on Bambu printers."
+
+PrintFarmer supports raw gcode upload via `apiClient.uploadGcodeFile()` → `POST /gcode-files/upload` and configurable `allowedExtensions` via `PUT /gcode-files/settings`. This is a genuine differentiator for multi-backend farms (Moonraker, PrusaLink, FlashForge, SDCP all accept raw gcode natively).
+
+**Recommendation:** Document this explicitly in PrintFarmer's feature positioning. The gcode upload pathway is a competitive advantage for non-Bambu fleets. Do NOT remove it. If we add Bambu backend support in the future, add per-printer validation at send time (not at upload time) so the library stays backend-agnostic.
+
+---
+
+### Finding 4: Smart filament auto-selection by type + color proximity
+
+**Evidence:** `frontend/src/components/SliceModal.tsx:123-164` in bambuddy scores filament presets for each AMS slot by:
+1. Type match (`PLA == PLA` → +10 points)
+2. Color proximity (exact hex match → +5, approximate → +1–3)
+3. Tier bonus (local → 1.5×, cloud → 1.0×, standard → 0.5×)
+4. Compatibility filter (rejects presets flagged as printer-incompatible)
+
+PrintFarmer's filament picker (`FilamentProfileSelector.tsx`, `CascadingMenuDropdown.tsx:FilamentProfileDropdown`) is manual — no auto-selection.
+
+**Recommendation:** Implement color+type-aware auto-pick for the filament profile selector on `NewSliceJobPage`. When a 3MF source carries filament slot metadata (type + color from `Metadata/plate_N.json`), pre-select the closest-matching filament profile automatically. This removes the most common user error in multi-color jobs (wrong filament preset for a slot).
+
+---
+
+# Decision Inbox: Bambuddy Feature Sweep — Top Adoption Candidates
+
+**Source:** brett-3 thread, 2026-05-31
+**Requested by:** Brady (Jeff Papiez)
+
+## Features Recommended for Team-Level Adoption Discussion
+
+### 1. Per-Print Cost + Energy Tracking
+
+**What:** Every print log entry records `filament_used_grams`, `cost`, `energy_kwh`, and `energy_cost`. Smart plug energy snapshots feed the energy fields automatically.
+
+**Why now:** Farm operators increasingly ask "what does this print cost me?" — materials + electricity. This is the top ROI question for commercial print farms. bambuddy tracks it in `backend/app/models/print_log.py` via a simple Float column pattern; the hard part is the smart plug polling loop, not the schema. PrintFarmer already has a print history concept — extending it with these four fields is low schema risk, medium UI effort.
+
+**Effort:** M (schema migration + smart plug polling + UI display on history page)
+
+---
+
+### 2. 8-Provider Notification System with User-Level Prefs
+
+**What:** A pluggable notification system supporting email, Telegram, Discord, generic webhook, ntfy, Pushover, CallMeBot/WhatsApp, and Home Assistant — all configurable per-user via `user_email_preferences`-style opt-ins.
+
+**Why now:** Print farm users want to know when prints finish, fail, or the queue is empty — and they want it on the channel they already use (often Telegram or Discord, not email). bambuddy's `backend/app/schemas/notification.py` ProviderType enum and `backend/app/services/notification_service.py` show a clean provider-dispatch pattern that translates directly to C#/interfaces. PrintFarmer currently has limited notification surface. This is a clear differentiator versus farm tools with email-only.
+
+**Effort:** M (provider interface + 3-4 core providers + settings UI; can ship in phases)
+
+---
+
+### 3. Layer-by-Layer Timelapse → MP4
+
+**What:** Per-print timelapse assembled from per-layer camera snapshots, stitched with ffmpeg into an MP4 and attached to the print archive.
+
+**Why now:** Timelapse is the #1 social/showcase feature users ask for, and it gives visual evidence for failure post-mortems. bambuddy does this in `backend/app/services/layer_timelapse.py`. PrintFarmer already has camera snapshot infrastructure from the camera platform work; the gap is the per-layer trigger from MQTT layer-change events and the ffmpeg stitch step. Medium effort, high user delight.
+
+**Effort:** M (layer-change MQTT trigger + frame accumulator + ffmpeg stitch + archive attach)
+
+---
+
+### 4. MakerWorld Direct Import
+
+**What:** User pastes a `makerworld.com/models/...` URL into bambuddy; bambuddy resolves the model, fetches the 3MF via the Bambu Cloud API token (same auth as printer telemetry), and imports it into the file library — no browser download step.
+
+**Why now:** MakerWorld is the dominant Bambu ecosystem model repository. Users already have a Bambu Cloud token in PrintFarmer for printer telemetry. The import path (`backend/app/services/makerworld.py`) reuses that token and talks to `api.bambulab.com/v1/design-service/*` — not the Cloudflare-gated website. Risk: Bambu could change the API; impact is isolated to the import feature.
+
+**Effort:** S-M (HTTP client + URL resolver + library ingest; no new auth needed if token already present)
+
+---
+
+## Features Recommended Against
+
+### Virtual Printer Emulation
+
+bambuddy implements a full MQTT broker + FTP server + RTSP proxy that makes itself look like a Bambu Lab printer to OrcaSlicer/BambuStudio. The goal is queue-based dispatch without changing slicer config. **PrintFarmer should not chase this.** Reasons:
+- Deep Bambu-specific protocol work with no benefit for non-Bambu backends
+- PrintFarmer's architecture dispatches via the slicer CLI and file upload, not by impersonating firmware — that's cleaner and multi-backend compatible
+- Maintenance liability: Bambu can break this silently with any firmware update
+
+### SpoolBuddy NFC Hardware Sub-System
+
+bambuddy ships a companion ESP32 device that writes NDEF tags and auto-assigns spools on scan. Cool feature, but requires hardware manufacturing/distribution support. PrintFarmer is software-only. Not in scope.
+
+---
+## Decision Record: Consider G-code toolpath preview parity from bambuddy
+
+**Author:** Brett
+**Date:** 2026-05-31
+**Status:** Proposed
+
+### Summary
+
+bambuddy renders sliced G-code in the browser with `gcode-preview`, layer controls,
+filament color mapping, and archive/library entry points. PrintFarmer should evaluate
+whether our artifact viewer gives equivalent toolpath-level feedback for sliced jobs.
+
+### Evidence
+
+- `frontend/package.json:31-44` depends on `@types/three`, `gcode-preview`, and `three`.
+- `frontend/src/components/GcodeViewer.tsx:51-62` creates a `WebGLPreview` with build volume,
+  extrusion rendering, travel moves disabled, and filament colors.
+- `frontend/src/components/GcodeViewer.tsx:139-145` processes raw G-code, counts layers, and
+  renders the result.
+- `frontend/src/pages/ArchivesPage.tsx:225-245` routes archive preview into the G-code viewer
+  when sliced G-code is available.
+
+### Why This May Help PrintFarmer
+
+A toolpath viewer gives users confidence that a slice is printable before dispatching to a
+printer, especially for farm workflows where the slicing worker is remote from the browser.
+If PrintFarmer already has mesh preview, this would complement it with post-slice validation.
+---
+## Decision Record: Consider a richer slice progress contract
+
+**Author:** Brett
+**Date:** 2026-05-31
+**Status:** Proposed
+
+### Summary
+
+bambuddy wires a request-scoped slicer progress stream from sidecar to backend job state and
+polling UI, including multi-plate context. PrintFarmer should compare this against slicer-host
+SignalR events and ensure we expose similarly specific phase, percentage, and plate metadata.
+
+### Evidence
+
+- `backend/app/api/routes/library.py:3103-3119` creates a `request_id` and forwards sidecar
+  progress snapshots into the slice dispatcher.
+- `backend/app/services/slicer_api.py:290-328` polls `/slice/progress/{request_id}` while the
+  blocking `/slice` request runs.
+- `backend/app/api/routes/library.py:3179-3197` wraps progress for multi-plate slice-all with
+  plate index/count metadata.
+- `backend/app/api/routes/slice_jobs.py:38-42` returns live progress in job status responses.
+
+### Why This May Help PrintFarmer
+
+More granular progress reduces the perceived opacity of remote slicing and helps users
+understand whether time is being spent on profile resolution, arranging, slicing, or artifact
+packaging. It also gives support/debugging a stronger breadcrumb trail for failed slices.
+---
+## Decision Record: dev→main Sync PR — 2026-05-29
+
+**Author:** Parker
+**Date:** 2026-05-29
+**Status:** ⚠️ PR ready locally, push blocked — needs `workflow` scope
+
+### Summary
+
+Prepared a clean sync of `development` → `main` to pick up 536 commits including Dependabot security fixes for 49 flagged vulnerabilities (2 critical, 15 high, 31 moderate, 1 low).
+
+### What Was Accomplished
+
+- **Branch created:** `sync/dev-to-main-2026-05-29` off `origin/main`
+- **Commits merged:** 536 (all of development since the last main sync)
+- **Commit SHA:** `d4d8b4a1e`
+- **Forbidden paths stripped from index:** All `.squad/`, `.ai-team/`, `.ai-team-templates/`, `team-docs/`, `docs/proposals/` — confirmed 0 forbidden paths in staged index
+- **Conflicts resolved (16):**
+  - `.squad/*` modify/delete conflicts (≈60 files) — resolved by `git rm --cached`
+  - `.github/fact-checker-charter.md`, `.github/loop.md`, `.github/squad.agent.md.template` — git directory-rename heuristic misfire; removed
+  - `.gitignore`, 5 `.github/workflows/squad-*.yml`, `mobile/scripts/release-beta.sh`, `scripts/sync-monorepo-version.sh`, 5 `.csproj` files — resolved using development's version
+
+### Blocker
+
+Push rejected: `refusing to allow an OAuth App to create or update workflow ... without 'workflow' scope`.
+
+**Resolution required:** Jeff must run `gh auth refresh --scopes workflow` (browser one-time code), then run:
+```bash
+cd /Users/jpapiez/s/PFarm1
+git push -u origin sync/dev-to-main-2026-05-29
+gh pr create --base main --head sync/dev-to-main-2026-05-29 \
+  --title "chore: sync development → main (Dependabot + accumulated)" \
+  --body "Brings main current with development (536 commits). Picks up Dependabot security fixes for the 49 vulnerabilities flagged on the default branch.
+
+Squad metadata (.squad/, .ai-team/, team-docs/, docs/proposals/) explicitly excluded per repo policy. The squad-main-guard.yml workflow will verify."
+```
+
+The local branch `sync/dev-to-main-2026-05-29` is ready to push — no further merge or conflict resolution needed.
+
+### CI Expectation
+
+- `squad-main-guard.yml` — should PASS (0 forbidden paths in index, verified)
+- All other checks (build, tests, compose validation) — expected green (same codebase as development which passed CI)
+---
+## Decision: Status-Gated Mutation Endpoints — Layer and HTTP Code Mapping
+
+**Date:** 2026-05-28
+**Issue:** OlyForge3D/PrintFarmer#290
+**Author:** Dallas
+**Status:** Implemented (PR #308, merged)
+
+### Decision
+
+The 409 state-gate for `/temps`, `/move`, and `/moveto` lives in the **controller layer**
+(`PrintersController.GatePrinterControlAsync`), not in `PrintersService`. The plugin layer
+propagates firmware 409s as `PrinterBackendBusyException` → `PrinterControlOutcome.BackendBusy`
+→ 502 Bad Gateway.
+
+### HTTP Status Code Mapping
+
+| Condition | HTTP code | Reason |
+|---|---|---|
+| Cached status is Printing/Pausing/Paused/Resuming/Cancelling/Heating | 409 Conflict | Client-side pre-flight; API knows before trying |
+| Printer ID not found | 404 Not Found | Entity doesn't exist |
+| Firmware refused (409 from PrusaLink/OctoPrint) | 502 Bad Gateway | Upstream refused after we tried; client cannot fix this |
+| Backend does not support command | 502 Bad Gateway | Capability mismatch |
+| Backend unreachable | 502 Bad Gateway | Infrastructure fault |
+
+### Rationale
+
+- **Controller, not service**: The status cache check is a request pre-flight concern. Services
+  should not know about HTTP semantics. Keeps `PrintersService` focused on printer I/O.
+- **502 for upstream busy (not 409)**: 409 from our API means "you asked at the wrong time and
+  our state says so." 502 from our API means "we tried and the printer said no." These must be
+  distinguishable so iOS clients can show the right UX.
+- **`PrinterBackendBusyException`** is the seam: backend plugins throw it when firmware returns
+  409, service catches and maps to `BackendBusy`, controller maps to 502.
+- **Busy state list** (`PrinterControlGate.BusyStates`) is authoritative and kept in sync with
+  `PrintFailureMonitorService` via PR #310.
+
+### Files Changed
+
+- `src/infra/Services/Printers/PrinterControlGate.cs` (new)
+- `src/infra/Services/Printers/PrinterControlOutcome.cs` (new)
+- `src/infra/Services/Printers/PrinterBackendBusyException.cs` (new)
+- `src/api/Controllers/PrintersController.cs` (`GatePrinterControlAsync`, `MapControlOutcome`, `IPrinterStatusCacheReader` injection)
+- `src/backends/Farm.Backend.Plugin.OctoPrint/OctoPrintClient.cs` (409 → `PrinterBackendBusyException` in SetBed/SetHotend/Jog)
+- `src/backends/Farm.Backend.Plugin.PrusaLink/PrusaLinkApiClient.cs` (409 → `PrinterBackendBusyException` in SetToolTemp/SetBedTemp/JogPrintHead)
+- `src/tests/Farm.Web.Api.Tests/Controllers/PrintersControllerControlGuardsTests.cs` (new, 4 tests)
+
+---
+
+# Decision: PrinterBackendCapabilities — Endpoint Confirmed, Fallback Table Canonical
+
+**Date:** 2026-05-28
+**Agent:** Gorman
+**Issue:** #280
+**PR:** https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
+
+## Decision
+
+`GET /api/printers/{printerId}/backend-capabilities` **exists** in `PrintersController.cs`
+(src/api/Controllers/PrintersController.cs:181). No backend work is needed for Mobile Controls v1.
+
+## Fallback Table Values
+
+The static table in `PrinterBackendCapabilities.fallback(for:)` is now the canonical iOS
+fallback when the endpoint returns 404 or decoding fails:
+
+| Backend     | supportsMovement | supportsTemperatureControl | supportsControlOperations | Notes |
+|-------------|-----------------|---------------------------|--------------------------|-------|
+| Moonraker   | true            | true                      | true                     | Full FFF; camera+history too |
+| PrusaLink   | true            | true                      | true                     | Full FFF |
+| OctoPrint   | true            | true                      | true                     | Full FFF |
+| FlashForge  | true            | true                      | false                    | FFF; no fan control |
+| SDCP        | false           | false                     | false                    | Resin printer |
+| Unknown     | false           | false                     | false                    | Conservative |
+
+## Locked Decisions Applied
+
+- `supportsBedTemperature` is derived from `supportsTemperatureControl` — no separate field in
+  backend DTO. Locked per Mobile Controls v1 spec: trust `supportsTemperatureControl` for FlashForge.
+- `supportsFanControl` derived from `supportsControlOperations` — fan is a general control operation.
+
+## Downstream Impact
+
+- `PrinterControlsViewModel` (#282) already calls `PrinterBackendCapabilities.fallback(for:)` —
+  the interface and fallback signature are compatible.
+- UI gating (#284/#285/#286) can trust all four of the required booleans.
+
+---
+
+# Newt — 2026-05-28 — Printer Controls Design Decisions (#283)
+
+## Preheat: List layout, not grid
+
+**Decision:** Use vertical list rows for preheat presets instead of 2×2 grid.
+
+**Reasoning:**
+- List rows allow inline temperature readout (e.g., "PLA — 200°/60°") which provides at-a-glance reference
+- Full-width rows are easier to tap on phone screens
+- Consistent with iOS Settings patterns for actionable list items
+- Grid would require separate tap + temperature lookup, adding cognitive load
+
+## Disabled-While-Printing: Lock icon + opacity (color-blind friendly)
+
+**Decision:** Disabled state uses lock icon (`lock.fill`) at trailing edge plus 0.5 opacity, not just color change.
+
+**Reasoning:**
+- Per WCAG 2.2, disabled state must not rely on color alone
+- Lock icon provides shape-based indicator recognizable without color perception
+- Aligns with iOS system patterns (e.g., locked settings rows)
+- Ensures accessibility for protanopia/deuteranopia users
+
+## Jog: Segmented pickers + dynamic button labels
+
+**Decision:** Jog subgroup uses native segmented pickers for axis (X/Y/Z) and step (0.1/1/10/100mm), with +/− buttons showing dynamic labels like "Move X +10mm".
+
+**Reasoning:**
+- Segmented pickers are HIG-native and automatically meet touch target requirements
+- Dynamic button labels prevent mode errors (operator always knows what will happen)
+- Axis/step state is visually prominent in picker selection
+- Compact layout fits phone screens without scrolling
+
+## Section Visibility: Hidden when offline
+
+**Decision:** Entire Controls section is conditionally rendered only when `printer.isOnline == true`.
+
+**Reasoning:**
+- Controls require active printer connection — showing disabled controls when offline adds noise
+- Consistent with existing pattern: `actionSection` only renders when online
+- Reduces visual clutter for disconnected printers
+- Clear mental model: "no controls = printer not reachable"
+
+---
+
+# Decision: Role-gated UI uses plain `if`-conditional, not a ViewModifier
+
+**Date:** 2026-05-28  
+**Issue:** OlyForge3D/PrintFarmerMobile#3 (iOS #274)  
+**Author:** Hudson  
+**Status:** Implemented
+
+## Context
+
+The Maintenance toggle in `PrinterDetailView` must be hidden for non-`farm_admin` users.
+Two patterns were considered:
+
+1. **Plain `if authViewModel.currentUserRole == "farm_admin" { ... }`** around the button block.
+2. A custom `adminOnly()` ViewModifier that reads role from environment and calls `.hidden()` or returns `EmptyView`.
+
+## Decision
+
+Plain `if`-conditional (option 1).
+
+## Rationale
+
+- The button is **entirely absent** from the view hierarchy for non-admins, not merely hidden. This avoids focus/VoiceOver traversal and any accidental tap passthrough.
+- ViewModifier would still construct the button node and apply `.hidden()` — semantically weaker.
+- Consistent with Apple HIG: omit controls the user can't use rather than disable/hide them.
+- Simpler — no new abstraction needed for a single call site. If multiple admin-only surfaces emerge, a modifier becomes worthwhile and this decision should be revisited.
+
+## Consequences
+
+- Any future admin-only control needs the same one-liner `if authViewModel.currentUserRole == "farm_admin"`.  
+- If admin role gating becomes widespread (>3 sites), consider extracting a `.adminOnly(authViewModel)` modifier or an `@ViewBuilder adminOnly { ... }` helper.
+
+---
+
+# iOS #281 — PrinterService Command Method Routing Decisions
+
+**Date:** 2026-05-28  
+**Author:** Gorman  
+**Issue:** OlyForge3D/PrintFarmer#281  
+**PR:** OlyForge3D/PrintFarmerMobile#4
+
+## Decision 1: homeXY / homeZ map to dedicated backend routes, not a parameterized `/home`
+
+**Context:** Issue #281 spec described `home(printerId:axes:)` as a single method routing to
+`POST /api/printers/{id}/home`. Backend inspection revealed three separate no-body POST endpoints:
+`/home` (all axes), `/homexy`, `/homez`.
+
+**Decision:** `home(printerId:axes:)` dispatches internally by sorted axes array:
+- `["X","Y"]` → `/homexy`
+- `["Z"]` → `/homez`
+- anything else (empty, `["X","Y","Z"]`, etc.) → `/home`
+
+`homeXY` and `homeZ` are protocol extension defaults that call `home(axes:)`.
+
+**Rationale:** No new backend routes needed. Caller API matches the issue spec. Route selection
+is an implementation detail hidden from callers.
+
+## Decision 2: setTemperatures nil-omit via custom Encodable (not dictionary)
+
+**Context:** Backend `TempTargets` C# record always has both `hotend` and `bed` (non-nullable
+ints). Issue #281 allows callers to pass `nil` for either field to omit it.
+
+**Decision:** Private `SetTemperaturesRequest` with custom `encode(to:)` that conditionally
+encodes each field. Not a `[String: Double]` dictionary — typed struct is safer and more
+readable.
+
+**Rationale:** Dictionary approach works but loses type safety. Custom Encodable is the Swift
+idiomatic pattern for omitting optional JSON fields without `null` emission.
+
+## Decision 3: move body uses [String: Double] dictionary
+
+**Context:** `MoveRequest` C# record has `x?`, `y?`, `z?`, `f?` fields. Swift needs to set
+only the relevant axis.
+
+**Decision:** `var body: [String: Double] = ["f": Double(feedrateMmMin)]` then
+`body[axis.lowercased()] = distanceMm`. Dictionary naturally omits unset keys.
+
+**Rationale:** A 4-field Encodable struct with 3 nil fields and a custom encoder is more
+boilerplate than the problem warrants. Dictionary is clean and correct here.
+
+## Decision 4: 409 conflict maps to existing NetworkError.conflict
+
+**Context:** `GatePrinterControlAsync` returns HTTP 409 when printer is printing/busy.
+Applies to `/temps` and `/move` (not `/home*`).
+
+**Decision:** No new error case. `APIClient` already maps HTTP 409 → `NetworkError.conflict`.
+Callers (`PrinterControlsViewModel`) catch `.conflict` and surface "Printer busy" to the user.
+
+---
+
+# Decision: Canonical "Is Printing" Source for Failure Detection Shield
+
+**Date:** 2026-05-28  
+**Author:** Ripley  
+**Issue:** #309  
+**PR:** #313
+
+## Decision
+
+The failure-detection shield badge must derive `isPrinting` from the live printer state (`printer.state`), not from `FailureDetectionPrinterStatusDto.isPrinting`.
+
+## Context
+
+`FailureDetectionPrinterStatusDto.isPrinting` is computed by the backend failure-detection polling service on a ~30-second cycle. Between poll cycles, the DTO can report `isPrinting: false` while the printer has already started a print job. The badge was using this stale value directly, causing the shield to show "Printer is not printing." on actively printing printers.
+
+The live `printer.state` field is updated via SignalR in near-realtime and is the authoritative source of the printer's current state.
+
+## Rule
+
+When rendering `FailureDetectionMonitoringBadge` or `FailureDetectionMonitoringOverlay`:
+
+1. Compute live `isPrinting` from `printer.state`:
+   - `CompactPrinterCard`: `state.toLowerCase().includes('printing')` (catches Pausing too)
+   - `DetailedPrinterCard`: `isOnline && state === 'Printing'`
+2. Pass as `isPrinting` prop to the badge/overlay.
+3. Inside the badge, build `effectiveStatus = { ...status, isPrinting, reason: <override if staleMismatch> }`.
+4. Pass `effectiveStatus` (not raw `status`) to `FailureDetectionStatusModal`.
+
+If `isPrinting === true` but `status.state` is `'idle'` or `'disabled'`, also replace `status.reason` with a waiting message so the modal copy is accurate.
+
+## References
+
+- `FailureDetectionMonitoringBadge.tsx` — `isPrinting` prop, `stalePrintingMismatch`, `effectiveStatus`
+- `CompactPrinterCard.tsx` / `DetailedPrinterCard.tsx` — `isPrinting={isPrinting}` passed to badge
+- `usePrinterFailureDetectionStatus.ts` — 30s polling hook (stale source)
+
+---
+
+# 2026-05-20: Mobile API Drift + Basic Printer Controls v1 — Locked Decisions
+
+**By:** Dallas (Lead/Architect), via Jeff Papiez
+**Scope:** iOS mobile app — basic printer controls (preheat, home, jog) + API drift cleanup.
+
+## Locked v1 design
+- **Fixed preheat presets** (no user customization v1):
+  - PLA: hotend 200°C / bed 60°C
+  - PETG: hotend 240°C / bed 80°C
+  - ABS: hotend 240°C / bed 100°C
+  - Cool Down: hotend 0°C / bed 0°C (both-to-zero)
+- **Fixed jog feedrates:** XY 3000 mm/min, Z 600 mm/min
+- **Fixed jog step picker:** 0.1 / 1 / 10 / 100 mm
+- **Capability gating:** trust backend `PrinterBackendCapabilities.supportsTemperatureControl` flag (e.g. FlashForge bed). No client-side probing spike.
+- **Cooldown semantics:** "Cool Down" preset sets both hotend and bed to 0.
+- **Auth model:** match existing backend auth. Maintenance toggle still requires `farm_admin` role gate (issue #274).
+- **State updates:** no optimistic UI. Wait for next `printerupdated` SignalR event.
+- **Section visibility:** hide controls section when `printer.isOnline == false`.
+- **Print-state blocking:** block controls client-side when `printing`/`paused`; backend enforcement validated in spike #279.
+- **Routing:** human squad only (Hudson / Gorman / Newt / Ripley). No `squad:copilot`.
+
+## GitHub issues created
+#274–#289 on OlyForge3D/PrintFarmer. See `.squad/agents/dallas/history.md` for full task→issue mapping.
+
+
+---
+
+### 2026-05-21: Issue #275 — PrinterService.stop() is not a pure iOS-side alias
+
+**By:** Gorman (iOS Networking) — requested by Jeff
+**Status:** Investigation only, no code changes
+
+**What:** iOS `PrinterService.stop(id:)` and `emergencyStop(id:)` call DIFFERENT URLs: `POST /api/printers/{id}/stop` vs `/emergency-stop`. The aliasing is server-side — `PrintersController.StopPrintAsync` is annotated "alias for emergency-stop for frontend compatibility" and forwards to `EmergencyStopAsync`.
+
+**Why it matters:** Per the issue prompt, the iOS `stop()` was assumed to be a thin in-process alias. It isn't. Removing it requires either:
+1. Deleting the backend `/stop` alias too (Lambert call), plus the iOS method, the protocol entry, the dedicated test (`testStopCallsCorrectEndpoint`), and updating `PrinterDetailViewModel.swift:429`. Coordinated cleanup.
+2. OR keeping `/stop` for web/mobile parity and closing #275 as wontfix.
+
+**Recommendation:** Bounce to Dallas/Lambert to decide whether the `/stop` alias endpoint should be retired. Until then, do not delete the iOS method — it correctly mirrors a real (if redundant) backend route.
+
+**Files referenced:**
+- mobile/PrintFarmer/Services/PrinterService.swift:47-51
+- mobile/PrintFarmer/Protocols/PrinterServiceProtocol.swift:16-17
+- mobile/PrintFarmerTests/Services/PrinterServiceTests.swift (`testStopCallsCorrectEndpoint`)
+- mobile/PrintFarmer/ViewModels/PrinterDetailViewModel.swift:429
+- src/api/Controllers/PrintersController.cs:2159, 2182-2201
+
+
+---
+
+# 2026-05-20: iOS Printer.progress decoder — clamp out-of-range backend values
+
+**Issue:** #277 — Add unit test pinning Printer.progress 0–100 contract.
+
+**Decision:** Clamp `progress` to `[0, 100]` at decode time (`Printer.init(from:)` in `mobile/PrintFarmer/Models/Models.swift`) before normalizing to the iOS internal `0.0…1.0` scale. Out-of-range backend payloads (`-5`, `150`) become `0.0` / `1.0` rather than producing `nil` or surfacing the drift to UI.
+
+**Why clamp instead of reject (return `nil`):**
+
+- The mobile app already silently normalizes `progress / 100.0` everywhere (`Printer` decoder, `DashboardViewModel` SignalR path, `PrinterDetailViewModel`, `PrinterListViewModel`). The contract is "iOS holds 0…1.0; backend holds 0…100." Rejecting one out-of-range value would leave the printer card without progress and surface a partial-decode failure to the user, which is worse than showing 0 % or 100 %.
+- The PrintFarmer backend `CompletePrinterDto.Progress` is a server-computed `double` derived from g-code line counters; brief overshoots (e.g. `100.4`) and pre-start undershoots (`-0.0`) are observed in production logs. Clamping is the kindest interpretation.
+- Aligns with the existing `PrintProgressBar` SwiftUI consumer, which assumes `0…1.0`.
+
+**Dual-scale contract (documented in test header + decoder comment):**
+
+| Layer | Range | Source |
+|-------|-------|--------|
+| Backend wire (`CompletePrinterDto.Progress`) | `0…100` | `src/api/...` |
+| iOS `Printer.progress` (post-decode) | `0.0…1.0` | `mobile/PrintFarmer/Models/Models.swift` |
+| SwiftUI consumers (`ProgressView`, `PrintProgressBar`) | `0.0…1.0` | iOS internal |
+
+**Follow-up (out of scope for #277, flagged):**
+
+- SignalR update paths in `DashboardViewModel:50`, `PrinterDetailViewModel:111` & `:141`, `PrinterListViewModel:46` divide by `100.0` without clamping — they should be updated to use the same clamp helper for parity. File a follow-up issue.
+- The pre-existing `ModelDecodingTests.testPrinterDecodesFullJSON` asserts `printer.progress == 45.5` against a JSON `progress: 45.5` payload, which is incorrect for the post-decode (normalized) value — left alone since #277 is a pin, not a sweep.
+
+**Validation:**
+
+Local `swift test` cannot run the SPM `PrintFarmerTests` target on macOS because sibling test files / app sources transitively reference `UIKit` (`UIImpactFeedbackGenerator`) and iOS-only SwiftUI APIs (`.page(indexDisplayMode:)`). The local iOS Simulator is also out of date (`CoreSimulator 1051.49.0` vs runtime `1051.54.0`). The new tests are pure `Foundation` + `XCTest` and rely on CI for validation.
+
+**Files:**
+
+- Modified: `mobile/PrintFarmer/Models/Models.swift` (clamp added to `Printer.init(from:)`).
+- Added: `mobile/PrintFarmerTests/Models/PrinterProgressContractTests.swift` (8 cases: 0/50/100/fractional/negative/overflow/null/missing).
+- Modified: `mobile/PrintFarmer.xcodeproj/project.pbxproj` (registered new test file).
+
+
+---
+
+### 2026-05-21: Spike #279 verdict — server-side guards for /temps and /move during print
+
+**By:** Ripley
+**Issue:** [#279](https://github.com/OlyForge3D/PrintFarmer/issues/279)
+**Verdict:** **(c) — DO NOT trust the backend.** iOS client must gate `/temps` and `/move` client-side based on cached `Printer.Status`.
+
+**Findings:**
+- Controller (`PrintersController.SetTempsAsync` / `MoveAsync` / `MoveToAsync`) has no state guard — only null-body validation.
+- `PrintersService` has no state check; collapses every failure (offline, capability missing, firmware 409, exception) to `bool false` → controller returns 404.
+- **Per-backend matrix:**
+  - **Moonraker:** sends `M104`/`M140`/`G91 G0` as raw G-code mid-print with no resistance.
+  - **PrusaLink:** firmware refuses with 409 mid-print, but plugin reduces to bool — clients can't distinguish.
+  - **OctoPrint:** same — firmware 409 collapsed to bool.
+  - **FlashForge:** `/temps` flows through; does NOT implement `ISupportsMovement` → `/move` returns 404.
+  - **SDCP:** implements neither → both return 404.
+- Test coverage: **zero** tests on `/temps` or `/move` paths (verified via coverage report `FNDA:0`).
+
+**Impact for Hudson (#284–#286):**
+- iOS controls section MUST disable temp/move controls when status ∈ `{Printing, Pausing, Paused, Resuming, Cancelling, Heating}`.
+- Re-evaluate gate on every SignalR `printerupdated`.
+- Even with client gating, expect Moonraker to silently accept `/temps` mid-print — operator-visible warning recommended.
+
+**Follow-up filed:** [#290 — Add server-side guards for /temps and /move during print](https://github.com/OlyForge3D/PrintFarmer/issues/290) (P0).
+
+**Comment:** https://github.com/OlyForge3D/PrintFarmer/issues/279#issuecomment-4509132269
+
+---
+
+## 2026-05-21: Inbox merge — Mobile Controls v1 Phase 1
+
+_Merged by Scribe from `.squad/decisions/inbox/` during Ralph rounds 2–5 closeout._
+
+
+---
+
+# Dallas — 2026-05-21 — Issues #275 and #290 triage
+
+## Issue #275 — closed `not planned` (wontfix)
+
+**Decision:** Option (a) — keep both `/api/printers/{id}/stop` and `/api/printers/{id}/emergency-stop`, document, close.
+
+**Reasoning:**
+- Gorman's investigation showed iOS `PrinterService.stop()` calls `/stop`, which is a real route on the backend (not in-process aliasing). The original premise of #275 — that `.stop()` is a redundant in-process alias — was incorrect.
+- Refactor (option b) touches backend + iOS + web with deprecation cycle for negligible gain.
+- Renaming `/stop` to a "real" route (option c) is semantic gymnastics — both endpoints still execute the same emergency-stop operation.
+- The 5-line backend shim (`PrintersController.StopAsync` → `EmergencyStopAsync`) is documented as intentional compat surface. No bug, no maintenance burden, no security gap.
+
+**Action taken:**
+- Comment posted on #275 with full triage rationale.
+- Issue closed with reason `not planned`.
+- No code changes. iOS `stop()`, protocol entry, test (`testStopCallsCorrectEndpoint`), `PrinterDetailViewModel.swift:429`, and backend shim all stay.
+
+---
+
+## Issue #290 — reassigned `squad:⚛️ ripley` → `squad:🏗️ dallas`
+
+**Decision:** I take ownership. Cross-cutting backend implementation across all printer plugins is architecture/cross-domain work — Ripley is a tester. We have no dedicated backend agent, so it lands with me.
+
+**Reasoning:**
+- Spike found zero server-side guards across backend plugins. Real gap, but not a v1 blocker:
+  - Existing design locks already require **client-side** guards (web + iOS) — covered by the 16-issue plan.
+  - Server-side guards = defense-in-depth (catches direct API callers / scripts / future third-party clients).
+- Practical priority: **P1** (post-v1). Will adjust the priority label when scheduling. Kept `priority:p0` for now since I'm not changing the existing prioritization scheme without a separate decision.
+- Did NOT file a request for a new backend agent. Decision: I'll hold the work as Lead until volume justifies adding a backend specialist.
+
+**Action taken:**
+- Comment posted on #290 explaining routing decision.
+- Labels: removed `squad:⚛️ ripley`, removed accidentally-added `squad:dallas` (non-emoji), added `squad:🏗️ dallas`.
+- Scope preserved from Ripley's original filing. Per-plugin sub-issues to be created during design phase.
+
+
+---
+
+### 2026-05-21T00:00:00Z: Printer-controls v1 design — non-obvious calls
+**By:** Newt (UX) for #283
+**What:**
+- Single-flight queue is **per subgroup**, not global. Preheat lock does not freeze Home/Jog.
+- Pending → Default timeout = **5 seconds** with a neutral toast ("Sent. Awaiting printer."), not an error.
+- Disabled-during-print uses **greyscale + 8% diagonal stripe overlay** for color-blind users (per #15).
+- Capability missing → **remove the control from the layout**. No greyed slot, no tooltip.
+- Error banner sits **directly under the affected subgroup** (not at section top) so the failed command is unambiguous.
+- Debounce: **250ms trailing-edge** on every control tap.
+- Lockout banner is **section-level**, not per-subgroup.
+- Mid-print state hides nothing — controls greyed + striped + announce "Controls locked" once via VoiceOver.
+- Section is fully hidden when `printer.isOnline == false` (`EmptyView()`).
+- Jog `+/−` use **60pt** height (above standard 44/50pt) — they're the most-tapped.
+
+**Why:** Locks ambiguity in the spec so #284/#285/#286 implementation does not need follow-up design clarifications.
+
+**Doc:** `mobile/docs/design/printer-controls-section.md`
+
+
+---
+
+# Mobile Controls v1 — Review Batch 1 Architectural Rulings
+
+**By:** Dallas (review of PRs #291–#297, 2026-05-21)
+**What:** Architectural rulings made during batch-1 review. Capture for downstream work (#282 ViewModel, #284–#286 UI build).
+**Why:** Several decisions need the team's persistent memory beyond per-PR comments.
+
+## Ruling A — `homedAxes` is `String?`, not `[String]?` (PR #294)
+The backend wire format is a compact lowercase string: `"xyz"`, `"xy"`, `""`, or `nil`. iOS models (`Printer.homedAxes`, `PrinterStatusDetail.homedAxes`) MUST match this shape. View rendering uses case-insensitive `contains("x"|"y"|"z")` per axis. Tests cover present / absent / empty.
+
+## Ruling B — Defensive nil-guard on partial status updates (PR #294)
+`PrinterDetailViewModel` MUST guard against partial detail-update payloads clobbering existing values:
+```swift
+if let homed = detail.homedAxes { current.homedAxes = homed }
+```
+This pattern should be applied to other optional-but-stateful fields when adding new ViewModel update paths.
+
+## Ruling C — Capabilities resolution: hybrid endpoint + static fallback (PR #295)
+v1 strategy: GET `/api/printers/{id}/backend-capabilities` → overlay onto static `PrinterBackendCapabilities.fallback(for: PrinterBackend)`. Backend currently surfaces only 2/14 fields; fallback table fills the rest. Failure modes (`.notFound`, `.serverError`) → use static fallback (no error to user). Actor-isolated cache `[UUID: PrinterBackendCapabilities]`, **no TTL in v1** — flagged for v2 follow-up if a printer's backend can change mid-session.
+
+## Ruling D — Capability missing ≠ disabled (PR #296)
+When a capability is false, the corresponding control is **removed from the UI**, not greyed out. Mid-print disable IS greyed (with diagonal-stripe overlay per #15 colorblind spec). Two distinct visual states; do not conflate.
+
+## Ruling E — `PrintJobPriority.from(intValue:)` is preserved (PR #293)
+While the wire format for enums is string-only (`JsonStringEnumConverter` global), `PrintJobDto.Priority` is serialized as a raw int field (NOT an enum on the wire). The `from(intValue:)` helper stays. Same exemption: `SignalRModels.AnyCodable` Int branch is correct (heterogeneous wrapper).
+
+## Ruling F — `MovePrinterRequest` unknown-axis fallback to `.x` is acceptable for v1 (PR #297, non-blocking)
+The locked axis picker (XYZ enum) prevents an unknown axis from reaching encoding in practice. Silent fallback to `.x` is acceptable for v1. Add a `precondition` assertion or exhaustive switch on axis when hardening (likely in #287 integration or post-v1).
+
+## Ruling G — Self-PR review constraint
+GitHub blocks `gh pr review --approve` on PRs authored by the reviewing user. Use `--comment` for verdicts + `--admin` for squash-merge. This applies to any squad agent reviewing their own PR — Dallas reviewing as Lead is not exempt when authoring.
+
+## Ruling H — Cross-author rebase handoff after merge cascades
+When sibling PRs in a batch touch overlapping files (e.g., #295 capabilities + #297 service methods on PrinterService), reviewer must NOT rebase the conflicting branches unilaterally — that violates the reviewer/author separation principle. Instead, post a "needs rebase" comment with explicit conflict-resolution guidance (e.g., "keep both sides; mechanical merge"). The original author rebases.
+
+---
+
+### 2026-05-21T09:38-07:00: AMS slot count is a backend off-by-one, not a frontend hardcode
+**By:** Ripley (requested by Jeff Papiez)
+**What:** Issue #302 root cause traced to `PrintersService.cs:2959` — `for (int i = 1; i < mmuGateCount; i++)` creates `mmuGateCount - 1` MmuGate toolheads (3 for default 4), leaving T0 as Physical. Result on Bambu: 1 Physical + 3 MmuGate instead of 4 MmuGate. Frontend `AmsSlotVisualization` is data-driven and will render 4 slots correctly once the seeding produces 4 gates.
+**Why:** Tagged issue `area:backend` and stopped before implementing — fix needs decision on `mmuGateCount` semantics (total gates vs. total toolheads), test update for `MmuGateAutoCreationTests.CreatePrinter_MultiMaterialTrue_CreatesThreeMmuGateToolheads`, and a repair routine for already-seeded printers. Frontend dedup of the lower "Spools" section is queued as a follow-up that must land after the backend fix.
+
+### 2026-05-21: PR #301 review — PreheatSubgroup (Hudson) verdict: 💬 Comment
+
+**By:** Vasquez (Code Reviewer)
+
+**What:** Reviewed PR #301 (`feat(ios): build PrinterControlsSection preheat subgroup`). Posted a `--comment` review on `OlyForge3D/PrintFarmer#301`. Spec adherence is good (presets, layout, single-flight, a11y, hit target, capability gating). Four non-blocking findings: unused `previewSeedCapabilities(_ caps:)` parameter, iPad disabled-tap reveal gap (`.disabled` + `.help()` won't show on touch-only iPad), accessibility-label localization gap (informational — no localization infra exists yet under `mobile/PrintFarmer/`), and a misnamed `unsafeBitCastedFallback()` helper.
+
+**Why:** Confirms the iOS Preheat subgroup respects the client-side capability-gating decision (#279/#290) — backend not trusted, gating happens in `isVisible(capabilities:)` on the view and re-validated at dispatch in `PrinterControlsViewModel.preheat`. Author can address the unused param + iPad reveal gap before flipping out of draft; localization and the rename are safe follow-ups.
+
+### 2026-05-21: pbxproj rebase pattern — union resolution after sibling subgroup PRs merge
+
+**By:** hudson (via coordinator)
+**What:** When sibling Xcode pbxproj-touching PRs (e.g. PrinterControls subgroups) have one merge first, the others rebase with predictable conflicts in two regions: parent group children list (e.g. `PrintFarmerTests` → `Views` ref) and the test target's Sources build phase. Resolve by **union** — keep both sides' references. Each branch typically generates a distinct `Views` group ID; both definitions already exist independently in the file body, so referencing both is non-destructive and Xcode tolerates duplicate-name groups with distinct IDs.
+**Why:** Applied to PRs #300 (home) and #301 (preheat) after #299 (jog) merged. Both rebased cleanly with `plutil -lint` passing. Force-pushed; both report `mergeable: MERGEABLE`. Local xcodebuild blocked by iOS 26.5 SDK absence; CI is authoritative.
+
+
+### 2026-05-21: iOS PrinterControlsSection forwards SignalR via parent, does not re-subscribe
+**By:** Hudson (iOS Dev) for jpapiez
+**What:** When a child SwiftUI view needs to react to `printerupdated` SignalR events but the parent `PrinterDetailViewModel` already subscribes via `configureSignalR`, the child must NOT open its own hub registration. Instead, accept the `printer: Printer` as a let-bound input and use `.onChange(of: printer.isOnline)` / `.onChange(of: printer.state)` to forward into the child VM. This is the pattern used by `PrinterControlsSection` (PR #304, issue #287).
+**Why:** Acceptance criteria on #287 say "View subscribes to printerupdated SignalR events", but duplicating the subscription would leak hub registrations and cause double-handling. Parent already owns the subscription and the printer rebuild — child observes the resulting value change. Single source of truth; no leaks.
+**Scope:** iOS / SwiftUI views composed inside `PrinterDetailView` (or any view whose parent VM owns a SignalR subscription).
+
+### 2026-05-21T14:35:00-07:00: Snapshot testing — proposed dependency add for #289
+**By:** Hudson (requested by Jeff Papiez)
+**What:** Issue #289 requires snapshot tests for `PrinterControlsSection`. The repo has NO existing snapshot infrastructure (verified: no `swift-snapshot-testing`, no `Package.resolved`, no `__Snapshots__` directory; "snapshot" mentions in tests are unrelated — they refer to camera image data on `PrinterServiceProtocol.getSnapshot`). Issue is labeled `go:needs-research`. Two viable paths:
+
+1. **Recommended:** Add `pointfreeco/swift-snapshot-testing` (~1.18.x) as a Swift Package dependency to the test target only.
+   - Update `mobile/Package.swift`: add `https://github.com/pointfreeco/swift-snapshot-testing` to `dependencies`, add `SnapshotTesting` product to the `PrintFarmerTests` testTarget.
+   - Update `mobile/PrintFarmer.xcodeproj/project.pbxproj`: add `XCRemoteSwiftPackageReference` + `XCSwiftPackageProductDependency` linked to `PrintFarmerTestsTarget` build phase. (Non-trivial pbxproj surgery; Xcode-generated normally.)
+   - Snapshot baselines stored under `PrintFarmerTests/__Snapshots__/PrinterControlsSectionTests/`.
+   - **CI implication:** Local xcodebuild is blocked by iOS 26.5 SDK / CoreSimulator drift (recurring theme in Hudson history). Baselines MUST be generated on CI or a machine with a working sim. Recording mode (`isRecording = true`) cannot be run from this dev box right now.
+
+2. **Alternative (lightweight, no dep):** Hierarchy/text snapshots — render the view via `UIHostingController`, walk the view tree via reflection or capture `ViewThatFits`/`AnyView` description, and assert string equality against checked-in `.txt` fixtures. Brittle and gives weaker regression coverage than `swift-snapshot-testing` image diffs; not recommended.
+
+**Why:** Path 1 is the industry-standard for SwiftUI snapshot testing and is what the issue text assumes ("If the existing snapshot infra is `swift-snapshot-testing`, reuse it"). Path 2 reinvents a wheel poorly. The blocker is dependency-add approval (one new package) + acceptance that baselines come from CI.
+
+**Proposal:** Approve path 1. Hudson will land the dep add + test scaffolding + three test cases (Moonraker / FlashForge / SDCP) × (idle visible / printing hidden) in a follow-up commit on `squad/289-controls-snapshot`, with `isRecording = true` on first CI run to capture baselines, then a second commit flipping back to `isRecording = false`. Draft PR opened against #289 with research notes pending Lead approval.
+
+### 2026-05-21T14:42:00Z: Shared disabled-control treatment + localized a11y for controls subgroups (issue #288)
+**By:** Hudson (iOS Developer) — requested by Brady Gaster
+
+**What:** Built `DisabledControlStyle.swift` housing three reusable view modifiers used by all controls subgroups:
+- `.disabledControlStyle(isDisabled:cornerRadius:)` — 50% opacity + Canvas-drawn 45° diagonal stripe overlay at 8% white (falls back to flat grey when `accessibilityReduceTransparency` is on). Spec §2.4 color-blind cue.
+- `.errorBorderHighlight(isActive:cornerRadius:)` — 1.5pt `pfError` stroked border with `easeInOut(0.2)` animation. Surfaced when `viewModel.lastError?.command.kind` matches the button's identity.
+- `.disabledTapReveal(isDisabled:reason:onReveal:)` — overlay tap detection for touch-only devices since SwiftUI `.help()` only fires on hover. Each subgroup wires this into a local `handleTap` helper that drives a transient `disabledTapMessage` caption auto-dismissed after 3s.
+
+Applied to:
+- `PreheatSubgroup.swift` — per-preset error matching via `isErrored(preset:)`.
+- `HomeSubgroup.swift` — per-axis-set error matching via `isErrored(matching: ["X","Y","Z"]/["X","Y"]/["Z"])`.
+- `JogSubgroup.swift` — per-direction matching via `isErrored(direction:)` against `selectedAxis` + sign of `distanceMm`.
+
+All `accessibilityLabel`/`Hint`/`Value` strings now go through `String(localized:, comment:)` so labels are localization-ready (issue #288 deliverable). Error hint pattern: `"Failed: \(message). Double tap to retry."`. Pending value: `"Sending command"`. Disabled hint surfaces `viewModel.blockedReason`. `accessibilityAddTraits` flips to `.updatesFrequently` while a command is pending so VoiceOver re-announces.
+
+**Renamed `Printer.previewStub` → `Printer.previewFallbackPrinter`** (per Vasquez's review — the original sarcastic flag on `try! JSONDecoder().decode(...)` was the actual concern). Three call sites updated in PreheatSubgroup.
+
+**Why:** Spec `mobile/docs/design/printer-controls-section.md` §2.4 and §4 explicitly require the diagonal stripe + pfError border + localized VoiceOver scripts. Three subgroups landed earlier without these, and #288 captures the gap. The shared modifier file means we don't open-code the stripe pattern in three places.
+
+**Validation status:**
+- `swiftc -parse` on all four files: clean.
+- `plutil -lint project.pbxproj`: OK after registering `DisabledControlStyle.swift` (4 pbxproj entries: PBXBuildFile, PBXFileReference, PBXGroup child, Sources phase).
+- `xcodebuild -list`: project loads, both targets visible.
+- Full build deferred to CI (iOS 26.5 SDK drift makes local `xcodebuild build` unreliable here).
+
+**Out of scope (filed as follow-ups if needed):** `PrinterControlsSection.shouldHide(for:)` removes the entire section during `printing | paused | starting`, which conflicts with spec §3.4's "visible but locked" expectation. The disabled treatment is still applied on transient state changes (single-flight sibling buttons, capability flips), so it earns its keep regardless.
+
+**Files touched:**
+- `mobile/PrintFarmer/Views/PrinterControls/DisabledControlStyle.swift` (new)
+- `mobile/PrintFarmer/Views/PrinterControls/PreheatSubgroup.swift`
+- `mobile/PrintFarmer/Views/PrinterControls/HomeSubgroup.swift`
+- `mobile/PrintFarmer/Views/PrinterControls/JogSubgroup.swift`
+- `mobile/PrintFarmer.xcodeproj/project.pbxproj`
+
+---
+
+
