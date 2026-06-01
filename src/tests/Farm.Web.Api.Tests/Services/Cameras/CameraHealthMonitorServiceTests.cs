@@ -130,4 +130,34 @@ public class CameraHealthMonitorServiceTests
     {
         IsUrlSafe(string.Empty).Should().BeFalse();
     }
+
+    // IPv6 SSRF coverage (#266)
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv4MappedLoopback_ReturnsFalse()
+    {
+        // ::ffff:127.0.0.1 maps to 127.0.0.1 — must be blocked.
+        IsUrlSafe("http://[::ffff:127.0.0.1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv6LinkLocal_ReturnsFalse()
+    {
+        // fe80::/10 link-local addresses must be blocked.
+        IsUrlSafe("http://[fe80::1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv6UniqueLocal_ReturnsFalse()
+    {
+        // fd00::/8 unique-local (ULA) addresses must be blocked.
+        IsUrlSafe("http://[fd00::1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv6Unspecified_ReturnsFalse()
+    {
+        // :: (IPv6Any / unspecified) must be blocked.
+        IsUrlSafe("http://[::]/snapshot.jpg").Should().BeFalse();
+    }
 }
