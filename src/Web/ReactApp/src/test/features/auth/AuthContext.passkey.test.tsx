@@ -2,16 +2,22 @@
  * Tests the REAL AuthContext.loginWithPasskey failure paths (not mocked at the
  * useAuth level). These are the regression guards requested by the trio review.
  *
- * - Backend soft-failure (success:false from POST /login/complete): returns false
- *   and sets context `error` state.
- * - Ceremony throw (user cancelled, hardware error): re-throws so callers can
- *   display an inline error near the passkey button.
+ * The backend POST /auth/passkey/login/complete never returns a 200 with
+ * success:false — it returns 401 on a failed assertion, which apiClient converts
+ * to a thrown ApiError.  Because loginWithPasskey has no catch block (only
+ * finally), ApiErrors propagate directly to the caller, which then displays them
+ * inline.
+ *
+ * - 401/ApiError from assertion failure (with details): propagates; details intact
+ * - 401/ApiError from assertion failure (no details): propagates; message used
+ * - Ceremony throw (user cancelled, hardware error): same propagation path
  */
 import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import type { ApiError } from '@/types/api';
 
 // Mock the entire passkeyService module so ceremony calls never touch the DOM
 vi.mock('@/services/passkeyService', () => ({
@@ -42,7 +48,10 @@ function AuthConsumer() {
       const ok = await loginWithPasskey('alice');
       setResult(ok);
     } catch (err: unknown) {
-      setCaughtError(err instanceof Error ? err.message : String(err));
+      // ApiError is a plain object {message, statusCode, details?} — not an
+      // Error instance.  Extract .message so both shapes are readable in the DOM.
+      const errObj = err as { message?: string };
+      setCaughtError(errObj?.message ?? (err instanceof Error ? err.message : String(err)));
     }
   }
 
@@ -71,15 +80,15 @@ describe('AuthContext.loginWithPasskey — real implementation', () => {
     localStorage.clear();
   });
 
-  it('returns false and sets context error when backend returns success:false', async () => {
-    vi.mocked(mockPasskeyLogin).mockResolvedValue({
-      success: false,
-      error: 'Assertion failed: unknown credential',
-    } as never);
+  it('propagates ApiError to the caller when the backend rejects assertion (with details)', async () => {
+    const apiError: ApiError = {
+      message: 'Assertion failed',
+      statusCode: 401,
+      details: 'Credential ID not found in the database',
+    };
+    vi.mocked(mockPasskeyLogin).mockRejectedValue(apiError);
 
     renderWithAuth();
-
-    // Wait for initial auth check to settle
     await waitFor(() => expect(screen.queryByTestId('loading')).toBeNull());
 
     await act(async () => {
@@ -87,15 +96,23 @@ describe('AuthContext.loginWithPasskey — real implementation', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('result')).toHaveTextContent('false');
-      expect(screen.getByTestId('context-error')).toHaveTextContent(
-        'Assertion failed: unknown credential',
-      );
+      // ApiError propagated — caller receives .message
+      expect(screen.getByTestId('caught-error')).toHaveTextContent('Assertion failed');
+      // loginWithPasskey has no catch block: setError is never called
+      expect(screen.queryByTestId('context-error')).toBeNull();
+      // loginWithPasskey threw, so no boolean result was returned
+      expect(screen.queryByTestId('result')).toBeNull();
+      // finally block ran — loading state cleared
+      expect(screen.queryByTestId('loading')).toBeNull();
     });
   });
 
-  it('sets generic context error when backend success:false with no error field', async () => {
-    vi.mocked(mockPasskeyLogin).mockResolvedValue({ success: false } as never);
+  it('propagates ApiError and clears loading when details are absent', async () => {
+    const apiError: ApiError = {
+      message: 'Authentication assertion failed',
+      statusCode: 401,
+    };
+    vi.mocked(mockPasskeyLogin).mockRejectedValue(apiError);
 
     renderWithAuth();
     await waitFor(() => expect(screen.queryByTestId('loading')).toBeNull());
@@ -105,8 +122,12 @@ describe('AuthContext.loginWithPasskey — real implementation', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('result')).toHaveTextContent('false');
-      expect(screen.getByTestId('context-error')).toHaveTextContent('Passkey login failed');
+      expect(screen.getByTestId('caught-error')).toHaveTextContent(
+        'Authentication assertion failed',
+      );
+      expect(screen.queryByTestId('context-error')).toBeNull();
+      expect(screen.queryByTestId('result')).toBeNull();
+      expect(screen.queryByTestId('loading')).toBeNull();
     });
   });
 
@@ -132,3 +153,4 @@ describe('AuthContext.loginWithPasskey — real implementation', () => {
     });
   });
 });
+

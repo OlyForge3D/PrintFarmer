@@ -4,6 +4,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
 import { apiClient } from '@/services/api';
+import type { PfRequestConfig } from '@/services/api';
 import type { AuthenticationResult } from '@/types/api';
 
 export interface PasskeyCredentialDto {
@@ -83,5 +84,6 @@ export async function loginWithPasskey(username: string): Promise<Authentication
     method: 'POST',
     url: '/auth/passkey/login/complete',
     data: { username, assertionResponse },
-  });
+    skipAuthRedirect: true,
+  } satisfies PfRequestConfig);
 }
