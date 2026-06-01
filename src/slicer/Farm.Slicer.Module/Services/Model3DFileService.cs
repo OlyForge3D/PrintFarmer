@@ -832,7 +832,11 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             ThumbnailUrl = thumbnailUrl,
             Tags = tags,
             ExtractedMetadata = metadata,
-            AutoTags = metadata?.AutoTags?.ToArray()
+            AutoTags = metadata?.AutoTags?.ToArray(),
+            SourceUrl = model.SourceUrl,
+            SourceLicense = model.SourceLicense,
+            SourceCreator = model.SourceCreator,
+            ImportedAt = model.ImportedAt,
         };
     }
 
@@ -1000,5 +1004,39 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             FileSize = geometryFile.Length,
             FileUrl = fileUrl
         };
+    }
+
+    /// <inheritdoc />
+    public async Task SetAttributionAsync(Guid modelId, string? sourceUrl, string? sourceCreator, string? sourceLicense, DateTime? importedAt, CancellationToken ct)
+    {
+        if (sourceUrl is not null && sourceUrl.Length > 2048)
+        {
+            throw new ArgumentException("SourceUrl must not exceed 2048 characters.", nameof(sourceUrl));
+        }
+
+        if (sourceCreator is not null && sourceCreator.Length > 256)
+        {
+            throw new ArgumentException("SourceCreator must not exceed 256 characters.", nameof(sourceCreator));
+        }
+
+        if (sourceLicense is not null && sourceLicense.Length > 128)
+        {
+            throw new ArgumentException("SourceLicense must not exceed 128 characters.", nameof(sourceLicense));
+        }
+
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(modelId, ct);
+        if (model == null)
+        {
+            throw new InvalidOperationException($"Model {modelId} not found.");
+        }
+
+        model.SourceUrl = sourceUrl;
+        model.SourceCreator = sourceCreator;
+        model.SourceLicense = sourceLicense;
+        model.ImportedAt = importedAt;
+        model.UpdatedAt = DateTime.UtcNow;
+
+        await _model3dFiles.UpdateAsync(model, ct);
+        await _model3dFiles.SaveChangesAsync(ct);
     }
 }

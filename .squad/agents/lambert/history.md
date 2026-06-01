@@ -38,16 +38,16 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 
 - **2026-05-28 — Plugin-propagation gap deferred (follow-up #317):** Moonraker, SDCP, and FlashForge plugins do not translate firmware busy responses into `PrinterBackendBusyException`. Controller gate is sufficient as primary defense; race-condition gap tracked as P2 in issue #317.
 
-### Bambuddy Review Pointer — 2026-05-31
+### External-reference-app Review Pointer — 2026-05-31
 
-bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from bambuddy" and "Consider a richer slice progress contract" for details.
+external-reference-app repo ([external reference repo]) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from external-reference-app" and "Consider a richer slice progress contract" for details.
 
-## Team Assignment: Bambuddy Adoption Plan (Scribe Merge, 2026-05-31)
+## Team Assignment: External-reference-app Adoption Plan (Scribe Merge, 2026-05-31)
 
 **Incoming Work:** Notification system backend (Phase 3, ~4 work items).
 
 **Context from Research:**
-- bambuddy implements 8-provider notification system: email, Telegram, Discord, generic webhook, ntfy, Pushover, CallMeBot/WhatsApp, Home Assistant
+- external-reference-app implements 8-provider notification system: email, Telegram, Discord, generic webhook, ntfy, Pushover, CallMeBot/WhatsApp, Home Assistant
 - IProvider pattern identified: `backend/app/schemas/notification.py` ProviderType enum + `backend/app/services/notification_service.py` dispatch logic
 - PrintFarmer phased rollout: webhook + Discord + Telegram first; remaining providers in follow-up PRs
 - Print farm users demand notifications on their preferred channel (often Telegram/Discord, not email)
@@ -58,12 +58,12 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 3. Implement `NotificationService` dispatcher
 4. Integrate with existing print lifecycle (completion, failure, queue empty events)
 
-**Linked Decisions:** decisions.md entries "Bambuddy Feature Adoption" and "Bambuddy Feature Sweep — Top Adoption Candidates"
+**Linked Decisions:** decisions.md entries "External-reference-app Feature Adoption" and "External-reference-app Feature Sweep — Top Adoption Candidates"
 
 
 ---
 
-### Bambuddy Adoption Finalization — 2026-05-31
+### External-reference-app Adoption Finalization — 2026-05-31
 
 **Brady Confirmation:** Notification providers (webhook + Discord + Telegram) ship as ONE PR (Phase 3 ready for scheduling).
 
@@ -100,9 +100,47 @@ bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two a
 - **2026-05-31 — Printables import foundation (#349, PR #375).** `IPrintablesImportService` + `PrintablesGraphQLClient` + `GET /api/3d-models/printables/preview?url=` in `Farm.Slicer.Module.Api`. URL parsing via compiled `Regex` — accepts `/model/{id}` and `/model/{id}-{slug}` forms; `ParseModelId` is `public static` so tests can call it directly. GraphQL client uses raw `HttpClient` (named, 15 s timeout, User-Agent header) — no StrawberryShake. `PrintablesApiException` separates upstream errors (→ 502) from bad-URL parse errors (→ 400). DI in `SlicerApiExtensions.AddSlicerApiServices` via `AddHttpClient<PrintablesGraphQLClient>` + `AddScoped<IPrintablesImportService>`. Tests: URL parsing (Theory), mocked HttpMessageHandler for GraphQL client, Moq for controller outcomes — 18 tests, all green.
 
 - **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "external-reference-app", "external-author", "external reference app", [external reference repo]. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
 
 - **2026-05-31 — SmartPlug provider pattern (PR #370).** `ISmartPlugProvider` lives in `src/api/Services/SmartPlug/`. Register all providers as `IEnumerable<ISmartPlugProvider>` singletons in `ServiceCollectionExtensions.RegisterSmartPlugProviders()`. Kasa uses raw TCP (port 9999, XOR obfuscation) — no `IHttpClientFactory` needed. Tasmota, Shelly, HA share the named `SmartPlug` HttpClient (5s timeout). Shelly auto-detects Gen 1 (`/meter/0`) vs Gen 2 (`/rpc/Switch.GetStatus`) by trying Gen 2 first. HA device address format: `{baseUrl}|{entityId}`; token in `HomeAssistant:Token` config key (env `PFARM__HomeAssistant__Token`). No DB entities in this PR — `PowerReading` is a plain record; entities + migrations in #346.
 
 - **2026-05-31 — Artifact metadata endpoint pattern (#336, PR #365).** Added `GET /api/artifacts/{id}/metadata` to slicer-host `ArtifactsController`. Pattern: (1) load artifact, (2) load parent `SliceJob`, (3) compare `job.UserId` vs caller's `ClaimTypes.NameIdentifier` claim — admin bypass via `User.IsInRole("farm_admin")`. `downloadUrl` is hardcoded to `/api/artifacts/{id}` — same as the existing binary download action. DTO is a C# `record` in `Farm.Slicer.Module/Dtos/`. `[ProducesResponseType]` attributes cover 200/404/403. Tests use `ControllerContext` with a `DefaultHttpContext` carrying a `ClaimsPrincipal` for auth-sensitive unit tests — no need to spin up a full HTTP pipeline.
 
 - **2026-05-31 — beads (`bd`) not available in worktrees.** Running `bd` from a worktree directory (e.g. `/Users/jpapiez/s/PFarm1-336`) fails with "no beads database found". The `.beads/` directory lives only in the main tree. Workaround: `BEADS_DIR=/path/to/main-tree/.beads bd ...`, or run `bd` from the main tree path. If `.beads/` is absent from the main tree entirely, the database has not been initialized — skip `bd sync` step and note as a blocker in the health report.
+
+- **2026-05-31 — Spoolman filament cost provider (#342, PR #378).** `IFilamentCostProvider` is the abstraction; `SpoolmanFilamentCostProvider` is the Spoolman-backed implementation. Lives in `src/infra/Services/Cost/`. Uses `IMemoryCache` (5-min TTL, `spoolman_cpg_spool_{id}` / `spoolman_cpg_filament_{id}` keys). Registered as Scoped (not Singleton) to avoid captive-dependency with `ISpoolmanService` typed HttpClient. Optional ctor injection `IFilamentCostProvider? filamentCostProvider = null` follows same pattern as `IJobCostCalculationService?` in `PrintJobCompletionService`. All exceptions caught → `null` return; Spoolman unconfigured also returns `null` (BaseUrl empty check inside `ISpoolmanService`). Multi-spool cost path in `JobCostCalculationService` uses provider as fast path; falls back to settings cascade on null. Cost per gram = Price / InitialWeightG (spool), or Price / Weight (filament).
+
+## Issue #353 — WebAuthn/FIDO2 Passkey Ceremony Endpoints (PR #380)
+
+**Branch:** `squad/353-passkey-webauthn-endpoints`
+
+### Package Gotcha
+- NuGet package is **`Fido2`** v4.0.1 (by abergs, 5M+ downloads) — NOT `Fido2NetLib` which stalled at `1.0.0-alpha`.
+- Namespace is still `Fido2NetLib` despite the different package name.
+- Companion: `Fido2.Models` v4.0.1 (types). `Fido2.AspNet` v4.0.1 is optional (not used).
+
+### Fido2 v4 API
+- `Fido2(Fido2Configuration)` — concrete class, not interface-backed.
+- `RequestNewCredential(RequestNewCredentialParams)` → `CredentialCreateOptions` (sync)
+- `MakeNewCredentialAsync(MakeNewCredentialParams, ct)` → `RegisteredPublicKeyCredential`
+- `GetAssertionOptions(GetAssertionOptionsParams)` → `AssertionOptions` (sync)
+- `MakeAssertionAsync(MakeAssertionParams, ct)` → `VerifiedAssertionResult`
+- `CredentialCreateOptions.ToJson()` / `.FromJson(string)` for cache round-trip
+- `AssertionOptions.ToJson()` / `.FromJson(string)` for cache round-trip
+
+### CredentialCreateOptions Required Members (v4)
+Object initializer requires: `Rp`, `User`, `Challenge`, `PubKeyCredParams`.
+- `PublicKeyCredentialRpEntity` has positional constructor: `(string id, string name, string? icon)`
+- `Fido2User`: properties `Id`, `Name`, `DisplayName`
+
+### AssertionOptions Required Members (v4)
+`Challenge` and `RpId` — can use object initializer: `new() { Challenge = [...], RpId = "localhost" }`
+
+### Vulnerability Warnings
+`Fido2` v4.0.1 pulls in `PeterO.Cbor` and `System.IdentityModel.Tokens.Jwt` which have known CVEs.
+These are transitive and expected — not blockers for the feature work.
+
+### Architecture Decisions
+- Challenges stored in `IDistributedCache` (in-memory; swap for Redis in prod)
+- Replay prevention: cache key deleted immediately on read (`LoadOptionsAsync`)
+- Credential persistence deferred to #354 — `CompleteRegistration` and `CompleteLogin` log TODO warnings

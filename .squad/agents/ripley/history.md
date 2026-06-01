@@ -84,14 +84,14 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - 2026-05-26 — `Badge` component does not spread HTML attributes (only `children`, `variant`, `size`, `dot`, `className`). Don't put `aria-label` on `<Badge>`; wrap in a `<span>` or test by text content instead.
 - 2026-05-26 — `apiClient.get<T>()` is a public method on the ApiClient singleton returning `Promise<AxiosResponse<T>>`. Use it in services for new endpoints not yet wired into named methods on `apiClient` (e.g., while Lambert builds the backend in parallel). Access response body via `.data`.
 
-### Bambuddy Review Pointer — 2026-05-31
+### External-reference-app Review Pointer — 2026-05-31
 
-bambuddy repo (https://github.com/maziggy/bambuddy) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from bambuddy" and "Consider a richer slice progress contract" for details.
+external-reference-app repo ([external reference repo]) was reviewed by Brett. Two adoption candidates identified: gcode-preview (toolpath rendering) and client-side 3MF parsing. See decisions.md entries "Consider G-code toolpath preview parity from external-reference-app" and "Consider a richer slice progress contract" for details.
 
-### Bambuddy Adoption & Settings Consolidation
+### External-reference-app Adoption & Settings Consolidation
 
 Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, extend GCodeViewer3D.tsx, wire to ArchivesPage), Quick Slice UX modal (preset-first, 3 profile dropdowns, hide raw sliders behind "Advanced"). Phase 2 deferred: multi-plate 3MF picker with smart filament auto-selection. Settings consolidation identified 15+ candidate admin pages (Filament, Slicer Profiles, Cameras, NFC, etc.) for unified nav with 8 tabs: General, Filament, Slicing, Hardware, Notifications, Integrations, Data, Users. Key UX: cross-tab search, collapsible cards, inline modals, masked secrets. NFC tag management modal (LinkSpoolModal + AssignSpoolModal, WebSocket real-time sync) deferred to later phase.
-- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "external-reference-app", "external-author", "external reference app", [external reference repo]. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
 
 ## 2026-05-31 — GcodePreviewService Abstraction (#333)
 

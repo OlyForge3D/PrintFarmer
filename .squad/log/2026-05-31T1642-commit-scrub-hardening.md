@@ -28,7 +28,7 @@
 ## Gate Verification
 
 Commit subject: "chore(squad): harden commit-message scrub gate + merge pending directives"  
-Scrub command: `grep -iE 'bambuddy|maziggy|bambu buddy|github\.com/maziggy' /tmp/squad-commit-scrub.txt`  
+Scrub command: `grep -iE 'external-reference-app|external-author|external reference app|github\.com/external-author' /tmp/squad-commit-scrub.txt`  
 Result: **PASS (0 matches)**
 
 ## Boundary Clarification

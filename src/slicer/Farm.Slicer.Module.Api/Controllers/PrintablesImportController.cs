@@ -1,4 +1,4 @@
-﻿using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,8 +7,9 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Slicer.Module.Api.Controllers;
 
 /// <summary>
-/// Endpoints for previewing Printables.com models before importing them.
-/// Import (DB write) is handled by a future endpoint once attribution fields land in #351.
+/// Endpoints for previewing Printables.com models and persisting attribution metadata.
+/// File upload is handled via the standard model upload endpoint; call <c>POST /api/3d-models/printables/attribution</c>
+/// afterward to attach Printables attribution fields to the uploaded record.
 /// </summary>
 [ApiController]
 [Route("api/3d-models/printables")]
@@ -102,6 +103,51 @@ public sealed class PrintablesImportController(
         {
             _logger.LogError(ex, "Unexpected error importing Printables model for {Url}", url);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to import Printables model.");
+        }
+    }
+
+    /// <summary>
+    /// Attaches Printables attribution metadata to an already-uploaded model record.
+    /// Call this after uploading the file via <c>POST /api/3d-models/upload</c>.
+    /// </summary>
+    /// <param name="request">Model ID and source Printables URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("attribution")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> PersistAttributionAsync([FromBody] PersistAttributionRequestDto request, CancellationToken ct)
+    {
+        if (request is null || request.ModelId == Guid.Empty || string.IsNullOrWhiteSpace(request.PrintablesUrl))
+        {
+            return BadRequest("modelId and printablesUrl are required.");
+        }
+
+        try
+        {
+            await _importService.PersistAttributionAsync(request.ModelId, request.PrintablesUrl, ct);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogInformation("Bad attribution request for model {ModelId}: {Message}", request.ModelId, ex.Message);
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning("Model {ModelId} not found for attribution update: {Message}", request.ModelId, ex.Message);
+            return NotFound(ex.Message);
+        }
+        catch (PrintablesApiException ex)
+        {
+            _logger.LogWarning(ex, "Printables API error resolving attribution for {Url}", request.PrintablesUrl);
+            return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error persisting attribution for model {ModelId}", request.ModelId);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to persist attribution.");
         }
     }
 }
