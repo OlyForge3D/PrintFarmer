@@ -278,4 +278,42 @@ extension AuthViewModelTests {
         viewModel.currentUser = makeUser(roles: [])
         XCTAssertNil(viewModel.currentUserRole)
     }
+
+    // MARK: - Maintenance Toggle Gating (#274)
+
+    /// Admin: currentUserRole == "farm_admin" -> the maintenance toggle is shown.
+    func testMaintenanceToggleVisibleForAdmin() {
+        viewModel.currentUser = makeUser(roles: ["farm_admin"])
+        XCTAssertEqual(viewModel.currentUserRole, "farm_admin",
+            "Admin must have currentUserRole == farm_admin so the maintenance toggle is shown")
+    }
+
+    /// Multiple roles including farm_admin: should still gate as admin.
+    func testMaintenanceToggleVisibleForMultiRoleWithAdmin() {
+        viewModel.currentUser = makeUser(roles: ["operator", "farm_admin", "viewer"])
+        XCTAssertEqual(viewModel.currentUserRole, "farm_admin",
+            "User with multiple roles including farm_admin must see maintenance toggle")
+    }
+
+    /// Non-admin: currentUserRole != "farm_admin" -> the maintenance toggle is hidden.
+    func testMaintenanceToggleHiddenForNonAdmin() {
+        viewModel.currentUser = makeUser(roles: ["operator"])
+        XCTAssertNotEqual(viewModel.currentUserRole, "farm_admin",
+            "Non-admin must not have currentUserRole == farm_admin so the maintenance toggle is hidden")
+    }
+
+    /// Case sensitivity: backend always sends lowercase "farm_admin".
+    func testMaintenanceToggleCaseSensitive() {
+        viewModel.currentUser = makeUser(roles: ["Farm_Admin"])
+        XCTAssertNotEqual(viewModel.currentUserRole, "farm_admin",
+            "Role matching is case-sensitive — backend normalizes to lowercase")
+    }
+
+    /// Unauthenticated (nil user, not just empty roles): maintenance toggle hidden.
+    func testMaintenanceToggleHiddenWhenUnauthenticated() {
+        viewModel.currentUser = nil
+        XCTAssertNil(viewModel.currentUserRole,
+            "Unauthenticated user must have nil currentUserRole so the maintenance toggle is hidden")
+    }
+
 }
