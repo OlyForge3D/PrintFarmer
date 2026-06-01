@@ -31,12 +31,25 @@ public sealed class HomeAssistantSmartPlugProvider(
     /// <inheritdoc/>
     public async Task<PowerReading?> GetCurrentReadingAsync(string deviceAddress, CancellationToken ct)
     {
-        (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
-        string? token = ResolveToken();
+        (string? parsedBaseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
+        (string? configuredBaseUrl, string? token) = ResolveConnectionParams();
 
         if (string.IsNullOrWhiteSpace(token))
         {
-            logger.LogWarning("HomeAssistant token not configured (PFARM__HomeAssistant__Token). Skipping reading for {EntityId}", entityId);
+            logger.LogWarning(
+                "HomeAssistant token not configured or integration disabled. Skipping reading for {EntityId}",
+                entityId);
+            return null;
+        }
+
+        // Blocker 5: prefer the address-embedded base URL; fall back to the configured setting.
+        // Never fall back to a hardcoded host.
+        string baseUrl = parsedBaseUrl ?? configuredBaseUrl ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            logger.LogWarning(
+                "HomeAssistant base URL not configured. Skipping reading for {EntityId}",
+                entityId);
             return null;
         }
 
@@ -53,9 +66,26 @@ public sealed class HomeAssistantSmartPlugProvider(
             await using System.IO.Stream stream = await response.Content.ReadAsStreamAsync(ct);
             return ParseStateResponse(stream, entityId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            logger.LogWarning(ex, "HomeAssistant GetCurrentReading failed for entity {EntityId} at {BaseUrl}", entityId, baseUrl);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Blocker 4: surface specific failure reasons so admins can act.
+            string reason = ex switch
+            {
+                TaskCanceledException => "timeout (HA may be offline)",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized }
+                    or HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden }
+                    => "bad token (401/403 Unauthorized)",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound }
+                    => $"entity not found — {entityId} returned 404",
+                _ => ex.Message
+            };
+            logger.LogWarning(
+                "HomeAssistant GetCurrentReading failed for {EntityId} at {BaseUrl}: {Reason}",
+                entityId, baseUrl, reason);
             return null;
         }
     }
@@ -63,12 +93,19 @@ public sealed class HomeAssistantSmartPlugProvider(
     /// <inheritdoc/>
     public async Task<bool> TestConnectionAsync(string deviceAddress, CancellationToken ct)
     {
-        (string baseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
-        string? token = ResolveToken();
+        (string? parsedBaseUrl, string entityId) = ParseDeviceAddress(deviceAddress);
+        (string? configuredBaseUrl, string? token) = ResolveConnectionParams();
 
         if (string.IsNullOrWhiteSpace(token))
         {
             logger.LogWarning("HomeAssistant token not configured. Cannot test connection for {EntityId}", entityId);
+            return false;
+        }
+
+        string baseUrl = parsedBaseUrl ?? configuredBaseUrl ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            logger.LogWarning("HomeAssistant base URL not configured. Cannot test connection for {EntityId}", entityId);
             return false;
         }
 
@@ -82,7 +119,11 @@ public sealed class HomeAssistantSmartPlugProvider(
             using HttpResponseMessage response = await client.GetAsync(url, ct);
             return response.IsSuccessStatusCode;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
         {
             logger.LogDebug(ex, "HomeAssistant TestConnection failed for {BaseUrl}", baseUrl);
             return false;
@@ -91,32 +132,32 @@ public sealed class HomeAssistantSmartPlugProvider(
 
     /// <summary>
     /// Parses deviceAddress formatted as "{baseUrl}|{entityId}".
-    /// Falls back to treating the whole string as an entity ID with no base URL when no pipe is present.
+    /// Returns <c>null</c> for baseUrl when no pipe is present; the caller must then
+    /// resolve the base URL from <see cref="HomeAssistantSettings.BaseUrl"/>.
+    /// Blocker 5: the hardcoded "homeassistant.local" fallback has been removed —
+    /// explicit configuration is required.
     /// </summary>
-    private static (string BaseUrl, string EntityId) ParseDeviceAddress(string deviceAddress)
+    private static (string? BaseUrl, string EntityId) ParseDeviceAddress(string deviceAddress)
     {
         int sep = deviceAddress.IndexOf('|', StringComparison.Ordinal);
         if (sep < 0)
         {
-            // Legacy / simple: treat whole string as entity; caller must have base URL in config.
-            return ("http://homeassistant.local:8123", deviceAddress);
+            // No base URL in address; caller resolves it from settings.
+            return (null, deviceAddress);
         }
 
         return (deviceAddress[..sep], deviceAddress[(sep + 1)..]);
     }
 
     /// <summary>
-    /// Resolves the HA long-lived access token.
-    /// Prefers the raw configuration key; falls back to the encrypted token in persisted settings.
-    /// Uses a short-lived DI scope to access the scoped <see cref="ISettingsService"/>.
+    /// Resolves the HA base URL and long-lived access token.
+    /// Token priority: raw configuration key (<c>HomeAssistant:Token</c>) → persisted encrypted token.
+    /// Blocker 2: returns a null token when <see cref="HomeAssistantSettings.Enabled"/> is false
+    /// and no config-level override is present, so the provider stops polling.
     /// </summary>
-    private string? ResolveToken()
+    private (string? ConfiguredBaseUrl, string? Token) ResolveConnectionParams()
     {
         string? configToken = configuration["HomeAssistant:Token"];
-        if (!string.IsNullOrWhiteSpace(configToken))
-        {
-            return configToken;
-        }
 
         // ISettingsService is scoped; create a short-lived scope from the singleton provider.
         using IServiceScope scope = scopeFactory.CreateScope();
@@ -124,12 +165,24 @@ public sealed class HomeAssistantSmartPlugProvider(
             .GetRequiredService<ISettingsService>()
             .Get<HomeAssistantSettings>();
 
-        if (!string.IsNullOrWhiteSpace(settings.EncryptedToken))
+        // Config-level token overrides the enabled toggle (useful for dev/admin scenarios).
+        if (!string.IsNullOrWhiteSpace(configToken))
         {
-            return dataProtector.Unprotect(settings.EncryptedToken);
+            return (settings.BaseUrl, configToken);
         }
 
-        return null;
+        // Honor the Enabled toggle when relying on persisted settings.
+        if (!settings.Enabled)
+        {
+            logger.LogDebug("HomeAssistant integration is disabled — skipping token resolution");
+            return (settings.BaseUrl, null);
+        }
+
+        string? token = !string.IsNullOrWhiteSpace(settings.EncryptedToken)
+            ? dataProtector.Unprotect(settings.EncryptedToken)
+            : null;
+
+        return (settings.BaseUrl, token);
     }
 
     private PowerReading? ParseStateResponse(System.IO.Stream stream, string entityId)

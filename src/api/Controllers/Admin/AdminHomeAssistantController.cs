@@ -86,6 +86,17 @@ public class AdminHomeAssistantController(
     public async Task<ActionResult<HomeAssistantConnectionTestResult>> TestConnectionAsync(
         CancellationToken ct)
     {
+        // Blocker 2: honor the Enabled toggle before attempting any outbound HA request.
+        HomeAssistantSettings current = settingsService.Get<HomeAssistantSettings>();
+        if (!current.Enabled)
+        {
+            return Ok(new HomeAssistantConnectionTestResult
+            {
+                Success = false,
+                Message = "Home Assistant integration is disabled."
+            });
+        }
+
         (string baseUrl, string? token) = ResolveConnectionDetails();
 
         if (string.IsNullOrWhiteSpace(baseUrl))
@@ -120,13 +131,28 @@ public class AdminHomeAssistantController(
                 Message = "Connected"
             });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Blocker 4: map specific HA failure modes to actionable admin messages.
+            string message = ex switch
+            {
+                TaskCanceledException => "Connection timed out — Home Assistant may be offline.",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized }
+                    or HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden }
+                    => "Authentication failed — check your long-lived access token.",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound }
+                    => "HA API endpoint not found — check the base URL.",
+                _ => ex.Message
+            };
             logger.LogDebug(ex, "Home Assistant connection test failed for {BaseUrl}", baseUrl);
             return Ok(new HomeAssistantConnectionTestResult
             {
                 Success = false,
-                Message = ex.Message
+                Message = message
             });
         }
     }
@@ -145,6 +171,13 @@ public class AdminHomeAssistantController(
     public async Task<ActionResult<IEnumerable<HomeAssistantEntityDto>>> DiscoverEntitiesAsync(
         CancellationToken ct)
     {
+        // Blocker 2: honor the Enabled toggle.
+        HomeAssistantSettings current = settingsService.Get<HomeAssistantSettings>();
+        if (!current.Enabled)
+        {
+            return BadRequest(new { error = "Home Assistant integration is disabled." });
+        }
+
         (string baseUrl, string? token) = ResolveConnectionDetails();
 
         if (string.IsNullOrWhiteSpace(baseUrl))
@@ -163,10 +196,25 @@ public class AdminHomeAssistantController(
             List<HomeAssistantEntityDto> entities = await FetchPowerEntitiesAsync(client, baseUrl, ct);
             return Ok(entities);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Blocker 4: map specific HA failure modes to actionable admin messages.
+            string message = ex switch
+            {
+                TaskCanceledException => "Connection timed out — Home Assistant may be offline.",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized }
+                    or HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden }
+                    => "Authentication failed — check your long-lived access token.",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound }
+                    => "HA API endpoint not found — check the base URL.",
+                _ => $"Discovery failed: {ex.Message}"
+            };
             logger.LogWarning(ex, "Home Assistant entity discovery failed for {BaseUrl}", baseUrl);
-            return BadRequest(new { error = $"Discovery failed: {ex.Message}" });
+            return BadRequest(new { error = message });
         }
     }
 
@@ -276,23 +324,29 @@ public class AdminHomeAssistantController(
         return result;
     }
 
+    /// <summary>
+    /// Returns true only for entities that expose instantaneous power (W or kW).
+    /// Blocker 3 fix: restricting to device_class=power and W/kW units prevents the entity
+    /// picker from offering kWh, voltage, or current sensors — values the provider would
+    /// misinterpret as watts, corrupting power readings.
+    /// </summary>
     private static bool IsPowerCapableEntity(JsonElement attrs)
     {
-        // Match by device_class
+        // Prefer explicit device_class=power (instantaneous watt sensors).
         if (attrs.TryGetProperty("device_class", out JsonElement dc))
         {
-            string deviceClass = dc.GetString() ?? string.Empty;
-            if (deviceClass is "power" or "energy" or "current" or "voltage")
+            if ((dc.GetString() ?? string.Empty) == "power")
             {
                 return true;
             }
         }
 
-        // Match by unit_of_measurement
+        // Fall back to unit_of_measurement for switch entities that expose watts
+        // without a device_class, e.g. older Shelly/Sonoff switch.* entities.
         if (attrs.TryGetProperty("unit_of_measurement", out JsonElement uom))
         {
             string unit = uom.GetString() ?? string.Empty;
-            if (unit is "W" or "kW" or "kWh" or "Wh" or "A" or "V" or "mA")
+            if (unit is "W" or "kW")
             {
                 return true;
             }

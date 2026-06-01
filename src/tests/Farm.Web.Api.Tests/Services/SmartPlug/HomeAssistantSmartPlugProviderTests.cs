@@ -20,7 +20,7 @@ public class HomeAssistantSmartPlugProviderTests
     private const string ValidToken = "test-ha-token-abc123";
 
     private static (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider(
-        string? token = ValidToken)
+        string? token = ValidToken, string? settingsBaseUrl = null)
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
 #pragma warning disable CA2000
@@ -38,20 +38,23 @@ public class HomeAssistantSmartPlugProviderTests
             .AddInMemoryCollection(configData)
             .Build();
 
-        // Scope factory is only used when IConfiguration token is absent.
-        // Always wire it up to return empty settings so the fallback path returns null cleanly.
-        HomeAssistantSettings emptySettings = new();
-        Mock<ISettingsService> emptySettingsService = new();
-        emptySettingsService.Setup(s => s.Get<HomeAssistantSettings>()).Returns(emptySettings);
+        // Scope factory is always wired; token=null tests verify that null token → null reading.
+        HomeAssistantSettings settings = new()
+        {
+            BaseUrl = settingsBaseUrl ?? string.Empty,
+            Enabled = true
+        };
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(s => s.Get<HomeAssistantSettings>()).Returns(settings);
 
-        Mock<IServiceProvider> emptyServiceProvider = new();
-        emptyServiceProvider.Setup(sp => sp.GetService(typeof(ISettingsService))).Returns(emptySettingsService.Object);
+        Mock<IServiceProvider> serviceProvider = new();
+        serviceProvider.Setup(sp => sp.GetService(typeof(ISettingsService))).Returns(settingsService.Object);
 
-        Mock<IServiceScope> emptyScope = new();
-        emptyScope.Setup(s => s.ServiceProvider).Returns(emptyServiceProvider.Object);
+        Mock<IServiceScope> scope = new();
+        scope.Setup(s => s.ServiceProvider).Returns(serviceProvider.Object);
 
         Mock<IServiceScopeFactory> scopeFactory = new();
-        scopeFactory.Setup(f => f.CreateScope()).Returns(emptyScope.Object);
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
 
         Mock<ISensitiveDataProtector> dataProtector = new();
 
@@ -220,15 +223,18 @@ public class HomeAssistantSmartPlugProviderTests
         result.Should().BeTrue();
     }
 
+    // Blocker 5: legacy address format (entity-only, no pipe) must use the configured
+    // base URL from HomeAssistantSettings — never a hardcoded fallback host.
     [Fact]
-    public async Task GetCurrentReadingAsync_WithLegacyAddressFormat_UsesDefaultBaseUrl()
+    public async Task GetCurrentReadingAsync_WithLegacyAddressFormat_UsesConfiguredBaseUrl()
     {
-        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) =
+            CreateProvider(settingsBaseUrl: "http://ha.custom.local:8123");
 
         string json = """{"entity_id":"sensor.plug_power","state":"10.0","attributes":{}}""";
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync",
-                ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.Host == "homeassistant.local"),
+                ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.Host == "ha.custom.local"),
                 ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -239,6 +245,17 @@ public class HomeAssistantSmartPlugProviderTests
 
         reading.Should().NotBeNull();
         reading!.WattsNow.Should().BeApproximately(10.0, 0.001);
+    }
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WithLegacyAddressFormat_WhenBaseUrlNotConfigured_ReturnsNull()
+    {
+        // No settingsBaseUrl → configured base URL is empty → provider cannot resolve host.
+        (HomeAssistantSmartPlugProvider provider, _) = CreateProvider(settingsBaseUrl: null);
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync("sensor.plug_power", CancellationToken.None);
+
+        reading.Should().BeNull();
     }
 
     [Fact]
@@ -259,5 +276,95 @@ public class HomeAssistantSmartPlugProviderTests
 
         reading.Should().NotBeNull();
         reading!.WattsNow.Should().BeApproximately(55.0, 0.001);
+    }
+
+    // ─── Blocker 2: Enabled toggle ────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenIntegrationDisabled_ReturnsNull()
+    {
+        // No config token override; settings.Enabled=false → provider must not poll.
+        IConfiguration config = new ConfigurationBuilder().Build();
+
+        HomeAssistantSettings disabledSettings = new()
+        {
+            Enabled = false,
+            BaseUrl = "http://ha.local:8123",
+            EncryptedToken = "enc:some-token"
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(s => s.Get<HomeAssistantSettings>()).Returns(disabledSettings);
+
+        Mock<IServiceProvider> serviceProvider = new();
+        serviceProvider.Setup(sp => sp.GetService(typeof(ISettingsService))).Returns(settingsService.Object);
+
+        Mock<IServiceScope> scope = new();
+        scope.Setup(s => s.ServiceProvider).Returns(serviceProvider.Object);
+
+        Mock<IServiceScopeFactory> scopeFactory = new();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+
+#pragma warning disable CA2000
+        HttpClient httpClient = new(new Mock<HttpMessageHandler>(MockBehavior.Strict).Object);
+#pragma warning restore CA2000
+        Mock<IHttpClientFactory> factory = new();
+        factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
+
+        HomeAssistantSmartPlugProvider provider = new(
+            factory.Object,
+            config,
+            scopeFactory.Object,
+            new Mock<ISensitiveDataProtector>().Object,
+            NullLogger<HomeAssistantSmartPlugProvider>.Instance);
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://ha.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().BeNull();
+    }
+
+    // ─── Blocker 6: error path coverage ──────────────────────────────────────
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenHaReturns401_ReturnsNull()
+    {
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenHaReturns404_ReturnsNull()
+    {
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenHaTimesOut_ReturnsNull()
+    {
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new TaskCanceledException("Request timeout"));
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().BeNull();
     }
 }

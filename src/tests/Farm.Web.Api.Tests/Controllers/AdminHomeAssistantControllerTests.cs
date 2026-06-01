@@ -139,7 +139,7 @@ public class AdminHomeAssistantControllerTests
     public async Task TestConnectionAsync_WhenBaseUrlMissing_ReturnsFailure()
     {
         _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
-            .Returns(new HomeAssistantSettings { EncryptedToken = "enc:tok" });
+            .Returns(new HomeAssistantSettings { Enabled = true, EncryptedToken = "enc:tok" });
         _dataProtector.Setup(p => p.Unprotect("enc:tok")).Returns("tok");
         AdminHomeAssistantController controller = CreateController();
 
@@ -156,7 +156,7 @@ public class AdminHomeAssistantControllerTests
     public async Task TestConnectionAsync_WhenTokenMissing_ReturnsFailure()
     {
         _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
-            .Returns(new HomeAssistantSettings { BaseUrl = "http://ha.local:8123" });
+            .Returns(new HomeAssistantSettings { Enabled = true, BaseUrl = "http://ha.local:8123" });
         AdminHomeAssistantController controller = CreateController();
 
         ActionResult<HomeAssistantConnectionTestResult> result =
@@ -174,6 +174,7 @@ public class AdminHomeAssistantControllerTests
         _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
             .Returns(new HomeAssistantSettings
             {
+                Enabled = true,
                 BaseUrl = "http://ha.local:8123",
                 EncryptedToken = "enc:tok"
             });
@@ -211,7 +212,9 @@ public class AdminHomeAssistantControllerTests
         HomeAssistantConnectionTestResult dto = Assert.IsType<HomeAssistantConnectionTestResult>(ok.Value);
         dto.Success.Should().BeTrue();
         dto.Version.Should().Be("2024.1.0");
-        dto.PowerEntityCount.Should().Be(2); // sensor.plug_power and sensor.plug_energy only
+        // Blocker 3: only sensor.plug_power (device_class=power/W) counts;
+        // sensor.plug_energy (kWh) is no longer included.
+        dto.PowerEntityCount.Should().Be(1);
     }
 
     // ─── DiscoverEntitiesAsync ────────────────────────────────────────────────
@@ -220,7 +223,7 @@ public class AdminHomeAssistantControllerTests
     public async Task DiscoverEntitiesAsync_WhenBaseUrlMissing_ReturnsBadRequest()
     {
         _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
-            .Returns(new HomeAssistantSettings { EncryptedToken = "enc:tok" });
+            .Returns(new HomeAssistantSettings { Enabled = true, EncryptedToken = "enc:tok" });
         _dataProtector.Setup(p => p.Unprotect("enc:tok")).Returns("tok");
         AdminHomeAssistantController controller = CreateController();
 
@@ -236,6 +239,7 @@ public class AdminHomeAssistantControllerTests
         _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
             .Returns(new HomeAssistantSettings
             {
+                Enabled = true,
                 BaseUrl = "http://ha.local:8123",
                 EncryptedToken = "enc:tok"
             });
@@ -269,5 +273,84 @@ public class AdminHomeAssistantControllerTests
         entities.Should().Contain(e => e.EntityId == "switch.printer_power");
         entities.Should().NotContain(e => e.EntityId == "light.kitchen");
         entities.Should().NotContain(e => e.EntityId == "sensor.other_sensor");
+    }
+
+    // ─── Blocker 2: Enabled toggle ────────────────────────────────────────────
+
+    [Fact]
+    public async Task TestConnectionAsync_WhenIntegrationDisabled_ReturnsDisabledMessage()
+    {
+        _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
+            .Returns(new HomeAssistantSettings
+            {
+                Enabled = false,
+                BaseUrl = "http://ha.local:8123",
+                EncryptedToken = "enc:tok"
+            });
+        AdminHomeAssistantController controller = CreateController();
+
+        ActionResult<HomeAssistantConnectionTestResult> result =
+            await controller.TestConnectionAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        HomeAssistantConnectionTestResult dto = Assert.IsType<HomeAssistantConnectionTestResult>(ok.Value);
+        dto.Success.Should().BeFalse();
+        dto.Message.Should().Contain("disabled");
+    }
+
+    // ─── Blocker 6: HA error-path coverage ───────────────────────────────────
+
+    [Fact]
+    public async Task TestConnectionAsync_WhenHaReturns401_ReturnsTokenErrorMessage()
+    {
+        _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
+            .Returns(new HomeAssistantSettings
+            {
+                Enabled = true,
+                BaseUrl = "http://ha.local:8123",
+                EncryptedToken = "enc:tok"
+            });
+        _dataProtector.Setup(p => p.Unprotect("enc:tok")).Returns("mytoken");
+
+        _httpHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        AdminHomeAssistantController controller = CreateController();
+
+        ActionResult<HomeAssistantConnectionTestResult> result =
+            await controller.TestConnectionAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        HomeAssistantConnectionTestResult dto = Assert.IsType<HomeAssistantConnectionTestResult>(ok.Value);
+        dto.Success.Should().BeFalse();
+        dto.Message.Should().Contain("token");
+    }
+
+    [Fact]
+    public async Task TestConnectionAsync_WhenHaTimesOut_ReturnsTimeoutMessage()
+    {
+        _settingsService.Setup(s => s.Get<HomeAssistantSettings>())
+            .Returns(new HomeAssistantSettings
+            {
+                Enabled = true,
+                BaseUrl = "http://ha.local:8123",
+                EncryptedToken = "enc:tok"
+            });
+        _dataProtector.Setup(p => p.Unprotect("enc:tok")).Returns("mytoken");
+
+        _httpHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new TaskCanceledException("Request timeout"));
+
+        AdminHomeAssistantController controller = CreateController();
+
+        ActionResult<HomeAssistantConnectionTestResult> result =
+            await controller.TestConnectionAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        HomeAssistantConnectionTestResult dto = Assert.IsType<HomeAssistantConnectionTestResult>(ok.Value);
+        dto.Success.Should().BeFalse();
+        dto.Message.Should().Contain("timed out");
     }
 }
