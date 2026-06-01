@@ -98,3 +98,12 @@ _(append new learnings below this line)_
 - **Conflict resolution lesson:** This was a union merge, not a choose-one-side merge. Keep base regressions (the backend-busy 409 assertions) and add the PR's six `/home` guard tests so the rebased branch preserves both the gating change and newer controller-mapping coverage.
 - **Gating pattern confirmation:** `/home`, `/homexy`, and `/homez` now follow the same `GatePrinterControlAsync` preflight used by `/temps`, `/move`, and `/moveto`: gate before backend I/O, return the 409 `CommandResult` envelope on busy cached states, and only call the printer service when idle.
 - **Operational fallback:** If `gh` auth is invalid but HTTPS git credentials still exist in the keychain, a one-off GitHub REST merge can safely finish a stalled PR without exposing any token values in logs.
+
+## 2026-05-31 — Trio Review Cycle #355, #371, #405
+
+Participated in multi-round trio review cycle. Key learnings:
+
+1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
+3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
+4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.

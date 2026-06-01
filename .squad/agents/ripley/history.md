@@ -1,16 +1,23 @@
-# Ripley History
+# Ripley Summary — Recent Sessions
 
-## Core Context
+Ripley is the frontend architect and API integration specialist.
 
-Ripley is the frontend architect and API integration specialist. Key retained context:
-- Owns printer-card UX, BedClearBanner behavior, and frontend cache/signal updates for auto-dispatch state.
-- Prefers centralizing transport compatibility in `src/Web/ReactApp/src/services/` wrappers so product language can stay clean in hooks/components.
-- Uses focused React integration tests to protect compact-card, banner, and SignalR merge seams where stale partial payloads can hide operator actions.
-- Consolidates repeated status affordances into a single predictable surface when duplicate UI adds cognitive load.
+## 2026-05-31: Trio Review Cycle #355, #371, #405
+Participated in multi-round trio review cycle with strict three-reviewer consensus and fresh-hand rotation (Brett, Kane). Key learnings:
+1. **Reviewer-lockout protocol:** Prevents fatigue in multi-round cycles
+2. **Kane surgical-fix MVP:** Small, scoped corrections proved cost-effective
+3. **Session-end report validation:** Always verify trio drops match current commit SHA
+4. **PR auto-close gap:** Manual close required for development branch merges
 
-Early detailed entries were summarized on 2026-03-25 for maintainability. See decisions and orchestration logs for source detail.
+## Recent Work Patterns (2026-05-26 to 2026-05-31)
+- Camera management UI: printer association, endpoint detection, backend probe abstraction
+- Login audit frontend: security page with tri-state filter and audit log display
+- Settings system consolidation: tabbed layout, 8-tab navigation, cross-tab search
+- Frontend transport integration: SignalR updates, status affordances, auto-dispatch naming
+- React component patterns: modal-based UX, BedClearBanner state preservation, failure-detection badge
 
-### Summarized history
+## Summarized History
+Detailed work entries from 2026-03-25 through 2026-05-25 archived in history-archive.md. Key themes: compact-card UX, live update seams, profile management, cost tracking, 3D visualization tools.
 
 **2026-03-25:** Finalized icon-only failure-detection badge behavior, removed redundant camera overlays, and documented the header-badge-as-single-source pattern.
 
@@ -201,3 +208,4 @@ Phase 1 work: G-code preview viewer (integrate gcode-preview npm lib v2.18.x, ex
 - Rendering full page components inside tab panels requires wrapping test helpers with QueryClientProvider + Auth mocks since pages typically call hooks that need providers.
 - The `SettingsPage` (admin config) rendered an h2 "Settings" which collided with the h1 shell heading in tests — use `level` matcher for disambiguation.
 - `SettingsTabStrip` now accepts optional `tabContent` record for rendering real content vs placeholder — backward compatible with empty tabs.
+For full historical context, see `.squad/decisions.md` and `.squad/orchestration-log.md`.

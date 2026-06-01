@@ -72,3 +72,12 @@ _(append new learnings below this line)_
 - `@State` lifecycle matches `PrinterDetailViewModel` 1:1 nav pattern; layout placement against main; no retain cycles.
 - Non-blocking note: missing loading-state UI during initial capability fetch (handoff to Hudson).
 - Comment: https://github.com/OlyForge3D/PrintFarmerMobile/pull/15#issuecomment-4570526326
+
+## 2026-05-31 — Trio Review Cycle #355, #371, #405
+
+Participated in multi-round trio review cycle. Key learnings:
+
+1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
+3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
+4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.

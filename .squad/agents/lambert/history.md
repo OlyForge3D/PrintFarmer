@@ -144,3 +144,11 @@ These are transitive and expected — not blockers for the feature work.
 - Challenges stored in `IDistributedCache` (in-memory; swap for Redis in prod)
 - Replay prevention: cache key deleted immediately on read (`LoadOptionsAsync`)
 - Credential persistence deferred to #354 — `CompleteRegistration` and `CompleteLogin` log TODO warnings
+## 2026-05-31 — Trio Review Cycle #355, #371, #405
+
+Participated in multi-round trio review cycle. Key learnings:
+
+1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
+3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
+4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.

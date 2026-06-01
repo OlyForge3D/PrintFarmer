@@ -7629,3 +7629,178 @@ All `accessibilityLabel`/`Hint`/`Value` strings now go through `String(localized
 ---
 
 
+
+## Notification Preferences — Architecture Decisions
+
+**Issue:** #341  
+**Author:** Ripley (Frontend)  
+**Date:** 2025-05-31
+
+### Context
+
+Farm operators need notification delivery (email, web push, in-app) with per-user preferences.
+
+### Decisions
+
+1. **Backend already existed.** The `NotificationPreferences` entity, `NotificationService`, and `GET/PUT /api/notifications/preferences` were already implemented. No changes to the existing preference logic were needed.
+
+2. **Push subscription model.** Added `PushSubscription` entity with `(UserId, Endpoint)` unique index. Supports multiple subscriptions per user (different browsers/devices). VAPID public key served from `GET /api/notifications/push-subscription/vapid-key` (reads from `VAPID_PUBLIC_KEY` env var).
+
+3. **Service Worker.** Extended existing `sw.js` with `push` and `notificationclick` event handlers rather than creating a separate file. Keeps a single SW registration.
+
+4. **Frontend pattern.** New `features/notifications/` module with TanStack Query hooks (`useNotificationPreferences`, `usePushSubscription`). Page at `/profile/notifications` — user-level, not admin-restricted.
+
+5. **No email/push delivery wiring yet.** The `NotificationService.BroadcastJobNotificationAsync` currently only creates in-app DB records and fires SignalR. Actual email sending (SMTP) and web push dispatch (via WebPush library) are deferred to phase 2. The infrastructure (subscriptions, preferences) is ready.
+
+### What's NOT included
+
+- SMS, Slack, Discord channels
+- Actual SMTP email sending
+- Actual web push payload dispatch (needs WebPush NuGet + VAPID private key)
+- `farm_alert` / low filament event types (only job events covered)
+
+### Migration
+
+- `AddPushSubscriptions` migration for both PostgreSQL and SqlServer
+- Creates `PushSubscriptions` table with FK to `Users`
+
+---
+
+# Decision: Passkey Management UI (#356)
+
+**Date:** 2025-01-31
+**Author:** Ripley (Frontend)
+**Status:** Implemented
+
+## Context
+
+Issue #356 requires a passkey management UI under profile settings. Users need to list, rename, and revoke registered passkey credentials.
+
+## Decisions
+
+1. **Route:** `/profile/passkeys` — consistent with existing `/profile/api-keys` pattern.
+2. **Backend endpoints:** Added to `AuthController` under `passkey/credentials` path:
+   - `GET /api/auth/passkey/credentials` — list
+   - `DELETE /api/auth/passkey/credentials/{id}` — revoke
+   - `PATCH /api/auth/passkey/credentials/{id}` — rename
+3. **Service layer:** Extended `IPasskeyService` / `PasskeyService` with `ListCredentialsAsync`, `DeleteCredentialAsync`, `RenameCredentialAsync`.
+4. **Frontend service:** Standalone `passkeyService.ts` (mirroring `apiKeysService.ts` pattern) using `apiClient.request()`.
+5. **Add passkey button:** Currently links to `/profile/passkeys/register` — will be connected to enrollment ceremony from #355.
+6. **No "last passkey" guard yet:** Issue mentions "cannot remove last passkey when no password set" — deferred until password-status API is available.
+
+## Tradeoffs
+
+- Kept backend additions minimal (no separate controller file) since they naturally belong with existing passkey endpoints in `AuthController`.
+- Used `int` ID for credential operations since the entity uses surrogate `int` PK.
+
+---
+
+## Decision: Settings Frontend Architecture (Issue #360)
+
+**Date:** 2025-07-22
+**Author:** Ripley (Frontend)
+
+### Context
+
+Implementing frontend pages for the per-user vs farm-wide settings split (backend shipped in #359/PR #385).
+
+### Decisions
+
+1. **Separate inner form components** — FarmSettingsForm and UserSettingsForm are separate components that receive data as props, initializing `useState` from prop values. This avoids the `useEffect` → `setState` anti-pattern flagged by the ESLint `react-hooks/set-state-in-effect` rule.
+
+2. **Route at `/preferences`** — The new page lives at `/preferences` (no role guard). Farm settings show a lock badge + read-only fields for non-admins using the `canWrite` flag from the API. The existing admin `/settings` route (metadata-driven) remains untouched.
+
+3. **React Query hooks** — `useFarmSettings` / `useUpdateFarmSettings` / `useUserSettings` / `useUpdateUserSettings` use the public `apiClient.get<T>` / `apiClient.put<T>` methods. Optimistic cache update on mutation success via `queryClient.setQueryData`.
+
+4. **Client-side validation mirrors backend** — Same min/max ranges. Toast errors for invalid input before sending request.
+
+### Alternatives Considered
+
+- Embedding in existing SettingsPage — rejected because that page is admin-only and metadata-driven. The new endpoints have a different shape and audience.
+- `react-hook-form` — charter says controlled `useState` is the convention.
+
+---
+
+# Decision: Optimistic Concurrency for Settings Writes
+
+**Author:** Ripley (Frontend, backend fix per lockout rule)  
+**PR:** #385  
+**Date:** 2025-05-31  
+
+## Context
+
+Multi-writer scenarios on settings endpoints (PUT /api/settings/user and PUT /api/settings/farm)
+could silently overwrite changes made by concurrent writers — a classic lost-update problem.
+
+## Decision
+
+Add application-managed concurrency tokens (`RowVersion` byte[] column) to:
+- `UserSettings` entity (per-user preferences)
+- `AppSettingsEntity` (farm-wide settings key-value store)
+
+### Mechanism
+
+1. **Token generation:** `AppDbContext.SaveChanges()` stamps a new GUID-based `RowVersion` on every Added/Modified entity.
+2. **EF Core config:** `IsConcurrencyToken()` — provider-agnostic (works with SQLite, Postgres, SqlServer).
+3. **PUT enforcement:** Clients supply `rowVersion` in the request body or `If-Match` header. Stale tokens yield HTTP 409 Conflict.
+4. **Backward compatibility:** If no `rowVersion` is supplied, the write proceeds without a concurrency check (graceful degradation for older clients).
+
+### Why not `IsRowVersion()` / `[Timestamp]`?
+
+`IsRowVersion()` relies on server-side value generation (SQL Server `rowversion`, Postgres `xmin`). This creates provider-specific migration differences and breaks SQLite (local dev + tests). Application-managed tokens are simpler and portable.
+
+## Migrations
+
+- `AddSettingsConcurrencyTokens` for both PostgreSQL and SqlServer providers.
+- Adds `RowVersion BYTEA/VARBINARY` column to `UserSettings` and `AppSettingsEntities` tables.
+
+## Alternatives Considered
+
+- **ETag via `UpdatedAt` timestamp:** Lower precision, timestamp collisions possible.
+- **Database-native `xmin`/`rowversion`:** Provider-specific, doesn't work with SQLite.
+- **Pessimistic locking:** Overly restrictive for settings that change infrequently.
+
+---
+
+# Decision: Fix captive dependency in PowerMonitorPollingService
+
+**Date:** 2025-07-14
+**Author:** Ripley (frontend, acting on backend fix per lockout rule)
+**PR:** #391
+**Bead:** #347
+
+## Context
+
+`PowerMonitorPollingService` is a singleton `BackgroundService` that previously accepted
+`IEnumerable<ISmartPlugProvider>` as a direct constructor dependency. PR #393 (HA integration)
+registers `HomeAssistantSmartPlugProvider` as **scoped** (it depends on per-request HTTP clients
+and HA session tokens).
+
+When both PRs merge, this creates a **captive dependency** — a singleton holding a reference to a
+scoped service. With `ValidateScopes=true` (ASP.NET Core Development mode), this causes a startup
+crash. In production (without validation), the scoped provider silently becomes a de-facto
+singleton, leaking state across requests.
+
+## Decision
+
+Replace the direct `IEnumerable<ISmartPlugProvider>` constructor injection with per-iteration
+scope resolution:
+
+1. Remove `IEnumerable<ISmartPlugProvider>` from the constructor parameters.
+2. In each poll iteration, resolve `IEnumerable<ISmartPlugProvider>` from the already-existing
+   `AsyncServiceScope` via `scope.ServiceProvider.GetServices<ISmartPlugProvider>()`.
+3. Pass the resolved providers to `PollMonitorsAsync` as a parameter.
+
+## Validation
+
+- Integration test `PowerMonitorPollingServiceScopeTests` verifies:
+  - Startup succeeds with `ValidateScopes = true` and a scoped provider registered.
+  - Each scope resolves a distinct provider instance (no captive reference).
+- Full solution build: 0 errors.
+- All tests pass.
+
+## Consequences
+
+- Any `ISmartPlugProvider` can now be registered with any DI lifetime (singleton, scoped, transient).
+- Zero behavioral change for existing singleton providers.
+- PR #393 can merge without modification.

@@ -259,3 +259,18 @@ Same /100 normalization applied in three ViewModel SignalR update handlers:
 **Pinning tests written:** `PrintFarmerTests/Models/PrinterProgressContractTests.swift` — 6 tests covering typical value (42.7→0.427), boundaries (0, 100), missing field (nil), and out-of-range without clamping (150, -5). All pin current 0.0-1.0 behavior.
 
 **Note on test execution:** iOS 26.5 simulator runtime not installed in local environment; tests confirmed correct by code review against decoder source. Build environment issue is pre-existing.
+
+## 2026-05-31 — Trio Review Cycle #355, #371, #405
+
+Participated in multi-round trio review cycle. Key learnings:
+
+1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
+3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
+4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+## 2026-05-31 — Issue #344 PrintJob cost aggregation
+
+- Cost aggregation lives in `JobCostCalculationService.CalculateAndStoreCostsAsync`: it stores nullable component costs, sums non-null components into `PrintJob.TotalCostUsd` (zero when all components are null), and stamps `CostCalculatedAt` with `DateTime.UtcNow`.
+- Completed transitions are in `PrintJobCompletionService`: normal completion around `SyncCompletionAsync` and orphan recovery in `SyncOrphanedJobsAsync`; schedule cost calculation after `SaveChangesAsync` so status persistence is not blocked.
+- Defensive parallel-dependency pattern: keep `IFilamentCostProvider` optional in the constructor, use it first when present, and accept null material cost when Spoolman/provider pricing is unavailable; for power monitors use per-printer `PowerMonitor.ElectricityRateUsdPerKwh` only when present/non-zero, otherwise fall back to farm-wide cost settings.

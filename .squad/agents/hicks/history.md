@@ -91,3 +91,12 @@ _(append new learnings below this line)_
 - **Lesson — Cross-layer translation gap:** Individual diff review (service layer tests) can miss downstream controller mapping. `PrinterBackendBusy` exception → `BackendBusy` outcome → HTTP 502 code chain was not verified in test path inspection. Code-path tests pass; system-path translation fails.
 - **Lesson — Two-reviewer consensus rule (durable):** Backend PRs spanning service logic + controller translation need two reviewers. Applies to: PrintersService → PrintersController exception/outcome flows; domain chains; worker-slicer routing. Single voice insufficient.
 - **Action:** PR #318 requires fix at PrintersController mapping layer before re-review. Bishop's catch earns the rule.
+
+## 2026-05-31 — Trio Review Cycle #355, #371, #405
+
+Participated in multi-round trio review cycle. Key learnings:
+
+1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
+3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
+4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.

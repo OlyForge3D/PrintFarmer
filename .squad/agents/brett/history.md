@@ -1,15 +1,23 @@
-# Brett History
+# Brett Summary — Recent Sessions
 
+Brett is the researcher and follow-up validator on multi-round review cycles.
 
-## Core Context
+## 2026-05-31: Trio Review Cycle #355, #371, #405
+Participated in follow-up validation on merged stack (round 8). Strict reviewer-lockout protocol with fresh-hand rotation proved effective. Key learnings:
+1. **Surgical-fix pattern:** Kane's narrow corrections across three branches demonstrated cost efficiency
+2. **Reviewer-lockout protocol:** Prevents fatigue in multi-round consensus cycles
+3. **Session-end report validation:** Must verify trio drops match current commit SHA
+4. **PR auto-close gap:** Manual close required for development branch merges
 
-Brett is the research and strategy specialist for PrintFarmer. Key retained context:
-- Competitive analysis repeatedly identified AI failure detection, business analytics, and workflow guidance as the biggest gaps versus commercial competitors.
-- Camera management is a farm-platform concern above printer firmware limits; the market expects multi-camera, enable/disable, and health concepts even when firmware APIs are limited.
-- OpenAPI, slicer artifact extraction, and project-style organization consistently ranked above free-form tagging in user-value research.
-- PrintFarmer's strongest market position is self-hosted + multi-backend + subscription-free, so roadmap recommendations should reinforce that niche.
+## Recent Work Patterns (2026-05-26 to 2026-05-31)
+- Research on bambuddy adoption patterns (Settings UX, NFC workflows)
+- Smart plugs electricity cost tracking (design proposal)
+- Printables.com model import (API integration design)
+- Passkey login support (WebAuthn ceremony architecture)
+- Follow-up validation on iOS controls, printer management, settings consolidation
 
-Early detailed entries were summarized on 2026-03-25 for maintainability. See decisions and orchestration logs for source detail.
+## Summarized History
+Detailed work entries from earlier sessions archived. Focus remains on research-informed decisions and follow-up validation across multi-agent cycles.
 
 ### Summarized history
 - 2026-03-06 to 2026-03-10: Delivered competitive landscape and five-feature research covering AI, analytics, camera control, OpenAPI, slicer artifacts, and OrcaSlicer workflow opportunities.
@@ -212,3 +220,13 @@ Created `.squad/decisions/inbox/brett-gcode-preview-worker-throwaway.md` with:
 ## Learnings
 
 - **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "external-reference-app", "external-author", "external reference app", [external reference repo]. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+For full historical context, see `.squad/decisions.md` and `.squad/orchestration-log.md`.
+
+## Learnings
+
+### 2026-05-31 — Issue #346 PowerMonitor entities and migrations
+- PowerMonitor/PowerReading live in `src/infra/Domain` with configuration classes in `src/infra/Data/Configurations`; `AppDbContext` is in `src/infra/Data`, not the older issue-body `src/api/Models`/`src/api/Data` paths.
+- `Printer.Id` is `Guid`, so `PowerMonitor.PrinterId` must remain `Guid` even though the issue sketch said `int`; the generated migrations use `uuid` for PostgreSQL and `uniqueidentifier` for SQL Server.
+- PowerReading retention is implemented by `Farm.Infrastructure.Services.Electricity.PowerReadingPruneService`, registered through `src/api/Startup/BackgroundServicesStartup.cs`, and deletes readings older than 90 days once daily.
+- Farm-wide electricity fallback is the existing `CostTrackingSettings.ElectricityRatePerKwh`; per-monitor `ElectricityRateUsdPerKwh > 0` overrides it, otherwise cost calculation falls back to the farm-wide rate.
+- Rebase lesson: after #413, rerun AppDbContext provider drift checks and avoid carrying stale snapshot changes that regress `LoginAuditEntry.Timestamp` provider metadata.

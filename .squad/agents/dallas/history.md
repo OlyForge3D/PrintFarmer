@@ -158,6 +158,27 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 - `.squad/decisions/inbox/dallas-backlog-printables-import.md`
 - `.squad/decisions/inbox/dallas-backlog-passkey-login.md`
 
+## 2026-05-31 — Triage Round 1: #317 Triaged, Lambert Bench Reassignments
+
+**Scope:** Triage #317, reassign Lambert's benched issues (#344, #346, #351) to other members, recommend next actionable.
+
+### #317 Triaged
+- **Title:** "[API] Plugins should propagate firmware 409 as PrinterBackendBusyException (Moonraker, SDCP, FlashForge)"
+- **Assigned to:** Brett (researcher, cross-plugin investigation)
+- **Labels added:** `squad:🔍 brett`, `priority:p2`, `type:bug`
+- **Rationale:** Multi-plugin firmware response handling requires investigation across three backends (Moonraker, SDCP, FlashForge). Brett as researcher good fit for coordinating plugin-level exception propagation.
+
+### Lambert Reassignments (Benched After PR Rejections #371, #405)
+- **#344 [P4-3] PrintJob cost aggregation** → `squad:🧪 kane`
+  - Rationale: Test-driven cost service logic (energy, material, machine-time aggregation). Kane proven surgical fixer with test coverage foundation from Phase 4 spike.
+- **#346 [E-2] PowerMonitor + PowerReading entities + migrations** → `squad:🔍 brett`
+  - Rationale: Clean EF Core migration on AppDbContext (Postgres + SqlServer). Power entity schema + 90-day auto-prune background logic.
+- **#351 [PI-3] Model3DFile attribution fields + slicer migrations** → `squad:🔍 brett`
+  - Rationale: EF Core migration on SlicerDbContext only (separate context from #346). Attribution schema only; no business logic beyond persistence.
+
+### Next Actionable
+- **#317 → Brett** (plugin firmware response handling, P2, independent, non-iOS).
+
 ## Learnings — 2026-05-31 Issue Filing Session
 
 **Scope:** Filed 31 GitHub issues covering the adoption plan + 5 new backlog clusters.
@@ -193,3 +214,13 @@ Reviewed 7 draft PRs against locked v1 design (decisions.md L576–589). Verdict
 - **All Brady policy answers from the 2026-05-31T09:25 triage directive are embedded in issue bodies** — HA in Phase 1, 90-day retention, attribution on both surfaces, residentKey:preferred, passkey-only out of scope, etc.
 - **The 15+ settings nav items list in ST-2 (#358)** is the one that will cause the most debate — some pages (like NfcDevicesPage) are listed in Hardware but cross-reference NFC UX work. Ralph should coordinate with Ripley on ordering.
 - **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "external-reference-app", "external-author", "external reference app", [external reference repo]. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+- **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
+
+## 2026-05-31 — Trio Review Cycle #355, #371, #405
+
+Participated in multi-round trio review cycle. Key learnings:
+
+1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
+3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
+4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.

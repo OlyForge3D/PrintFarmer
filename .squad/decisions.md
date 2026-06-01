@@ -1742,177 +1742,1824 @@ NEVER reference the external-reference-app repo by name in ANY of: GitHub issues
 
 ---
 
-## Notification Preferences — Architecture Decisions
+## Bishop rereview — #355 / 3aeffbf6a
 
-**Issue:** #341  
-**Author:** Ripley (Frontend)  
-**Date:** 2025-05-31
+VERDICT: REQUEST_CHANGES
 
-### Context
+What Dallas actually fixed:
 
-Farm operators need notification delivery (email, web push, in-app) with per-user preferences.
+1. `src/Web/ReactApp/src/common/contexts/AuthContext.tsx:83-105` + `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:44-59,176-183` — the original dead passkey error path is fixed. `AuthContext.loginWithPasskey()` no longer catches and converts thrown failures to `false`; the `finally` preserves loading cleanup, and `LoginModal` now catches the rejection and renders the inline `role="alert"` error near the passkey button.
 
-### Decisions
+2. `src/Web/ReactApp/src/services/api.ts:296-321` + `src/api/Controllers/AuthController.cs:472-485` — the global 401 interceptor now narrowly exempts `/auth/passkey/login/complete`, which matches the backend endpoint that returns `Unauthorized(result)` for failed passkey assertions. I do not see the previous redirect-to-/login hijack on this path anymore.
 
-1. **Backend already existed.** The `NotificationPreferences` entity, `NotificationService`, and `GET/PUT /api/notifications/preferences` were already implemented. No changes to the existing preference logic were needed.
+3. `src/Web/ReactApp/src/features/profile/pages/PasskeysPage.tsx:53-69,76-79` + `src/api/Controllers/AuthController.cs:417-418` — the rename-by-diff race is gone. Registration now uses the server-returned `newCredentialId`, then renames that exact credential. This replaces the old “refetch and diff IDs” guesswork with a stable identifier.
 
-2. **Push subscription model.** Added `PushSubscription` entity with `(UserId, Endpoint)` unique index. Supports multiple subscriptions per user (different browsers/devices). VAPID public key served from `GET /api/notifications/push-subscription/vapid-key` (reads from `VAPID_PUBLIC_KEY` env var).
+Why I am still holding REQUEST_CHANGES:
 
-3. **Service Worker.** Extended existing `sw.js` with `push` and `notificationclick` event handlers rather than creating a separate file. Keeps a single SW registration.
+1. The new regression tests still do **not** cover the production error path the way Dallas claims, and two of them guard an impossible transport shape.
 
-4. **Frontend pattern.** New `features/notifications/` module with TanStack Query hooks (`useNotificationPreferences`, `usePushSubscription`). Page at `/profile/notifications` — user-level, not admin-restricted.
+   - `src/Web/ReactApp/src/test/features/auth/AuthContext.passkey.test.tsx:74-111` mocks `passkeyService.loginWithPasskey()` to **resolve** `{ success: false, error: ... }` and asserts that `AuthContext` sets context error state.
+   - That is not how the real stack behaves for `/auth/passkey/login/complete`: the backend returns `401 Unauthorized` when `result.Success` is false (`src/api/Controllers/AuthController.cs:484-485`), `apiClient.request()` rejects non-2xx responses (`src/Web/ReactApp/src/services/api.ts:2421-2423`), and the interceptor rethrows an `ApiError` object (`src/Web/ReactApp/src/services/api.ts:292-321`).
+   - Net: the “backend soft-failure resolves `success:false` into `AuthContext.error`” story in Dallas’s note is not a real production path for the current backend/client contract. Those tests pass, but they are still mock-driven fiction for this endpoint.
 
-5. **No email/push delivery wiring yet.** The `NotificationService.BroadcastJobNotificationAsync` currently only creates in-app DB records and fires SignalR. Actual email sending (SMTP) and web push dispatch (via WebPush library) are deferred to phase 2. The infrastructure (subscriptions, preferences) is ready.
+2. `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.test.tsx:9-15,177-188` still mocks `useAuth()` outright, so it never exercises the seam that actually broke before: real `LoginModal` -> real `AuthContext.loginWithPasskey()` -> real `apiClient` error normalization. The test now mocks a rejection that is at least *possible*, but it still is not a production-path regression guard.
 
-### What's NOT included
+What I verified beyond source inspection:
 
-- SMS, Slack, Discord channels
-- Actual SMTP email sending
-- Actual web push payload dispatch (needs WebPush NuGet + VAPID private key)
-- `farm_alert` / low filament event types (only job events covered)
+- `git log --oneline origin/development..origin/squad/355-passkey-enrollment` shows:
+  - `3aeffbf6a chore(squad): drop revision decision for #355 passkey enrollment`
+  - `4183347b1 fix(passkey-enrollment): address trio review blockers (#355)`
+  - `a1c21f24a feat(auth): passkey enrollment + login flow with @simplewebauthn/browser`
+- Targeted Vitest run passed:
+  - `npx vitest run src/test/features/auth/AuthContext.passkey.test.tsx src/test/features/auth/LoginModal.passkey.test.tsx`
+  - Result: 10 tests passed.
+- Passing does not clear the objection above, because the critical regression hole is in **what those tests model**, not whether the current mocks are green.
 
-### Migration
+Required correction:
 
-- `AddPushSubscriptions` migration for both PostgreSQL and SqlServer
-- Creates `PushSubscriptions` table with FK to `Users`
+- Replace the mock-only regression story with at least one production-aligned test that renders `LoginModal` with the real `AuthProvider` (or otherwise drives the real `useAuth`/`apiClient` path) and proves a failed `/auth/passkey/login/complete` response surfaces inline without redirect.
+- Either remove the dead `success:false` passkey-login test assumptions, or change the transport contract so that passkey login can actually resolve a soft failure instead of always rejecting on 401.
+
+Plain text summary: Dallas fixed the original user-facing bugs, but the new tests still overclaim production coverage. The passkey inline-error seam is still not regression-tested against the real AuthContext/apiClient behavior, and two AuthContext tests are asserting a `{ success:false }` response shape the real `/auth/passkey/login/complete` path cannot produce.
+## Bishop review — #355 / a1c21f24a
+**Verdict:** REQUEST_CHANGES
+**Blocking issues:**
+1. `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:44-60`, `src/Web/ReactApp/src/common/contexts/AuthContext.tsx:83-109`, `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.test.tsx:177-188` — the modal’s new passkey-specific inline error path is effectively dead in production. `LoginModal` expects `loginWithPasskey()` to reject so it can set `passkeyError`, but `AuthContext.loginWithPasskey()` catches every thrown ceremony/API error and returns `false` instead. The only test for the inline alert mocks an impossible rejection from `useAuth`, so it passes without covering the real failure path. Unify this state machine so failed passkey auth surfaces in one place and test the actual boolean-false path.
+2. `src/Web/ReactApp/src/features/profile/pages/PasskeysPage.tsx:53-65` — enrollment renames the “new” credential by diffing the cached ID set against a refetched list. If another passkey is registered for the same account before that refetch resolves, this can rename the wrong credential. Because device names are used to identify which security credential to keep/delete later, this is a correctness issue, not just a cosmetic race. Match on a stable server-returned identifier instead of guessing by diff.
+**Non-blocking nits:**
+1. `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.test.tsx` does not cover the real-world backend rejection path (`loginWithPasskey` resolves `false` + context error), loading/disabled behavior during a passkey ceremony, or clearing stale passkey errors on retry.
+2. `src/Web/ReactApp/src/services/passkeyService.ts:73-86` correctly leaves challenge/origin validation to the backend, but the frontend currently drops backend `ApiError.details` in `AuthContext`, so user-facing passkey failures are less actionable than they could be.
+**Strengths:** The frontend correctly delegates WebAuthn option parsing/serialization to `@simplewebauthn/browser` instead of hand-rolled base64 logic. I also verified the backend ceremony contract is doing the security-critical work server-side (FIDO2 origin/challenge verification and one-time challenge consumption), so the client is not trying to validate WebAuthn itself.
+## Bishop round-3 rereview — #355 / 3a568f640
+
+VERDICT: REQUEST_CHANGES
+
+What Dallas fixed:
+
+1. `src/Web/ReactApp/src/test/features/auth/AuthContext.passkey.test.tsx:1-13,83-155` now models the production failure shape correctly for my round-2 blocker #1. The test header explicitly documents that `/auth/passkey/login/complete` fails via 401/`ApiError`, and the assertions now verify rejection propagation instead of the impossible resolved `{ success: false }` path.
+
+2. `src/Web/ReactApp/src/services/api.ts:149-163,316-324,2437-2438` + `src/Web/ReactApp/src/services/passkeyService.ts:83-88` fix Hicks's interceptor concern cleanly. `PfRequestConfig` is exported, extends `AxiosRequestConfig`, is accepted by `apiClient.request()`, and `passkeyService.loginWithPasskey()` sets `skipAuthRedirect: true` on the `/auth/passkey/login/complete` request.
+
+3. `src/Web/ReactApp/src/test/services/api.interceptor.test.ts:1-85` does exercise the real interceptor, not a mock. The test instantiates `ApiClient`, leaves axios real, swaps in a custom adapter that rejects with a controlled 401 `AxiosError`, and verifies both the `skipAuthRedirect: true` and default redirect branches.
+
+4. The app-code inline error path still lines up end-to-end in production code:
+   - `src/Web/ReactApp/src/services/passkeyService.ts:83-88` marks the completion request with `skipAuthRedirect: true`.
+   - `src/Web/ReactApp/src/services/api.ts:316-324` skips token clearing/redirect when that flag is present and still rejects an `ApiError`.
+   - `src/Web/ReactApp/src/common/contexts/AuthContext.tsx:83-105` has no `catch` in `loginWithPasskey()`, so the rejection propagates after `finally` clears loading.
+   - `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:44-60,176-181` catches that rejection and renders the inline `role="alert"` message.
+
+Why I am still holding REQUEST_CHANGES:
+
+1. My round-2 blocker #2 is only partially addressed. `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:17-30` no longer mocks `useAuth`, and it does wrap the real `AuthProvider` (`:137-142`), but it still mocks `@/services/passkeyService` outright. The actual failing seam I called out was the real `LoginModal -> AuthContext -> apiClient` path; this test still short-circuits below `AuthContext` and injects the rejection at the service boundary (`:150-179`) instead of stubbing at HTTP/interceptor level.
+
+2. Because of that deeper mock, Dallas's claim that the new integration test exercises the “full chain” or stubs at the HTTP layer is not accurate. The separate interceptor test proves the flag works in isolation, but there is still no single regression test that drives `LoginModal` through the real `AuthProvider`, real `passkeyService`, and real `ApiClient` error normalization together.
+
+What I verified beyond source inspection:
+
+- Focused Vitest run passed:
+  - `npm run test:run -- src/test/features/auth/AuthContext.passkey.test.tsx src/test/features/auth/LoginModal.passkey.integration.test.tsx src/test/services/api.interceptor.test.ts`
+  - Result: 3 files passed, 7 tests passed.
+- The requested raw grep for `<<<<<<<|=======|>>>>>>>` is noisy because it matches ordinary separator comments (and, if unfiltered, vendored files), so it is not a reliable merge-marker signal by itself.
+- Anchored merge-marker scan `^(<<<<<<<|=======|>>>>>>>)` over `src/Web/ReactApp/src/**/*.{ts,tsx}` found no actual conflict markers.
+
+Required correction:
+
+- Replace the new “integration” test's `@/services/passkeyService` mock with HTTP-layer stubbing that lets the real `passkeyService` and real `ApiClient` participate, then prove a failed `/auth/passkey/login/complete` response surfaces inline in `LoginModal` without redirect.
+
+Plain text summary: Dallas fully fixed my first blocker and the interceptor flag looks sound, but my second blocker is still open because the new LoginModal “integration” test still mocks `passkeyService` and does not exercise the real `LoginModal -> AuthContext -> apiClient` seam I asked to protect.
+## Bishop round-4 re-review — #355 / f38803360
+
+VERDICT: APPROVE
+
+What I verified:
+
+1. `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx` no longer mocks `@/services/passkeyService`. The only functional boundary mock is `@simplewebauthn/browser` at `:30-33`, plus rendering/environment helpers at `:37-39` and `:46-141`. I also grep-checked the committed blob at `f38803360`; there is no `vi.mock('@/services/passkeyService')`.
+
+2. The custom axios adapter is wired onto the real singleton client, not a fake service layer. The test reaches into `apiClient`'s internal axios instance at `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:147-149`, then installs the dispatcher via `axiosInstance.defaults.adapter = makeDispatchAdapter(...)` at `:246-252` and `:283-289`.
+
+3. The 401 path does hit the real interceptor. The real production service marks only the completion request with `skipAuthRedirect: true` in `src/Web/ReactApp/src/services/passkeyService.ts:74-88`. The real interceptor in `src/Web/ReactApp/src/services/api.ts:309-337` checks `error.response?.status === 401`, skips redirect/token clearing when `skipAuthRedirect` is set (`:316-325`), then normalizes the backend payload into an `ApiError` and rejects it (`:327-337`).
+
+4. The browser boundary is mocked at the correct layer. `@simplewebauthn/browser.startAuthentication` is mocked in the test module definition at `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:30-33` and configured in `:230-232`. That is the hardware/browser seam; the real `passkeyService.loginWithPasskey()` still executes `begin -> startAuthentication -> complete` in `src/Web/ReactApp/src/services/passkeyService.ts:74-88`.
+
+5. The end-to-end failure path is intact with no mocked seam in the chain:
+   - `LoginModal` calls `loginWithPasskey(username)` from `useAuth()` in `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:24,44-59`.
+   - `useAuth()` returns the real context value in `src/Web/ReactApp/src/features/auth/hooks/useAuth.ts:1-12`.
+   - `AuthContext.loginWithPasskey()` calls the real passkey service and has no `catch`, so rejection propagates after `finally` in `src/Web/ReactApp/src/common/contexts/AuthContext.tsx:83-105`.
+   - The real service calls the real `apiClient.request()` twice and sets `skipAuthRedirect: true` only on `/auth/passkey/login/complete` in `src/Web/ReactApp/src/services/passkeyService.ts:74-88`.
+   - The test adapter returns the stubbed 401 for `/auth/passkey/login/complete` at `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:241-252`.
+   - The real interceptor converts that 401 into `ApiError.details` in `src/Web/ReactApp/src/services/api.ts:327-337`.
+   - `LoginModal` catches the propagated error and renders `role="alert"` in `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:56-59,176-183`, which the test asserts at `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:262-271`.
+
+6. The positive path is also real: the same adapter setup returns 200 at `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:283-289`, and the test proves `AuthContext` stores the token and closes the modal at `:299-305`.
+
+7. Focused verification passed:
+   - Command: `cd /Users/jpapiez/s/PFarm1/src/Web/ReactApp && npm run test:run -- src/test/features/auth/LoginModal.passkey.integration.test.tsx`
+   - Result: `1` file passed, `2` tests passed.
+
+8. Conflict-marker scan note: the exact raw grep requested over `src/Web/ReactApp` is not empty because `node_modules` contains comment separators matching `=======`. A source-only anchored scan over `src/Web/ReactApp/src/**/*.{ts,tsx}` returned `EMPTY`, so there are no actual merge conflict markers in the app source.
+
+Plain text summary: Kane cleared my round-3 blocker. The rewritten test at `f38803360` does not mock `passkeyService`, swaps a custom adapter onto the real `apiClient` axios instance, mocks only `startAuthentication` at the browser boundary, and drives the real `LoginModal -> AuthContext -> passkeyService -> ApiClient -> interceptor` error path all the way to the inline alert.
+VERDICT: APPROVE
+
+Scope reviewed:
+- Branch: origin/squad/371-home-assistant-provider
+- Commits: b4680ba40, 1487790fe
+- Prior Bishop block: .squad/decisions/inbox/bishop-371-review.md
+- Dallas revision note: .squad/decisions/dallas-371-revision.md
+
+Commit verification:
+- `git log origin/development..origin/squad/371-home-assistant-provider --oneline` includes the requested revision commits, including `b4680ba40` and `1487790fe`.
+
+Findings:
+
+1. SECURITY: UnifiedSettingsController no longer exposes HomeAssistantSettings through the generic settings path.
+- Mechanism: hardcoded section-name blocklist in `src/api/Controllers/UnifiedSettingsController.cs` using a static `HashSet<string>` keyed by section name, including `HomeAssistantSettings.SectionName`.
+- Enforcement points: the blocklist is checked in the aggregate GET path, keyed GET path, bulk update path, and keyed update path before returning or deserializing blocked settings.
+- Logging: the prior raw payload/object logging was removed from the real controller path. The controller now logs section keys instead of serializing raw settings objects, and the typed-settings object logging path that could have serialized HomeAssistant settings is no longer used for the blocked section.
+- Security assessment: this is a targeted hardcoded blocklist, not an attribute- or interface-based secret classification system. For this change set, it closes the original HomeAssistant leak. Residual architectural caveat: a future secret-bearing settings type could slip through if its section name is not added to the blocklist, but I found no additional secret-bearing settings type in scope that re-opens this review block.
+- Citations: `src/api/Controllers/UnifiedSettingsController.cs` (blocklist definition and early checks in GET/POST/by-key methods per Dallas revision), `src/api/Controllers/AdminHomeAssistantController.cs` (masked dedicated admin path remains the intended route).
+
+2. SECURITY: raw payload/object logging side door appears closed.
+- I specifically looked for controller/provider `ILogger` calls that still emit HomeAssistant settings objects or raw payloads.
+- The dangerous generic settings-controller payload/object logging calls were removed/replaced on the real UnifiedSettingsController path rather than merely renamed.
+- Remaining Home Assistant logging is parameterized around base URL / operation failures, not settings objects or token-bearing payloads.
+- I found no settings export/download/backup endpoint in `src/api/Controllers` that re-exposes `HomeAssistantSettings`.
+- Citations: `src/api/Controllers/UnifiedSettingsController.cs`, `src/api/Controllers/AdminHomeAssistantController.cs`, Home Assistant controller/provider references under `src/api` and `src/backends/Farm.Backend.HomeAssistant`.
+
+3. FALLBACK REMOVAL: `homeassistant.local` hardcoded fallback is gone, and null base-url flow is handled gracefully.
+- `ParseDeviceAddress` now returns nullable `BaseUrl` when the device address is in the legacy entity-only format.
+- Callers resolve the effective base URL from parsed value or configured settings; when neither is available, they return a safe failure (`null` / unsuccessful result) instead of forcing `homeassistant.local` or throwing a 500.
+- I did not find a remaining hardcoded `homeassistant.local` fallback in the Home Assistant smart plug provider path.
+- Citations: `src/backends/Farm.Backend.HomeAssistant/HomeAssistantSmartPlugProvider.cs` (`ParseDeviceAddress`, `ResolveConnectionParams`, and callers that short-circuit when base URL is missing).
+
+4. TESTS: the new tests cover the real controller/provider paths, not just isolated helpers.
+- Dallas added/updated tests for disabled integration, bad token / 401, timeout behavior, legacy address parsing with configured base URL, and legacy address parsing with missing base URL.
+- The coverage is meaningful because it exercises `AdminHomeAssistantController` and `HomeAssistantSmartPlugProvider` behaviors directly, which are the actual runtime entry points tied to the prior blockers.
+- For the UnifiedSettingsController leak specifically, the relevant protection is in the actual controller path rather than a stand-alone helper, and the review findings show the controller now blocks the HomeAssistant section before returning/deserializing it.
+- Citations: Home Assistant controller/provider test files added or updated by `b4680ba40`; reviewed tests include the new 401/timeout/legacy-address cases Dallas claimed.
+
+5. Adversarial side-door review.
+- I looked for other controller/endpoints reading `HomeAssistantSettings`, settings export/backup/download surfaces, and logs/exception paths that might still include the token.
+- Result: I did not find another controller path that generically exposes `HomeAssistantSettings`, nor an export/download endpoint that bypasses the dedicated admin controller.
+- Exception/logging paths are parameterized and do not appear to include the encrypted token value.
+- Citations: `src/api/Controllers`, `src/backends/Farm.Backend.HomeAssistant`, and Home Assistant settings references across `src/**/*.cs`.
+
+6. Conflict markers.
+- Required scan result: empty.
+- Command: `grep -rE '<<<<<<<|=======|>>>>>>>' src/ --include='*.cs' --include='*.csproj' 2>/dev/null`
+- Result: no matches.
+
+Decision:
+- The original Bishop block is cleared.
+- Dallas fixed the primary security issue and the two secondary issues I previously raised.
+- Residual note for future hardening: the UnifiedSettingsController protection is a section-name blocklist, so future secret-bearing settings types would require explicit additions. That is not enough to block this PR because the reviewed Home Assistant secret leak path is now shut.
+
+Plain text summary:
+APPROVE. The HomeAssistant settings leak through UnifiedSettingsController is closed by a real controller-path blocklist and logging cleanup, the `homeassistant.local` fallback was removed without introducing a 500 path, the new tests cover the key disabled/401/timeout/legacy-address behaviors, and the conflict-marker scan is clean.
+## Review Metadata
+
+- Reviewer: Bishop
+- Branch: `squad/371-home-assistant-provider`
+- Commit: `f03fdb538`
+- Issue: `#371`
+- Decision date: `2026-05-31T20:10:00-07:00`
+
+## VERDICT
+
+BLOCK
+
+## Findings
+
+### 1. Blocker: the new Home Assistant token can still be exposed and bypass encryption through the generic settings API
+
+Lambert added a masked custom admin controller, but the underlying settings type is still registered as a normal app setting and exposes `EncryptedToken` as a JSON property (`src/infra/Settings/HomeAssistantSettings.cs:11-13, 38-39`). The reviewed commit also contains an anonymous generic settings GET that returns every settings object verbatim (`src/api/Controllers/UnifiedSettingsController.cs:36-49`).
+
+That means this branch introduces a new credential-bearing settings object that can be returned outside the masked Home Assistant controller. Worse, the generic settings POST logs the raw payload and the deserialized typed settings object (`src/api/Controllers/UnifiedSettingsController.cs:62-91`), then saves the typed settings directly. That bypasses the custom encryption path in `AdminHomeAssistantController.UpdateSettings()` (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:49-73`) and undermines the masking path in `MapToDto()` / `MaskToken()` (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:304-325`).
+
+Net: the custom controller is not a sufficient safety boundary. A client can still send or persist `encryptedToken` through the generic settings endpoint, and the branch adds a new secret-like field to an anonymously readable settings surface. That fails the issue’s “encrypted token” requirement in practice.
+
+### 2. Correctness issue: legacy address fallback ignores configured HA base URL and hard-codes `homeassistant.local`
+
+`HomeAssistantSmartPlugProvider.ParseDeviceAddress()` says the no-pipe path should rely on configured base URL, but the implementation hard-codes `http://homeassistant.local:8123` instead (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:92-105`). That is inconsistent with the settings-driven design for this integration and unlike the other smart-plug providers, which use the address they are given instead of silently switching to a fixed host (`src/api/Services/SmartPlug/KasaSmartPlugProvider.cs:21-47`, `src/api/Services/SmartPlug/TasmotaSmartPlugProvider.cs:18-49`, `src/api/Services/SmartPlug/ShellySmartPlugProvider.cs:19-37`).
+
+The test suite currently locks that bug in as intended behavior (`src/tests/Farm.Web.Api.Tests/Services/SmartPlug/HomeAssistantSmartPlugProviderTests.cs:223-242`) instead of verifying fallback to the configured Home Assistant base URL.
+
+### 3. Test surface is 19 cases, but it misses the failure paths that matter most here
+
+The commit adds 19 tests total: 10 controller tests and 9 provider tests. Coverage is not empty, but it is incomplete for the risky paths called out in the review brief.
+
+- Controller tests cover missing base URL/token plus happy-path test/discovery (`src/tests/Farm.Web.Api.Tests/Controllers/AdminHomeAssistantControllerTests.cs:79-272`).
+- Provider tests cover missing token, unavailable state, offline device, persisted-token fallback, and happy path (`src/tests/Farm.Web.Api.Tests/Services/SmartPlug/HomeAssistantSmartPlugProviderTests.cs:117-262`).
+
+Missing coverage:
+
+- bad token / 401 or 403 responses on both provider and controller paths
+- controller network failures on `/api/` and `/api/states`
+- malformed persisted token / `Unprotect()` failure
+- discovery responses with missing `entity_id` / missing attributes / empty array edge cases
+- any shared contract-style smart-plug test harness proving Home Assistant passes the same provider contract as the existing implementations (I found provider-specific tests only under `src/tests/Farm.Web.Api.Tests/Services/SmartPlug`)
+
+Given Lambert’s recent history and the security-sensitive nature of the token flow, these gaps matter.
+
+### 4. Controller is bloated; it owns logic that should live in a service
+
+`AdminHomeAssistantController` is doing settings persistence, token masking, token resolution, outbound HTTP, response parsing, and entity classification in one 392-line controller file (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:35-325`). That is SRP drift and makes the security story harder to audit because the “safe” path is split from the generic settings path instead of centralized in one service boundary.
+
+This is not the main blocker by itself, but it is part of why the encryption/masking contract is easy to bypass.
+
+## Acceptance-Criteria / Scope Notes
+
+- `HomeAssistantSmartPlugProvider` is registered alongside Kasa/Tasmota/Shelly (`src/api/Infrastructure/ServiceCollectionExtensions.cs:744-749`).
+- The fetched branch passed the explicit conflict-marker scan the user requested: `git show origin/squad/371-home-assistant-provider:src/infra/Data/AppDbContext.cs | grep -E '<<<<<<<|=======|>>>>>>>'` returned no matches.
+- `AppDbContext` itself stayed in scope in the final branch state; the reviewed hunk is conflict cleanup only, leaving `PowerMonitors`, `PowerReadings`, and `UserSettings` together (`src/infra/Data/AppDbContext.cs:218-224`).
+
+## Required Fixes Before Re-Review
+
+1. Make Home Assistant token storage unreachable from the generic settings GET/POST path.
+2. Ensure no raw or encrypted Home Assistant token is ever returned or logged outside the masked admin DTO.
+3. Fix provider fallback so entity-only addresses use configured settings instead of `http://homeassistant.local:8123`.
+4. Add failure-path tests for bad token, upstream non-200s, and persisted-token decryption failure.
+
+Plain text summary: BLOCK — the custom masked admin controller is undermined by the generic settings API, which can expose or persist/log the Home Assistant token path outside the intended encryption flow. The provider also hard-codes `homeassistant.local` on legacy fallback, and the 19 new tests still miss the critical bad-token/error-path cases.
+# Bishop — Round 3 Re-review of #371 (HA provider) @ HEAD 45333917a
+
+## Verdict: **APPROVE**
+
+Both Hicks' round-2 blockers are genuinely fixed in code, not papered over with
+test-only mocks. The new tests exercise the real production codepaths.
+
+## Independent verification
+
+### Blocker 1 — kW→watts conversion
+
+`HomeAssistantSmartPlugProvider.ParseStateResponse` (src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:219-227)
+now reads `attributes.unit_of_measurement` and multiplies `watts *= 1000.0`
+when the unit is `"kW"`. W stays untouched. The conversion happens at the
+single consumption point inside the JSON parser — the same `watts` variable
+that flows into the returned `PowerReading`, so every caller benefits.
+
+I searched for other code paths that read entity `state` and treat it as
+watts; the only other `state` reader is `AdminHomeAssistantController.cs:307`,
+which surfaces `currentState` + `unitOfMeasurement` as display strings on the
+entity-picker DTO (not used for storage). No additional silent
+unit-misinterpretation paths exist.
+
+Minor brittleness note (not blocking): the unit check is case-sensitive exact
+`== "kW"`. HA core consistently emits that casing for power sensors, so this
+is acceptable for now; worth a follow-up if we ever see "Kw" or "KW" in the
+wild.
+
+### Blocker 2 — Enabled toggle priority
+
+`ResolveConnectionParams` (lines 161-189) now checks `settings.Enabled`
+**before** consulting `configuration["HomeAssistant:Token"]`. When disabled,
+it returns a null token with a debug log and the public
+`GetCurrentReadingAsync` / `TestConnectionAsync` paths short-circuit on the
+null token — meaning the env var override is also gated. Both public entry
+points share this resolver, so the off-switch is truly hard.
+
+### Test quality (the #355 anti-pattern check)
+
+- `WhenStateInKilowatts_ConvertsToWatts` and `WhenStateInWatts_DoesNotConvert`
+  return real JSON via a `Mock<HttpMessageHandler>` and assert on
+  `reading.WattsNow`. The parser-under-test is the real
+  `ParseStateResponse` — nothing is mocked away.
+- `WhenIntegrationDisabledAndEnvVarSet_ReturnsNullWithoutHttpCall` uses
+  `MockBehavior.Strict` on the HTTP handler. Any outbound call would throw,
+  so the passing assertion is genuine proof of inertness. The env var is
+  injected via `ConfigurationBuilder.AddInMemoryCollection` exactly the way
+  `IConfiguration` would surface a `PFARM__HomeAssistant__Token` binding.
+  This is the right shape of test.
+
+### Conflict markers / hygiene
+
+`grep -rE '<<<<<<<|=======|>>>>>>>'` across `src/` — clean. No merge debris.
+
+## Build/test caveat (not Brett's problem)
+
+`Farm.Web.Api.Tests` does not compile on the squad branch because of
+pre-existing `DateTimeOffset` vs `DateTime` errors in
+`SecurityAuditControllerTests.cs` and `LoginAuditServiceTests.cs`, which
+originate from commit `495b1aea8` already on `origin/development`. I
+confirmed those files are byte-identical to development. Brett's 30/30 HA
+claim could not be re-executed end-to-end against the project as a whole,
+but the HA changes themselves are not the cause and the patch does not
+modify those files. Recommend a separate cleanup ticket; do not block #371
+on it.
+
+## Bottom line
+
+Code is correct, tests are honest, no marker debris, no env-var bypass. Land it.
+# Bishop — PR #371 Round 4 Verdict
+
+**Verdict:** ✅ APPROVE
+**Commit reviewed:** `6785eae01` (delta from previously-approved `45333917a`)
+**Branch:** `squad/371-home-assistant-provider`
+
+## Scope of delta
+- `src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs` — only `ParseStateResponse`'s unit-of-measurement branch (+12 / −5).
+- `src/tests/Farm.Web.Api.Tests/Services/SmartPlug/HomeAssistantSmartPlugProviderTests.cs` — +62 lines (two new tests: `[Theory]` for `kw`/`KW` case variants, `[Fact]` for `mW`).
+- `.squad/decisions/brett-371-revision.md` — squad bookkeeping, no production impact.
+
+## Verification
+- ✅ Diff scoped exactly to `ParseStateResponse`; no other production code touched.
+- ✅ Case-insensitive kW now uses `Equals(..., StringComparison.OrdinalIgnoreCase)` — addresses Hicks's concern that HA returns user-configured strings.
+- ✅ New `mW` branch multiplies by `0.001` (correct: 500 mW → 0.5 W, matches new test).
+- ✅ Unknown units still fall through unchanged (W stays W) — no behavioral regression.
+- ✅ No conflict markers in the diff (the `<<<<<<<` hit was prose inside Brett's decision file, not code).
+- ✅ Tests follow existing file's mock/assert patterns; assertions tight (`BeApproximately(_, 0.001)`).
+
+## Rationale
+Surgical, well-tested fix that resolves Hicks's two remaining concerns without expanding scope or introducing regressions.
+
+— Bishop
+## Bishop review — #405 / 4c82b6734
+**Verdict:** BLOCK
+**Blocking issues:**
+1. Commit `4c82b6734` still contains unresolved merge-conflict markers in `src/infra/Data/AppDbContext.cs:218-226` (`<<<<<<< HEAD` / `=======` / `>>>>>>>`). A detached checkout of the reviewed commit fails to build the migration project with `CS8300: Merge conflict marker encountered`, so this snapshot is not deployment-safe regardless of the migration body.
+**Non-blocking nits:**
+1. The migration itself is symmetric: `Up()` correctly declares `oldClrType: typeof(DateTimeOffset)` / `oldType: "datetimeoffset"`, matching the original `20260526173129_AddLoginAuditLog` SqlServer migration, and `Down()` cleanly reverts to that schema.
+2. Converting `datetimeoffset` to `datetime2` drops offset metadata. The app appears intentionally UTC-only (`LoginAuditEntry.Timestamp` is `DateTime`, `LoginAuditService` writes `DateTime.UtcNow`, controller DTOs and tests all use `DateTime`), so this looks semantically aligned — but it is only lossless if existing rows are already stored with `+00:00` offsets.
+**Strengths:** Dedicated SqlServer-only correction migration is the right containment strategy, and the codebase consistently models login-audit timestamps as UTC `DateTime`. If the branch were otherwise clean, this should stop the recurring scaffold drift.
+# Bishop — Round 2 Review: `squad/405-sqlserver-loginaudit-fix` @ `50b42a74a`
+
+## Verdict: **APPROVE**
+
+Dallas's model-side approach (`DateTime → DateTimeOffset` on `LoginAuditEntry.Timestamp`) is the architecturally correct fix for #405 and is meaningfully better than Lambert's broken DB-side downgrade attempt. The C# model now aligns with the production column types (`datetimeoffset` on SqlServer, `timestamptz` on Postgres) that have existed since the original migration — i.e., the model was the thing that was wrong, not the schema.
+
+## Verification Performed
+
+1. **Conflict markers**: `grep -E '^(<<<<<<<|>>>>>>>)' src/` → **clean.** No merge artifacts.
+2. **HasConversion claim**: **VERIFIED** at `src/infra/Data/AppDbContext.cs:236-244`. SQLite-only branch (`Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite"`) maps `DateTimeOffset` → `UtcDateTime` and back via `new DateTimeOffset(v, TimeSpan.Zero)`. Stored as sortable DateTime in SQLite text store, so ORDER BY / WHERE on `Timestamp` work correctly. Production providers (Postgres, SqlServer) bypass this branch entirely — zero behavior change there.
+3. **SQLite ORDER BY regression risk (the core concern from commit `495b1aea8`)**: **MITIGATED AND TESTED.** Ran `dotnet test --filter "FullyQualifiedName~LoginAudit|FullyQualifiedName~SecurityAudit"` → **18/18 passed.** This includes:
+   - `GetLoginAudit_WithEntries_ReturnsOrderedNewestFirst` (ORDER BY Timestamp DESC)
+   - `GetLoginAudit_Pagination_RespectsPageAndPageSize` (ORDER BY + Skip/Take)
+   - `GetLoginAudit_FilterByDateRange_ReturnsOnlyEntriesWithinRange` (WHERE Timestamp >= / <=)
+   These are exactly the scenarios the original `DateTime` choice was made to avoid. The HasConversion solves it cleanly.
+4. **Migrations**:
+   - **Postgres** (`20260601031232_…`): empty Up/Down body — correct. The column was already `timestamp with time zone`; this migration is pure model-snapshot synchronization.
+   - **SqlServer** (`20260601031244_…`): `AlterColumn datetime2 → datetimeoffset` with reversible Down. SQL Server's implicit `datetime2 → datetimeoffset` cast assigns offset `+00:00`, which is exactly right for UTC-stored timestamps. No data loss.
+5. **Controller surface**: `[FromQuery] DateTimeOffset?` for `from`/`to` and `LoginAuditItemDto.Timestamp : DateTimeOffset` — Swashbuckle/System.Text.Json handle both correctly. Serialized form changes from `…Z` to `…+00:00`, which is still ISO-8601 and parses identically in browsers and Swift's `ISO8601DateFormatter`. Frontend and mobile clients consuming the existing string-typed DTO will not break.
+6. **Test infra**: All call sites in `SecurityAuditControllerTests` and `LoginAuditServiceTests` updated cleanly (`DateTime.UtcNow → DateTimeOffset.UtcNow`, `.Kind == DateTimeKind.Utc → .Offset == TimeSpan.Zero`). No stragglers.
+
+## Non-Blocking Notes (do not gate merge)
+
+- **Behavior nuance** on query params: `?from=2024-01-01` (no offset) is now bound by ASP.NET as local time rather than `DateTimeKind.Unspecified`. In practice admin UIs send ISO-8601 with offset, and the existing tests cover this, so I'm not treating it as a regression — but worth a one-liner in the API docs if this endpoint is consumed by external scripts.
+- **Style**: the inline `OnModelCreating` HasConversion could live in a `LoginAuditEntryConfiguration` under `Data/Configurations/` next to the other `IEntityTypeConfiguration<T>` classes that `ApplyConfigurationsFromAssembly` discovers. Minor consistency point; not worth rework now since the comment explaining *why* it's provider-conditional is clearer at the call site.
+- **PR linkage**: commit message uses `Closes #405` ✅ — also include it in the PR body per repo convention.
+
+## Why this beats Lambert's prior attempt
+
+Lambert tried to demote the columns (`datetimeoffset → datetime2` on SqlServer) to match the model — which (a) shipped with literal conflict markers, (b) would have silently dropped timezone information in production, and (c) couldn't be replicated on Postgres without changing `timestamptz → timestamp`, a semantic loss. Dallas inverted the fix: keep the column types (they were always right), upgrade the model. That's the right direction.
+
+— Bishop
+# Bishop — #405 Round 3 Re-Verification
+
+**Date**: 2025-06-02
+**Branch**: `squad/405-sqlserver-loginaudit-fix`
+**Range reviewed**: `094d59ea7..2109b51ea` (single commit `2109b51ea`)
+**Verdict**: **APPROVE**
 
 ---
 
-# Decision: Passkey Management UI (#356)
+## Re-verification scope
 
-**Date:** 2025-01-31
-**Author:** Ripley (Frontend)
-**Status:** Implemented
+Round 2 was already approved. This pass only verifies Kane's narrow follow-up
+addressing Hicks's two documentation/test gaps from `hicks-405-round2.md`.
 
-## Context
+## Diff inspection
 
-Issue #356 requires a passkey management UI under profile settings. Users need to list, rename, and revoke registered passkey credentials.
+```
+.squad/decisions/inbox/kane-405-revision.md                              | 56 ++++++++++
+src/infra/Data/AppDbContext.cs                                           |  3 +++
+src/tests/Farm.Web.Api.Tests/Controllers/SecurityAuditControllerTests.cs | 35 +++++++
+3 files changed, 94 insertions(+)
+```
 
-## Decisions
+- `AppDbContext.cs`: +3 lines, comment-only directly above the existing
+  `HasConversion` block. No behavior change. Explains the lossiness and pins
+  the service contract that prevents it from firing.
+- `SecurityAuditControllerTests.cs`: +35 lines, single new `[Fact]`
+  `GetLoginAudit_Timestamp_SerializesAsUtcIso8601`. Uses existing
+  `SeedEntriesAsync` + `CustomWebApplicationFactory` helpers, parses the raw
+  JSON to inspect the literal timestamp string, and asserts UTC format
+  (`Z` or `+00:00`), parseability, and `Offset == TimeSpan.Zero`. End-to-end
+  through the controller — exactly the gap Hicks flagged.
+- `.squad/decisions/inbox/kane-405-revision.md`: process doc, not code.
 
-1. **Route:** `/profile/passkeys` — consistent with existing `/profile/api-keys` pattern.
-2. **Backend endpoints:** Added to `AuthController` under `passkey/credentials` path:
-   - `GET /api/auth/passkey/credentials` — list
-   - `DELETE /api/auth/passkey/credentials/{id}` — revoke
-   - `PATCH /api/auth/passkey/credentials/{id}` — rename
-3. **Service layer:** Extended `IPasskeyService` / `PasskeyService` with `ListCredentialsAsync`, `DeleteCredentialAsync`, `RenameCredentialAsync`.
-4. **Frontend service:** Standalone `passkeyService.ts` (mirroring `apiKeysService.ts` pattern) using `apiClient.request()`.
-5. **Add passkey button:** Currently links to `/profile/passkeys/register` — will be connected to enrollment ceremony from #355.
-6. **No "last passkey" guard yet:** Issue mentions "cannot remove last passkey when no password set" — deferred until password-status API is available.
+## Scope creep check
 
-## Tradeoffs
+None. Diff is strictly limited to the two requested items. No unrelated
+refactors, no touched controllers/services/entities, no new dependencies, no
+config changes.
 
-- Kept backend additions minimal (no separate controller file) since they naturally belong with existing passkey endpoints in `AuthController`.
-- Used `int` ID for credential operations since the entity uses surrogate `int` PK.
+## Conflict markers
+
+`grep -E '^(<<<<<<<|=======|>>>>>>>)'` on both code files: clean.
+
+## Build & tests
+
+```
+cd src/tests/Farm.Web.Api.Tests
+dotnet test --filter "FullyQualifiedName~LoginAudit"
+→ Passed!  - Failed: 0, Passed: 19, Skipped: 0, Total: 19
+```
+
+19/19 across `SecurityAuditControllerTests` (12) + `LoginAuditServiceTests` (7),
+matching Kane's claimed counts. Build: 0 errors, only pre-existing warnings.
+
+## Verdict
+
+**APPROVE** — follow-up is exactly the narrow comment + UTC round-trip test
+Hicks asked for, with zero scope creep and a clean 19/19 green bar.
+# Dallas — #355 Passkey Enrollment — Revision 2
+
+**Branch:** `squad/355-passkey-enrollment`
+**Commit:** `3a568f640`
+**Addresses:** `bishop-355-rereview.md` + `hicks-355-rereview.md`
 
 ---
 
-## Decision: Settings Frontend Architecture (Issue #360)
+## Blocker 1 — AuthContext tests assert impossible production shape (Bishop)
 
-**Date:** 2025-07-22
-**Author:** Ripley (Frontend)
+**Tests 1 + 2 in `AuthContext.passkey.test.tsx`** previously mocked
+`passkeyService.loginWithPasskey` to resolve with `{success: false, error: '...'}`.
+Bishop was right: the real backend returns 401 on a failed assertion, which
+`apiClient.request()` converts to a thrown `ApiError` plain object.
+`loginWithPasskey` has no `catch` block — only `finally` — so the error
+propagates to the caller.  The `else { setError(result.error || ...) }` branch
+is dead code for this endpoint.
 
-### Context
+**Fix:**
 
-Implementing frontend pages for the per-user vs farm-wide settings split (backend shipped in #359/PR #385).
-
-### Decisions
-
-1. **Separate inner form components** — FarmSettingsForm and UserSettingsForm are separate components that receive data as props, initializing `useState` from prop values. This avoids the `useEffect` → `setState` anti-pattern flagged by the ESLint `react-hooks/set-state-in-effect` rule.
-
-2. **Route at `/preferences`** — The new page lives at `/preferences` (no role guard). Farm settings show a lock badge + read-only fields for non-admins using the `canWrite` flag from the API. The existing admin `/settings` route (metadata-driven) remains untouched.
-
-3. **React Query hooks** — `useFarmSettings` / `useUpdateFarmSettings` / `useUserSettings` / `useUpdateUserSettings` use the public `apiClient.get<T>` / `apiClient.put<T>` methods. Optimistic cache update on mutation success via `queryClient.setQueryData`.
-
-4. **Client-side validation mirrors backend** — Same min/max ranges. Toast errors for invalid input before sending request.
-
-### Alternatives Considered
-
-- Embedding in existing SettingsPage — rejected because that page is admin-only and metadata-driven. The new endpoints have a different shape and audience.
-- `react-hook-form` — charter says controlled `useState` is the convention.
+- `AuthContext.passkey.test.tsx` — rewrote tests 1 and 2:
+  - **Test 1**: `passkeyLogin` rejects with `ApiError {message, statusCode:401, details}` → asserts the ApiError propagates to the caller, `caught-error` shows the message, no `context-error` is set, `isLoading` cleaned up by `finally`.
+  - **Test 2**: same path, ApiError without `details` → fallback to `message`.
+  - **Test 3** (ceremony throw) unchanged — already correct.
+- Updated `AuthConsumer.caughtError` handler: `err instanceof Error ? err.message : String(err)` → `errObj?.message ?? (err instanceof Error ? err.message : String(err))` so `ApiError` plain objects are readable in the DOM.
 
 ---
 
-# Decision: Optimistic Concurrency for Settings Writes
+## Blocker 2 — LoginModal tests mock useAuth, seam untested (Bishop + Hicks)
 
-**Author:** Ripley (Frontend, backend fix per lockout rule)  
-**PR:** #385  
-**Date:** 2025-05-31  
+**Fix:**
 
-## Context
+New file `src/test/features/auth/LoginModal.passkey.integration.test.tsx`:
+- Wraps `LoginModal` in real `AuthProvider` — **no `vi.mock('@/features/auth/hooks/useAuth', ...)`**.
+- Mocks only `@/services/passkeyService` (throws `ApiError`) and `@/services/api` (`getCurrentUser` rejects → no session).
+- Same UI-component stubs as the existing `LoginModal.passkey.test.tsx`.
+- **2 tests:** details-present path (alert shows `details`) and details-absent path (alert shows `message`).  Both assert `onClose` not called.
 
-Multi-writer scenarios on settings endpoints (PUT /api/settings/user and PUT /api/settings/farm)
-could silently overwrite changes made by concurrent writers — a classic lost-update problem.
+The real `AuthContext.loginWithPasskey → ApiError propagation → LoginModal.handlePasskeyLogin catch → setPasskeyError` chain is exercised end-to-end.
+
+---
+
+## Blocker 3 — Interceptor uses brittle URL-suffix string, not tested (Hicks)
+
+**Fix (production):**
+
+- `api.ts`: exported `PfRequestConfig extends AxiosRequestConfig { skipAuthRedirect?: boolean }`.
+- Interceptor 401 check changed from `!error.config?.url?.endsWith('/auth/passkey/login/complete')` to `!(error.config as PfRequestConfig)?.skipAuthRedirect`.
+- `request<T>` method signature updated to accept `PfRequestConfig`.
+- `passkeyService.ts`: imports `PfRequestConfig`; the complete request now passes `skipAuthRedirect: true`.
+
+**Fix (test):**
+
+New file `src/test/services/api.interceptor.test.ts`:
+- Real `ApiClient` (axios NOT mocked) — interceptors actually register and run.
+- Custom adapter (`axiosInstance.defaults.adapter`) injects a 401 `AxiosError` without a network call.
+- **Test A:** `skipAuthRedirect: true` → `localStorage.removeItem` not called for `auth-token`, `window.location.href` unchanged.
+- **Test B:** no flag → `localStorage.removeItem('auth-token')` called, `window.location.href === '/login'`.
+# Decision: Fix #405 — LoginAuditEntry.Timestamp DateTimeOffset Migration Drift
+
+**Author**: Dallas  
+**Branch**: `squad/405-sqlserver-loginaudit-fix`  
+**Issue**: #405 — SqlServer migration drift on `LoginAuditEntry.Timestamp`  
+**Date**: 2026-06-01  
+
+---
+
+## Problem
+
+`LoginAuditEntry.Timestamp` was typed as `DateTime` in the C# EF model.
+
+- EF Core maps `DateTime` → `datetime2` for SqlServer.  
+- But the original migration (`20260526173129_AddLoginAuditLog.cs`) created the column as `datetimeoffset`.  
+- Result: every subsequent migration scaffold detected drift and tried to `AlterColumn` back to `datetime2`, which would have corrupted production data.
+
+---
+
+## Decision: Change the C# model to DateTimeOffset
+
+**Rationale**: The production column type (`datetimeoffset` / `timestamptz`) is the correct type for audit timestamps — it preserves timezone information. The C# model was wrong, not the database. Changing the model to `DateTimeOffset` aligns the EF type mapping with the actual stored column type on both providers.
+
+Alternatives considered and rejected:
+- **Add `[Column(TypeName = "datetimeoffset")]` annotation on `DateTime` property**: Dirty hack; still wrong .NET type for the data. Downstream code would lose timezone info when reading.
+- **Change SqlServer migration column to `datetime2`**: Would drop offset precision from existing rows in production. Wrong direction.
+
+---
+
+## Why the Postgres Migration is Empty
+
+Npgsql maps both `DateTime` (UTC kind) and `DateTimeOffset` to `timestamp with time zone` in Postgres. The physical column type was already `timestamp with time zone` and remains unchanged. The migration is a **no-op** intentionally — its only purpose is to update the EF model snapshot so the tooling stops detecting false drift. Generating this migration is required; omitting it would leave the snapshot stale.
+
+---
+
+## SqlServer Migration Semantics
+
+The `Up()` method does `AlterColumn<DateTimeOffset>` from `datetime2` → `datetimeoffset`. In production, the column is **already** `datetimeoffset` (from the original migration), so this `AlterColumn` is effectively a **no-op at the database level**. EF Core's "data loss" warning applies only to the `Down()` direction (datetimeoffset → datetime2 drops offset info during rollback).
+
+---
+
+## SQLite HasConversion for Test Infrastructure
+
+EF Core's SQLite provider does not support `DateTimeOffset` in translated `ORDER BY` or `WHERE` clauses (it throws `NotSupportedException`). The integration tests use in-memory SQLite via `CustomWebApplicationFactory`.
+
+Fix: Added `HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))` in `AppDbContext.OnModelCreating` inside an `if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")` guard. This is the EF Core recommended pattern.
+
+Semantics are transparent: the UTC instant is preserved; on read-back the offset is restored as `TimeSpan.Zero` (+00:00), which is correct for an audit timestamp always stored in UTC.
+
+---
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/infra/Domain/AuthDomain.cs` | `DateTime Timestamp` → `DateTimeOffset Timestamp` |
+| `src/infra/Services/Authentication/LoginAuditService.cs` | `DateTime.UtcNow` → `DateTimeOffset.UtcNow` |
+| `src/infra/Data/AppDbContext.cs` | Added SQLite `HasConversion` for `LoginAuditEntry.Timestamp` |
+| `src/api/Controllers/Admin/SecurityAuditController.cs` | `DateTime? from/to` → `DateTimeOffset?`; DTO field |
+| `src/tests/.../SecurityAuditControllerTests.cs` | All `DateTime.UtcNow` → `DateTimeOffset.UtcNow` |
+| `src/tests/.../LoginAuditServiceTests.cs` | `DateTimeOffset before`; `.Offset` check |
+| `Farm.Migrations.PostgreSQL/.../20260601031232_LoginAuditTimestampToDateTimeOffset.cs` | Empty migration (snapshot sync) |
+| `Farm.Migrations.SqlServer/.../20260601031244_LoginAuditTimestampToDateTimeOffset.cs` | `AlterColumn` datetime2 → datetimeoffset |
+
+---
+
+## Test Results
+
+- 19/19 LoginAudit + SecurityAudit tests pass.
+- Full suite: 6 pre-existing failures (5 OrcaSlicerProfilesProvider, 1 MmuToolheadRetroSync) — identical to baseline on `development`. Zero new failures.
+## Hicks re-review — #355 / 4183347b1
+
+**Verdict:** REQUEST_CHANGES
+
+### Re-review scope
+
+- Branch fetched: `origin/squad/355-passkey-enrollment`
+- Revision inspected: `4183347b1 fix(passkey-enrollment): address trio review blockers (#355)`
+- Branch head observed: `3aeffbf6a chore(squad): drop revision decision for #355 passkey enrollment`
+- Issue #355 acceptance criterion checked literally: failed passkey assertion must show inline error, not page navigation.
+- Frontend build check: `cd src/Web/ReactApp && npm run build` passed on branch head.
+
+### What is fixed
+
+- The dead `AuthContext.loginWithPasskey` catch path is gone. `AuthContext` now lets thrown ceremony/API failures propagate through `finally`, while backend soft failures still set context `error` and return `false` (`src/Web/ReactApp/src/common/contexts/AuthContext.tsx:83-105`).
+- The production passkey error UI is reachable for thrown failures: `LoginModal.handlePasskeyLogin` catches the propagated error, prefers `details`, and renders `passkeyError` in an inline `role="alert"` block near the passkey button (`src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:44-62`, `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:176-204`).
+- For the current exact production call shape, failed assertion should no longer navigate: `passkeyService.loginWithPasskey` posts to `/auth/passkey/login/complete` (`src/Web/ReactApp/src/services/passkeyService.ts:82-86`), and the interceptor skips global token-clear/redirect when `error.config.url` ends with that exact suffix (`src/Web/ReactApp/src/services/api.ts:296-307`). The rejected API error still carries backend `error` as `details` (`src/Web/ReactApp/src/services/api.ts:311-321`), so `LoginModal` can display it inline.
+
+### Blocking finding
+
+1. **The prior 401 blocker is fixed only by an untested, brittle URL suffix special case.** The interceptor exemption is `!error.config?.url?.endsWith('/auth/passkey/login/complete')` (`src/Web/ReactApp/src/services/api.ts:296-307`). That is coupled to the current string literal in `passkeyService` (`src/Web/ReactApp/src/services/passkeyService.ts:82-86`) rather than to request intent. A harmless refactor to a trailing slash, query-bearing URL, renamed route, endpoint constant mismatch, or different complete endpoint with the same semantic 401 would silently re-enable the global logout/redirect and violate #355's failed-assertion inline-error criterion.
+
+   The new tests do not catch this. `LoginModal.passkey.test.tsx` mocks `useAuth`, so it never uses the real `AuthContext`, `passkeyService`, `apiClient`, or interceptor (`src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.test.tsx:6-15`, `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.test.tsx:177-188`). `AuthContext.passkey.test.tsx` uses the real provider but mocks both `passkeyService` and `apiClient`, so it also bypasses the modified interceptor (`src/Web/ReactApp/src/test/features/auth/AuthContext.passkey.test.tsx:16-29`, `src/Web/ReactApp/src/test/features/auth/AuthContext.passkey.test.tsx:113-133`). Dallas's own revision note confirms the fix is an `endsWith('/auth/passkey/login/complete')` URL guard and says new similar endpoints would need their own exemption (`.squad/decisions/dallas-355-revision.md:42-51`).
+
+   **Required change:** bind the exemption to request semantics instead of a fragile URL suffix, or add a production-path regression test that proves a 401 from the actual passkey complete request does not clear `auth-token` and does not assign `window.location.href`, while still surfacing the inline error. A per-request config flag such as `skipAuthRedirect`/`suppressUnauthorizedRedirect` on the passkey complete call would be less brittle than route string matching; an interceptor-level test should cover it.
+
+### Non-blocking notes
+
+- Dallas's two-tier failure model is accurate for current code: thrown ceremony/API errors surface through `LoginModal`'s passkey alert; `success:false` 200 responses surface through the modal's existing context error block (`.squad/decisions/dallas-355-revision.md:19-31`, `src/Web/ReactApp/src/common/contexts/AuthContext.tsx:95-101`, `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:79-83`).
+- The build command required by #355 passed, but it does not prove the interceptor behavior because the new tests mock around it.
+
+Plain text summary: REQUEST_CHANGES. The user-visible passkey failure path appears reachable now, but the global 401 fix is still a brittle, untested route-string carve-out. Add a semantic interceptor bypass and a production-path regression test for failed passkey assertion without navigation.
+## Hicks review — #355 / a1c21f24a
+**Verdict:** REQUEST_CHANGES
+**Blocking issues:**
+1. `passkeyService.loginWithPasskey()` posts failures through `apiClient.request()`; `POST /api/auth/passkey/login/complete` returns `401` for `AuthenticationResult(success: false)`, and the global axios interceptor clears the token and navigates to `/login` on any 401 from non-auth routes. That violates the #355 acceptance criterion that failed assertions show inline error without page navigation, and it also prevents `AuthContext.loginWithPasskey()` from reading the typed `AuthenticationResult.error` payload.
+2. `LoginModal`'s passkey error path is not the production path under `AuthProvider`: `AuthContext.loginWithPasskey()` catches ceremony/API exceptions and resolves `false`, so `LoginModal.handlePasskeyLogin()`'s `catch`/`passkeyError` alert is only exercised by the mock test, not by the real hook. The seven tests therefore miss the actual double-error-state behavior and do not verify the user-visible failed-assertion requirement.
+**Non-blocking nits:**
+1. `PasskeysPage` renames the newly enrolled credential by list diff (`beforeIds` vs fresh list). A concurrent enrollment on the same account can rename the wrong credential; backend should return the numeric credential id from `register/complete` when this graduates from Phase 1.
+2. The passkey username is not trimmed before begin/complete, unlike the implicit expectation for a username hint. Leading/trailing whitespace can create challenge cache keys that do not match the intended account.
+3. The frontend trusts Fido2NetLib option JSON as `PublicKeyCredential*OptionsJSON`, but there is no serialization contract test proving the controller emits the exact SimpleWebAuthn v13 JSON shape/casing.
+**Strengths:** Uses `@simplewebauthn/browser` instead of hand-rolled WebAuthn conversion, keeps API calls centralized through `apiClient`, and `npm run build` passes.
+## Hicks round-3 re-review — #355 / 3a568f640
+
+VERDICT: APPROVE
+
+Scope reviewed:
+- Fetched `origin/squad/355-passkey-enrollment` and reviewed commit `3a568f6407ba0e14e6f7cb259918eb901d3160f1`.
+- Re-read my round-2 blocker in `.squad/decisions/inbox/hicks-355-rereview.md`.
+- Re-read GitHub issue #355 acceptance criteria, especially: failed assertion must show inline error, not page navigation; `npm run build` must pass.
+
+Findings:
+
+1. The brittle URL-suffix carve-out is gone and replaced with the semantic request flag I asked for.
+   - `src/Web/ReactApp/src/services/api.ts:149-163` exports `PfRequestConfig extends AxiosRequestConfig` with optional `skipAuthRedirect?: boolean`, so consumers can opt into the behavior intentionally instead of depending on a route string.
+   - `src/Web/ReactApp/src/services/api.ts:311-324` reads `(error.config as PfRequestConfig)?.skipAuthRedirect` in the real response interceptor before clearing `auth-token` or assigning `window.location.href = "/login"`.
+   - The optional flag gracefully defaults to existing behavior: when it is absent/false, the negated optional-chain condition still clears the token and redirects on 401.
+
+2. The passkey login complete call is correctly opted out.
+   - `src/Web/ReactApp/src/services/passkeyService.ts:83-88` posts to `/auth/passkey/login/complete` with `skipAuthRedirect: true` and uses `satisfies PfRequestConfig`, so the backend's 401 soft failure can propagate to the modal instead of invoking the global logout/navigation path.
+
+3. I do not see other passkey endpoints that should receive this flag.
+   - Login begin returns options or 400 for user/input failures (`src/api/Controllers/AuthController.cs:436-459`), so 401 is not the expected soft-failure status there.
+   - Login complete is the endpoint that deliberately maps `AuthenticationResult.Success == false` to 401 (`src/api/Controllers/AuthController.cs:482-486`), and it is the one flagged.
+   - Registration begin/complete and credential management are authorized account-management operations (`src/api/Controllers/AuthController.cs:368-430`, `src/api/Controllers/AuthController.cs:501-562`); a 401 there means the user is not authenticated and should keep the normal redirect behavior.
+
+4. The new interceptor test covers the real interceptor, not a reimplementation.
+   - `src/Web/ReactApp/src/test/services/api.interceptor.test.ts:14-18` explicitly does not mock axios, only the API URL helper.
+   - `src/Web/ReactApp/src/test/services/api.interceptor.test.ts:20-37` installs a custom axios adapter that rejects with a controlled 401, so the real `ApiClient` response interceptor runs without network I/O.
+   - `src/Web/ReactApp/src/test/services/api.interceptor.test.ts:65-74` verifies `skipAuthRedirect: true` preserves the token and does not change `window.location.href`.
+   - `src/Web/ReactApp/src/test/services/api.interceptor.test.ts:76-85` verifies the default branch still removes `auth-token` and redirects to `/login`.
+
+5. The LoginModal/AuthProvider seam is now covered for inline error propagation.
+   - `src/Web/ReactApp/src/common/contexts/AuthContext.tsx:83-105` uses the real provider path and lets thrown passkey service errors propagate through `finally`.
+   - `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:44-61` catches the propagated error and chooses `details ?? message` for inline display.
+   - `src/Web/ReactApp/src/features/auth/components/LoginModal.tsx:176-184` renders the passkey failure as a `role="alert"` inline message.
+   - `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:135-193` uses the real `AuthProvider`, verifies details/message fallback alerts, and verifies `onClose` is not called. The no-navigation assertion is covered at the interceptor layer above, which is the layer that can navigate.
+
+Validation performed:
+- `cd src/Web/ReactApp && npm run test:run -- src/test/services/api.interceptor.test.ts src/test/features/auth/LoginModal.passkey.integration.test.tsx` passed: 2 files, 4 tests.
+- `cd src/Web/ReactApp && npm run build` passed. Vite reported only the existing large-chunk warning class.
+
+Non-blocking note:
+- The integration test stubs pass `iconLeft` through to a raw `<button>`, producing a React unknown-prop warning during that focused test run. It does not undermine the interceptor/passkey correctness fix, but Dallas may want to clean the stub later to keep test output quiet.
+
+Plain text summary: APPROVE. The round-2 blocker is resolved: the 401 exemption is now a typed, exported per-request flag, the real interceptor is tested in both skip/default branches, passkey login complete sets the flag, and the inline error path is covered through the real AuthProvider seam.
+VERDICT: APPROVE
+
+Review target: squad/355-passkey-enrollment, round-4 re-review of commit f38803360.
+
+Citations:
+- src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:1-15 documents the intended real chain: LoginModal -> AuthContext -> passkeyService -> ApiClient -> 401 interceptor, with only the WebAuthn browser boundary mocked.
+- src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:30-39 mocks only @simplewebauthn/browser and apiUrlHelpers; lines 46-141 are rendering-only component/router stubs. There is no passkeyService, ApiClient, interceptor, or AuthContext mock.
+- src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:147-158 reaches into the singleton apiClient AxiosInstance and installs a custom adapter, matching the real-axios/custom-adapter pattern in src/Web/ReactApp/src/test/services/api.interceptor.test.ts:1-7 and :60-63.
+- src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:241-271 exercises the negative path: begin succeeds, complete returns 401, inline alert renders "Credential ID not found", location remains unchanged, and the modal does not close.
+- src/Web/ReactApp/src/services/passkeyService.ts:83-88 sends /auth/passkey/login/complete through apiClient.request with skipAuthRedirect: true; src/Web/ReactApp/src/services/api.ts:309-337 is the real response interceptor that honors that flag and normalizes the AxiosError to ApiError.details.
+- src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx:274-305 covers the success path through the same real chain, verifying AuthContext token storage and modal close.
+
+Findings:
+- No blockers. The rewritten test does not subtly mock the interceptor or AuthContext. The only functional mock is the WebAuthn browser boundary; HTTP is stubbed at Axios adapter level so real ApiClient request/response interceptors still execute.
+- No app-code regression in Kane's round-4 commit: `git diff-tree --no-commit-id --name-status -r f38803360` reports only `M src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx`.
+- Conflict marker scan is clean for the changed test file using strict marker anchors `^(<<<<<<<|=======|>>>>>>>)`.
+- Focused acceptance check passed on branch HEAD, with the test file identical to f38803360: `npm run test:run -- src/test/features/auth/LoginModal.passkey.integration.test.tsx` => 2 tests passed.
+
+Plain text summary: APPROVE. The test rewrite now proves the issue #355 inline-error/no-navigation criterion through the real AuthContext, passkeyService, ApiClient, and 401 interceptor chain, while mocking only the browser WebAuthn boundary.
+## Hicks re-review — #371 / b4680ba40 + 1487790fe
+
+Reviewer: Hicks (Adversarial Reviewer #2)
+Date: 2026-05-31T21:35:00-07:00
+Branch under review: `squad/371-home-assistant-provider`
+Commits reviewed: `b4680ba40`, `1487790fe`
+Verdict: REQUEST_CHANGES
+
+## Acceptance criteria checked literally
+
+- `HomeAssistantSmartPlugProvider` is registered alongside the other smart plug
+  providers: `src/api/Infrastructure/ServiceCollectionExtensions.cs:749`.
+- HA settings are persisted with token encryption through the dedicated admin
+  controller: `src/api/Controllers/Admin/AdminHomeAssistantController.cs:52-73`.
+  Generic settings exposure is now blocklisted for `HomeAssistantSettings`:
+  `src/api/Controllers/UnifiedSettingsController.cs:24-30`,
+  `src/api/Controllers/UnifiedSettingsController.cs:44-64`,
+  `src/api/Controllers/UnifiedSettingsController.cs:275-283`, and
+  `src/api/Controllers/UnifiedSettingsController.cs:353-360`.
+- The dedicated connection test returns HA version and power entity count:
+  `src/api/Controllers/Admin/AdminHomeAssistantController.cs:120-132`.
+- Entity discovery exists, but the revised filtering still has a unit correctness
+  bug; see blocker 1 below.
+- The branch adds HA-specific provider/controller tests. I still did not find a
+  shared smart-plug provider contract test suite; this is unchanged from the
+  prior review.
+
+## Blockers
+
+1. Entity discovery still offers units the provider records as watts without
+   conversion.
+
+   `IsPowerCapableEntity` accepts `device_class == "power"` unconditionally
+   before looking at `unit_of_measurement`
+   (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:327-340`), and
+   otherwise accepts only `"W"` or `"kW"`
+   (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:344-352`).
+   That correctly rejects the tested `energy`/`kWh` case, but it still allows
+   kW entities and any `device_class=power` entity regardless of unit.
+
+   The provider then parses the entity state and stores it directly as
+   `WattsNow` with no unit check or conversion
+   (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:201-207`,
+   `src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:237`).
+   A `0.5 kW` sensor discovered by the picker is therefore persisted as
+   `0.5 W`. Likewise, HA power-class sensors using other valid power units
+   such as mW/MW/BTU/h/hp are either accepted and misread or rejected without
+   a clear conversion policy. This is the same class of data corruption as the
+   prior Wh/V/A blocker, just shifted to kW/device_class paths.
+
+   Required fix: either only offer W entities, or carry the unit through the
+   binding/provider path and convert every accepted power unit to watts before
+   creating `PowerReading`.
+
+2. The enabled toggle is still bypassed on the runtime polling path when a
+   config-level token exists.
+
+   The dedicated admin test endpoint now returns before outbound calls when
+   disabled (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:89-98`),
+   and discovery also refuses when disabled
+   (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:174-179`).
+   However, the provider resolves the config token first and explicitly lets it
+   override `HomeAssistantSettings.Enabled`
+   (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:160-172`).
+   Only persisted-token mode honors `Enabled=false`
+   (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:174-179`).
+
+   Background polling calls the provider for every enabled `PowerMonitor`
+   (`src/api/Services/PowerMonitor/PowerMonitorPollingService.cs:89-91`,
+   `src/api/Services/PowerMonitor/PowerMonitorPollingService.cs:104-119`).
+   Therefore a deployment that has `PFARM__HomeAssistant__Token` configured
+   still polls HA even after the admin disables the integration. That is a
+   half-implemented toggle: some paths honor it, the runtime path can ignore it.
+
+   Required fix: make `Enabled=false` a true global off switch for the provider
+   before any auth/network work, including config-token deployments, or remove
+   the toggle semantics and document a separate override explicitly. The issue
+   says the integration is optional and must not break installs without HA; a
+   persisted admin toggle that does not stop polling is not sufficient.
+
+## Remaining concerns
+
+- The two-catch error handling is materially better for the dedicated HA admin
+  endpoints: 401/403, 404, and timeout now produce different admin-facing
+  messages (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:138-156`,
+  `src/api/Controllers/Admin/AdminHomeAssistantController.cs:203-218`). There
+  are still no stable error-code fields, only free-form messages, and the
+  generic power-monitor test endpoint still collapses HA provider failures into
+  `"Device did not respond"`
+  (`src/api/Controllers/Admin/AdminPowerMonitorsController.cs:180-199`).
+  I am not keeping this as the main blocker because the dedicated HA endpoints
+  now distinguish the major cases, but the API contract remains brittle.
+
+- `GET /api/admin/integrations/home-assistant/entities` now returns 400 when
+  `Enabled=false`
+  (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:174-179`). That
+  is internally consistent with “disabled means no HA calls,” but it means an
+  admin must enable the integration before using discovery to finish binding
+  entities. If the intended UX is “configure and discover first, enable after,”
+  this needs a separate discovery/test override that is not used by background
+  polling.
 
 ## Decision
 
-Add application-managed concurrency tokens (`RowVersion` byte[] column) to:
-- `UserSettings` entity (per-user preferences)
-- `AppSettingsEntity` (farm-wide settings key-value store)
+REQUEST_CHANGES. Dallas fixed the anonymous generic settings exposure and
+improved the dedicated HA admin error messages, but two prior risk areas remain
+in production paths: discovery can still bind non-watt/scaled power values that
+the provider records as watts, and the runtime provider can ignore the disabled
+toggle when a config token is present.
 
-### Mechanism
+Plain text summary: REQUEST_CHANGES — fix unit conversion/filtering for kW and
+other power units, and make `Enabled=false` stop provider polling even when
+`PFARM__HomeAssistant__Token` is configured.
+## Hicks review — #371 / f03fdb538
 
-1. **Token generation:** `AppDbContext.SaveChanges()` stamps a new GUID-based `RowVersion` on every Added/Modified entity.
-2. **EF Core config:** `IsConcurrencyToken()` — provider-agnostic (works with SQLite, Postgres, SqlServer).
-3. **PUT enforcement:** Clients supply `rowVersion` in the request body or `If-Match` header. Stale tokens yield HTTP 409 Conflict.
-4. **Backward compatibility:** If no `rowVersion` is supplied, the write proceeds without a concurrency check (graceful degradation for older clients).
+**Reviewer:** Hicks (Adversarial Reviewer #2)  
+**Date:** 2026-05-31T20:10:00-07:00  
+**Branch:** `squad/371-home-assistant-provider`  
+**Commit:** `f03fdb538`  
+**Verdict:** REQUEST_CHANGES
 
-### Why not `IsRowVersion()` / `[Timestamp]`?
+## Acceptance criteria checked literally
 
-`IsRowVersion()` relies on server-side value generation (SQL Server `rowversion`, Postgres `xmin`). This creates provider-specific migration differences and breaks SQLite (local dev + tests). Application-managed tokens are simpler and portable.
+Issue #371 AC says:
 
-## Migrations
+- `HomeAssistantSmartPlugProvider` registered alongside Kasa/Tasmota/Shelly.
+- HA settings persisted with encrypted token.
+- Connection test endpoint returns HA version + entity count.
+- Entity discovery endpoint lists power-capable entities.
+- Provider passes the same contract tests as other `ISmartPlugProvider` impls.
 
-- `AddSettingsConcurrencyTokens` for both PostgreSQL and SqlServer providers.
-- Adds `RowVersion BYTEA/VARBINARY` column to `UserSettings` and `AppSettingsEntities` tables.
+Evidence:
 
-## Alternatives Considered
+- Registration exists beside Kasa/Tasmota/Shelly at `src/api/Infrastructure/ServiceCollectionExtensions.cs:744-750`.
+- Admin PUT encrypts the submitted token before saving at `src/api/Controllers/Admin/AdminHomeAssistantController.cs:57-72`.
+- Connection test calls HA `/api/` for version and `/api/states` for count at `src/api/Controllers/Admin/AdminHomeAssistantController.cs:109-120` and `src/api/Controllers/Admin/AdminHomeAssistantController.cs:194-214`.
+- Discovery calls `/api/states` at `src/api/Controllers/Admin/AdminHomeAssistantController.cs:217-222`.
+- I found HA-specific unit tests, not a shared provider contract suite. `git grep` found no smart-plug provider contract test class; only provider-specific tests and polling scope tests.
 
-- **ETag via `UpdatedAt` timestamp:** Lower precision, timestamp collisions possible.
-- **Database-native `xmin`/`rowversion`:** Provider-specific, doesn't work with SQLite.
-- **Pessimistic locking:** Overly restrictive for settings that change infrequently.
+Validation run:
 
----
+- `dotnet build ./farm-web.sln -c Debug --no-restore`: passed, 7 existing warnings.
+- Focused tests: `dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName~HomeAssistantSmartPlugProviderTests|FullyQualifiedName~AdminHomeAssistantControllerTests"`: passed, 19/19.
 
-# Decision: Fix captive dependency in PowerMonitorPollingService
+## Blocking findings
 
-**Date:** 2025-07-14
-**Author:** Ripley (frontend, acting on backend fix per lockout rule)
-**PR:** #391
-**Bead:** #347
+1. **HA secret is added to the generic settings surface, which has anonymous GET endpoints.**
 
-## Context
+   `HomeAssistantSettings` is an `IAppSetting` with a public JSON property `encryptedToken` and a comment saying it must never be surfaced raw (`src/infra/Settings/HomeAssistantSettings.cs:34-39`). But the generic settings controller exposes all settings verbatim through `[AllowAnonymous] GET /api/settings` (`src/api/Controllers/UnifiedSettingsController.cs:36-49`) and a single-section `[AllowAnonymous] GET /api/settings/{keyName}` (`src/api/Controllers/UnifiedSettingsController.cs:252-265`).
 
-`PowerMonitorPollingService` is a singleton `BackgroundService` that previously accepted
-`IEnumerable<ISmartPlugProvider>` as a direct constructor dependency. PR #393 (HA integration)
-registers `HomeAssistantSmartPlugProvider` as **scoped** (it depends on per-request HTTP clients
-and HA session tokens).
+   In the happy path this leaks DP ciphertext, not the LLAT. That is still not the contract promised by the new settings type. Worse, `SensitiveDataProtector.Unprotect` explicitly falls back to returning the original value when decrypt fails or data is plaintext/migrated (`src/infra/Services/Security/SensitiveDataProtector.cs:49-66`), so a mis-saved/plaintext `encryptedToken` would be anonymously returned. The dedicated admin GET is masked (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:304-325`), but the cross-cutting settings API bypasses that masking entirely.
 
-When both PRs merge, this creates a **captive dependency** — a singleton holding a reference to a
-scoped service. With `ValidateScopes=true` (ASP.NET Core Development mode), this causes a startup
-crash. In production (without validation), the scoped provider silently becomes a de-facto
-singleton, leaking state across requests.
+   Required fix: keep Home Assistant secrets out of generic settings responses or add a secret/masked setting convention that `UnifiedSettingsController` honors before this setting is registered globally.
+
+2. **The `Enabled` toggle is persisted but not enforced by either the provider or admin HA operations.**
+
+   The setting has an `Enabled` flag (`src/infra/Settings/HomeAssistantSettings.cs:20-25`) and admin PUT persists it (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:54-55`). After that, `ResolveConnectionDetails` ignores `settings.Enabled` and returns base URL/token whenever present (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:175-182`). The provider fallback also ignores `settings.Enabled` and uses the encrypted token whenever it exists (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:113-130`).
+
+   Deployment failure mode: an admin disables HA, but any existing `PowerMonitor` with provider `HomeAssistant` continues polling the HA instance every power-monitor interval. That violates the configuration pattern users expect from an enabled toggle and makes the integration not actually optional once a monitor exists.
+
+   Required fix: define the semantics and enforce them consistently. If disabled means globally off, the provider should return null/false and admin discovery/test should either refuse or clearly report disabled.
+
+3. **Discovery lists entities that the provider will misinterpret as watts.**
+
+   Discovery accepts `device_class` values `power`, `energy`, `current`, and `voltage`, plus units `W`, `kW`, `kWh`, `Wh`, `A`, `V`, and `mA` (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:279-301`). The provider then treats the selected entity's HA `state` as `watts` unconditionally (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:142-155`) and returns it as `PowerReading.WattsNow` (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:183-184`).
+
+   Deployment failure mode: the entity picker can offer `sensor.plug_energy` (`kWh`) or `sensor.plug_voltage` (`V`); binding that entity will store kWh or volts as watts and corrupt cost/energy readings. That is a literal breakage of the “entity picker instead of raw address” workflow because discovery is the source of selectable addresses.
+
+   Required fix: either restrict bindable entities to instantaneous power (`device_class=power` and W/kW units) or return enough metadata to bind separate power/energy entities and have the provider read the correct one as watts.
+
+4. **Network error contract is too lossy for admin remediation.**
+
+   The admin connection test and discovery use `EnsureSuccessStatusCode()` for HA `/api/` and `/api/states` (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:194-222`). Failures are collapsed to `ex.Message`: test returns HTTP 200 with `success=false` (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:123-130`), discovery returns HTTP 400 (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:166-170`).
+
+   This does not distinguish bad token (401), entity/route missing (404), timeout/offline, or malformed response. The provider itself also collapses 401/404/offline into a logged warning and null reading (`src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:49-59`). Kasa/Tasmota/Shelly have local-device semantics where null is acceptable; HA has a farm-wide credential/config surface and needs actionable admin status.
+
+   Required fix: map HA status and transport failures into stable error codes/messages at least for admin endpoints: unauthorized, not found/no states API, timeout/offline, invalid response.
+
+## Non-blocking observations
+
+- Data Protection key persistence is present for normal Docker deployments: `DATAPROTECTION_KEYS_PATH=/app/data-protection-keys` and a mounted path exist in `scripts/docker/compose-templates/docker-compose.yml`; startup persists keys via `PersistKeysToFileSystem` and `SetApplicationName("PrintFarmer")` in `src/api/Startup/DataProtectionStartup.cs:21-39`. I do not see pod-restart key loss as the main risk unless a deployment bypasses those templates.
+- No token value is directly logged in the new admin controller or provider. Logs include base URL/entity only (`src/api/Controllers/Admin/AdminHomeAssistantController.cs:123-130`, `src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs:56-59`).
+- `AdminHomeAssistantController` at 392 lines is large but not outrageous for settings + test + discovery + DTOs. The bigger issue is duplicated HA REST/parsing logic in controller vs provider; this should probably move into a small HA client service so controller and provider share status mapping and entity classification.
+- The AppDbContext `+4/-6` diff is not “only settings registration.” It resolves pre-existing conflict markers and adds `UserSettings` beside `PowerMonitor`/`PowerReading` (`f03fdb538` diff; current file at `src/infra/Data/AppDbContext.cs:218-224`). That may be necessary merge repair, but it is unrelated to HA settings registration and deserves explicit owner sign-off.
+- WebSocket subscription was listed as preferred in scope, but not in the Phase 1 acceptance checklist. REST polling at the existing 30s power-monitor cadence is probably acceptable for Phase 1, but the enabled-toggle and entity-type issues above must be fixed first.
 
 ## Decision
 
-Replace the direct `IEnumerable<ISmartPlugProvider>` constructor injection with per-iteration
-scope resolution:
+REQUEST_CHANGES. The branch builds and the focused HA tests pass, but the integration has cross-cutting deployment risks: the new secret-bearing setting is exposed through anonymous generic settings endpoints, the enabled toggle does not disable runtime polling, discovery can bind non-watt entities that the provider records as watts, and admin network failures are not actionable enough.
 
-1. Remove `IEnumerable<ISmartPlugProvider>` from the constructor parameters.
-2. In each poll iteration, resolve `IEnumerable<ISmartPlugProvider>` from the already-existing
-   `AsyncServiceScope` via `scope.ServiceProvider.GetServices<ISmartPlugProvider>()`.
-3. Pass the resolved providers to `PollMonitorsAsync` as a parameter.
+Plain text summary: REQUEST_CHANGES — fix generic settings secret exposure, enforce the HA enabled toggle, restrict or model entity types correctly, and surface stable HA network/auth errors before approval.
+# Hicks Review — PR #371 round 3
+
+VERDICT: REQUEST_CHANGES
+
+Brett did fix the `Enabled=false` bypass: `ResolveConnectionParams()` loads `HomeAssistantSettings` and returns before reading `HomeAssistant:Token` / `PFARM__HomeAssistant__Token`, and I found no alternate env-token injection via DI, named `SmartPlug` HttpClient defaults, or options binding.
+
+The power-unit fix is incomplete. `ParseStateResponse()` reads `attributes.unit_of_measurement` and converts only when the string is exactly `"kW"`; `"kw"` / `"KW"` are not handled, and HA-valid `"mW"` is left unchanged, overstating milli-watt readings by 1000x. Tests cover exact `"kW"`, exact `"W"`, and the disabled+env-var path through the real provider seam, but they do not cover unit casing or `mW`.
+
+Focused validation attempted:
+
+`cd src && dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --filter "FullyQualifiedName~HomeAssistantSmartPlugProviderTests"`
+
+The test project currently fails to compile before running the focused tests due unrelated DateTime/DateTimeOffset errors in `LoginAuditServiceTests` and `SecurityAuditControllerTests`, so runtime validation could not complete.
+VERDICT: APPROVE
+
+Both blockers are cleared: energy units now compare with `StringComparison.OrdinalIgnoreCase`, `mW` is converted by multiplying by 0.001, and focused `FullyQualifiedName~HomeAssistant` tests passed (33/33).
+## Hicks review — #405 / 4c82b6734
+**Verdict:** REQUEST_CHANGES
+**Blocking issues:**
+1. The fix chooses `datetime2`/`DateTime` even though #405 calls out the prod `datetimeoffset` column and recommends making the model canonical as `DateTimeOffset` or explicit `datetimeoffset`. That direction preserves the drift's data shape; this commit instead alters deployed SqlServer data to a less expressive type and can discard any stored non-UTC offsets.
+2. Provider symmetry is not established. The Postgres `AddLoginAuditLog` migration created `LoginAuditEntries.Timestamp` as `timestamp with time zone`, not `timestamp without time zone`; the SqlServer target is now `datetime2`. Those do not round-trip identically through `DateTime`: SqlServer `datetime2` materializes with `DateTimeKind.Unspecified`, while the service writes UTC and the API DTO serializes the raw `DateTime`. Postgres `timestamptz` is UTC-oriented, so JSON can differ (`Z` vs no offset) and filters can have provider-specific semantics.
+**Non-blocking nits:**
+1. Add a provider-backed SqlServer smoke test that inserts and reads a `LoginAuditEntry.Timestamp`, asserting the stored type and the API/DTO round-trip preserves the intended UTC semantics. The current InMemory test only proves `DateTime.UtcNow` before EF provider materialization.
+**Strengths:** The migration is narrow and targets the exact SqlServer column. The `oldClrType`/`oldType` values match the original SqlServer migration's `DateTimeOffset`/`datetimeoffset` declaration.
+# Hicks round-2 review — issue #405 / commit 50b42a74a
+
+VERDICT: REQUEST_CHANGES
+
+Good: Dallas did switch the model/service path to DateTimeOffset (`LoginAuditEntry.Timestamp`, DTO timestamp, controller `from`/`to` filters, and `LoginAuditService` uses `DateTimeOffset.UtcNow`). The SQL Server migration is the desired `datetime2` -> `datetimeoffset` direction, and the PostgreSQL snapshot is consistent with `timestamp with time zone` / `DateTimeOffset`.
+
+Blocking correctness issue: the SQLite `HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))` is not a sound DateTimeOffset round-trip. It preserves the instant after normalizing to UTC, but it drops the original offset. A seeded value like `2026-01-01T12:00:00-05:00` will come back as `2026-01-01T17:00:00Z`; the API wire payload therefore emits UTC `Z`, not the original offset. This also means Hicks's round-1 nit is still unaddressed: there is no API round-trip test proving an offset-bearing timestamp is preserved across persistence + JSON serialization.
+
+Validation run:
+
+`cd src && dotnet test ./farm-web.sln --filter "FullyQualifiedName~LoginAudit|FullyQualifiedName~SecurityAudit"`
+
+Result: passed, 18 tests. However, those tests only cover UTC `DateTimeOffset.UtcNow` and date filtering; they do not cover non-zero offset preservation.
+VERDICT: APPROVE
+
+Rationale: Both prior blockers are cleared: AppDbContext now documents SQLite's lossy non-UTC offset conversion and the service-contract reason, and GetLoginAudit_Timestamp_SerializesAsUtcIso8601 verifies the API emits UTC ISO 8601 with zero offset while the focused LoginAudit/SecurityAudit tests pass.
+
+Validation: cd src && dotnet test ./farm-web.sln --filter "FullyQualifiedName~LoginAudit|FullyQualifiedName~SecurityAudit" — Passed 6/6.
+## Kane revision — #355 LoginModal integration test (round 3 blocker)
+
+Commit: `f38803360`
+
+### Blocker addressed
+
+Bishop's round-3 blocker: `LoginModal.passkey.integration.test.tsx` mocked
+`@/services/passkeyService`, short-circuiting the seam at the service boundary
+instead of the HTTP layer.  The real `LoginModal → AuthContext → apiClient`
+chain was not exercised.
+
+### HTTP stubbing approach
+
+**Custom axios adapter** — same pattern established by `api.interceptor.test.ts`.
+
+The singleton `apiClient` exposes an internal `AxiosInstance` at the private
+`client` field.  A URL-dispatch adapter is swapped onto
+`axiosInstance.defaults.adapter` in `beforeEach` and removed in `afterEach`.
+The adapter matches request URLs by substring and returns either a resolved
+response object (2xx) or a rejected `AxiosError` (4xx), which the real
+response interceptor then processes.
+
+**Why this approach and not MSW:**
+The project has no MSW dependency (`grep -E "msw|setupServer"` found nothing in
+`package.json`, `test/`, or `src/`).  The interceptor test already established
+the axios adapter pattern as the project convention.  Adding MSW would be a
+new dependency for no benefit when the existing pattern covers the requirement
+cleanly.
+
+### What is mocked at the browser boundary
+
+`@simplewebauthn/browser` → `startAuthentication` is mocked to return a fake
+assertion object.
+
+`startAuthentication` wraps `navigator.credentials.get()`.  jsdom does not
+implement the WebAuthn browser API, so `startAuthentication` would throw
+unconditionally in any test environment without a mock.  This is the correct
+seam: it represents the physical hardware/platform boundary (authenticator
+device or platform biometrics).  Everything above it — `passkeyService`,
+`ApiClient`, the 401 interceptor with `skipAuthRedirect=true`, `AuthContext`,
+`LoginModal` — is real and fully exercised.
+
+### Test coverage
+
+**Negative path** (`shows inline alert when /login/complete returns 401`):
+- Adapter stubs `/auth/passkey/login/begin` → 200 (challenge options)
+- Adapter stubs `/auth/passkey/login/complete` → 401 `{ error: 'Credential ID not found' }`
+- Real interceptor sees `skipAuthRedirect=true` → does NOT redirect, does NOT
+  clear token → normalises `AxiosError` to `ApiError` with `details`
+- `ApiError` propagates through `AuthContext.loginWithPasskey` (no catch there)
+  → caught in `LoginModal.handlePasskeyLogin` → `setPasskeyError`
+- Asserts: `role="alert"` contains the details text, `window.location.href`
+  unchanged, `localStorage` has no token, `onClose` not called.
+
+**Positive path** (`closes modal and stores token when /login/complete returns 200`):
+- Adapter stubs both passkey routes with success responses
+- Real `AuthContext` stores the token and calls `onClose`
+- Asserts: `onClose` called once, `localStorage['auth-token']` set to the
+  stubbed token, no `role="alert"` present.
+
+### Pre-existing baseline
+
+7 test files were already failing on `3a568f640` before this change (verified
+by stash-reverting and re-running the suite).  My change introduces no new
+failures: 3 files / 7 tests pass in the targeted run; full suite remains at
+7 failed / 191 passed.
+
+### Build / test / lint / conflict scan
+
+- `npm run build`: ✅ passed
+- `npm run test:run` (targeted — 3 files): ✅ 7/7 passed
+- `npm run test:run` (full suite): ✅ same 7 pre-existing failures, 0 new
+- `npm run lint`: pre-existing `LoginAuditPage` unused-var error in `App.tsx`,
+  unrelated to this change
+- Anchored conflict marker scan (`^(<<<<<<<|=======|>>>>>>>)`): ✅ empty
+# Kane — HA Provider Revision (371 round-4)
+
+**Commit:** `6785eae01`
+**Branch:** `squad/371-home-assistant-provider`
+
+## Changes Made
+
+### `HomeAssistantSmartPlugProvider.cs` — `ParseStateResponse`
+
+Replaced exact `== "kW"` check with a case-insensitive block covering all three HA
+`device_class=power` units:
+
+| unit_of_measurement | Action |
+|---|---|
+| `kW` / `kw` / `KW` | `watts *= 1000.0` (via `StringComparison.OrdinalIgnoreCase`) |
+| `mW` / `mw` / `MW` | `watts *= 0.001` (new) |
+| `W` (or absent) | no conversion (unchanged) |
+
+### `HomeAssistantSmartPlugProviderTests.cs`
+
+Added to the existing Blocker 1 kW test block (Brett's tests untouched):
+
+- `[Theory] [InlineData("kw")] [InlineData("KW")]` — verifies case variants convert 2.0 → 2000 W
+- `[Fact] GetCurrentReadingAsync_WhenStateInMilliwatts_ConvertsToWatts` — verifies 500 mW → 0.5 W
+
+## Test Results
+
+**20/20 HomeAssistantSmartPlugProvider tests pass** (17 Brett + 3 Kane).
+
+## Hicks Blockers Resolved
+
+1. ✅ Case-insensitive `kW` — `"kw"` and `"KW"` now convert correctly.
+2. ✅ `mW` milliwatt support added per HA `device_class=power` spec.
+# Kane — #405 Revision (Round 2 Response)
+
+**Date**: 2025-06-02  
+**Branch**: `squad/405-sqlserver-loginaudit-fix`  
+**Addressing**: Hicks's `REQUEST_CHANGES` blockers from `hicks-405-round2.md`
+
+---
+
+## Blocker 1: SQLite `HasConversion` lossiness
+
+**Decision**: Acceptable in practice — document the constraint, don't change behavior.
+
+`LoginAuditService.RecordAsync` always writes `DateTimeOffset.UtcNow`, so every
+persisted `Timestamp` has offset `+00:00`. The `HasConversion` lossiness only fires
+if a caller writes a non-UTC offset, which the service contract forbids.
+
+**Fix applied**: Added a 3-line comment directly above the `HasConversion` call in
+`AppDbContext.cs` explaining (a) why the conversion exists, (b) that it is lossy for
+non-UTC offsets, and (c) that the service contract forbids that scenario.
+
+```csharp
+// SQLite has no native DateTimeOffset type. We normalize to UTC for storage
+// since LoginAuditService always writes DateTimeOffset.UtcNow. This conversion
+// is LOSSY for non-UTC offsets — that scenario is forbidden by service contract.
+```
+
+---
+
+## Blocker 2: No API round-trip test for UTC timestamps
+
+**Fix applied**: Added `GetLoginAudit_Timestamp_SerializesAsUtcIso8601` to
+`SecurityAuditControllerTests.cs`.
+
+What the test proves end-to-end:
+1. Seeds a `LoginAuditEntry` with `DateTimeOffset.UtcNow` (offset `+00:00`) via EF Core.
+2. GETs `/api/admin/security/login-audit` as an authenticated admin.
+3. Parses the raw response JSON (not the deserialized DTO) to inspect the literal
+   `timestamp` string.
+4. Asserts it ends with `Z` or `+00:00` (both are valid UTC ISO 8601 representations).
+5. Asserts `DateTimeOffset.TryParse` succeeds.
+6. Asserts `parsed.Offset == TimeSpan.Zero`.
+
+The test uses the existing `CustomWebApplicationFactory` + `SeedEntriesAsync` helpers —
+no new mocking layers introduced.
+
+---
+
+## Test counts
+
+| Scope | Before | After |
+|---|---|---|
+| `SecurityAuditControllerTests` | 11 | 12 |
+| `LoginAuditServiceTests` | 7 | 7 |
+| **Total (filter match)** | **18** | **19** |
+
+All 19 passed. Build: 0 errors, all warnings pre-existing.
+# Lambert — #371 Home Assistant Settings & Admin Integration
+
+**Branch**: `squad/371-home-assistant-provider`
+**Commit**: `f03fdb538`
+**Date**: 2025-06-01
+
+## Files Added/Modified
+
+| File | Change |
+|---|---|
+| `src/infra/Settings/HomeAssistantSettings.cs` | New `IAppSetting` with `Enabled`, `BaseUrl`, `EncryptedToken` fields |
+| `src/api/Controllers/Admin/AdminHomeAssistantController.cs` | New admin controller with 4 endpoints |
+| `src/tests/Farm.Web.Api.Tests/Controllers/AdminHomeAssistantControllerTests.cs` | 9 unit tests for controller |
+| `src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs` | Updated constructor + `ResolveToken()` fallback |
+| `src/tests/Farm.Web.Api.Tests/Services/SmartPlug/HomeAssistantSmartPlugProviderTests.cs` | Updated factory + added persisted-token test |
+| `src/infra/Data/AppDbContext.cs` | Resolved pre-existing merge conflict (#345 vs #359) |
+
+## Test Coverage
+
+- **Provider tests** (9 tests): token missing → null, valid state parsing, unavailable state, offline device, legacy address format, settings fallback path
+- **Controller tests** (9 tests): settings masked/unmasked display, update with encrypt/skip-re-encrypt/validation, test connection missing URL/token/success, entity discovery missing URL/filter logic
+
+All 19 new/modified tests pass. Pre-existing failures in `MmuToolheadRetroSyncTests` and `OrcaSlicerProfilesProviderTests` are unrelated to this issue.
+
+## Key Decisions
+
+### HTTP error handling in controller
+`POST /test` always returns HTTP 200 with a `success: bool` flag (and optional error message) rather than propagating HTTP errors. This is consistent with other "probe" endpoints in the codebase and avoids frontend having to handle both 4xx/5xx from HA and from our API.
+
+### Auth token storage approach
+Token is stored as `ISensitiveDataProtector.Protect(plainToken)` — uses ASP.NET Core Data Protection (AES-256). The raw encrypted blob is stored in `AppSettingsEntity` (same table as Obico/Spoolman settings). The API never returns the raw encrypted value; it returns `***...{last4}` as a display placeholder. The `PUT /settings` endpoint skips re-encryption if the incoming value starts with `"***"` (the placeholder prefix), which is the same pattern used by other sensitive settings in this codebase.
+
+### Token resolution / singleton–scoped lifetime
+`HomeAssistantSmartPlugProvider` is a singleton. `ISettingsService` is scoped. To avoid captive dependency, the provider receives `IServiceScopeFactory` (singleton-safe) and creates a short-lived scope only on the fallback path (i.e., when `IConfiguration["HomeAssistant:Token"]` is absent). In production this path is rare; in typical deployments the token is supplied via env var and the scope is never opened.
+
+### Polling cadence consistency
+No polling cadence was changed. Power reading is still on-demand via `GetCurrentReadingAsync`, consistent with Kasa/Tasmota/Shelly providers. The HA provider does not poll independently.
+
+## Trio Focus Areas
+
+- **HTTP error handling**: `POST /test` swallows HA errors and returns structured result — deliberate; document in PR
+- **Token storage**: Data Protection blob in shared settings table — same as Obico/OctoPrint tokens; acceptable for V1
+- **Polling cadence**: No change; matches other providers — no follow-up needed
+## Lambert — Issue #405 SqlServer Timestamp Fix
+
+**Date:** 2026-05-31T17:34:00-07:00
+**Branch:** `squad/405-sqlserver-loginaudit-fix`
+**Commit:** `4c82b6734`
+
+### What Changed
+
+New SqlServer-only migration `20260601003912_FixLoginAuditTimestampType` corrects
+schema drift introduced in PR #391:
+
+- `Up()`: `AlterColumn<DateTime>` on `LoginAuditEntries.Timestamp` — sets
+  `type: "datetime2"` (matches entity model)
+- `Down()`: reverts to `type: "datetimeoffset"` (previous erroneous state)
+
+The entity `LoginAuditEntry.Timestamp` is `DateTime` — EF maps that to `datetime2`
+on SqlServer. The original `AddLoginAuditLog` migration erroneously used
+`DateTimeOffset`/`datetimeoffset`. Postgres was unaffected (Npgsql maps `DateTime`
+to `timestamp with time zone`, which is what that migration produced).
+
+No model changes. No Postgres migration needed.
+
+### Regression Risk
+
+**Low.** This is a column type correction on a new table (`LoginAuditEntries`) that
+only holds security audit rows. No foreign keys depend on this column. The index on
+`Timestamp` survives an `AlterColumn`.
+
+Risk scenarios to verify:
+
+- Any code that reads `Timestamp` into `DateTimeOffset` (there is none — entity uses
+  `DateTime`) would break. Confirm there are no direct SQL queries casting this column.
+- Deployed SqlServer databases will incur a brief `ALTER TABLE` lock. For audit tables
+  this is low-risk (rows are insert-only, no UPDATE contention).
+
+### What Trio Should Focus On
+
+1. **Migration safety**: verify `Up()` AlterColumn params (`oldClrType`,
+   `oldType`) match what `AddLoginAuditLog` actually created. Incorrect
+   `oldClrType`/`oldType` can cause silent EF no-ops on some providers.
+2. **Downstream cost-aggregation queries**: any analytics or reporting query
+   that reads `LoginAuditEntries.Timestamp` (e.g., login rate over time for
+   the admin dashboard) should be tested against `datetime2` semantics.
+   `datetime2` loses timezone offset — confirm all callers pass UTC values
+   (the entity already uses `DateTime.UtcNow`).
+3. **Idempotency on already-correct DBs**: if a SqlServer deployment was
+   already manually patched to `datetime2`, the `AlterColumn` is a no-op
+   but should not error. Confirm with a test migration run.
+4. **PR #391 history**: verify no other column in that migration shares this
+   `DateTimeOffset`/`DateTime` mismatch before approving.
+# Decision Inbox: Passkey Frontend (Issue #355)
+
+**Agent**: Ripley  
+**Branch**: `squad/355-passkey-enrollment`  
+**Date**: 2026-06-01  
+**Status**: Ready for trio review — NO PR opened (gate pending)
+
+---
+
+## What Shipped
+
+### `passkeyService.ts` — refactored to `@simplewebauthn/browser` v13
+
+- `registerPasskey()` now calls `startRegistration({ optionsJSON })` instead of raw `navigator.credentials.create()`
+- `loginWithPasskey(username)` added — calls `GET /api/passkeys/login/begin?username=...`, runs `startAuthentication({ optionsJSON })`, POSTs result to `/api/passkeys/login/complete`, returns `boolean` (true = JWT stored)
+- All manual base64url helpers removed
+
+### `AuthContextValue.ts` + `AuthContext.tsx`
+
+- `loginWithPasskey: (username: string) => Promise<boolean>` added to `AuthContextType` interface
+- Implemented in `AuthContext.tsx` mirroring the existing `login()` pattern: stores JWT, sets user, handles `isActive` check, surfaces error via context
+
+### `LoginModal.tsx`
+
+- "or" divider + **"Sign in with passkey"** button added below the password form actions
+- Button is `disabled` when username is empty; `title` attribute explains why
+- Inline `role="alert"` error displayed when the ceremony fails (separate from the credential-error path in `AuthContext`)
+- `passkeyLoading` state disables the whole modal during ceremony
+
+### `PasskeysPage.tsx`
+
+- "Add passkey" button now opens a pre-registration modal with an optional device name field (using `FormField` + `Input` from UI library)
+- After registration, the new credential is found by diffing the passkey list (before vs. after IDs), then renamed via `renamePasskey()`
+- Rename modal input fixed to use UI library `Input` instead of raw `<input>`
+
+### Test: `LoginModal.passkey.test.tsx` (7/7 passing)
+
+Covers: button renders; disabled/enabled by username; calls `loginWithPasskey` with correct value; `onClose` on success; no `onClose` on failure; inline error on ceremony throw.
+
+---
+
+## Known Concerns for Trio Review
+
+### 1. Post-registration rename-by-diff (fragile under concurrent registrations)
+
+`PasskeysPage` finds the newly registered credential by computing `newIds.find(id => !oldIds.includes(id))`. If two concurrent registrations happen from the same account in the same browser session, the diff might find the wrong credential's ID. This is acceptable for Phase 1 but should be flagged.
+
+**Decision needed**: Accept the diff approach, or require the backend to return the new credential's integer DB id in `register/complete`?  
+*Current backend returns `{ message, credentialId: string }` where `credentialId` is Base64 binary, not the integer id.*
+
+### 2. Double-error state in LoginModal
+
+`loginWithPasskey` errors can surface two ways:
+- The ceremony itself throws (user cancelled, hardware error) → caught in `LoginModal.handlePasskeyLogin`, shown as inline `passkeyError`
+- The backend returns `success: false` → `AuthContext.loginWithPasskey` returns `false` and sets `AuthContext.error`; `LoginModal` only checks the boolean and doesn't show an additional inline error
+
+This means a backend rejection shows no inline feedback in `LoginModal` (only the context-level error, which isn't rendered in the passkey section). **Decision needed**: Should `LoginModal` show the `AuthContext.error` in the passkey section too, or is the context-level error display sufficient?
+
+### 3. `AuthContextValue.ts` path
+
+`AuthContext.tsx` imports `AuthContextValue` via `'./AuthContextValue'` which cross-resolves from `common/contexts/` to `contexts/`. This was pre-existing and the build passes, but it's worth a note for reviewers.
+
+### 4. Pre-existing lint error in `App.tsx`
+
+`'LoginAuditPage' is defined but never used` — pre-existing, unrelated to this change.
+
+---
+
+## Not In Scope (Phase 1)
+
+- Passkey-only accounts (no password)
+- Fully discoverable / conditional UI autofill
+- Platform authenticator preference hints beyond `residentKey: preferred` (set server-side)
+- Multiple concurrent passkey registrations
+## Vasquez re-review — #355 / 4183347b1
+
+**Verdict:** APPROVE
+
+---
+
+### Prior Blocker: Dead error path — RESOLVED
+
+**What I verified:**
+
+1. **AuthContext.loginWithPasskey** (AuthContext.tsx:83–103) now uses `try {} finally {}` with
+   NO catch block. Ceremony errors (user cancel, hardware timeout, network failure) propagate
+   naturally through the `finally` clause without being swallowed. `setIsLoading(false)` runs
+   in `finally` to reset loading state regardless of outcome.
+
+2. **LoginModal.handlePasskeyLogin** (LoginModal.tsx:49–63) wraps `loginWithPasskey(username)`
+   in a try/catch. The catch is now REACHABLE in production because AuthContext no longer
+   swallows. Error extraction: `apiErr?.details ?? apiErr?.message ?? 'Passkey sign-in failed'`
+   handles both Error instances (`.message`) and structured API error objects (`.details`).
+
+3. **The `role="alert"` inline error div** (LoginModal.tsx ~160–167) renders `{passkeyError}`
+   which is set ONLY in the catch block. This UI path is now live in production.
+
+4. **Two-tier error model is sound:**
+   - Ceremony throw → propagates → LoginModal catch → `passkeyError` → inline display near button
+   - Backend soft-fail (200 OK, `success:false`) → AuthContext sets `error` → top-of-form display
+   - No cross-contamination: `passkeyError` (local state) is independent of context `error`.
+
+**Adversarial checks performed:**
+
+- No hidden catch that re-swallows at a different level. The `finally` only resets `isLoading`.
+- `setError(null)` at the top of `loginWithPasskey` does not interfere — for thrown errors,
+  context `error` stays null (correct; caller owns display). For soft-fails, it's set to the
+  backend message.
+- No re-render race that clears `passkeyError`: it's local state in LoginModal, not derived
+  from context.
+- `isLoading` reset in `finally` doesn't unmount the component or trigger cleanup that loses
+  the thrown error before the caller's catch receives it (React state batching ensures this).
+
+---
+
+### Tests: Adequate Coverage
+
+**AuthContext.passkey.test.tsx** — exercises the REAL `AuthProvider` component with mocked
+`passkeyService` at the network boundary (not at the hook level). Three cases:
+- Backend soft-fail with error message → context `error` set, returns `false`
+- Backend soft-fail without error message → generic fallback
+- Ceremony rejection → error propagates to caller, no context `error` set
+
+This is a proper integration test proving the real `loginWithPasskey` implementation re-throws.
+
+**LoginModal.passkey.test.tsx** — unit test at the hook level confirming the Modal's catch
+block renders the error in `role="alert"`. Complementary to the integration test above.
+Together they prove the full end-to-end path.
+
+---
+
+### AppDbContext Merge Conflict Resolution — CLEAN
+
+Diff at `src/infra/Data/AppDbContext.cs` shows conflict markers removed, both DbSets retained:
+- `PowerMonitors` / `PowerReadings` (from electricity monitoring)
+- `UserSettings` (from #359 per-user settings)
+
+These are distinct entity types with no naming collision or duplicate registration risk.
+EF Core registers each via `Set<T>()` — no ambiguity.
+
+---
+
+### 401 Interceptor Guard — CORRECT
+
+`api.ts` now skips redirect+token-clear when `error.config?.url?.endsWith('/auth/passkey/login/complete')`.
+Narrow and appropriate — this is the only endpoint that semantically uses 401 for "wrong
+credential" rather than "expired session." All other 401s still trigger the full logout flow.
+
+---
+
+### Remaining Non-Blocking Notes (unchanged from round 1)
+
+- AbortController for modal unmount: not addressed, acceptable Phase 2 scope
+- Shared `isLoading` across password + passkey: low risk, acceptable
+- Username enumeration surface on `/auth/passkey/login/begin`: backend concern (#380)
+
+None of these are blocking.
+
+---
+
+**Summary:** Dallas's revision addresses the root cause — the catch block is genuinely removed,
+not merely refactored to a different level. The two-tier error model (throw vs soft-fail) is
+clean, tested at the integration level, and the inline error UI is now live in production.
+Merge conflict resolution is correct. No new issues found.
+## Vasquez review — #355 / a1c21f24a
+
+**Verdict:** REQUEST_CHANGES
+**Blocking issues:**
+
+1. **Dead catch block / unreachable inline error — LoginModal.tsx:56–58 + AuthContext.tsx:83–110**
+
+   `AuthContext.loginWithPasskey` wraps the entire ceremony in try/catch and *never* re-throws — it catches all exceptions, calls `setError(...)`, and returns `false`. Therefore, `LoginModal.handlePasskeyLogin`'s own `catch` block (line 56–58) is unreachable in production. The `passkeyError` state will never be set; the `role="alert"` inline error div (line 175–183) is dead UI.
+
+   The test `"shows an inline error when the passkey ceremony throws"` passes only because `mockLoginWithPasskey.mockRejectedValue(...)` doesn't match the real `AuthContext.loginWithPasskey` which never rejects. This is a green test validating non-existent production behavior.
+
+   **Impact:** User-visible — when a passkey ceremony aborts (user cancel, hardware timeout, network failure), the error message appears at the top of the form via context `error`, not near the passkey button where the user's attention is. The carefully designed inline UX is inert.
+
+   **Fix options (pick one):**
+   - (a) Have `AuthContext.loginWithPasskey` re-throw ceremony errors (not backend-soft-failures) so `LoginModal` can catch them locally, matching the tested behavior.
+   - (b) Split the flow: move the `passkeyService.loginWithPasskey()` call into `LoginModal` directly (or into a thin hook), let the modal handle ceremony errors inline, and only delegate JWT-storage/user-state to `AuthContext`.
+   - (c) After `loginWithPasskey` returns `false`, read `error` from the auth context and copy it to `passkeyError` for inline display.
+
+**Non-blocking nits:**
+
+1. **Rename-by-diff race (PasskeysPage.tsx:55–64):** Ripley's concern #1 is valid — diffing query cache to find the new credential is fragile. Not a real-world risk in Phase 1 (single-tab, single-user), but file a follow-up issue to have `POST /auth/passkey/register/complete` return the DB integer ID so the frontend can rename deterministically.
+
+2. **No AbortController propagation:** `startAuthentication`/`startRegistration` accept an `AbortSignal` in simplewebauthn v13. If the user closes the modal mid-ceremony, the WebAuthn prompt lingers. Consider wiring `AbortController` to modal unmount for cleaner lifecycle.
+
+3. **`isLoading` shared across password + passkey flows (AuthContext.tsx:84):** Both `login()` and `loginWithPasskey()` mutate the same `isLoading`. If a fast double-click triggers both paths, they interfere. Low risk but worth noting for Phase 2.
+
+4. **Username enumeration surface:** `POST /auth/passkey/login/begin` with `{ username }` — if the backend returns distinguishable responses (timing or error shape) for known vs unknown users, this is an info leak. This is a backend concern (#380 scope), but the frontend should not surface the raw backend error to the user. Currently it does via `result.error || 'Passkey login failed'` at AuthContext.tsx:100. Recommend always showing the generic message regardless of backend detail.
+
+**Strengths:**
+
+- Clean separation: `passkeyService.ts` is a textbook WebAuthn client layer — minimal, typed, zero side effects. Easy to unit-test in isolation.
+- Accessibility: `role="alert"`, `aria-label`, disabled-state `title` attribute — better than most first passes.
+
+---
+
+**Ripley concern assessment:**
+
+| Ripley flag | Vasquez take |
+|---|---|
+| Rename-by-diff concurrency | Real but acceptable scope-limit for Phase 1. Non-blocking. File follow-up. |
+| Double-error-state | Worse than flagged — the inline error path is entirely dead code. **Blocking.** |
+# Vasquez — Round 3 Re-Review: squad/355-passkey-enrollment
+
+**Commit:** `3a568f640` — "test(squad): address #355 trio test-quality blockers"
+**Date:** 2026-05-31T22:15:00-07:00
+**Verdict:** ✅ APPROVE
+
+## Summary
+
+Dallas's test-quality fix is a clean refactor with no app-code regression. The
+one app-code change (replacing the brittle URL-suffix check with
+`PfRequestConfig.skipAuthRedirect`) is a strict improvement in correctness and
+maintainability.
+
+## Findings
+
+### 1. `PfRequestConfig.skipAuthRedirect` — Clean Refactor ✅
+
+- **Type definition**: Properly exported interface extending `AxiosRequestConfig`
+  with optional boolean field. Documented with JSDoc.
+  (`api.ts:148-163`)
+- **Consumer pattern**: `passkeyService.ts:87` uses `satisfies PfRequestConfig`
+  for compile-time validation — best practice.
+- **Backwards compatibility**: Since `PfRequestConfig extends AxiosRequestConfig`
+  and `skipAuthRedirect` is optional, all ~30 existing callers of
+  `apiClient.request()` remain valid with zero changes. No semantic shift.
+- **Interceptor logic**: The condition
+  `!(error.config as PfRequestConfig)?.skipAuthRedirect` is the correct
+  negative check — default (undefined/false) preserves existing redirect
+  behaviour. Only explicit `true` suppresses. No accidental opt-in possible.
+- **No stray readers**: `grep -rn skipAuthRedirect` in production code shows
+  exactly 2 locations (type definition + interceptor check) plus 1 consumer
+  (`passkeyService.ts`). No unexpected consumers.
+
+### 2. AuthContext Error Propagation — Unchanged ✅
+
+- `loginWithPasskey` in `AuthContext.tsx` still uses `try { ... } finally { ... }`
+  with **no catch block**. ApiErrors from `passkeyLogin()` propagate directly to
+  the caller (LoginModal's `handlePasskeyLogin` catch).
+- The `else` branch (`setError(result.error || 'Passkey login failed')`) only
+  runs when the service resolves with `success: false` — a path that, per the
+  commit message and backend design, doesn't actually exist for the assertion
+  endpoint (it returns 401 → throw). Dead code but harmless; not a regression.
+
+### 3. Test Quality — Addresses All Blockers ✅
+
+- **AuthContext.passkey.test.tsx**: Now models the real path (mock rejects with
+  ApiError, verifies `caught-error` DOM node, confirms `context-error` is null).
+- **LoginModal.passkey.integration.test.tsx**: Real AuthProvider, real error
+  propagation seam, verifies `role="alert"` appears with correct text and
+  `onClose` is not invoked. Both `details` and `message` fallback paths covered.
+- **api.interceptor.test.ts**: Real axios instance + custom adapter. Exercises
+  both branches (skip=true: no localStorage clear; skip=false: clear + redirect).
+
+### 4. Conflict Markers — None ✅
+
+`grep -rE` on `src/Web/ReactApp` returns zero git conflict markers (only
+unrelated `=======` patterns in `node_modules/zod`).
+
+### 5. Adversarial Check — No Hidden Semantic Changes
+
+- The interceptor's net behaviour for all requests **without** the flag is
+  identical to the previous commit's URL-suffix check: 401 → clear token →
+  redirect. The only difference is the mechanism (flag vs URL match).
+- The passkey `/login/complete` endpoint now opts out via an explicit flag rather
+  than an implicit URL convention — more robust against URL refactors.
+- No other endpoint accidentally gains `skipAuthRedirect`. Only
+  `passkeyService.loginWithPasskey` sets it.
+
+## Previously Approved Items — No Regression
+
+- Passkey enrollment flow (`/auth/passkey/register/*`) untouched by this commit.
+- LoginModal inline-error UI (`role="alert"`) still rendered on passkey failure —
+  now additionally proven by the integration test.
+- Token lifecycle (store on success, clear on 401 for non-passkey endpoints)
+  unchanged.
+
+## Decision
+
+**APPROVE** — no issues. Ship it.
+# Vasquez — Round 4 Re-Review: squad/355-passkey-enrollment @ f38803360
+
+**Date:** 2026-05-31T22:45:00-07:00
+**Branch:** `squad/355-passkey-enrollment`
+**Commit:** `f38803360` — "test(squad): make #355 LoginModal integration test exercise real passkeyService"
+**Scope:** Test-only rewrite (1 file, +152/−39 lines)
+
+## VERDICT: ✅ APPROVE
+
+---
+
+## Verification Checklist
+
+| Check | Result |
+|-------|--------|
+| No app-code changes | ✅ `git diff --name-only` returns only the test file |
+| Conflict markers | ✅ Zero occurrences of `<<<<<<<`, `=======`, `>>>>>>>` |
+| Adapter pattern matches `api.interceptor.test.ts` | ✅ Same technique: custom adapter on `axiosInstance.defaults.adapter`, `AxiosError` construction, cleanup in `afterEach` |
+| `passkeyService` NOT mocked | ✅ No `vi.mock('@/services/passkeyService')` present |
+| `apiClient` NOT mocked | ✅ Real singleton imported; only its transport adapter is swapped |
+| WebAuthn mock is at correct boundary | ✅ `@simplewebauthn/browser` mocked (wraps `navigator.credentials.get` unavailable in jsdom) |
+| Real interceptor exercised | ✅ `skipAuthRedirect=true` path tested via 401 adapter; no redirect, no token clear |
+| Happy-path exercises real chain | ✅ 200 response → token stored in localStorage, `onClose` called |
+
+## Findings
+
+### Integration Depth — Genuinely Integration-Grade
+
+The test exercises:
+1. `LoginModal` (React component click handler)
+2. `AuthContext.loginWithPasskey` (context method)
+3. `passkeyService.loginWithPasskey` (real service, two HTTP calls)
+4. `apiClient.request` (real ApiClient with interceptors)
+5. 401 interceptor (`skipAuthRedirect` logic)
+6. Error normalisation to `ApiError` → propagation → UI render
+
+The ONLY mock boundaries are:
+- `@simplewebauthn/browser` — unavoidable (no WebAuthn in jsdom)
+- UI component stubs (Modal, icons, etc.) — rendering-layer only, doesn't affect the tested seam
+- `apiUrlHelpers` — prevents env-var crash, same as reference test
+
+This is a legitimate integration test, not a dressed-up unit test.
+
+### Potential Concerns (all acceptable)
+
+1. **`makeDispatchAdapter` uses `url.includes(k)` for routing** — could theoretically match ambiguous substrings. In practice the routes (`/auth/passkey/login/begin` vs `/auth/passkey/login/complete`) are unambiguous. No issue.
+
+2. **Adapter cleanup uses `delete (axiosInstance.defaults as any).adapter`** — same pattern as `api.interceptor.test.ts`. The singleton is module-scoped, so this is necessary to prevent leakage. Correct.
+
+3. **No test for network-error path (non-HTTP failure)** — out of scope for this PR; the 401/200 paths are the critical assertions for passkey login. Not a blocker.
+
+### Regression Risks
+
+**None identified.** The commit:
+- Touches no production code
+- Adds no new dependencies
+- Uses the established adapter-stubbing pattern
+- Cleans up after itself in `afterEach`
+
+## Citations
+
+- Test file: `src/Web/ReactApp/src/test/features/auth/LoginModal.passkey.integration.test.tsx` (lines 145–307)
+- Reference pattern: `src/Web/ReactApp/src/test/services/api.interceptor.test.ts` (lines 1–60)
+- Commit message documents the architecture accurately
+
+---
+
+**Plain text summary:** Kane's rewrite is solid. The test exercises the full LoginModal→AuthContext→passkeyService→ApiClient→interceptor chain with HTTP stubbing at the axios adapter level — the same proven pattern from `api.interceptor.test.ts`. No app code touched, no conflict markers, no regression risk. The only mock boundaries (WebAuthn browser API, UI stubs) are correct and well-justified. APPROVE.
+# Re-Review: squad/371-home-assistant-provider
+
+**Reviewer:** Vasquez (Adversarial Reviewer #3)  
+**Commits reviewed:** `b4680ba40`, `1487790fe`  
+**Date:** 2026-05-31T21:35:00-07:00  
+**Prior verdict:** APPROVE (incorrect — missed security blocker)
+
+---
+
+## VERDICT: APPROVE
+
+All 6 consolidated trio blockers are adequately addressed. The security fix is correct and covers both read and write paths.
+
+---
+
+## Token Lifecycle Trace (Adversarial Re-Trace)
+
+### Write path
+- Plain token arrives via `PUT /api/admin/integrations/home-assistant/settings` (`UpdateSettings`)
+- Encrypted immediately: `dataProtector.Protect(request.Token)` → stored as `EncryptedToken`
+- The generic `POST /api/settings` (bulk update) **blocks** the `"HomeAssistant"` key at line 96–100 with `_settingsBlocklist.Contains(key)` → skips, logs only the key name
+- The per-key `POST /api/settings/{keyName}` **blocks** at line 230 via same blocklist → returns `NotFound`
+
+### Read path
+- `GET /api/settings` skips `HomeAssistant` section (line 55–58)
+- `GET /api/settings/{keyName}` returns `NotFound` for `"HomeAssistant"` (line 219–222)
+- `GET /api/admin/integrations/home-assistant/settings` returns `HomeAssistantSettingsDto` with `TokenMasked` only (last 4 chars)
+
+### Logging review
+- **CONFIRMED CLEAN**: No `LogInformation("{@SettingsSections}", ...)` or `LogInformation("{@TypedSettings}", ...)` statements remain in `UnifiedSettingsController`
+- Line 81 logs `settingsSections.Keys` (key names only, never values)
+- Line 93 logs individual key name being processed
+- Line 98 logs the blocked key warning (name only)
+- No structured log statement captures the `settingsValues` payload body
+- `AdminHomeAssistantController` never logs the plain token; only `baseUrl` appears in `LogDebug`/`LogWarning` messages
+
+### Use path
+- `HomeAssistantSmartPlugProvider.ResolveConnectionParams()` decrypts token in-memory → passes to `Authorization` header → never logs it
+- `AdminHomeAssistantController.ResolveConnectionDetails()` same pattern
+
+### Export/backup surface
+- No settings export endpoint exists
+- No backup/dump endpoint for `AppSettingsEntities` exists
+- `GetMetadata()` (line 170) returns schema metadata for all settings (including HA) but this contains no secret values — only field names/types/descriptions. Acceptable.
+
+---
+
+## Blocker-by-Blocker Assessment
+
+| # | Blocker | Status | Citation |
+|---|---------|--------|----------|
+| 1 | UnifiedSettingsController secret leak | ✅ Fixed | `_settingsBlocklist` blocks GET, POST bulk, POST per-key. Log statements removed. |
+| 2 | Enabled toggle ignored | ✅ Fixed | Controller: early returns in `TestConnectionAsync` (L86), `DiscoverEntitiesAsync` (L144). Provider: `ResolveConnectionParams()` returns null token when disabled. |
+| 3 | Discovery non-watt entities | ✅ Fixed | `IsPowerCapableEntity` restricted to `device_class=="power"` or unit in `{"W","kW"}`. |
+| 4 | Lossy error handling | ✅ Fixed | Two-catch pattern with `switch` expression mapping in controller + provider. |
+| 5 | Hardcoded fallback | ✅ Fixed | `ParseDeviceAddress` returns null for missing baseUrl; caller resolves from settings; no hardcoded host. |
+| 6 | Missing error-path tests | ✅ Fixed | 7 new test methods covering disabled, 401, timeout paths. |
+
+---
+
+## AppDbContext Review
+
+The diff at `src/infra/Data/AppDbContext.cs` resolves a prior merge conflict correctly:
+- Adds `PowerMonitor` + `PowerReading` DbSets (from the electricity monitoring feature)
+- Preserves `UserSettings` DbSet (from #359)
+- No extraneous DbSets, no HA-specific entities added (correct — HA settings go through `AppSettingsEntities` JSON store)
+- No conflict markers present on branch HEAD
+
+---
+
+## Conflict Marker Scan
+
+```
+grep -rn '^<<<<<<<\|^=======\|^>>>>>>>' src/ --include='*.cs'
+```
+Result: **empty** ✅
+
+---
+
+## Test Quality Assessment
+
+**Controller tests** (AdminHomeAssistantControllerTests): 12 tests total. Directly instantiate the controller with mocked dependencies — tests exercise the actual controller method logic including the `settingsService.Get<>()` → `ResolveConnectionDetails()` → HTTP call → error mapping pipeline. The mocked `HttpMessageHandler` triggers real `EnsureSuccessStatusCode()` behavior. Good.
+
+**Provider tests** (HomeAssistantSmartPlugProviderTests): 11 tests total. `CreateProvider` helper wires the full DI chain (config → scope factory → settings service → data protector). The disabled-integration test correctly verifies that no HTTP call is attempted (strict mock handler would throw). Good.
+
+**Gap noted (informational, not blocking):** No test for the `GetMetadata` endpoint filtering — it currently returns HA metadata unfiltered. Since metadata contains no secret values (just field names/types), this is cosmetic.
+
+---
+
+## Residual Observations (Non-Blocking)
+
+1. **`GetMetadata()` exposes HA schema** — returns `HomeAssistantSettings` field metadata (names, types, descriptions) without filtering. Not a secret leak, but reveals the integration exists. Consider filtering in a future pass. Severity: 🔵 Info.
+
+2. **`MaskToken` decrypts to compute mask** — every `GetSettings` call decrypts the token server-side to extract the last 4 chars. Alternative: store last-4-chars alongside the encrypted blob. Marginal perf concern only. Severity: 🔵 Info.
+
+---
+
+## Summary
+
+The revision correctly addresses the security blocker I missed in my prior APPROVE. The `_settingsBlocklist` mechanism blocks all four code paths through `UnifiedSettingsController` (GET all, GET by key, POST bulk, POST by key). The dangerous structured log statements have been removed. The dedicated admin controller properly encrypts on write and masks on read. The token never appears in any log template.
+
+All 6 blockers are resolved. Tests are meaningful (not mocking around the logic under test). AppDbContext is clean. No conflict markers.
+
+**VERDICT: APPROVE** — ready for PR creation.
+# Vasquez Review — squad/371-home-assistant-provider @ f03fdb538
+
+**Date:** 2026-05-31T20:10:00-07:00
+**Issue:** #371 — [HA-1] Optional Home Assistant integration
+**Reviewer:** Vasquez (Adversarial Reviewer #3)
+
+---
+
+## VERDICT: APPROVE
+
+---
+
+## Focus Area Results
+
+### 1. Token Handling — PASS ✅
+
+Full lifecycle traced:
+
+| Path | Flow | Secure? |
+|------|------|---------|
+| **Write** | `UpdateSettings` → `request.Token` → `dataProtector.Protect()` → `settings.EncryptedToken` → `settingsService.Save()` | ✅ |
+| **Read (API GET)** | `GetSettings()` → `MapToDto()` → `MaskToken()` → decrypts → returns `***{last4}` | ✅ |
+| **Read (internal use)** | `ResolveConnectionDetails()` / `ResolveToken()` → decrypt → used only in `Authorization: Bearer` header to HA | ✅ |
+| **Masked placeholder passthrough** | If incoming `Token` starts with `***`, encrypt is skipped, existing token preserved | ✅ |
+
+**Log scrubbing:** Structured logging uses `{EntityId}` and `{BaseUrl}` placeholders — token never interpolated. `LogDebug` for connection failures includes `ex` but `HttpRequestException` messages don't contain Authorization header values.
+
+**No plaintext leak paths found.** The DTO exposes only `TokenMasked`, never `EncryptedToken` or raw token.
+
+### 2. Test Quality — PASS ✅ (19 tests, substantive)
+
+**Controller tests (10):** Cover all 4 endpoints, both happy and error paths. Assertions verify specific behavior:
+- Token masking produces `***` + last 4 chars
+- Protect/Save interaction verified on update
+- Masked placeholder skips encryption (Verify `Times.Never`)
+- Entity filtering correctly selects only power-capable entities (device_class + unit checks)
+- Connection test returns HA version and accurate entity count
+
+**Provider tests (9):** Cover both token resolution paths (config vs persisted/encrypted), state parsing with attributes, non-numeric state handling, HTTP failure resilience, legacy address format fallback, and the full decrypt-from-settings path.
+
+**No tautologies found.** Tests that could pass regardless of implementation were not present — each test makes assertions that would fail if the relevant code path broke.
+
+### 3. AppDbContext — PASS ✅ (conflict resolution, not feature addition)
+
+The diff (`4 +-`) resolves **pre-existing conflict markers on `origin/development`** (lines 218/223/226). Lambert correctly keeps BOTH sides:
+- `PowerMonitor` + `PowerReading` DbSets (from electricity monitoring)
+- `UserSettings` DbSet (from #359 per-user settings)
+
+**No `HomeAssistantSettings` DbSet was added** — correct, because settings use `ISettingsService` (file/JSON-backed), not EF Core.
+
+### 4. EF Migrations — PASS ✅
+
+`git diff --name-only -- src/migrations/` returns empty. No migrations added. Process requirement met.
+
+### 5. Conflict Marker Scan — PASS ✅
+
+```
+grep -rE '<<<<<<<|>>>>>>>' src/ --include='*.cs'
+```
+
+Returns zero results on the branch. The markers that exist on `origin/development` are **resolved** by this branch.
+
+---
+
+## Observations (non-blocking)
+
+### 🔵 Info: `ex.Message` returned to client in test-connection endpoint
+
+```csharp
+// AdminHomeAssistantController.cs — TestConnectionAsync catch block
+return Ok(new HomeAssistantConnectionTestResult
+{
+    Success = false,
+    Message = ex.Message  // ← raw exception message exposed to admin
+});
+```
+
+`HttpRequestException.Message` is typically safe (status codes, DNS failures), and the endpoint is `[Authorize(Roles = "farm_admin")]`. Non-issue for this scope, but worth noting for future hardening — a poorly behaved HA reverse proxy could theoretically include unexpected content in error messages.
+
+### 🔵 Info: development branch has conflict markers
+
+`origin/development:src/infra/Data/AppDbContext.cs` lines 218/223/226 contain unresolved merge markers. This branch fixes them as a side-effect. Someone should also fix development directly.
+
+---
+
+## Summary
+
+Lambert's discipline is acceptable on this commit. Token lifecycle is airtight (encrypt-on-write, mask-on-read, decrypt only for internal bearer auth). Tests are substantive and cover both primary code paths (config token vs persisted encrypted token). No migrations snuck in. Conflict markers from development are properly resolved. The code is minimal, focused, and meets the Phase 1 acceptance criteria from #371.
+# Vasquez Review — PR #371 Round 3
+
+VERDICT: APPROVE
+
+Round-3 fixes at 45333917a look genuine and do not regress the round-2 approval. The new Home Assistant tests cover both W and kW conversion paths, and the disabled-provider test uses MockBehavior.Strict with no configured SendAsync path, proving Enabled=false takes priority over environment configuration and makes zero HTTP calls.
+
+Validation:
+- `dotnet build ./farm-web.sln -c Debug`: passed
+- `dotnet format ./farm-web.sln --verify-no-changes`: passed
+- `dotnet test ./farm-web.sln -c Debug --no-build`: passed
+- Development baseline focused check for `MmuToolheadRetroSyncTests`: passed; no MmuToolheadRetroSync failure reproduced on current development, so there is no evidence of a Brett-introduced regression from the round-3 changes.
+# Vasquez Review — PR #371 Round 4
+
+VERDICT: APPROVE
+
+Rationale: Kane's 6785eae01 fix genuinely covers Hicks's concerns because the implementation now uses case-insensitive kW handling plus mW conversion, the focused HomeAssistantSmartPlugProvider suite passes 20/20 including explicit `kw`, `KW`, and `mW` cases, and the full clean-branch build passes with only unrelated pre-existing full-suite failures outside the 45333917a..HEAD diff.
+
+Validation:
+- Clean detached validation tree: `1d417e14f`, containing `6785eae01`.
+- `dotnet build ./farm-web.sln -c Debug`: passed with 8 existing warnings.
+- `dotnet test ./farm-web.sln -c Debug --no-build`: failed in unrelated/untouched tests: 5 `OrcaSlicerProfilesProviderTests` failures and 1 `MmuToolheadRetroSyncTests` failure.
+- `dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName~HomeAssistantSmartPlugProviderTests"`: passed 20/20.
+## Vasquez review — #405 / 4c82b6734
+
+**Verdict:** APPROVE
+
+**Blocking issues:** none
+
+**Non-blocking nits:**
+
+1. **Issue #405 text recommends the opposite fix** — the issue body says "recommend `datetimeoffset` — already in prod" and suggests changing the *model* to `DateTimeOffset`. Lambert's fix goes the other way (altering the DB column to match the `DateTime` model). This is the correct choice given the code, but the issue should be updated or a comment added to explain why the recommendation was rejected, so future readers don't reopen this.
+
+2. **Postgres migration also declares `DateTimeOffset` in its `.cs` file** (line 19 of `20260526173117_AddLoginAuditLog.cs`: `table.Column<DateTimeOffset>(type: "timestamp with time zone"...)`). This is technically "wrong CLR type in the migration source" but produces the correct SQL on Postgres because `timestamp with time zone` is what Npgsql maps `DateTime` to anyway. It won't cause runtime drift on Postgres, but it's an aesthetic inconsistency that could confuse a future reader. Non-blocking since Postgres behavior is correct.
+
+3. **No data-loss guard for existing `datetimeoffset` values.** `ALTER COLUMN` from `datetimeoffset` to `datetime2` silently drops timezone offset data. Since all callers use `DateTime.UtcNow` (offset is always +00:00), this is safe — but a comment in the migration noting "all existing values are UTC; offset loss is intentional" would be defensive documentation.
+
+**Strengths:**
+
+Migration is minimal, focused, and correctly uses `oldClrType`/`oldType` to match the actual prior state. Commit message is excellent — explains the root cause, why Postgres is unaffected, and includes `Closes #405`.
+
+**Process recommendations:**
+
+1. **Root-cause gap:** The original `AddLoginAuditLog` migration went out-of-sync because the migration was likely scaffolded while the entity still had `DateTimeOffset Timestamp`, then the entity was changed to `DateTime` without re-scaffolding. Recommend a CI check that runs `dotnet ef migrations has-pending-model-changes` on both providers as a PR gate. This would catch model/migration drift before merge. File as a separate issue (P2).
+
+2. **DateTimeOffset vs DateTime project-wide decision:** The codebase mixes `DateTime` (audit, scheduling, maintenance) with `DateTimeOffset` (PrintApproval, base entity CreatedDate/UpdatedDate). This dual convention increases drift risk. Recommend a one-time decision record: "new entities use X" — probably `DateTimeOffset` for audit trails (preserves TZ semantics) and `DateTime` only where EF base-class constraints force it. Not blocking for this PR since changing the model now would require touching the DTO, controller, and all callers — scope creep for a P1 fix.
+
+3. **Scan other SqlServer migrations for same issue:** I verified `PrintApproval.CreatedAt` is legitimately `DateTimeOffset` in the model, so no drift there. But the project should do a one-time audit: for every `DateTime` property in `src/infra/Domain/`, confirm the SqlServer migration Designer declares `DateTime` (not `DateTimeOffset`). The entities in `MaintenanceAlert`, `UserTask`, `JobSchedule`, etc. all use `DateTime` — any of these could silently drift if a migration was scaffolded under similar conditions.
+VERDICT: APPROVE
+
+Pragmatic/test review of Dallas commit 50b42a74a on squad/405-sqlserver-loginaudit-fix.
+
+Evidence:
+- Build: `cd src && dotnet build ./farm-web.sln -c Debug` completed with 0 errors (`.squad/logs/vasquez-405-build.log`). It does emit new analyzer/style warnings in the empty PostgreSQL migration, but they are warnings only.
+- Focused audit tests: `cd src && dotnet test ./farm-web.sln --filter "FullyQualifiedName~LoginAudit|FullyQualifiedName~SecurityAudit"` passed: 18 passed, 0 failed (`.squad/logs/vasquez-405-audit-tests.log`). The filtered suite currently contains 18 test methods, not 19.
+- SQLite ORDER BY/filter/paging coverage remains real integration coverage via `CustomWebApplicationFactory` + `AppDbContext`, not mocked EF. `SecurityAuditControllerTests` still covers newest-first ordering, date-range Timestamp filtering, and page/pageSize behavior.
+- No new EF-mocking red flag found; service tests still use EF InMemory, controller tests use the app factory and real DbContext.
+- Migration sanity: generated Up and Down scripts for PostgreSQL and SQL Server successfully (`.squad/logs/vasquez-405-migration-scripts.log`). PostgreSQL is history-only because the provider mapping is unchanged; SQL Server Up/Down alter `LoginAuditEntries.Timestamp` between `datetime2` and `datetimeoffset` and recreate the timestamp index.
+
+Notes:
+- The empty PostgreSQL migration introduces SA1505/SA1508/S1186 warnings. I would clean that formatting/comment before merge if the team treats new warnings as blockers, but the requested practical gates pass.
+## Vasquez — PR #405 Round 3 Verdict
+
+**Verdict:** APPROVE
+**Branch:** `squad/405-sqlserver-loginaudit-fix`
+**Reviewed commit:** `2109b51ea` (`test(#405): add UTC round-trip assertion + SQLite HasConversion comment`)
+
+## Findings
+
+- The new `GetLoginAudit_Timestamp_SerializesAsUtcIso8601` test is genuine: it seeds `LoginAuditEntry` through `AppDbContext`, calls the real `/api/admin/security/login-audit` endpoint with an authenticated admin `HttpClient`, reads the raw JSON response, and verifies UTC parse/format semantics.
+- The controller test runs through `CustomWebApplicationFactory` using SQLite (`UseSqlite`), not a mocked controller/service path.
+- The SQLite conversion comment now clearly documents the intentionally lossy non-UTC offset conversion and the service-contract reason it is acceptable.
 
 ## Validation
 
-- Integration test `PowerMonitorPollingServiceScopeTests` verifies:
-  - Startup succeeds with `ValidateScopes = true` and a scoped provider registered.
-  - Each scope resolves a distinct provider instance (no captive reference).
-- Full solution build: 0 errors.
-- All tests pass.
+| Check | Result |
+|---|---|
+| `dotnet build ./farm-web.sln -c Debug` | PASS — 0 errors, 2 existing NU1510 warnings |
+| `dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName~LoginAuditServiceTests|FullyQualifiedName~SecurityAuditControllerTests"` | PASS — 19/19 passed |
 
-## Consequences
+## Rationale
 
-- Any `ISmartPlugProvider` can now be registered with any DI lifetime (singleton, scoped, transient).
-- Zero behavioral change for existing singleton providers.
-- PR #393 can merge without modification.
+The new test exercises the real API round trip over the SQLite-backed integration harness and the focused LoginAudit/SecurityAudit suite passes without regression.
+
+---
+
+## Ralph Cycle — 2026-06-01
+
+### #409 — EF Core Migration Drift CI Gate (PR #413, Parker)
+
+- Gate covers all four context/provider pairs (`AppDbContext` × Postgres/SqlServer, `SlicerDbContext` × Postgres/SqlServer) with correct `DB_PROVIDER` env per invocation; runs after `.NET` restore and before tests; failure message names the offending context/provider label. (**Parker, Parker-409-migration-gate**)
+- Bishop APPROVE: DB_PROVIDER pairings and wiring correct; non-blocking: pin `dotnet-ef` tool version to EF Core package version to avoid future SDK/tool drift. (**Bishop**)
+- Hicks APPROVE: Four explicit `check_migration_drift` calls extend cleanly when a fifth migration project is added; design-time factories open no live connections. (**Hicks**)
+- Vasquez APPROVE: Fail-closed (tool install failure aborts before drift check); no secrets exposure; non-blocking follow-ups: auto-discovery or canary count for new contexts, pin `dotnet-ef`, add CODEOWNERS to `ci.yml`; confirmed gate would have caught #405. (**Vasquez**)
+
+### #346 — PowerMonitor + PowerReading Entities (Brett, verified prior merge PR #418)
+
+- `PowerMonitor.PrinterId` is `Guid` to match `Printer.Id` (issue sketch used `int`; that would break the FK). (**Brett**)
+- Cascade delete from `Printer → PowerMonitor → PowerReading` to prevent orphan readings. (**Brett**)
+- `PowerReading.RecordedAt` kept as UTC `DateTime` (not `DateTimeOffset`) to avoid the SqlServer DateTimeOffset drift pattern from #405. (**Brett**)
+- 90-day hot-reading retention via `PowerReadingPruneService` (daily hosted service, `IServiceScopeFactory`, `ExecuteDeleteAsync` for set-based pruning). (**Brett**)
+- Per-monitor `ElectricityRateUsdPerKwh > 0` overrides farm-wide `CostTrackingSettings.ElectricityRatePerKwh`; zero value falls back to farm-wide rate. (**Brett**)
+
+### #351 — Model3DFile Attribution Fields + Slicer Migrations (PR #420, Brett + Dallas fix)
+
+- Entity is `Model3D` (not `Model3DFile`); `Model3DDtos.cs` `Model3DDto` carries the four new fields. (**Brett**)
+- Fields are `DateTime?` not `DateTimeOffset?` — follows #405 lesson; SqlServer uses `datetime2`. (**Brett**)
+- Both `ImportAsync` (absolute route, import workflow) and `PersistAttributionAsync` (attribution endpoint) coexist; they serve distinct workflows. (**Brett**)
+- Existing migration timestamps `20260531180051` (PG) and `20260531180118` (SS) preserved; no regeneration needed. (**Brett**)
+- Dallas commit `a24608806`: added fail-fast `ArgumentException` guards in `SetAttributionAsync` for `SourceUrl > 2048`, `SourceCreator > 256`, `SourceLicense > 128` before EF mutation; controller already maps `ArgumentException → 400`; new `Model3DFileServiceAttributionTests` covers happy path, 3 overflow paths, null fields. (**Dallas**)
+- Hicks R1 REQUEST_CHANGES (missing server-side length validation, no tests) → resolved in Dallas fix; Hicks R2 APPROVE. (**Hicks**)
+- Vasquez R1 REQUEST_CHANGES (Printables API `Creator`/`License` strings reach DB unvalidated, will 500 on overlong upstream values) → resolved in Dallas fix; Vasquez R2 APPROVE; advisory: add XML-doc remark on `IModel3DFileService.SetAttributionAsync` warning callers it does not re-validate `sourceUrl` scheme. (**Vasquez**)
+- Bishop R1 APPROVE (minor: controller XML doc says `POST /import/attribution`, actual route is `POST /api/3d-models/printables/attribution` — non-blocking; fixed in Dallas commit); Bishop R2 APPROVE. (**Bishop**)
+
+### #344 — PrintJob Cost Aggregation (PR #422, Kane + Dallas rebase)
+
+- Cost composition in `JobCostCalculationService`: material + energy + machine-time = subtotal; labor layered on top; `TotalCostUsd`/`CostCalculatedAt` persisted together. Measured-kWh path and wattage-estimate path share the same resolved electricity rate. (**Kane**)
+- Per-printer rate resolution order: `PowerMonitor.ElectricityRateUsdPerKwh > 0` → `CostTrackingSettings.ElectricityRatePerKwh` fallback → `null` (no positive rate). (**Kane**)
+- Status transition saved first; cost calculation scheduled in background via `Task.Run` + fresh `IServiceScopeFactory` scope to avoid disposed-context risk. (**Kane**)
+- `IFilamentCostProvider` remains optional; absent provider degrades to null material component without throwing. (**Kane**)
+- Duplicate `AddKwhUsedToPrintJob` migrations removed because #347 already owns the `KwhUsed` column; both provider drift checks passed. (**Kane**)
+- Dallas rebase: resolved snapshot/designer conflicts by taking `development`'s versions (preserves #420 slicer migrations and #412 DateTimeOffset fix); preserved Kane's cost fields in `AppDbContextModelSnapshot.cs`; added contract comment on `TotalCostUsd = 0` vs `null` behavior. (**Dallas**)
+- Vasquez R1 REQUEST_CHANGES (BLOCKING): branch as submitted deleted shipped `AddModel3DFileAttribution` slicer migrations (rebase artifact) and reverted #412 DateTimeOffset fix in `AppDbContextModelSnapshot` + old `AddLoginAuditLog.Designer.cs` — would corrupt EF history on deployed environments; non-blocking: fire-and-forget cost recalc has no idempotency guard for duplicate completion events. (**Vasquez**)
+- Dallas rebase resolved Vasquez's blocking findings; Bishop APPROVE, Hicks APPROVE, Vasquez (implicitly) unblocked post-rebase. (**Dallas**)
+- Bishop non-blocking watch item: machine-time fallback is null-only; a negative per-printer/model hourly rate would be honored rather than rejected. (**Bishop**)
