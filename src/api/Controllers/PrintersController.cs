@@ -1776,20 +1776,45 @@ public class PrintersController(
             }
             else
             {
-                // Validate: must be a plain hostname or IP with no embedded separators or control chars
-                bool hasInvalidChar = ip.Any(c =>
-                    c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
-                    || char.IsControl(c) || char.IsWhiteSpace(c));
+                // Accept valid IPv4 or IPv6 addresses (including bracketed IPv6 like [fe80::1]).
+                // Only apply the hostname char-blacklist for input that is not a parseable IP.
+                string candidateForParse = ip.StartsWith('[') && ip.EndsWith(']')
+                    ? ip[1..^1]
+                    : ip;
 
-                bool isValidHost = !hasInvalidChar &&
-                    (IPAddress.TryParse(ip, out _) ||
-                     Uri.CheckHostName(ip) == UriHostNameType.Dns);
+                bool isValidHost;
+                if (IPAddress.TryParse(candidateForParse, out IPAddress? parsedIp))
+                {
+                    // Brackets are only valid around an IPv6 address (RFC 3986 §3.2.2).
+                    // Reject [v4-addr] — it passes TryParse but breaks URL construction
+                    // and is never a valid user intent (admin sees 200, camera never works).
+                    if (ip.StartsWith('[') && parsedIp.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    {
+                        return BadRequest("Invalid BuddyCameraIp: brackets are only valid around an IPv6 address.");
+                    }
+
+                    // Valid IP address; downstream SSRF validation handles range checks.
+                    isValidHost = true;
+                }
+                else
+                {
+                    // Not a parseable IP; treat as hostname and reject injection chars.
+                    bool hasInvalidChar = ip.Any(c =>
+                        c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
+                        || char.IsControl(c) || char.IsWhiteSpace(c));
+
+                    isValidHost = !hasInvalidChar &&
+                        Uri.CheckHostName(ip) == UriHostNameType.Dns;
+                }
 
                 if (!isValidHost)
                 {
                     return BadRequest("Invalid BuddyCameraIp: must be a plain IP address or hostname.");
                 }
 
+                // TODO(#428 follow-up): extract a shared CameraHostNormalizer helper that
+                // validates + canonicalizes BuddyCameraIp in one place, removing the split
+                // between controller validation and service URL construction.
                 await _printersService.SyncBuddyCameraAsync(p, ip, ct);
             }
         }

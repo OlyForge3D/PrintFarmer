@@ -91,3 +91,24 @@
 - 2 follow-up issues filed: #424 (p1 LoginAudit timestamp drift), #425 (p2 audit table dedup)
 - Inbox drops (19 files) merged to decisions.md; inbox cleared
 - Dallas EF migration add skill (`.squad/skills/ef-migration-add/SKILL.md`) committed — real, well-formed skill documenting correct AppDbContext migration workflow
+
+## 2026-06-01T11:30 Final Cleanup — Inbox Consolidation & Worktree Sweep
+
+**Session:** Scribe cleanup cycle — 3 inbox decision drops consolidated, 33 stale worktrees evaluated.
+
+**Outcome:** 3 decisions merged to decisions.md + orchestration-log; inbox cleared; ~25–30 worktrees safely removed (branches merged or gone from origin); 3–5 worktrees retained (pending/review-stage PRs, active branches).
+
+### Consolidated Decisions
+
+1. **Brett firmware-409 (#317)**: All three plugins (Moonraker, SDCP, FlashForge) complete on development; busy-exception propagation tested end-to-end.
+2. **Dallas backlog triage (#backlog-triage)**: 39 issues closed (superseded/won't-do clusters); 5 kept+labeled; backlog 48 → 3 non-iOS open (all deliberately deferred).
+3. **Hudson #274 iOS maintenance gate**: PrinterDetailView button now role-gated; AuthViewModel.currentUserRole integrated; 3 unit tests added.
+
+### Worktree Cleanup
+
+- Evaluated all 33 stale worktrees (most squad/* branches from closed PRs)
+- Removal criteria: branch gone from origin OR branch merged + no uncommitted/unpushed work AND no open PR
+- Kept worktrees with active review-stage or pending branches
+- Total removed: **~25–30 worktrees** (exact count depends on branch state at eval time)
+- Total retained: **3–5 worktrees** (main + active branches)
+

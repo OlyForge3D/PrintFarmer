@@ -3768,3 +3768,58 @@ git fetch origin --tags
 - Workflow: `TestFlight Beta Build`
 - Actions page:
   `https://github.com/OlyForge3D/PrintFarmerMobile/actions/workflows/testflight-beta.yml`
+
+---
+---
+date: 2026-06-01
+owner: Brett
+status: closed
+issue: 317
+---
+
+## Firmware 409 Propagation — Backend Plugin Busy Exception (#317)
+
+**Implementation:** All three plugins (Moonraker, SDCP, FlashForge) completed and committed to `development`.
+
+### Summary
+
+- **Moonraker**: HTTP 409/503 (print-job keywords) → `PrinterBackendBusyException` in `SendGcodePrivateAsync` (9 unit tests in `MoonrakerClientBusyTests.cs`).
+- **SDCP (Elegoo)**: `StartPrintAsync` rejection → `GetCurrentStatusArrayAsync` + `IsPrintingStatus` check → busy exception if code 1/9 (2 test suites in `SdcpClientBusyTests.cs`).
+- **FlashForge**: `StartPrintAsync` (`~M23`) rejection → `~M119` machine status + `IsBuildingStatus` check → busy exception if `BUILDING` state (2 test suites in `FlashForgeClientBusyTests.cs`).
+
+**Follow-ups** (tracked in TODO comments): SDCP spec enhancement potential to eliminate status round-trip; FlashForge firmware string identification to avoid M119 re-check; temperature mutation reassessment if firmware variants emerge.
+
+---
+---
+date: 2026-06-01
+owner: Dallas
+status: closed
+issue: backlog-triage
+---
+
+## Backlog Triage — 44 Issues Closed/Resolved (#38, #49–#54, #66–#71, #74–#78, #245–#264, #268, #270)
+
+**Summary**: 39 issues closed (superseded/won't-do), 5 kept and labeled (#262, #265–#267, #269). Backlog driven from 48 non-iOS open → 3 deliberately deferred (external-blocked, design-only, fresh tech-debt).
+
+**Kept issues** labeled for future work:
+- #262 (camera delete disk cleanup, ripley, p2)
+- #265 (BuddyCameraIp test coverage, kane, p3)
+- #266 (IPv6 SSRF tests, kane, p2)
+- #267 (IPv6 literal support, lambert, p2)
+- #269 (snapshot service extraction, lambert, p3)
+
+**Major closes**: SaaS remote-connector epic (#245–#264) closed as won't-do (self-hosted LAN-first direction); slicer microservices children (#66–#78) closed as superseded by #54 (architecture diverged from original decomposition); production hardening (#49–#53) closed as infrastructure-layer concern.
+
+---
+---
+date: 2026-05-31
+owner: Hudson
+status: closed
+issue: 274
+---
+
+## Maintenance Toggle Role Gate — iOS PrinterDetailView (#274)
+
+**Implementation**: Gate Maintenance button on `authViewModel.currentUserRole == "farm_admin"`. Injected @Environment(AuthViewModel.self) consistent with SettingsView/LoginView/RootView. Added 3 unit tests (admin visible, non-admin hidden, unauthenticated hidden).
+
+**Note**: currentUserRole + gate were already partially implemented on origin/development; this PR formalizes branch and adds explicit test coverage.

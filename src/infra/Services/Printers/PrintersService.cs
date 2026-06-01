@@ -4139,7 +4139,7 @@ public class PrintersService(
             return;
         }
 
-        string rtspUrl = $"rtsp://{trimmedIp}:554/live/";
+        string rtspUrl = $"rtsp://{FormatRtspHost(trimmedIp)}:554/live/";
         printer.BuddyCameraIp = trimmedIp;
 
         if (existing != null)
@@ -4214,6 +4214,28 @@ public class PrintersService(
         return camera is not null
             ? (camera.StreamUrl, camera.SnapshotUrl)
             : (null, null);
+    }
+
+    /// <summary>
+    /// Formats a host string for use in an RTSP URL, bracketing bare IPv6 addresses
+    /// as required by RFC 2732 / RFC 3986 (e.g. <c>2001:db8::1</c> → <c>[2001:db8::1]</c>).
+    /// Already-bracketed values and IPv4/hostname values are returned unchanged.
+    /// </summary>
+    internal static string FormatRtspHost(string host)
+    {
+        // Already bracketed — pass through as-is (bracketed IPv4 is rejected at the controller level).
+        if (host.StartsWith('[') && host.EndsWith(']'))
+        {
+            return host;
+        }
+
+        // Bare IPv6 must be wrapped in brackets for URL construction.
+        if (IPAddress.TryParse(host, out IPAddress? ip) && ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return $"[{host}]";
+        }
+
+        return host;
     }
 
     /// <summary>
