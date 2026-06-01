@@ -137,12 +137,12 @@ public class LoginAuditServiceTests : IDisposable
     [Fact]
     public async Task RecordAsync_TimestampIsUtc()
     {
-        DateTime before = DateTime.UtcNow.AddSeconds(-1);
+        DateTimeOffset before = DateTimeOffset.UtcNow.AddSeconds(-1);
 
         await _service.RecordAsync("user", true, "1.2.3.4", null, null);
 
         LoginAuditEntry? entry = await _db.LoginAuditEntries.SingleOrDefaultAsync();
         entry!.Timestamp.Should().BeAfter(before);
-        entry.Timestamp.Kind.Should().Be(DateTimeKind.Utc);
+        entry.Timestamp.Offset.Should().Be(TimeSpan.Zero);
     }
 }

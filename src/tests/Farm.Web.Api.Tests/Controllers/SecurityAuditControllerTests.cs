@@ -112,7 +112,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetLoginAudit_WithEntries_ReturnsOrderedNewestFirst()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         await SeedEntriesAsync(
         [
             new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = now.AddMinutes(-10), Username = "old", Success = true, IpAddress = "1.1.1.1" },
@@ -131,8 +131,8 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     {
         await SeedEntriesAsync(
         [
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "alice", Success = true, IpAddress = "1.1.1.1" },
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "eve", Success = false, IpAddress = "2.2.2.2" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "alice", Success = true, IpAddress = "1.1.1.1" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "eve", Success = false, IpAddress = "2.2.2.2" },
         ]);
 
         LoginAuditPageDto? page = await GetPageAsync("?success=false");
@@ -146,8 +146,8 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     {
         await SeedEntriesAsync(
         [
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "alice@example.com", Success = true, IpAddress = "1.1.1.1" },
-            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTime.UtcNow, Username = "bob@example.com", Success = false, IpAddress = "2.2.2.2" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "alice@example.com", Success = true, IpAddress = "1.1.1.1" },
+            new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Username = "bob@example.com", Success = false, IpAddress = "2.2.2.2" },
         ]);
 
         LoginAuditPageDto? page = await GetPageAsync("?username=alice");
@@ -159,7 +159,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     [Fact]
     public async Task GetLoginAudit_Pagination_RespectsPageAndPageSize()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         List<LoginAuditEntry> entries = Enumerable.Range(0, 10)
             .Select(i => new LoginAuditEntry
             {
@@ -196,7 +196,7 @@ public class SecurityAuditControllerTests : IAsyncLifetime
             new LoginAuditEntry
             {
                 Id = Guid.NewGuid(),
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTimeOffset.UtcNow,
                 Username = "tester",
                 Success = false,
                 IpAddress = "10.0.0.42",
@@ -218,9 +218,44 @@ public class SecurityAuditControllerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetLoginAudit_Timestamp_SerializesAsUtcIso8601()
+    {
+        DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+        await SeedEntriesAsync(
+        [
+            new LoginAuditEntry
+            {
+                Id = Guid.NewGuid(),
+                Timestamp = utcNow,
+                Username = "audit-utc",
+                Success = true,
+                IpAddress = "127.0.0.1",
+            },
+        ]);
+
+        HttpResponseMessage resp = await _adminClient!.GetAsync("/api/admin/security/login-audit");
+        resp.EnsureSuccessStatusCode();
+
+        string json = await resp.Content.ReadAsStringAsync();
+        using JsonDocument doc = JsonDocument.Parse(json);
+        string? rawTimestamp = doc.RootElement
+            .GetProperty("items")[0]
+            .GetProperty("timestamp")
+            .GetString();
+
+        rawTimestamp.Should().NotBeNullOrEmpty();
+        DateTimeOffset.TryParse(rawTimestamp, out DateTimeOffset parsed).Should().BeTrue(
+            "timestamp must be parseable as DateTimeOffset");
+        bool isUtcFormat = rawTimestamp!.EndsWith("Z", StringComparison.OrdinalIgnoreCase)
+            || rawTimestamp.EndsWith("+00:00", StringComparison.OrdinalIgnoreCase);
+        isUtcFormat.Should().BeTrue("login audit timestamps must be UTC (Z or +00:00) per service contract");
+        parsed.Offset.Should().Be(TimeSpan.Zero, "LoginAuditService always writes DateTimeOffset.UtcNow");
+    }
+
+    [Fact]
     public async Task GetLoginAudit_FilterByDateRange_ReturnsOnlyEntriesWithinRange()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         await SeedEntriesAsync(
         [
             new LoginAuditEntry { Id = Guid.NewGuid(), Timestamp = now.AddHours(-2), Username = "too_old", Success = true, IpAddress = "1.1.1.1" },
