@@ -430,6 +430,68 @@ public class HomeAssistantSmartPlugProviderTests
         reading!.WattsNow.Should().BeApproximately(250.0, 0.001);
     }
 
+    [Theory]
+    [InlineData("kw")]
+    [InlineData("KW")]
+    public async Task GetCurrentReadingAsync_WhenStateInKilowattsCaseVariant_ConvertsToWatts(string unit)
+    {
+        // HA returns user-configured unit strings; "kw" and "KW" must be treated the same as "kW".
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+
+        string stateJson = $$"""
+            {
+                "entity_id": "sensor.plug_power",
+                "state": "2.0",
+                "attributes": {
+                    "unit_of_measurement": "{{unit}}"
+                }
+            }
+            """;
+
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+            });
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().NotBeNull();
+        reading!.WattsNow.Should().BeApproximately(2000.0, 0.001);
+    }
+
+    [Fact]
+    public async Task GetCurrentReadingAsync_WhenStateInMilliwatts_ConvertsToWatts()
+    {
+        // HA device_class=power supports mW; 500 mW must be stored as 0.5 W.
+        (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+
+        string stateJson = """
+            {
+                "entity_id": "sensor.plug_power",
+                "state": "500.0",
+                "attributes": {
+                    "unit_of_measurement": "mW"
+                }
+            }
+            """;
+
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+            });
+
+        PowerReading? reading = await provider.GetCurrentReadingAsync(
+            "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
+
+        reading.Should().NotBeNull();
+        reading!.WattsNow.Should().BeApproximately(0.5, 0.001);
+    }
+
     // ─── Blocker 2 (round-3): Enabled=false + env var set → provider is inert ─
 
     [Fact]

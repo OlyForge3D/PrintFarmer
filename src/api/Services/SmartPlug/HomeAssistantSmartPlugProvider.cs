@@ -219,12 +219,19 @@ public sealed class HomeAssistantSmartPlugProvider(
 
             if (root.TryGetProperty("attributes", out JsonElement attrs))
             {
-                // Unit-aware conversion: HA may report in kW; the rest of the system stores watts.
-                // Only kW needs conversion — W entities are already in the correct unit.
-                if (attrs.TryGetProperty("unit_of_measurement", out JsonElement uomEl)
-                    && (uomEl.GetString() ?? string.Empty) == "kW")
+                // Unit-aware conversion: HA may report in kW or mW; the rest of the system stores watts.
+                // HA returns user-configured strings so comparison must be case-insensitive.
+                if (attrs.TryGetProperty("unit_of_measurement", out JsonElement uomEl))
                 {
-                    watts *= 1000.0;
+                    string uom = uomEl.GetString() ?? string.Empty;
+                    if (uom.Equals("kW", StringComparison.OrdinalIgnoreCase))
+                    {
+                        watts *= 1000.0;
+                    }
+                    else if (uom.Equals("mW", StringComparison.OrdinalIgnoreCase))
+                    {
+                        watts *= 0.001;
+                    }
                 }
 
                 if (attrs.TryGetProperty("total_increasing", out JsonElement ti))
