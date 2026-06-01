@@ -120,4 +120,7 @@ tools/installer/dist/
 
 # Local camera snapshot storage (runtime output)
 src/api/snapshots/
-snapshots/ .beads/
+snapshots/
+
+# Beads issue tracking (removed — use GitHub issues instead)
+.beads/
