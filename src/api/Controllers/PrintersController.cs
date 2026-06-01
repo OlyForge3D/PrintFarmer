@@ -1776,14 +1776,28 @@ public class PrintersController(
             }
             else
             {
-                // Validate: must be a plain hostname or IP with no embedded separators or control chars
-                bool hasInvalidChar = ip.Any(c =>
-                    c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
-                    || char.IsControl(c) || char.IsWhiteSpace(c));
+                // Accept valid IPv4 or IPv6 addresses (including bracketed IPv6 like [fe80::1]).
+                // Only apply the hostname char-blacklist for input that is not a parseable IP.
+                string candidateForParse = ip.StartsWith('[') && ip.EndsWith(']')
+                    ? ip[1..^1]
+                    : ip;
 
-                bool isValidHost = !hasInvalidChar &&
-                    (IPAddress.TryParse(ip, out _) ||
-                     Uri.CheckHostName(ip) == UriHostNameType.Dns);
+                bool isValidHost;
+                if (IPAddress.TryParse(candidateForParse, out _))
+                {
+                    // Valid IP address; downstream SSRF validation handles range checks.
+                    isValidHost = true;
+                }
+                else
+                {
+                    // Not a parseable IP; treat as hostname and reject injection chars.
+                    bool hasInvalidChar = ip.Any(c =>
+                        c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
+                        || char.IsControl(c) || char.IsWhiteSpace(c));
+
+                    isValidHost = !hasInvalidChar &&
+                        Uri.CheckHostName(ip) == UriHostNameType.Dns;
+                }
 
                 if (!isValidHost)
                 {

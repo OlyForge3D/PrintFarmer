@@ -151,6 +151,35 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         body.Should().NotContain(injection, because: "raw user input must not be reflected in error responses");
     }
 
+    // IPv6 acceptance tests (#267)
+
+    [Theory]
+    [InlineData("2001:db8::1")]
+    [InlineData("[2001:db8::1]")]
+    [InlineData("::1")]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenValidIpv6_ReturnsOk(string ipv6)
+    {
+        Guid id = await SeedPrinterAsync();
+        var dto = new UpdatePrinterDto(BuddyCameraIp: ipv6);
+
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("notanip:colon")]
+    [InlineData("hostname:with:colons")]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenHostnameContainsColon_ReturnsBadRequest(string injection)
+    {
+        Guid id = await SeedPrinterAsync();
+        var dto = new UpdatePrinterDto(BuddyCameraIp: injection);
+
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     [Fact]
     public async Task UpdatePrinter_ClearsBuddyCameraIp_WhenCameraHasSnapshots_Succeeds()
     {
