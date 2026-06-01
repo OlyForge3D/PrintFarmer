@@ -83,6 +83,110 @@ final class PreheatSubgroupTests: XCTestCase {
         _ = subgroup.body
     }
 
+
+    // MARK: - Accessibility labels (spec §4.1)
+
+    func test_accessibilityLabel_idle_pla() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityLabel(preset: .pla, isPending: false), "Preheat for PLA")
+    }
+
+    func test_accessibilityLabel_idle_petg() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityLabel(preset: .petg, isPending: false), "Preheat for PETG")
+    }
+
+    func test_accessibilityLabel_idle_abs() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityLabel(preset: .abs, isPending: false), "Preheat for ABS")
+    }
+
+    func test_accessibilityLabel_idle_coolDown() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityLabel(preset: .coolDown, isPending: false), "Cool down")
+    }
+
+    func test_accessibilityLabel_pending_pla() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityLabel(preset: .pla, isPending: true), "Preheat for PLA, in progress")
+    }
+
+    func test_accessibilityLabel_pending_coolDown() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityLabel(preset: .coolDown, isPending: true), "Cooling down, in progress")
+    }
+
+    // MARK: - Accessibility hints (spec §4.1)
+
+    func test_accessibilityHint_idle_pla_withBed() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(
+            view.accessibilityHint(preset: .pla, canControl: true, hasError: false),
+            "Sets hotend to 200 degrees, bed to 60 degrees."
+        )
+    }
+
+    func test_accessibilityHint_idle_petg_withBed() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(
+            view.accessibilityHint(preset: .petg, canControl: true, hasError: false),
+            "Sets hotend to 240 degrees, bed to 80 degrees."
+        )
+    }
+
+    func test_accessibilityHint_idle_coolDown() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(
+            view.accessibilityHint(preset: .coolDown, canControl: true, hasError: false),
+            "Sets hotend and bed to 0 degrees."
+        )
+    }
+
+    func test_accessibilityHint_disabled_returnsSpec41Text() throws {
+        let vm = try makeVM(state: "printing", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(
+            view.accessibilityHint(preset: .pla, canControl: false, hasError: false),
+            "Disabled while printing."
+        )
+    }
+
+    // MARK: - Accessibility value (spec §4.1)
+
+    func test_accessibilityValue_pending_returnsPending() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityValue(isPending: true, hasError: false), "Pending")
+    }
+
+    func test_accessibilityValue_error_returnsFailed() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityValue(isPending: false, hasError: true), "Failed")
+    }
+
+    func test_accessibilityValue_idle_isEmpty() throws {
+        let vm = try makeVM(state: "ready", isOnline: true)
+        let view = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(view.accessibilityValue(isPending: false, hasError: false), "")
+    }
+
+    // MARK: - Helpers (accessibility tests)
+
+    private func makeVM(state: String, isOnline: Bool) throws -> PrinterControlsViewModel {
+        let printer = try Self.makePrinter(state: state, isOnline: isOnline)
+        return PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+    }
+
     // MARK: - Helpers
 
     private static func makePrinter(state: String, isOnline: Bool) throws -> Printer {

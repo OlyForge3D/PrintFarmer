@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import PrintFarmer
 
 /// Smoke tests for `JogSubgroup` — focuses on pure decision helpers that
@@ -81,4 +82,74 @@ final class JogSubgroupTests: XCTestCase {
     func test_stepOptions_areLockedToV1Values() {
         XCTAssertEqual(JogSubgroup.stepOptions, [0.1, 1, 10, 100])
     }
+
+    // MARK: - Accessibility labels and hints (spec §4.1)
+
+    func test_jogAccessibilityLabel_positive_isJogForward() throws {
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        XCTAssertEqual(view.jogAccessibilityLabel(direction: 1), "Jog forward")
+    }
+
+    func test_jogAccessibilityLabel_negative_isJogBackward() throws {
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        XCTAssertEqual(view.jogAccessibilityLabel(direction: -1), "Jog backward")
+    }
+
+    func test_jogAccessibilityHint_positive_usesPositiveDirection() throws {
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        let hint = view.jogAccessibilityHint(direction: 1, stepLabelText: "1", hasError: false)
+        XCTAssertTrue(hint.contains("positive"), "Hint for + jog must say 'positive' per spec §4.1, got: \(hint)")
+    }
+
+    func test_jogAccessibilityHint_negative_usesNegativeDirection() throws {
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        let hint = view.jogAccessibilityHint(direction: -1, stepLabelText: "1", hasError: false)
+        XCTAssertTrue(hint.contains("negative"), "Hint for - jog must say 'negative' per spec §4.1, got: \(hint)")
+    }
+
+    func test_jogAccessibilityHint_disabled_returnsSpec41Text() throws {
+        // Default printer state is "printing" -> canControl = false
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        let hint = view.jogAccessibilityHint(direction: 1, stepLabelText: "1", hasError: false)
+        XCTAssertEqual(hint, "Disabled while printing.")
+    }
+
+    func test_jogAccessibilityValue_pending_returnsPending() throws {
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        XCTAssertEqual(view.jogAccessibilityValue(isPending: true, hasError: false), "Pending")
+    }
+
+    func test_jogAccessibilityValue_idle_isEmpty() throws {
+        let vm = PrinterControlsViewModel(
+            printerService: MockPrinterService(),
+            printer: try TestData.decodePrinter()
+        )
+        let view = JogSubgroup(viewModel: vm)
+        XCTAssertEqual(view.jogAccessibilityValue(isPending: false, hasError: false), "")
+    }
+
 }

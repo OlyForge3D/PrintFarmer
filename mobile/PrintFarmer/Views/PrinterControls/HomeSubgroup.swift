@@ -75,7 +75,8 @@ struct HomeSubgroup: View {
                         hasError: isErrored(matching: ["X", "Y"]),
                         a11yLabel: isXYPending
                             ? String(localized: "Homing X and Y, in progress", comment: "VoiceOver: Home XY in flight")
-                            : String(localized: "Home X and Y axes", comment: "VoiceOver: Home XY idle")
+                            : String(localized: "Home X and Y", comment: "VoiceOver: Home XY idle per spec §4.1"),
+                        idleHint: String(localized: "Homes X and Y axes only.", comment: "VoiceOver idle hint Home XY per spec §4.1")
                     ) {
                         Task { await viewModel.homeXY() }
                     }
@@ -88,7 +89,8 @@ struct HomeSubgroup: View {
                         hasError: isErrored(matching: ["Z"]),
                         a11yLabel: isZPending
                             ? String(localized: "Homing Z, in progress", comment: "VoiceOver: Home Z in flight")
-                            : String(localized: "Home Z axis", comment: "VoiceOver: Home Z idle")
+                            : String(localized: "Home Z", comment: "VoiceOver: Home Z idle per spec §4.1"),
+                        idleHint: String(localized: "Homes Z axis only.", comment: "VoiceOver idle hint Home Z per spec §4.1")
                     ) {
                         Task { await viewModel.homeZ() }
                     }
@@ -128,7 +130,7 @@ struct HomeSubgroup: View {
                 ? String(localized: "Homing all axes, in progress", comment: "VoiceOver: Home All in flight")
                 : String(localized: "Home all axes", comment: "VoiceOver: Home All idle")
         )
-        .accessibilityHint(accessibilityHint(hasError: isErrored(matching: ["X", "Y", "Z"])))
+        .accessibilityHint(accessibilityHint(hasError: isErrored(matching: ["X", "Y", "Z"]), idleHint: String(localized: "Homes X, Y, and Z.", comment: "VoiceOver idle hint Home All per spec §4.1")))
         .accessibilityValue(accessibilityValue(isPending: isAllPending, hasError: isErrored(matching: ["X", "Y", "Z"])))
         .accessibilityAddTraits(isAllPending ? .updatesFrequently : .isButton)
         .help(viewModel.blockedReason ?? "")
@@ -155,6 +157,7 @@ struct HomeSubgroup: View {
         isPending: Bool,
         hasError: Bool,
         a11yLabel: String,
+        idleHint: String,
         action: @escaping () -> Void
     ) -> some View {
         Button {
@@ -183,7 +186,7 @@ struct HomeSubgroup: View {
         .disabledControlStyle(isDisabled: isDisabled && !isPending)
         .errorBorderHighlight(isActive: hasError)
         .accessibilityLabel(a11yLabel)
-        .accessibilityHint(accessibilityHint(hasError: hasError))
+        .accessibilityHint(accessibilityHint(hasError: hasError, idleHint: idleHint))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : .isButton)
         .help(viewModel.blockedReason ?? "")
@@ -221,18 +224,18 @@ struct HomeSubgroup: View {
 
     // MARK: - Accessibility strings
 
-    private func accessibilityHint(hasError: Bool) -> String {
+    func accessibilityHint(hasError: Bool, idleHint: String) -> String {
         if hasError, let message = viewModel.lastError?.message {
             return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last home command failed")
         }
-        if isDisabled, let reason = viewModel.blockedReason {
-            return String(localized: "Disabled. \(reason)", comment: "VoiceOver hint when controls are disabled")
+        if isDisabled {
+            return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        return ""
+        return idleHint
     }
 
-    private func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
-        if isPending { return String(localized: "Sending command", comment: "VoiceOver value while a control command is in flight") }
+    func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
+        if isPending { return String(localized: "Pending", comment: "VoiceOver value while command is in flight per spec §4.1") }
         if hasError { return String(localized: "Failed", comment: "VoiceOver value when last command failed") }
         return ""
     }
