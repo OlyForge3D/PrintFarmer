@@ -327,19 +327,70 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     // MARK: - String-only enum decoder coverage (#278)
+    // TODO: Add decoder tests for PrinterBackend, MotionType, PrintJobStatus, PrintJobPriority (#278 follow-up)
 
-    func testAutoDispatchStateDecodesFromString() throws {
-        // Backend uses JsonStringEnumConverter; no int branch should exist.
-        let cases: [(Data, AutoDispatchState)] = [
-            (Data("\"None\"".utf8), .none),
-            (Data("\"PendingReady\"".utf8), .pendingReady),
-            (Data("\"Ready\"".utf8), .ready),
-            (Data("\"Dismissed\"".utf8), .dismissed),
-        ]
-        for (json, expected) in cases {
-            let state = try decoder.decode(AutoDispatchState.self, from: json)
-            XCTAssertEqual(state, expected)
-        }
+    func testAutoDispatchStateDecodesNone() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"None\"".utf8)
+        )
+        XCTAssertEqual(state, .none)
+    }
+
+    func testAutoDispatchStateDecodesPendingReady() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"PendingReady\"".utf8)
+        )
+        XCTAssertEqual(state, .pendingReady)
+    }
+
+    func testAutoDispatchStateDecodesReady() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"Ready\"".utf8)
+        )
+        XCTAssertEqual(state, .ready)
+    }
+
+    func testAutoDispatchStateDecodesDismissed() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"Dismissed\"".utf8)
+        )
+        XCTAssertEqual(state, .dismissed)
+    }
+
+    func testAutoDispatchStateDecodesEmptyString() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"\"".utf8)
+        )
+        XCTAssertEqual(state, .none)
+    }
+
+    func testAutoDispatchStateDecodesNullValue() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("null".utf8)
+        )
+        XCTAssertEqual(state, .none)
+    }
+
+    func testAutoDispatchStateRejectsNumericValue() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("1".utf8)
+        )
+        XCTAssertEqual(state, .none)
+    }
+
+    func testAutoDispatchStateLowercaseFallsBackToNone() throws {
+        let state = try decoder.decode(
+            AutoDispatchState.self,
+            from: Data("\"none\"".utf8)
+        )
+        XCTAssertEqual(state, .none)
     }
 
     func testAutoDispatchStateUnknownStringFallsBackToNone() throws {
