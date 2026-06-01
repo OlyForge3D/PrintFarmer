@@ -243,7 +243,25 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
     {
         // Arrange: set an IP first so a camera row exists
         Guid printerId = await SeedPrinterAsync();
-        await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
+        HttpResponseMessage setupResponse = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
+        Assert.True(setupResponse.IsSuccessStatusCode, $"setup failed: {await setupResponse.Content.ReadAsStringAsync()}");
+
+        // Arrange: also seed a non-PrusaLink camera on the same printer (Vasquez #3)
+        await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var customCamera = new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                Name = "Custom Camera",
+                Source = CameraSource.Standalone,
+                StreamUrl = "rtsp://custom.local:554/live/",
+                IsEnabled = true,
+            };
+            seedDb.Cameras.Add(customCamera);
+            await seedDb.SaveChangesAsync();
+        }
 
         // Act: clear the IP
         HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: ""));
@@ -261,6 +279,14 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
 
         Printer? printer = await db.Printers.FindAsync(printerId);
         printer!.BuddyCameraIp.Should().BeNull(because: "BuddyCameraIp on the Printer row must be nulled after the clear");
+
+        // Vasquez #3: non-PrusaLink camera on same printer must survive the clear
+        List<Camera> survivingCameras = await db.Cameras
+            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.Standalone)
+            .ToListAsync();
+        survivingCameras.Should().ContainSingle(because: "clearing BuddyCameraIp must not remove cameras from other sources");
+        survivingCameras[0].StreamUrl.Should().Be("rtsp://custom.local:554/live/",
+            because: "the non-PrusaLink camera's stream URL must be unchanged after the clear");
     }
 
     [Fact]
@@ -270,7 +296,8 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid printerAId = await SeedPrinterAsync();
         Guid printerBId = await SeedPrinterAsync();
 
-        await _client!.PutAsJsonAsync($"/api/printers/{printerAId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.1"));
+        HttpResponseMessage setupResponseA = await _client!.PutAsJsonAsync($"/api/printers/{printerAId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.1"));
+        Assert.True(setupResponseA.IsSuccessStatusCode, $"setup failed: {await setupResponseA.Content.ReadAsStringAsync()}");
 
         // Act: update printer B's BuddyCameraIp — must not touch printer A
         HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerBId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.2"));
@@ -287,5 +314,87 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         camerasA.Should().ContainSingle(because: "printer A's Buddy camera must not be touched when printer B is updated");
         camerasA[0].StreamUrl.Should().Be("rtsp://172.16.0.1:554/live/",
             because: "printer A's stream URL must remain unchanged after printer B is updated");
+    }
+
+    /// <summary>
+    /// Vasquez blocker #1: a stale disabled PrusaLink camera row must be re-enabled (not duplicated)
+    /// when a new BuddyCameraIp is set on the printer.
+    /// </summary>
+    [Fact]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenStaleDisabledRowExists_ReEnablesCamera()
+    {
+        // Arrange: printer with a pre-existing PrusaLink camera that has IsEnabled = false
+        Guid printerId = await SeedPrinterAsync();
+        Guid existingCameraId;
+
+        await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var staleCamera = new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                Name = "Stale Buddy Camera",
+                Source = CameraSource.PrusaLink,
+                StreamUrl = "rtsp://10.0.0.1:554/live/",
+                IsEnabled = false,
+            };
+            seedDb.Cameras.Add(staleCamera);
+
+            var printer = await seedDb.Printers.FindAsync(printerId);
+            printer!.BuddyCameraIp = "10.0.0.1";
+            await seedDb.SaveChangesAsync();
+
+            existingCameraId = staleCamera.Id;
+        }
+
+        // Act: set a new BuddyCameraIp
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.2"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert: single camera row, updated URL, re-enabled
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        List<Camera> cameras = await db.Cameras
+            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .ToListAsync();
+
+        cameras.Should().ContainSingle(because: "the existing disabled row must be updated in place — not duplicated");
+        Camera cam = cameras[0];
+        cam.StreamUrl.Should().Be("rtsp://10.0.0.2:554/live/",
+            because: "the stream URL must reflect the new IP");
+        cam.IsEnabled.Should().BeTrue(
+            because: "a stale disabled Buddy camera must be re-enabled when a new IP is assigned");
+    }
+
+    /// <summary>
+    /// Vasquez blocker #2: changing an existing BuddyCameraIp must update the existing camera row
+    /// in place — it must not create a duplicate row.
+    /// </summary>
+    [Fact]
+    public async Task UpdatePrinter_BuddyCameraIp_WhenIpChanges_UpdatesExistingCameraRow()
+    {
+        // Arrange: printer with an existing active PrusaLink Buddy camera
+        Guid printerId = await SeedPrinterAsync();
+        HttpResponseMessage setupResponse = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
+        Assert.True(setupResponse.IsSuccessStatusCode, $"setup failed: {await setupResponse.Content.ReadAsStringAsync()}");
+
+        // Act: update to a different IP
+        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.2"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert: still exactly one PrusaLink camera row, stream URL points to new IP
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        List<Camera> cameras = await db.Cameras
+            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .ToListAsync();
+
+        cameras.Should().ContainSingle(because: "changing the IP must update the existing row, not create a duplicate");
+        cameras[0].StreamUrl.Should().Be("rtsp://10.0.0.2:554/live/",
+            because: "the stream URL must be updated to reflect the new IP");
     }
 }
