@@ -26,6 +26,7 @@ using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -66,6 +67,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
+/// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -82,7 +84,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
     Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
-    Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService) : IPrintersService
+    Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
+    IStoragePathService storagePathService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -99,6 +102,7 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
     private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
+    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -4122,19 +4126,11 @@ public class PrintersService(
             {
                 await _go2RtcService.RemoveStreamAsync(existing.Id, ct);
 
-                // Pre-delete snapshot rows before removing the camera entity.
+                // Pre-delete snapshot files and DB rows before removing the camera entity.
                 // Camera→CameraSnapshot FK is Restrict, so SaveChanges would throw
                 // if any snapshot rows still reference this camera when it is removed.
-                List<Domain.CameraSnapshot> snapshots = await _db.CameraSnapshots
-                    .Where(s => s.CameraId == existing.Id)
-                    .ToListAsync(ct);
-                if (snapshots.Count > 0)
-                {
-                    _db.CameraSnapshots.RemoveRange(snapshots);
-                    _logger.LogInformation(
-                        "[BuddyCamera] Removing {Count} snapshot records for camera {CameraId} before deletion",
-                        snapshots.Count, existing.Id);
-                }
+                await Farm.Infrastructure.Services.Cameras.SnapshotCleanupHelper.DeleteSnapshotsForCameraAsync(
+                    existing.Id, _db, _storagePathService, _logger, ct);
 
                 _unitOfWork.Cameras.Remove(existing);
                 _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
