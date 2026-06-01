@@ -167,6 +167,7 @@ SignalR rules:
 - Slicer schema changes use `Farm.Slicer.Migrations.PostgreSQL` and `Farm.Slicer.Migrations.SqlServer` with `SlicerDbContext`.
 - Use descriptive PascalCase migration names.
 - SQLite local development may use `EnsureCreated`; production deployments use migrations.
+- Every PR is gated in CI by `dotnet ef migrations has-pending-model-changes` for all four main app and slicer context/provider migration projects.
 - Verify generated migration files exist under the affected `src/migrations/*/Migrations/` project directories.
 
 Common main app migration commands, from `src/`:
