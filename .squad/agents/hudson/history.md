@@ -90,9 +90,22 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - CI coupling: PFarm1 PR #329's iOS workflow runs the checked-in `mobile/` project directly, not `/Users/jpapiez/s/PFarm-Ios`; workflow-only assumptions should be verified from `.github/workflows/ios-pr-ci.yml` before switching repos.
 - Environmental follow-up: a macOS job can fail with no steps/logs if the account has failed payments or a spending-limit block. Check the check-run annotations when `gh run view --log-failed` says `log not found`.
 
+### 2026-05-31: PR Issue-Linkage Gate (Governance)
+
+- **Problem:** Session 2026-05-31 merged 17 PRs; 0 auto-closed their linked issues. Root cause: agents wrote PR titles like `feat(x): thing (#350)` or commit footers like `[closes PFarm1-350]` (legacy beads syntax). GitHub only auto-closes on `Closes #N` / `Fixes #N` / `Resolves #N` **in the PR body**. Parenthetical refs and bead-style refs do NOT trigger auto-close. Brady manually closed all 17 issues.
+- **Solution:** Installed process gate across 5 deliverables:
+  1. `.github/pull_request_template.md` — Added "Linked issues" section with required `Closes #N` format + pre-merge checklist item.
+  2. **Builder charters** (9 agents: lambert, ripley, ash, brett, kane, parker, newt, dallas, gorman) — Added STANDING RULE section requiring `--body` to contain `Closes #<issue>` when opening PR.
+  3. **Reviewer trio** (vasquez, hicks, bishop) — Added PRE-PR REVIEW GATE checklist bullet requiring verification with `gh pr view <num> --json closingIssuesReferences` (REJECT if missing).
+  4. `.squad/decisions/inbox/hudson-pr-issue-linkage.md` — Documented decision, root cause, and enforcement.
+  5. `.squad/skills/pr-issue-linkage/SKILL.md` — Extracted skill covering auto-close syntax, why parenthetical/bead-style fail, reviewer gate, and recovery procedure (bulk-close with `gh issue close N -c "Resolved by #PR"`).
+- **Verification command:** `gh pr view <num> --json closingIssuesReferences` must list the issue(s); if empty, link didn't register.
+- **Confidence:** Medium (observed once in production; gate now prevents recurrence).
+
 ## Milestone Summary
 - 2026-05-20: iOS squad merged; mobile controls v1 issues assigned (#274 role gate, #275 drift, #284–#286 controls, #288 polish).
 - 2026-05-21: Phase 1 complete — 8 PRs merged on `development` (#291–#298).
 - 2026-05-24: Beta 74 released; Xcode registration patterns solidified.
 - 2026-05-28: Issue #274 re-run complete (role-gating decision finalized for PR #3).
 - 2026-05-29: PR #12 merged (verbatim spec strings); PR #13 rebased + pending Vasquez tiebreaker on test-tooling gap.
+- 2026-05-31: PR issue-linkage gate installed (governance); process closes the 17 auto-close miss from merged PRs.

@@ -40,3 +40,17 @@ When reviewing:
 - **Project:** PrintFarmer — React TypeScript dashboard for managing multiple 3D printers
 - **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS
 - **Owner:** Jeff Papiez
+
+## STANDING RULE — PRE-PR BRANCH REVIEW GATE (effective 2026-05-31)
+
+ALL code MUST pass 3-way adversarial review (Bishop + Hicks + Vasquez consensus APPROVE) on the BRANCH before any `gh pr create` is executed. No more "ship PR then review." Flow:
+1. Builder pushes branch (no PR yet)
+2. Trio reviews branch HEAD (diff against development)
+3. Consensus 3/3 APPROVE → builder (or wrangler) opens PR
+4. Consensus REQUEST_CHANGES → builder revises on branch → re-review
+5. Reviews still adversarial — independent verdicts, then consensus synthesis
+
+Revisions to ALREADY-OPEN PRs (fix-ups) follow the existing PR-review loop, not this gate.
+
+**PRE-PR REVIEW GATE CHECKLIST:**
+- [ ] PR body contains `Closes #N` / `Fixes #N` / `Resolves #N` for every linked issue (verify with `gh pr view <num> --json closingIssuesReferences` — must return at least one entry when an issue exists). REJECT if missing.

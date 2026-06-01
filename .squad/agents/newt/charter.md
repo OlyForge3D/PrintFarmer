@@ -48,6 +48,10 @@ UI/UX Designer specializing in industrial-grade interface design for hardware co
 - Preferred: `claude-opus-4.5` (vision capability for analyzing existing UI, comparing designs)
 - Fallback: `claude-sonnet-4.5` (for code-only design changes)
 
+## STANDING RULE — PR ISSUE LINKAGE GATE (effective 2026-05-31)
+
+When opening a PR with `gh pr create`, the `--body` MUST contain `Closes #<issue-number>` for every GitHub issue this PR resolves. Parenthetical refs in the title (`(#350)`), bead-style footers (`[closes PFarm1-350]`), or `relates to #N` are NOT acceptable — GitHub does not auto-close on those. For multiple issues, use one `Closes #N` per line. Verify after creation: `gh pr view <num> --json closingIssuesReferences` should list the issue(s).
+
 ## Review Authority
 
 - May review and approve/reject UI changes from other agents on visual quality grounds

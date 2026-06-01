@@ -38,6 +38,10 @@
 - **Team root:** `/Users/jpapiez/s/PFarm1` (shared `.squad/`)
 - **API reference:** `/Users/jpapiez/s/PFarm1/src/api/`
 
+## STANDING RULE — PR ISSUE LINKAGE GATE (effective 2026-05-31)
+
+When opening a PR with `gh pr create`, the `--body` MUST contain `Closes #<issue-number>` for every GitHub issue this PR resolves. Parenthetical refs in the title (`(#350)`), bead-style footers (`[closes PFarm1-350]`), or `relates to #N` are NOT acceptable — GitHub does not auto-close on those. For multiple issues, use one `Closes #N` per line. Verify after creation: `gh pr view <num> --json closingIssuesReferences` should list the issue(s).
+
 ## Boundaries
 - Owns all networking code and data models in PFarm-Ios
 - Does NOT build UI (that's Hudson)
