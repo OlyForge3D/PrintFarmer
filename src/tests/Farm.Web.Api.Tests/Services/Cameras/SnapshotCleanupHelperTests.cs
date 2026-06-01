@@ -171,6 +171,35 @@ public class SnapshotCleanupHelperTests : IDisposable
         }
     }
 
+    // ── Absolute-path attack ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DeleteSnapshotsForCameraAsync_AbsolutePathInFilePath_SkipsDeleteButRemovesDbRow()
+    {
+        var cameraId = SeedCamera(_db);
+
+        // Path.Combine drops all preceding components when a segment is rooted,
+        // so this resolves to an absolute path outside the snapshot root.
+        string absoluteAttackPath = OperatingSystem.IsWindows()
+            ? @"C:\Windows\System32\notepad.exe"
+            : "/etc/passwd";
+
+        SeedSnapshot(cameraId, absoluteAttackPath);
+
+        await SnapshotCleanupHelper.DeleteSnapshotsForCameraAsync(
+            cameraId, _db, _storagePathService.Object, _logger.Object, CancellationToken.None);
+
+        await _db.SaveChangesAsync();
+
+        // DB row must be cleaned up even though the file was skipped.
+        Assert.Empty(_db.CameraSnapshots.Where(s => s.CameraId == cameraId));
+
+        // The absolute-path target must not have been touched (it is outside the root).
+        Assert.True(
+            !File.Exists(absoluteAttackPath) || new FileInfo(absoluteAttackPath).Length > 0,
+            "Absolute-path file outside snapshot root must not be deleted by cleanup.");
+    }
+
     // ── Multiple snapshots ────────────────────────────────────────────────────────
 
     [Fact]

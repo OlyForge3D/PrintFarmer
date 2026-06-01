@@ -58,8 +58,8 @@ public static class SnapshotCleanupHelper
             string canonicalFull = Path.GetFullPath(fullPath);
 
             bool isContained =
-                canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                || canonicalFull.Equals(canonicalRoot, StringComparison.Ordinal);
+                canonicalFull.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || canonicalFull.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase);
 
             if (!isContained)
             {
@@ -80,6 +80,13 @@ public static class SnapshotCleanupHelper
             catch (FileNotFoundException)
             {
                 // Already gone — nothing to do.
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logger.LogError(
+                    ex,
+                    "[SnapshotCleanup] Access denied deleting snapshot file {Path} for camera {CameraId} — DB row will still be removed",
+                    fullPath, cameraId);
             }
             catch (IOException ex)
             {
