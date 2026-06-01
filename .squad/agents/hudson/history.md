@@ -109,3 +109,9 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - 2026-05-28: Issue #274 re-run complete (role-gating decision finalized for PR #3).
 - 2026-05-29: PR #12 merged (verbatim spec strings); PR #13 rebased + pending Vasquez tiebreaker on test-tooling gap.
 - 2026-05-31: PR issue-linkage gate installed (governance); process closes the 17 auto-close miss from merged PRs.
+
+### 2026-05-31: Issue 289 close-out
+
+- PR 306 was already merged 2026-05-21 with all 6 snapshot tests but issue 289 was not auto-closed (closingIssuesReferences empty — PR title not body carried Closes reference).
+- Resolution: manually closed 289 via gh issue close with comment referencing PR 306 + commit 7f02d6a3.
+- Pattern: check gh pr list --state merged + gh pr view --json closingIssuesReferences before doing duplicate work when re-assigned an open issue.
