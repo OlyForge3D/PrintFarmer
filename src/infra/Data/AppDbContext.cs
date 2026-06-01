@@ -237,6 +237,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // on LoginAuditEntry round-trip correctly through the SQLite text store.
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {
+            // SQLite has no native DateTimeOffset type. We normalize to UTC for storage
+            // since LoginAuditService always writes DateTimeOffset.UtcNow. This conversion
+            // is LOSSY for non-UTC offsets — that scenario is forbidden by service contract.
             _ = modelBuilder.Entity<LoginAuditEntry>()
                 .Property(e => e.Timestamp)
                 .HasConversion(
