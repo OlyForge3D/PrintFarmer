@@ -7,7 +7,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
-using Microsoft.EntityFrameworkCore;
+using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Cameras;
@@ -21,22 +21,26 @@ public class CameraService : ICameraService
     private readonly AppDbContext _db;
     private readonly ILogger<CameraService> _logger;
     private readonly IPrintersService _printersService;
+    private readonly IStoragePathService _storagePathService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
         AppDbContext db,
         ILogger<CameraService> logger,
-        IPrintersService printersService)
+        IPrintersService printersService,
+        IStoragePathService storagePathService)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(printersService);
+        ArgumentNullException.ThrowIfNull(storagePathService);
 
         _unitOfWork = unitOfWork;
         _db = db;
         _logger = logger;
         _printersService = printersService;
+        _storagePathService = storagePathService;
     }
 
     private static CameraDto ToDto(Camera camera) => new()
@@ -318,19 +322,10 @@ public class CameraService : ICameraService
                 return false;
             }
 
-            // Pre-delete snapshot rows before removing the camera entity.
+            // Pre-delete snapshot files and DB rows before removing the camera entity.
             // The Camera→CameraSnapshot FK is Restrict, so EF Core will throw a FK
             // violation if any snapshot rows still reference this camera when it is removed.
-            List<Domain.CameraSnapshot> snapshots = await _db.CameraSnapshots
-                .Where(s => s.CameraId == id)
-                .ToListAsync(ct);
-            if (snapshots.Count > 0)
-            {
-                _db.CameraSnapshots.RemoveRange(snapshots);
-                _logger.LogInformation(
-                    "Removing {Count} orphaned snapshot records for camera {CameraId}",
-                    snapshots.Count, id);
-            }
+            await SnapshotCleanupHelper.DeleteSnapshotsForCameraAsync(id, _db, _storagePathService, _logger, ct);
 
             _unitOfWork.Cameras.Remove(camera);
             await _unitOfWork.SaveChangesAsync(ct);
