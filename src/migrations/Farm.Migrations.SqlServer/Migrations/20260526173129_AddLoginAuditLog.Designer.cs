@@ -1648,8 +1648,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("Success")
                         .HasColumnType("bit");
 
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("datetime2");
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("UserAgent")
                         .HasMaxLength(512)
