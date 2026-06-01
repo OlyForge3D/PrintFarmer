@@ -145,6 +145,7 @@ public static class FeatureServicesStartup
         // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);
