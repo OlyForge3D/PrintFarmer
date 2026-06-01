@@ -4,6 +4,7 @@ PrintFarmer is a two-tier 3D printer farm management system:
 
 - Backend: C#/.NET API and services in `src/`.
 - Frontend: React TypeScript app in `src/Web/ReactApp/`.
+- Mobile: SwiftUI iOS app in `mobile/` (Xcode project, shares the API with the React frontend).
 - Database: EF Core with SQLite for local development and PostgreSQL/SQL Server support for deployments.
 - Real-time updates: SignalR hubs for printer and slicer events.
 - Slicing: OrcaSlicer and PrusaSlicer worker services plus slicer-host APIs.
@@ -25,6 +26,7 @@ Always run commands from the directory expected by the tool:
 | Git commands | repo root |
 | .NET restore/build/test/format | `src/` |
 | React npm commands | `src/Web/ReactApp/` |
+| Xcode / swift / fastlane (iOS app) | `mobile/` |
 | Docker deploy scripts and compose | repo root |
 
 Do not rely on the terminal's current directory. `cd` explicitly before running commands.
@@ -72,9 +74,29 @@ Run local development natively, not in Docker:
 
 Keep API servers and test commands in separate terminals or background processes. Verify the API is running before endpoint testing.
 
+## Mobile App
+
+The SwiftUI iOS app lives in `mobile/` and was merged in from `OlyForge3D/PFarm-Ios`. It targets iOS 17+ and requires Xcode 26+ (Swift 5.9+). Architecture is MVVM + repository pattern.
+
+API integration:
+
+- The app reads `PRINTFARMER_API_URL` to locate the backend. The mobile README defaults to `http://localhost:5000`; for local PrintFarmer dev, override to `http://localhost:5245` so it matches the .NET API.
+- The mobile app consumes the same `/api/*` JSON contract as the React frontend — camelCase property names, string enums (see Serialization Rules below). Do not introduce mobile-only DTOs unless absolutely required; extend the shared API instead.
+
+Common commands (run from `mobile/`):
+
+```bash
+xcodebuild -scheme PrintFarmer -destination 'platform=iOS Simulator,name=iPhone 15' build
+xcodebuild test -scheme PrintFarmer -destination 'platform=iOS Simulator,name=iPhone 15'
+fastlane beta   # release pipeline
+```
+
+Test suites: `PrintFarmerTests` (unit) and `PrintFarmerUITests` (UI). The app has its own `mobile/squad.config.ts` and `mobile/AGENTS.md` for agent guidance, and shares the consolidated release pipeline with the main app. See `mobile/README.md` for full setup details.
+
 ## Architecture Invariants
 
 - The React app talks to the API at port 5245 in local development.
+- The iOS app in `mobile/` consumes the same `/api/*` contract as the React frontend; both must remain compatible with the backend's camelCase + string-enum serialization.
 - In microservices deployments, slicer routes are handled by slicer-host on port 5246 and routed by nginx.
 - Docker is for deployment, not normal local development.
 - Backend plugins contain backend-specific clients, validators, and discovery probes.
