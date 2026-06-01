@@ -40,6 +40,7 @@ import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendi
 import { ProfileImportWizardPage } from '@/features/tasks';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
+import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
@@ -54,7 +55,6 @@ import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDi
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
-import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
@@ -187,8 +187,8 @@ function AuthenticatedAppRoutes() {
         <Route path="files/projects" element={<Navigate to="/projects" replace />} />
         <Route path="files/*" element={<FilesPage />} />
         <Route path="projects" element={<ProjectsPage />} />
-        <Route path="spools" element={<Navigate to="/settings?tab=filament" replace />} />
-        <Route path="spools/:tabId" element={<Navigate to="/settings?tab=filament" replace />} />
+        <Route path="spools" element={<FilamentManagementPage />} />
+        <Route path="spools/:tabId" element={<FilamentManagementPage />} />
         <Route path="cameras" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="cameras/:tabId" element={<Navigate to="/settings?tab=hardware" replace />} />
         <Route path="nfc-devices" element={<Navigate to="/settings?tab=hardware" replace />} />
@@ -235,7 +235,7 @@ function AuthenticatedAppRoutes() {
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<Navigate to="/admin/workers?tab=jobs" replace />} />
-        <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing" replace />} />
+        <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing&sub=profiles" replace />} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>

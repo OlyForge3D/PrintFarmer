@@ -10,7 +10,6 @@ import {
   getDefaultSubPage,
 } from '@/features/settings/types';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
-import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
@@ -41,11 +40,6 @@ const SINGLE_PAGE_CONTENT: Record<string, React.ReactNode> = {
   general: (
     <SettingsSection title="General Settings" description="Farm name, timezone, and system configuration.">
       <SettingsPage />
-    </SettingsSection>
-  ),
-  filament: (
-    <SettingsSection title="Filament Management" description="Manage spools, materials, and inventory.">
-      <FilamentManagementPage />
     </SettingsSection>
   ),
   notifications: (

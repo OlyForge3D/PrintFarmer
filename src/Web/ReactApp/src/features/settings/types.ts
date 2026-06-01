@@ -30,12 +30,6 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     subPages: [],
   },
   {
-    id: 'filament',
-    label: 'Filament',
-    keywords: ['filament', 'spool', 'material', 'spoolman', 'inventory', 'pla', 'abs', 'petg'],
-    subPages: [],
-  },
-  {
     id: 'slicing',
     label: 'Slicing',
     keywords: ['slicer', 'slice', 'profile', 'orcaslicer', 'prusaslicer', 'bed type', 'nozzle', 'process', 'print settings'],
