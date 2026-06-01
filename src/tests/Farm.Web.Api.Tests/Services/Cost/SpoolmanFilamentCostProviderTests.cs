@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;

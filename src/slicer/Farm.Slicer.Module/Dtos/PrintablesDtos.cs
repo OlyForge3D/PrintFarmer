@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Dtos;
+﻿namespace Farm.Slicer.Module.Dtos;
 
 /// <summary>
 /// Preview metadata returned by the Printables import preview endpoint.

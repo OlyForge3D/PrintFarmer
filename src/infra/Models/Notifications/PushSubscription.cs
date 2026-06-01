@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain.Notifications;
+﻿namespace Farm.Infrastructure.Domain.Notifications;
 
 /// <summary>
 /// Stores a user's web push subscription for delivering browser notifications.
