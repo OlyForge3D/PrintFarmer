@@ -10,6 +10,9 @@ namespace Farm.Infrastructure.Services.Cameras;
 /// </summary>
 internal static class CameraUrlValidator
 {
+    private static readonly byte[] Nat64WellKnownPrefix =
+    [0x00, 0x64, 0xff, 0x9b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+
     /// <summary>
     /// Returns <see langword="true"/> if <paramref name="url"/> is safe to probe:
     /// scheme is HTTP, HTTPS, or RTSP; host is not loopback or link-local.
@@ -50,6 +53,11 @@ internal static class CameraUrlValidator
 
             if (ip.AddressFamily == AddressFamily.InterNetworkV6)
             {
+                if (TryExtractEmbeddedIpv4(ip, out IPAddress? embeddedIpv4) && IsBlockedIpv4Address(embeddedIpv4))
+                {
+                    return false;
+                }
+
                 // Loopback (::1)
                 if (IPAddress.IsLoopback(ip))
                 {
@@ -90,17 +98,7 @@ internal static class CameraUrlValidator
                 return true;
             }
 
-            // IPv4 checks
-            byte[] bytes = ip.GetAddressBytes();
-
-            // Block IPv4 loopback range (127.0.0.0/8)
-            if (bytes[0] == 127)
-            {
-                return false;
-            }
-
-            // Block link-local (169.254.x.x — cloud metadata endpoint range)
-            if (bytes[0] == 169 && bytes[1] == 254)
+            if (IsBlockedIpv4Address(ip))
             {
                 return false;
             }
@@ -109,5 +107,52 @@ internal static class CameraUrlValidator
         }
 
         return true;
+    }
+
+    private static bool TryExtractEmbeddedIpv4(IPAddress ipv6Address, out IPAddress embeddedIpv4)
+    {
+        ReadOnlySpan<byte> bytes = ipv6Address.GetAddressBytes();
+
+        bool isIpv4Compatible = bytes[..12].SequenceEqual(stackalloc byte[12]);
+        bool isNat64WellKnown = bytes[..12].SequenceEqual(Nat64WellKnownPrefix);
+
+        // 6to4 (2002::/16) embeds IPv4 in bytes[2..6]
+        bool is6to4 = bytes[0] == 0x20 && bytes[1] == 0x02;
+
+        if (!isIpv4Compatible && !isNat64WellKnown && !is6to4)
+        {
+            embeddedIpv4 = IPAddress.None;
+            return false;
+        }
+
+        if (is6to4)
+        {
+            embeddedIpv4 = new IPAddress(bytes[2..6]);
+        }
+        else
+        {
+            embeddedIpv4 = new IPAddress(bytes[12..16]);
+        }
+
+        return true;
+    }
+
+    private static bool IsBlockedIpv4Address(IPAddress ipv4Address)
+    {
+        byte[] bytes = ipv4Address.GetAddressBytes();
+
+        // Block IPv4 loopback range (127.0.0.0/8)
+        if (bytes[0] == 127)
+        {
+            return true;
+        }
+
+        // Block link-local (169.254.x.x — cloud metadata endpoint range)
+        if (bytes[0] == 169 && bytes[1] == 254)
+        {
+            return true;
+        }
+
+        return false;
     }
 }

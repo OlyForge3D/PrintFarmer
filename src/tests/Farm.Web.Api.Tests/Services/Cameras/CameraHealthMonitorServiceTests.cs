@@ -108,6 +108,78 @@ public class CameraHealthMonitorServiceTests
     }
 
     [Fact]
+    public void IsUrlSafeForProbing_WithIpv4CompatibleIpv6Loopback_ReturnsFalse()
+    {
+        IsUrlSafe("http://[::127.0.0.1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv4CompatibleIpv6LinkLocal_ReturnsFalse()
+    {
+        IsUrlSafe("http://[::169.254.1.1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv4CompatibleIpv6PrivateClass10Ip_ReturnsTrue()
+    {
+        IsUrlSafe("http://[::10.0.0.1]/snapshot.jpg").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithIpv4CompatibleIpv6PrivateClass192Ip_ReturnsTrue()
+    {
+        IsUrlSafe("http://[::192.168.1.1]/snapshot.jpg").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithNat64Loopback_ReturnsFalse()
+    {
+        IsUrlSafe("http://[64:ff9b::7f00:1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithNat64LinkLocal_ReturnsFalse()
+    {
+        IsUrlSafe("http://[64:ff9b::a9fe:0101]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithNat64PrivateClass10Ip_ReturnsTrue()
+    {
+        IsUrlSafe("http://[64:ff9b::0a00:0001]/snapshot.jpg").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_WithNat64PrivateClass192Ip_ReturnsTrue()
+    {
+        IsUrlSafe("http://[64:ff9b::c0a8:0101]/snapshot.jpg").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_With6to4Loopback_ReturnsFalse()
+    {
+        IsUrlSafe("http://[2002:7f00:0001::1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_With6to4LinkLocal_ReturnsFalse()
+    {
+        IsUrlSafe("http://[2002:a9fe:0101::1]/snapshot.jpg").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_With6to4PrivateClass10Ip_ReturnsTrue()
+    {
+        IsUrlSafe("http://[2002:0a00:0001::1]/snapshot.jpg").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsUrlSafeForProbing_With6to4PrivateClass192Ip_ReturnsTrue()
+    {
+        IsUrlSafe("http://[2002:c0a8:0101::1]/snapshot.jpg").Should().BeTrue();
+    }
+
+    [Fact]
     public void IsUrlSafeForProbing_WithFileScheme_ReturnsFalse()
     {
         IsUrlSafe("file:///etc/passwd").Should().BeFalse();

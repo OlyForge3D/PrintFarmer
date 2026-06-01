@@ -58,6 +58,12 @@ public class Go2RtcService : IGo2RtcService
             return null;
         }
 
+        if (!CameraUrlValidator.IsUrlSafeForProbing(rtspUrl))
+        {
+            _logger.LogWarning("[go2rtc] Blocked unsafe RTSP URL for camera {CameraId}", cameraId);
+            return null;
+        }
+
         string baseUrl = settings.BaseUrl.TrimEnd('/');
         string streamName = cameraId.ToString();
 

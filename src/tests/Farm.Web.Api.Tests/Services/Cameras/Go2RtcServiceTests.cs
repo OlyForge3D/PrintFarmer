@@ -23,7 +23,7 @@ public class Go2RtcServiceTests
         HttpMessageHandler? httpHandler = null)
     {
         var settingsService = new Mock<ISettingsService>(MockBehavior.Strict);
-        settingsService.Setup(s => s.Get<Go2RtcSettings>()).Returns(settings);
+        settingsService.Setup(s => s.Get<Go2RtcSettings>()).Returns(settings!);
 
         var factory = new Mock<IHttpClientFactory>(MockBehavior.Loose);
         if (httpHandler is not null)
@@ -153,6 +153,24 @@ public class Go2RtcServiceTests
         string? result = await service.AddStreamAsync(Guid.NewGuid(), "rtsp://cam:554/stream", CancellationToken.None);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddStreamAsync_WhenRtspUrlIsUnsafe_ReturnsNullWithoutSendingRequest()
+    {
+        var handlerMock = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        var service = CreateService(
+            new Go2RtcSettings { Enabled = true, BaseUrl = "http://go2rtc:1984" },
+            handlerMock.Object);
+
+        string? result = await service.AddStreamAsync(Guid.NewGuid(), "rtsp://[64:ff9b::7f00:1]/stream", CancellationToken.None);
+
+        result.Should().BeNull();
+        handlerMock.Protected().Verify(
+            "SendAsync",
+            Times.Never(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
     }
 
     #endregion
