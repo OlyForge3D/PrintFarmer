@@ -124,3 +124,10 @@ snapshots/
 
 # Beads issue tracking (removed — use GitHub issues instead)
 .beads/
+
+# Review scratch / PR artifact caches (do not commit)
+.copilot-review-*/
+.squad/reviews/
+.squad/decisions/inbox/pr-*.diff
+.squad/decisions/inbox/pr-*-view.json
+.squad/decisions/inbox/review-*.txt
