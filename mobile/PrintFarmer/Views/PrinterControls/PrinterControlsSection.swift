@@ -2,17 +2,18 @@ import SwiftUI
 
 /// Composite Printer Controls section. Hosts the three subgroups (Preheat,
 /// Home, Jog), owns the `PrinterControlsViewModel`, and applies the section-
-/// level visibility rules from issue #287:
+/// level visibility rules from the v1 design spec (printer-controls-v1.md):
 ///
-/// * Hidden when `printer.isOnline == false`.
-/// * Hidden when `printer.state` is `printing` / `paused` / `starting`.
-/// * Phone: vertical stack (Preheat → Home → Jog).
-/// * iPad (regular width): Preheat full-width, Home + Jog side-by-side.
+/// * Hidden entirely when `printer.isOnline == false`.
+/// * **Visible** when `printing` / `paused` — a lockout banner is shown
+///   and all subgroup buttons are disabled (section stays on-screen so
+///   the user can see it is there but locked, per spec §2.2 and §2.4).
+/// * Phone: vertical stack (Preheat → Divider → Home → Divider → Jog).
+/// * iPad (regular width): Preheat + Home side-by-side (top), Jog full-width (bottom).
 ///
-/// The section forwards parent-driven printer updates (which the parent's
-/// `PrinterDetailViewModel` already populates from the `printerupdated`
-/// SignalR event) into `viewModel.handlePrinterUpdate(_:)` so pending command
-/// state clears once the backend confirms the effect.
+/// The section forwards parent-driven printer updates into
+/// `viewModel.handlePrinterUpdate(_:)` so pending command state clears once
+/// the backend confirms the effect via `printerupdated` SignalR.
 struct PrinterControlsSection: View {
 
     let printer: Printer
@@ -26,10 +27,16 @@ struct PrinterControlsSection: View {
         )
     }
 
+    /// Hides the entire section only when the printer is offline. During a
+    /// print or pause the section remains visible with disabled controls and
+    /// a lockout banner (spec §2.2, §2.4).
     static func isHidden(for printer: Printer) -> Bool {
-        if !printer.isOnline { return true }
+        !printer.isOnline
+    }
+
+    private var isPrintingOrPaused: Bool {
         switch printer.state?.lowercased() {
-        case "printing", "paused", "starting": return true
+        case "printing", "paused": return true
         default: return false
         }
     }
@@ -53,26 +60,44 @@ struct PrinterControlsSection: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Controls")
-                .font(.headline)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.pfTextPrimary)
                 .accessibilityAddTraits(.isHeader)
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
+                if isPrintingOrPaused {
+                    lockoutBanner
+                        .padding(.bottom, 12)
+                }
+
                 if horizontalSizeClass == .regular {
-                    PreheatSubgroup(viewModel: viewModel)
+                    // iPad: Preheat + Home side-by-side (top), Jog full-width (bottom).
                     HStack(alignment: .top, spacing: 16) {
+                        PreheatSubgroup(viewModel: viewModel)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         HomeSubgroup(viewModel: viewModel)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        JogSubgroup(viewModel: viewModel)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    Divider()
+                        .background(Color.pfBorder)
+                        .padding(.vertical, 8)
+                    JogSubgroup(viewModel: viewModel)
                 } else {
+                    // Phone: vertical stack with dividers between subgroups.
                     PreheatSubgroup(viewModel: viewModel)
+                    Divider()
+                        .background(Color.pfBorder)
+                        .padding(.vertical, 8)
                     HomeSubgroup(viewModel: viewModel)
+                    Divider()
+                        .background(Color.pfBorder)
+                        .padding(.vertical, 8)
                     JogSubgroup(viewModel: viewModel)
                 }
 
                 if let error = viewModel.lastError {
                     errorBanner(error)
+                        .padding(.top, 12)
                 }
             }
             .padding()
@@ -82,6 +107,27 @@ struct PrinterControlsSection: View {
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
         }
+    }
+
+    // MARK: - Banners
+
+    @ViewBuilder
+    private var lockoutBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.fill")
+                .foregroundStyle(Color.pfWarning)
+            Text("Controls are disabled while a print is active.")
+                .font(.footnote)
+                .foregroundStyle(Color.pfTextPrimary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            String(localized: "Controls disabled, print is active.",
+                   comment: "VoiceOver: lockout banner during print")
+        )
     }
 
     @ViewBuilder
@@ -100,7 +146,7 @@ struct PrinterControlsSection: View {
                 .buttonStyle(.borderless)
         }
         .padding(10)
-        .background(Color.pfError.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
 }
