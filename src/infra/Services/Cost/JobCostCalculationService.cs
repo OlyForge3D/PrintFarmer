@@ -74,14 +74,14 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal? laborCost = CalculateLaborCost(subtotal, settings);
 
         // Calculate total cost
-        decimal? totalCost = subtotal + (laborCost ?? 0m);
+        decimal totalCost = subtotal + (laborCost ?? 0m);
 
         // Store results
         job.MaterialCostUsd = materialCost;
         job.EnergyCostUsd = energyCost;
         job.MachineTimeCostUsd = machineTimeCost;
         job.LaborCostUsd = laborCost;
-        job.TotalCostUsd = totalCost > 0 ? totalCost : null;
+        job.TotalCostUsd = totalCost;
         job.CostCalculatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -93,7 +93,7 @@ public class JobCostCalculationService : IJobCostCalculationService
             energyCost ?? 0m,
             machineTimeCost ?? 0m,
             laborCost ?? 0m,
-            totalCost ?? 0m);
+            totalCost);
 
         return true;
     }
@@ -133,14 +133,14 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal? finalLaborCost = laborCost ?? CalculateLaborCost(subtotal, settings);
 
         // Calculate total
-        decimal? totalCost = subtotal + (finalLaborCost ?? 0m);
+        decimal totalCost = subtotal + (finalLaborCost ?? 0m);
 
         // Store results
         job.MaterialCostUsd = finalMaterialCost;
         job.EnergyCostUsd = finalEnergyCost;
         job.MachineTimeCostUsd = finalMachineTimeCost;
         job.LaborCostUsd = finalLaborCost;
-        job.TotalCostUsd = totalCost > 0 ? totalCost : null;
+        job.TotalCostUsd = totalCost;
         job.CostCalculatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -198,6 +198,26 @@ public class JobCostCalculationService : IJobCostCalculationService
         }
 
         CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
+
+        if (_filamentCostProvider is not null)
+        {
+            decimal? costPerGram = null;
+
+            if (job.SpoolmanSpoolId.HasValue)
+            {
+                costPerGram = await _filamentCostProvider.GetSpoolCostPerGramAsync(job.SpoolmanSpoolId.Value, ct);
+            }
+
+            if (!costPerGram.HasValue && job.SpoolmanFilamentId.HasValue)
+            {
+                costPerGram = await _filamentCostProvider.GetFilamentCostPerGramAsync(job.SpoolmanFilamentId.Value, ct);
+            }
+
+            if (costPerGram.HasValue)
+            {
+                return Math.Round(costPerGram.Value * (decimal)filamentUsageGrams.Value, 2);
+            }
+        }
 
         double? effectivePrice = null;
         double spoolWeightGrams = 1000.0;
@@ -397,10 +417,9 @@ public class JobCostCalculationService : IJobCostCalculationService
 
     /// <summary>
     /// Calculates energy cost from power consumption data.
-    /// When <see cref="PrintJob.KwhUsed"/> is set (measured by a smart plug), uses that directly.
+    /// When <see cref="PrintJob.KwhUsed"/> is set, uses that measured value directly.
     /// The electricity rate is taken from the printer's <see cref="PowerMonitor"/> if one is
-    /// configured (and its rate is non-zero); otherwise falls back to
-    /// <see cref="CostTrackingSettings.ElectricityRatePerKwh"/>.
+    /// configured and non-zero; otherwise it falls back to the farm-wide rate.
     /// When <see cref="PrintJob.KwhUsed"/> is null, falls back to a wattage-based estimate:
     /// (printDurationHours × printerWattage / 1000) × electricityRatePerKwh.
     /// </summary>
@@ -414,27 +433,30 @@ public class JobCostCalculationService : IJobCostCalculationService
             return null;
         }
 
-        if (job.KwhUsed.HasValue && job.KwhUsed.Value > 0)
+        decimal electricityRate = settings.ElectricityRatePerKwh;
+
+        if (job.AssignedPrinterId.HasValue)
         {
-            // Prefer per-monitor rate; fall back to farm-wide rate
-            decimal rate = settings.ElectricityRatePerKwh;
+            PowerMonitor? monitor = await _db.Set<PowerMonitor>()
+                .Where(m => m.PrinterId == job.AssignedPrinterId.Value && m.IsEnabled)
+                .FirstOrDefaultAsync(ct);
 
-            if (job.AssignedPrinterId.HasValue)
+            if (monitor is { ElectricityRateUsdPerKwh: > 0 })
             {
-                PowerMonitor? monitor = await _db.Set<PowerMonitor>()
-                    .Where(m => m.PrinterId == job.AssignedPrinterId.Value && m.IsEnabled)
-                    .FirstOrDefaultAsync(ct);
-
-                if (monitor is { ElectricityRateUsdPerKwh: > 0 })
-                {
-                    rate = monitor.ElectricityRateUsdPerKwh;
-                }
+                electricityRate = monitor.ElectricityRateUsdPerKwh;
             }
-
-            return Math.Round(job.KwhUsed.Value * rate, 2);
         }
 
-        // Wattage-based estimate when no measured energy is available
+        if (electricityRate <= 0)
+        {
+            return null;
+        }
+
+        if (job.KwhUsed is > 0m)
+        {
+            return Math.Round(job.KwhUsed.Value * electricityRate, 2);
+        }
+
         if (!job.ActualPrintTime.HasValue || job.ActualPrintTime.Value.TotalHours <= 0)
         {
             return null;
@@ -444,9 +466,10 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal printerWattage = job.AssignedPrinter?.Wattage
             ?? job.AssignedPrinter?.Model?.DefaultWattage
             ?? settings.AveragePrinterWattage;
-        decimal electricityRate = settings.ElectricityRatePerKwh;
 
-        return Math.Round((printDurationHours * printerWattage / 1000m) * electricityRate, 2);
+        decimal energyCost = (printDurationHours * printerWattage / 1000m) * electricityRate;
+
+        return Math.Round(energyCost, 2);
     }
 
     /// <summary>

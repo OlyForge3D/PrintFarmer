@@ -234,8 +234,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         await _db.SaveChangesAsync(ct);
 
-        // Calculate detailed cost breakdown (runs after SaveChanges to ensure ActualFilamentUsage is persisted)
-        await CalculateDetailedCostBreakdownAsync(primaryJob.Id, ct);
+        // Calculate detailed cost breakdown after persistence without blocking the status update.
+        ScheduleDetailedCostBreakdown(primaryJob.Id);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as completed. Duration: {Duration}",
@@ -623,6 +623,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         int syncedCount = 0;
         HashSet<Guid> printersToNotify = [];
+        List<Guid> completedJobIds = [];
 
         foreach (PrintJob job in orphanedJobs)
         {
@@ -702,6 +703,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                 syncedCount++;
                 printersToNotify.Add(printerId);
+                completedJobIds.Add(job.Id);
             }
             else if (IsFailureState(currentPrinterState))
             {
@@ -736,6 +738,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 "[PrintJobCompletionService] Synced {Count} orphaned jobs",
                 syncedCount);
 
+            foreach (Guid completedJobId in completedJobIds)
+            {
+                ScheduleDetailedCostBreakdown(completedJobId);
+            }
+
             // Broadcast updates for affected printers
             foreach (Guid printerId in printersToNotify)
             {
@@ -747,23 +754,45 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     }
 
     /// <summary>
-    /// Calculates detailed cost breakdown using the JobCostCalculationService if available.
+    /// Schedules detailed cost breakdown using the JobCostCalculationService if available.
     /// </summary>
-    private async Task CalculateDetailedCostBreakdownAsync(Guid jobId, CancellationToken ct)
+    private void ScheduleDetailedCostBreakdown(Guid jobId)
     {
-        if (_jobCostCalculationService == null)
+        if (_serviceScopeFactory is not null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    IJobCostCalculationService costService = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+                    await costService.CalculateAndStoreCostsAsync(jobId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
+                }
+            });
+
+            return;
+        }
+
+        if (_jobCostCalculationService is null)
         {
             return;
         }
 
-        try
+        _ = Task.Run(async () =>
         {
-            await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to calculate detailed cost breakdown for job {JobId}", jobId);
-        }
+            try
+            {
+                await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
+            }
+        });
     }
 
     /// <inheritdoc />
