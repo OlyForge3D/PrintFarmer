@@ -81,6 +81,14 @@ const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
 
+const LazySettingsReorgProposalNewtPage = lazy(() =>
+  import('@/features/settings/pages/SettingsReorgProposal-Newt').then(mod => ({ default: mod.default }))
+);
+
+const LazySettingsReorgProposalFerroPage = lazy(() =>
+  import('@/features/settings/pages/SettingsReorgProposal-Ferro').then(mod => ({ default: mod.default }))
+);
+
 function RouteLoader() {
   return (
     <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading">
@@ -231,8 +239,10 @@ function AuthenticatedAppRoutes() {
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
-        <Route path="security/login-audit" element={<Navigate to="/settings?tab=users" replace />} />
+          <Route path="security/login-audit" element={<Navigate to="/settings?tab=users" replace />} />
         </Route>
+        <Route path="dev/proposal-newt" element={<ProtectedRoute requiredRole="farm_admin"><RouteSuspense><LazySettingsReorgProposalNewtPage /></RouteSuspense></ProtectedRoute>} />
+        <Route path="dev/proposal-ferro" element={<ProtectedRoute requiredRole="farm_admin"><RouteSuspense><LazySettingsReorgProposalFerroPage /></RouteSuspense></ProtectedRoute>} />
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<Navigate to="/admin/workers?tab=jobs" replace />} />
         <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing&sub=profiles" replace />} />

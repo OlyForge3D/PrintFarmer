@@ -207,6 +207,21 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
 
+  // — Dev —
+  { name: 'Dev', isSectionHeader: true, requiredRole: 'farm_admin' },
+  {
+    name: 'Proposal: Newt',
+    href: '/dev/proposal-newt',
+    icon: AlertIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Proposal: Ferro',
+    href: '/dev/proposal-ferro',
+    icon: AlertIcon,
+    requiredRole: 'farm_admin'
+  },
+
 ];
 
 export function Layout() {
