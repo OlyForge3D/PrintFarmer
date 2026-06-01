@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Link } from 'react-router';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
-import { EyeIcon, EyeOffIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
+import { EyeIcon, EyeOffIcon, KeyIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button, Checkbox, Input } from '@/common/components/ui';
@@ -19,12 +19,15 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { login, error } = useAuth();
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const { login, loginWithPasskey, error } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoading) return;
 
+    setPasskeyError(null);
     setIsLoading(true);
     try {
       const success = await login({ username, password, rememberMe });
@@ -38,13 +41,33 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
     }
   };
 
+  const handlePasskeyLogin = async () => {
+    if (passkeyLoading || isLoading || !username) return;
+
+    setPasskeyError(null);
+    setPasskeyLoading(true);
+    try {
+      const success = await loginWithPasskey(username);
+      if (success) {
+        onClose();
+        setUsername('');
+        setPassword('');
+      }
+    } catch (err: unknown) {
+      setPasskeyError(err instanceof Error ? err.message : 'Passkey sign-in failed');
+    } finally {
+      setPasskeyLoading(false);
+    }
+  };
+
   const handleClose = useCallback(() => {
-    if (!isLoading) {
+    if (!isLoading && !passkeyLoading) {
       onClose();
       setUsername('');
       setPassword('');
+      setPasskeyError(null);
     }
-  }, [isLoading, onClose]);
+  }, [isLoading, passkeyLoading, onClose]);
 
   const formContent = (
     <>
@@ -122,13 +145,13 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             type="button"
             onClick={onSwitchToRegister}
             variant="subtle"
-            disabled={isLoading}
+            disabled={isLoading || passkeyLoading}
           >
             Register
           </Button>
           <Button
             type="submit"
-            disabled={isLoading || !username || !password}
+            disabled={isLoading || passkeyLoading || !username || !password}
             variant="primary"
             iconLeft={isLoading ? undefined : <LoginIcon className="h-4 w-4" />}
           >
@@ -142,6 +165,42 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             )}
           </Button>
         </div>
+
+        <div className="flex items-center gap-3 pt-1" aria-hidden="true">
+          <div className="flex-1 h-px bg-pf-border" />
+          <span className="text-xs text-pf-text-secondary">or</span>
+          <div className="flex-1 h-px bg-pf-border" />
+        </div>
+
+        {passkeyError && (
+          <div
+            role="alert"
+            className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm"
+            style={{ color: 'var(--pf-error)' }}
+          >
+            {passkeyError}
+          </div>
+        )}
+
+        <Button
+          type="button"
+          onClick={handlePasskeyLogin}
+          disabled={isLoading || passkeyLoading || !username}
+          variant="secondary"
+          className="w-full"
+          aria-label="Sign in with passkey"
+          title={!username ? 'Enter your username above to sign in with a passkey' : undefined}
+          iconLeft={passkeyLoading ? undefined : <KeyIcon className="h-4 w-4" />}
+        >
+          {passkeyLoading ? (
+            <>
+              <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+              <span>Verifying passkey…</span>
+            </>
+          ) : (
+            'Sign in with passkey'
+          )}
+        </Button>
       </form>
     </>
   );
@@ -153,7 +212,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
       title="Sign In"
       titleIcon={<PrintFarmerLogo size={28} />}
       width="max-w-md"
-      isDisabled={isLoading}
+      isDisabled={isLoading || passkeyLoading}
       showCloseButton={false}
     >
       {formContent}
