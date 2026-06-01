@@ -2,6 +2,7 @@
 import React, { createContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
+import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
 import type { AuthContextType } from './AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -79,6 +80,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  const loginWithPasskey = async (username: string): Promise<boolean> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const result = await passkeyLogin(username);
+
+      if (result.success && result.user && result.user.isActive === false) {
+        setError('Your account is pending admin approval. You cannot log in until approved.');
+        return false;
+      }
+
+      if (result.success && result.token && result.user) {
+        localStorage.setItem('auth-token', result.token);
+        setUser(result.user);
+        return true;
+      } else {
+        setError(result.error || 'Passkey login failed');
+        return false;
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const register = async (userData: RegisterRequest): Promise<boolean | 'pending'> => {
     setIsLoading(true);
     setError(null);
@@ -143,6 +169,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isAuthenticated,
     isLoading,
     login,
+    loginWithPasskey,
     register: register as (userData: RegisterRequest) => Promise<boolean>, // for compatibility, but actual type is boolean | 'pending'
     logout,
     hasRole,

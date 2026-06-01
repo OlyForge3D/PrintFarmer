@@ -1,4 +1,11 @@
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from '@simplewebauthn/browser';
 import { apiClient } from '@/services/api';
+import type { PfRequestConfig } from '@/services/api';
+import type { AuthenticationResult } from '@/types/api';
 
 export interface PasskeyCredentialDto {
   id: number;
@@ -13,11 +20,10 @@ export interface RenamePasskeyRequest {
 }
 
 export async function listPasskeys(): Promise<PasskeyCredentialDto[]> {
-  const response = await apiClient.request<PasskeyCredentialDto[]>({
+  return apiClient.request<PasskeyCredentialDto[]>({
     method: 'GET',
     url: '/auth/passkey/credentials',
   });
-  return response;
 }
 
 export async function deletePasskey(id: number): Promise<void> {
@@ -36,80 +42,48 @@ export async function renamePasskey(id: number, deviceName: string): Promise<voi
 }
 
 /**
- * Performs the full WebAuthn passkey registration ceremony:
+ * Performs the full WebAuthn passkey registration ceremony using @simplewebauthn/browser.
  * 1. Requests creation options from the server.
- * 2. Calls the browser WebAuthn API to create a credential.
+ * 2. Invokes the browser WebAuthn API via startRegistration().
  * 3. Sends the attestation response back to the server for verification.
  */
-export async function registerPasskey(): Promise<{ credentialId: string }> {
-  const options = await apiClient.request<PublicKeyCredentialCreationOptions>({
+export async function registerPasskey(): Promise<{ credentialId: string; newCredentialId: number }> {
+  const optionsJSON = await apiClient.request<PublicKeyCredentialCreationOptionsJSON>({
     method: 'POST',
     url: '/auth/passkey/register/begin',
   });
 
-  // The server returns base64url-encoded buffers that need to be decoded for the browser API.
-  const publicKey = prepareCreationOptions(options);
+  const attestationResponse = await startRegistration({ optionsJSON });
 
-  const credential = (await navigator.credentials.create({
-    publicKey,
-  })) as PublicKeyCredential | null;
-
-  if (!credential) {
-    throw new Error('Passkey registration was cancelled.');
-  }
-
-  const attestationResponse = credential.response as AuthenticatorAttestationResponse;
-
-  const result = await apiClient.request<{ credentialId: string }>({
+  return apiClient.request<{ credentialId: string }>({
     method: 'POST',
     url: '/auth/passkey/register/complete',
-    data: {
-      id: credential.id,
-      rawId: bufferToBase64Url(credential.rawId),
-      type: credential.type,
-      response: {
-        attestationObject: bufferToBase64Url(attestationResponse.attestationObject),
-        clientDataJSON: bufferToBase64Url(attestationResponse.clientDataJSON),
-      },
-    },
+    data: attestationResponse,
+  });
+}
+
+/**
+ * Performs the full WebAuthn passkey authentication ceremony using @simplewebauthn/browser.
+ * 1. Requests assertion options from the server with the given username hint.
+ * 2. Invokes the browser WebAuthn API via startAuthentication().
+ * 3. Sends the assertion response back to the server for verification.
+ * 4. Returns the server's AuthenticationResult (success, token, user, error).
+ *
+ * @remarks Brady policy: username hint is required (fully discoverable credentials are out of scope).
+ */
+export async function loginWithPasskey(username: string): Promise<AuthenticationResult> {
+  const optionsJSON = await apiClient.request<PublicKeyCredentialRequestOptionsJSON>({
+    method: 'POST',
+    url: '/auth/passkey/login/begin',
+    data: { username },
   });
 
-  return result;
-}
+  const assertionResponse = await startAuthentication({ optionsJSON });
 
-function prepareCreationOptions(
-  options: PublicKeyCredentialCreationOptions,
-): PublicKeyCredentialCreationOptions {
-  return {
-    ...options,
-    challenge: base64UrlToBuffer(options.challenge as unknown as string),
-    user: {
-      ...options.user,
-      id: base64UrlToBuffer(options.user.id as unknown as string),
-    },
-    excludeCredentials: options.excludeCredentials?.map((cred) => ({
-      ...cred,
-      id: base64UrlToBuffer(cred.id as unknown as string),
-    })),
-  };
-}
-
-function base64UrlToBuffer(base64url: string): ArrayBuffer {
-  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
-
-function bufferToBase64Url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return apiClient.request<AuthenticationResult>({
+    method: 'POST',
+    url: '/auth/passkey/login/complete',
+    data: { username, assertionResponse },
+    skipAuthRedirect: true,
+  } satisfies PfRequestConfig);
 }

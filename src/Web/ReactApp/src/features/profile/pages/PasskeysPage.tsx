@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button } from '@/common/components/ui';
+import { Button, FormField, Input } from '@/common/components/ui';
 import { KeyIcon, PlusIcon, DeleteIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import {
@@ -18,6 +18,8 @@ export function PasskeysPage() {
   const [deleteTarget, setDeleteTarget] = useState<PasskeyCredentialDto | null>(null);
   const [editTarget, setEditTarget] = useState<PasskeyCredentialDto | null>(null);
   const [editName, setEditName] = useState('');
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [pendingDeviceName, setPendingDeviceName] = useState('');
 
   const { data: passkeys = [], isLoading } = useQuery({
     queryKey: ['passkeys'],
@@ -49,10 +51,17 @@ export function PasskeysPage() {
   });
 
   const registerMutation = useMutation({
-    mutationFn: registerPasskey,
+    mutationFn: async (deviceName?: string) => {
+      const result = await registerPasskey();
+      if (deviceName?.trim()) {
+        await renamePasskey(result.newCredentialId, deviceName.trim());
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['passkeys'] });
       toast.success('Passkey registered successfully');
+      setShowRegisterModal(false);
+      setPendingDeviceName('');
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to register passkey');
@@ -92,11 +101,11 @@ export function PasskeysPage() {
         <div className="flex justify-end">
           <Button
             variant="primary"
-            onClick={() => registerMutation.mutate()}
+            onClick={() => setShowRegisterModal(true)}
             disabled={registerMutation.isPending}
           >
             <PlusIcon className="w-4 h-4" />
-            <span>{registerMutation.isPending ? 'Registering…' : 'Add passkey'}</span>
+            <span>Add passkey</span>
           </Button>
         </div>
 
@@ -152,6 +161,64 @@ export function PasskeysPage() {
         )}
       </div>
 
+      {/* Register passkey modal */}
+      <Modal
+        isOpen={showRegisterModal}
+        onClose={() => {
+          if (!registerMutation.isPending) {
+            setShowRegisterModal(false);
+            setPendingDeviceName('');
+          }
+        }}
+        title="Add passkey"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setShowRegisterModal(false);
+                setPendingDeviceName('');
+              }}
+              disabled={registerMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => registerMutation.mutate(pendingDeviceName || undefined)}
+              disabled={registerMutation.isPending}
+              loading={registerMutation.isPending}
+            >
+              {registerMutation.isPending ? 'Registering…' : 'Register passkey'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-pf-text-secondary">
+            Your browser will prompt you to create a passkey. Optionally give it a name to
+            identify it later — or leave blank to use the device description.
+          </p>
+          <FormField label="Device name (optional)" htmlFor="passkey-device-name">
+            <Input
+              id="passkey-device-name"
+              type="text"
+              value={pendingDeviceName}
+              onChange={(e) => setPendingDeviceName(e.target.value)}
+              placeholder="e.g. MacBook Pro, iPhone 15"
+              maxLength={100}
+              disabled={registerMutation.isPending}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !registerMutation.isPending) {
+                  registerMutation.mutate(pendingDeviceName || undefined);
+                }
+              }}
+            />
+          </FormField>
+        </div>
+      </Modal>
+
       {/* Delete confirmation modal */}
       <Modal
         isOpen={!!deleteTarget}
@@ -201,12 +268,15 @@ export function PasskeysPage() {
           </div>
         }
       >
-        <label className="block text-sm font-medium text-pf-text-primary mb-1">
+        <label
+          htmlFor="rename-passkey-input"
+          className="block text-sm font-medium text-pf-text-primary mb-1"
+        >
           Device name
         </label>
-        <input
+        <Input
+          id="rename-passkey-input"
           type="text"
-          className="w-full px-3 py-2 border border-pf-border rounded-md bg-pf-bg-primary text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
           value={editName}
           onChange={(e) => setEditName(e.target.value)}
           maxLength={100}

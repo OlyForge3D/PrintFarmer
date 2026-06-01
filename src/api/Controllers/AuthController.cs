@@ -414,8 +414,8 @@ public class AuthController(
 
         try
         {
-            RegisteredPublicKeyCredential credential = await _passkeyService.CompleteRegistrationAsync(username, attestationResponse, ct);
-            return Ok(new { message = "Passkey registered successfully", credentialId = Convert.ToBase64String(credential.Id) });
+            (RegisteredPublicKeyCredential fidoCred, int newCredentialId) = await _passkeyService.CompleteRegistrationAsync(username, attestationResponse, ct);
+            return Ok(new { message = "Passkey registered successfully", credentialId = Convert.ToBase64String(fidoCred.Id), newCredentialId });
         }
         catch (PasskeyChallengeNotFoundException ex)
         {

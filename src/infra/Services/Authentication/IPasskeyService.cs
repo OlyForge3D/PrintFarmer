@@ -18,8 +18,10 @@ public interface IPasskeyService
 
     /// <summary>
     /// Verifies the authenticator attestation. Challenge is consumed from cache (replay prevention).
+    /// Returns the FIDO2 credential alongside the integer DB primary key so callers
+    /// can return a stable identifier to the client without a list-diff.
     /// </summary>
-    Task<RegisteredPublicKeyCredential> CompleteRegistrationAsync(string username, AuthenticatorAttestationRawResponse attestationResponse, CancellationToken ct = default);
+    Task<(RegisteredPublicKeyCredential Credential, int NewCredentialId)> CompleteRegistrationAsync(string username, AuthenticatorAttestationRawResponse attestationResponse, CancellationToken ct = default);
 
     /// <summary>
     /// Generates assertion options for a passkey login and caches the challenge.

@@ -63,7 +63,7 @@ public class PasskeyService(
         return CacheAndReturnAsync(CacheKeys.Registration(username), options.ToJson(), options, ct);
     }
 
-    public async Task<RegisteredPublicKeyCredential> CompleteRegistrationAsync(
+    public async Task<(RegisteredPublicKeyCredential Credential, int NewCredentialId)> CompleteRegistrationAsync(
         string username,
         AuthenticatorAttestationRawResponse attestationResponse,
         CancellationToken ct = default)
@@ -114,7 +114,7 @@ public class PasskeyService(
             Convert.ToBase64String(result.Id),
             aaguidDescription ?? "unknown");
 
-        return result;
+        return (result, credential.Id);
     }
 
     public Task<AssertionOptions> BeginLoginAsync(string username, CancellationToken ct = default)

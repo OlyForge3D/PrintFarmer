@@ -77,7 +77,7 @@ public class PasskeyControllerTests
         RegisteredPublicKeyCredential fakeCredential = new() { Id = [1, 2, 3] };
         _passkeySvc
             .Setup(s => s.CompleteRegistrationAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAttestationRawResponse>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fakeCredential);
+            .ReturnsAsync((fakeCredential, 42));
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterCompleteAsync(

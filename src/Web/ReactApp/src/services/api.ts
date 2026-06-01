@@ -146,6 +146,22 @@ import type { GeometryUploadResultDto, ThreeMfMetadata } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
+/**
+ * Extended Axios request config with PrintFarmer-specific interceptor bypass flags.
+ * Pass a `PfRequestConfig` to `apiClient.request()` when you need to suppress the
+ * default 401 redirect behaviour for endpoints that signal soft failures via 401
+ * (e.g. passkey assertion completion).
+ */
+export interface PfRequestConfig extends AxiosRequestConfig {
+  /**
+   * When `true`, a 401 response will not trigger the global token-clear and
+   * redirect-to-/login behaviour in the response interceptor.  Use this for
+   * endpoints that legitimately return 401 to indicate a failed operation
+   * rather than an expired session.
+   */
+  skipAuthRedirect?: boolean;
+}
+
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
 export class ApiClient {
@@ -293,8 +309,11 @@ export class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
-        // Handle 401 Unauthorized - clear token and redirect to login
-        if (error.response?.status === 401) {
+        // Handle 401 Unauthorized — clear token and redirect to login unless
+        // the caller set skipAuthRedirect:true on the request config to handle
+        // the 401 inline (e.g. passkey assertion, which the backend signals
+        // with 401 for failed credentials rather than as a session expiry).
+        if (error.response?.status === 401 && !(error.config as PfRequestConfig)?.skipAuthRedirect) {
           localStorage.removeItem("auth-token");
           // Only redirect if not already on auth pages
           if (
@@ -2415,7 +2434,7 @@ export class ApiClient {
 
   // ============ Generic request method ============
 
-  async request<T>(config: AxiosRequestConfig): Promise<T> {
+  async request<T>(config: PfRequestConfig): Promise<T> {
     const response = await this.client.request<T>(config);
     return response.data;
   }
