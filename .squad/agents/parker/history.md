@@ -177,3 +177,12 @@ When asked for `git branch -d` only, never silently escalate to `-D`. If `-d` re
 - The main .NET/React CI workflow lives at `.github/workflows/ci.yml`; its `build-and-test` job restores the .NET solution before frontend install, builds, and tests.
 - EF migration drift detection is now a pre-test CI gate using `dotnet ef migrations has-pending-model-changes` for all four migration projects: app PostgreSQL, app SQL Server, slicer PostgreSQL, and slicer SQL Server.
 - Each drift check must run from `src/` with the correct `DB_PROVIDER` and context; clear CI errors should name the specific context/provider that drifted.
+
+## 2026-05-31T22:57:52-07:00 — iOS Beta Build Investigation (COMPLETE)
+
+**Issue:** iOS beta build pipeline investigation
+**Findings:** 12 stacked PRs in OlyForge3D/PrintFarmerMobile block release
+**Recommendation:** Documented in .squad/decisions.md
+**Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-parker.md
+
+Status: Backlog item cleared. Beta trigger gated on PR stack merge.

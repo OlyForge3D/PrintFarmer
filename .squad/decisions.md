@@ -3563,3 +3563,208 @@ The new test exercises the real API round trip over the SQLite-backed integratio
 - Vasquez R1 REQUEST_CHANGES (BLOCKING): branch as submitted deleted shipped `AddModel3DFileAttribution` slicer migrations (rebase artifact) and reverted #412 DateTimeOffset fix in `AppDbContextModelSnapshot` + old `AddLoginAuditLog.Designer.cs` — would corrupt EF history on deployed environments; non-blocking: fire-and-forget cost recalc has no idempotency guard for duplicate completion events. (**Vasquez**)
 - Dallas rebase resolved Vasquez's blocking findings; Bishop APPROVE, Hicks APPROVE, Vasquez (implicitly) unblocked post-rebase. (**Dallas**)
 - Bishop non-blocking watch item: machine-time fallback is null-only; a negative per-printer/model hourly rate would be honored rather than rejected. (**Bishop**)
+- Any `ISmartPlugProvider` can now be registered with any DI lifetime (singleton, scoped, transient).
+- Zero behavioral change for existing singleton providers.
+- PR #393 can merge without modification.
+
+## Kane revision — #355 LoginModal integration test (round 3 blocker)
+
+Commit: `f38803360`
+
+### Blocker addressed
+
+Bishop's round-3 blocker: `LoginModal.passkey.integration.test.tsx` mocked
+`@/services/passkeyService`, short-circuiting the seam at the service boundary
+instead of the HTTP layer.  The real `LoginModal → AuthContext → apiClient`
+chain was not exercised.
+
+### HTTP stubbing approach
+
+**Custom axios adapter** — same pattern established by `api.interceptor.test.ts`.
+
+The singleton `apiClient` exposes an internal `AxiosInstance` at the private
+`client` field.  A URL-dispatch adapter is swapped onto
+`axiosInstance.defaults.adapter` in `beforeEach` and removed in `afterEach`.
+The adapter matches request URLs by substring and returns either a resolved
+response object (2xx) or a rejected `AxiosError` (4xx), which the real
+response interceptor then processes.
+
+**Why this approach and not MSW:**
+The project has no MSW dependency (`grep -E "msw|setupServer"` found nothing in
+`package.json`, `test/`, or `src/`).  The interceptor test already established
+the axios adapter pattern as the project convention.  Adding MSW would be a
+new dependency for no benefit when the existing pattern covers the requirement
+cleanly.
+
+### What is mocked at the browser boundary
+
+`@simplewebauthn/browser` → `startAuthentication` is mocked to return a fake
+assertion object.
+
+`startAuthentication` wraps `navigator.credentials.get()`.  jsdom does not
+implement the WebAuthn browser API, so `startAuthentication` would throw
+unconditionally in any test environment without a mock.  This is the correct
+seam: it represents the physical hardware/platform boundary (authenticator
+device or platform biometrics).  Everything above it — `passkeyService`,
+`ApiClient`, the 401 interceptor with `skipAuthRedirect=true`, `AuthContext`,
+`LoginModal` — is real and fully exercised.
+
+### Test coverage
+
+**Negative path** (`shows inline alert when /login/complete returns 401`):
+- Adapter stubs `/auth/passkey/login/begin` → 200 (challenge options)
+- Adapter stubs `/auth/passkey/login/complete` → 401 `{ error: 'Credential ID not found' }`
+- Real interceptor sees `skipAuthRedirect=true` → does NOT redirect, does NOT
+  clear token → normalises `AxiosError` to `ApiError` with `details`
+- `ApiError` propagates through `AuthContext.loginWithPasskey` (no catch there)
+  → caught in `LoginModal.handlePasskeyLogin` → `setPasskeyError`
+- Asserts: `role="alert"` contains the details text, `window.location.href`
+  unchanged, `localStorage` has no token, `onClose` not called.
+
+**Positive path** (`closes modal and stores token when /login/complete returns 200`):
+- Adapter stubs both passkey routes with success responses
+- Real `AuthContext` stores the token and calls `onClose`
+- Asserts: `onClose` called once, `localStorage['auth-token']` set to the
+  stubbed token, no `role="alert"` present.
+
+### Pre-existing baseline
+
+7 test files were already failing on `3a568f640` before this change (verified
+by stash-reverting and re-running the suite).  My change introduces no new
+failures: 3 files / 7 tests pass in the targeted run; full suite remains at
+7 failed / 191 passed.
+
+### Build / test / lint / conflict scan
+
+- `npm run build`: ✅ passed
+- `npm run test:run` (targeted — 3 files): ✅ 7/7 passed
+- `npm run test:run` (full suite): ✅ same 7 pre-existing failures, 0 new
+- `npm run lint`: pre-existing `LoginAuditPage` unused-var error in `App.tsx`,
+  unrelated to this change
+- Anchored conflict marker scan (`^(<<<<<<<|=======|>>>>>>>)`): ✅ empty
+---
+# Kane — HA Provider Revision (371 round-4)
+
+**Commit:** `6785eae01`
+**Branch:** `squad/371-home-assistant-provider`
+
+## Changes Made
+
+### `HomeAssistantSmartPlugProvider.cs` — `ParseStateResponse`
+
+Replaced exact `== "kW"` check with a case-insensitive block covering all three HA
+`device_class=power` units:
+
+| unit_of_measurement | Action |
+|---|---|
+| `kW` / `kw` / `KW` | `watts *= 1000.0` (via `StringComparison.OrdinalIgnoreCase`) |
+| `mW` / `mw` / `MW` | `watts *= 0.001` (new) |
+| `W` (or absent) | no conversion (unchanged) |
+
+### `HomeAssistantSmartPlugProviderTests.cs`
+
+Added to the existing Blocker 1 kW test block (Brett's tests untouched):
+
+- `[Theory] [InlineData("kw")] [InlineData("KW")]` — verifies case variants convert 2.0 → 2000 W
+- `[Fact] GetCurrentReadingAsync_WhenStateInMilliwatts_ConvertsToWatts` — verifies 500 mW → 0.5 W
+
+## Test Results
+
+**20/20 HomeAssistantSmartPlugProvider tests pass** (17 Brett + 3 Kane).
+
+## Hicks Blockers Resolved
+
+1. ✅ Case-insensitive `kW` — `"kw"` and `"KW"` now convert correctly.
+2. ✅ `mW` milliwatt support added per HA `device_class=power` spec.
+---
+---
+date: 2026-05-31
+owner: Parker
+status: proposed
+issue: 409
+---
+
+## EF Core Migration Drift CI Gate
+
+PrintFarmer uses one CI gate in `.github/workflows/ci.yml` to detect EF Core entity model drift before tests run. The gate installs `dotnet-ef` after solution restore and runs `dotnet ef migrations has-pending-model-changes` from `src/`.
+
+The gate covers all four deployment migration projects:
+
+- `Farm.Migrations.PostgreSQL` with `AppDbContext` and `DB_PROVIDER=postgres`
+- `Farm.Migrations.SqlServer` with `AppDbContext` and `DB_PROVIDER=sqlserver`
+- `Farm.Slicer.Migrations.PostgreSQL` with `SlicerDbContext` and `DB_PROVIDER=postgres`
+- `Farm.Slicer.Migrations.SqlServer` with `SlicerDbContext` and `DB_PROVIDER=sqlserver`
+
+The check sits after `.NET` restore and before the test steps so migration drift fails fast with an error message naming the offending context/provider.
+---
+---
+date: 2026-06-01
+owner: Parker
+status: proposed
+issue: ios-beta-build
+---
+
+## Mobile Beta Build Recommendation
+
+I inspected the iOS release repo from WSL at `/home/jpapiez/s/PFarm-Ios`.
+The GitHub URL provided in the request, `olyforge3d/PFarm-Ios`, is not
+accessible. The actual public iOS release repo is
+`OlyForge3D/PrintFarmerMobile`, which I cloned into the requested path for
+inspection.
+
+### Findings
+
+- GitHub Actions workflow exists: `.github/workflows/testflight-beta.yml`
+- No `fastlane/` directory exists in the repo
+- Fastlane is invoked inline inside the GitHub Actions workflow
+- No Xcode Cloud post-clone scripts or other Xcode Cloud trigger files were
+  found; only the shared Xcode scheme exists
+- The workflow advertises `workflow_dispatch`, but the implementation derives
+  version metadata from `github.ref_name` as if it is a release tag
+  (`v*-beta*` / `v*-rc*`)
+- Practical beta trigger path is therefore a new release tag push, not a plain
+  manual dispatch from a branch
+
+### Release Gate
+
+I did **not** trigger a new beta build.
+
+Reasons:
+
+1. The release repo is not in a releasable state:
+   - `origin/development` is behind `origin/main`
+   - the current iOS controls work is still sitting in open stacked PRs in
+     `OlyForge3D/PrintFarmerMobile` (#1, #3, #4, #7, #10, #11, #12, #13,
+     #14, #15, #16, #17)
+2. The latest TestFlight workflow failure (`26337479649`) died in
+   **Build for App Store** with missing `PrinterBackendCapabilities` types and
+   related controls code, which is consistent with the stacked PRs not yet being
+   landed in the release branch
+3. Triggering `workflow_dispatch` on a branch would produce incorrect release
+   metadata because the workflow expects a tag-shaped ref name
+4. The repo's own release guidance (`.github/skills/release-beta/SKILL.md` and
+   `scripts/release-beta.sh`) says beta releases should be cut by merging
+   `development` into `main`, tagging, and pushing the tag
+
+### What Parker Recommends
+
+1. Merge the pending iOS PR stack in `OlyForge3D/PrintFarmerMobile`
+2. Fast-forward or rebuild `development` so it contains the intended iOS fixes
+3. Confirm the release repo builds cleanly from the release branch tip
+4. Cut the next beta tag and let `testflight-beta.yml` run from that tag
+
+### Suggested release command sequence
+
+```bash
+cd /home/jpapiez/s/PFarm-Ios
+git fetch origin --tags
+# merge the iOS stack first
+./scripts/release-beta.sh <next-beta-number>
+```
+
+### Expected next trigger
+
+- Trigger source: push of a new beta tag such as `v1.0-beta.<n>`
+- Workflow: `TestFlight Beta Build`
+- Actions page:
+  `https://github.com/OlyForge3D/PrintFarmerMobile/actions/workflows/testflight-beta.yml`

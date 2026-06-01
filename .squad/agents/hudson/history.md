@@ -115,3 +115,11 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 - PR 306 was already merged 2026-05-21 with all 6 snapshot tests but issue 289 was not auto-closed (closingIssuesReferences empty — PR title not body carried Closes reference).
 - Resolution: manually closed 289 via gh issue close with comment referencing PR 306 + commit 7f02d6a3.
 - Pattern: check gh pr list --state merged + gh pr view --json closingIssuesReferences before doing duplicate work when re-assigned an open issue.
+## 2026-05-31T22:57:52-07:00 — iOS Accessibility Pass (COMPLETE)
+
+**Issue:** Q2 backlog — iOS controls accessibility
+**Deliverable:** PR #423 with 23 new accessibility tests
+**Design Spec:** §4.1 reconciliation complete
+**Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-hudson.md
+
+Status: Backlog item cleared. No blockers for review.
