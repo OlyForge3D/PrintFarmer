@@ -406,4 +406,73 @@ final class PrinterServiceTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    // MARK: - getBackendCapabilities()
+
+    func testGetBackendCapabilities_happyPath_returnsMergedCapabilities() async throws {
+        let capJson = """
+        {
+            "printerId": "\(TestData.testUUID)",
+            "printerName": "Test Moonraker",
+            "backend": "Moonraker",
+            "supportsMovement": true,
+            "supportsTemperatureControl": true,
+            "supportsCamera": true,
+            "supportsControlOperations": true,
+            "supportsFileList": true,
+            "supportsFileUpload": true,
+            "supportsFileDownload": true,
+            "supportsStartPrint": true,
+            "supportsFilamentControl": true,
+            "supportsFileMetadata": true,
+            "supportsPrinterInformation": true,
+            "supportsHistory": true
+        }
+        """
+        MockAPIClient.stubResponse(json: capJson)
+
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertTrue(captured?.url?.path.contains("backend-capabilities") ?? false,
+                      "Must hit the backend-capabilities endpoint first")
+        XCTAssertTrue(caps.supportsMovement, "Moonraker wire DTO supportsMovement=true must be honoured")
+        XCTAssertTrue(caps.supportsTemperatureControl)
+    }
+
+    func testGetBackendCapabilities_404_fallsBackToStaticTable() async throws {
+        // Stub per-path: capabilities returns 404, printer get returns Moonraker printer
+        MockAPIClient.stubResponses([
+            "backend-capabilities": (statusCode: 404, json: "{}"),
+            "/api/printers/\(TestData.testUUID)": (statusCode: 200, json: TestJSON.printer)
+        ])
+
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+
+        // Moonraker fallback: all controls supported
+        XCTAssertTrue(caps.supportsMovement,
+                      "Moonraker fallback must report supportsMovement=true")
+        XCTAssertTrue(caps.supportsTemperatureControl)
+        XCTAssertTrue(caps.supportsBedTemperature)
+        XCTAssertTrue(caps.supportsFanControl)
+    }
+
+    func testGetBackendCapabilities_resin_sdcp_movementFalse() async throws {
+        let sdcpPrinterJson = TestJSON.printer
+            .replacingOccurrences(of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"SDCP\"")
+
+        MockAPIClient.stubResponses([
+            "backend-capabilities": (statusCode: 404, json: "{}"),
+            "/api/printers/\(TestData.testUUID)": (statusCode: 200, json: sdcpPrinterJson)
+        ])
+
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+
+        // SDCP (resin) fallback: no movement, no temperature
+        XCTAssertFalse(caps.supportsMovement,
+                       "Resin/SDCP fallback must report supportsMovement=false")
+        XCTAssertFalse(caps.supportsTemperatureControl)
+        XCTAssertFalse(caps.supportsBedTemperature)
+        XCTAssertFalse(caps.supportsFanControl)
+    }
 }

@@ -140,3 +140,18 @@
 - **Fix**: Added ar isExecuting: Bool { pendingCommand != nil } in Computed section of PrinterControlsViewModel.swift — read-only Bool alias backed by the already-@Published pendingCommand.
 - **Test added**: 	est_isExecuting_trueWhileInFlight_falseAfterError (15th test) — uses AsyncGate to assert isExecuting=true mid-flight, isExecuting=false after error clears pendingCommand.
 - Branch: squad/282-controls-viewmodel; PR: https://github.com/OlyForge3D/PrintFarmer/pull/419
+### 2026-05-31: Issues #280 + #281 — Wire DTO decoder tests + getBackendCapabilities service tests (PR #417)
+- **Model + service already on development**: PrinterBackendCapabilities.swift, PrinterServiceProtocol.swift (getBackendCapabilities, setTemperatures, home, homeXY, homeZ, move), PrinterService.swift implementations all present.
+- **Issue #280 AC gap**: 'Decoder test covers full-support, partial-support, and resin (movement=false) fixtures' was missing.
+  - Added 4 wire DTO decoder tests to PrinterBackendCapabilitiesTests.swift (9→13):
+    - testWireDto_fullSupport_moonraker
+    - testWireDto_partialSupport_flashForge
+    - testWireDto_resin_sdcp_movementFalse (critical: supportsMovement=false path)
+    - testWireDto_missingOptionalFields_decodedAsNil
+  - Added 3 PrinterService.getBackendCapabilities tests to PrinterServiceTests.swift (29→32):
+    - testGetBackendCapabilities_happyPath_returnsMergedCapabilities
+    - testGetBackendCapabilities_404_fallsBackToStaticTable (Moonraker fallback)
+    - testGetBackendCapabilities_resin_sdcp_movementFalse (SDCP all-false fallback)
+- **Issue #281**: All 11 happy-path tests already present on development (setTemperatures x3, home x3, homeXY/homeZ wrappers, move x3).
+- **Branch**: squad/280-281-printer-controls-networking; **PR**: https://github.com/OlyForge3D/PrintFarmer/pull/417
+- **Build note**: swiftc -typecheck not runnable locally (CoreSimulator out of date). Relying on CI.
