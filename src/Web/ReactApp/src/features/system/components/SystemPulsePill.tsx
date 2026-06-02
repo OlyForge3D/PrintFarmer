@@ -314,8 +314,29 @@ export function SystemPulsePill() {
 
   const tone = useMemo(() => getHealthTone(overallHealth), [overallHealth]);
 
-  if (!isFarmAdmin || error || !data) {
+  if (!isFarmAdmin) {
     return null;
+  }
+
+  if (error || !data) {
+    return (
+      <div className="relative">
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          disabled
+          title="System status unavailable"
+          className="h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] border-pf-border text-pf-text-tertiary opacity-60"
+          aria-label="System status unavailable"
+        >
+          <span className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-pf-text-tertiary opacity-50" aria-hidden="true" />
+            <span>System</span>
+          </span>
+        </Button>
+      </div>
+    );
   }
 
   return (
