@@ -615,7 +615,7 @@ export function Layout() {
                                   onClick={() => { setSidebarOpen(false); }}
                                   className={({ isActive }: { isActive: boolean }) =>
                                     `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                      ? 'bg-pf-bg-2 text-pf-accent'
                                       : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                     }`
                                   }
@@ -635,7 +635,7 @@ export function Layout() {
                           onClick={() => { setSidebarOpen(false); }}
                           className={({ isActive }: { isActive: boolean }) =>
                             `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                              ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                              ? 'bg-pf-bg-2 text-pf-accent'
                               : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                             }`
                           }
@@ -725,7 +725,7 @@ export function Layout() {
                                 onClick={() => { /* child nav */ }}
                                 className={({ isActive }: { isActive: boolean }) =>
                                   `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                    ? 'bg-pf-bg-2 text-pf-accent'
                                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                   }`
                                 }
@@ -746,7 +746,7 @@ export function Layout() {
                         onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
                           `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                            ? 'bg-pf-bg-2 text-pf-accent'
                             : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                           }`
                         }
@@ -772,7 +772,7 @@ export function Layout() {
                                 to={child.href}
                                 className={({ isActive }: { isActive: boolean }) =>
                                   `flex items-center px-3 py-2 text-sm transition-colors ${isActive
-                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
+                                    ? 'bg-pf-bg-2 text-pf-accent'
                                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                   }`
                                 }
