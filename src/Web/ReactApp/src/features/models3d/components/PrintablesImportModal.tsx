@@ -6,8 +6,8 @@ import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { Alert } from '@/common/components/ui/Alert';
-import { Radio } from '@/common/components/ui/Radio';
-import { ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
+import { Checkbox } from '@/common/components/ui/Checkbox';
+import { CubeIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 
 interface PrintablesFileEntry {
@@ -39,11 +39,14 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
+const multiSelectThreshold = 2;
+
 export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModalProps) {
   const queryClient = useQueryClient();
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<PrintablesPreview | null>(null);
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [imageError, setImageError] = useState(false);
   const [step, setStep] = useState<'url' | 'confirm'>('url');
 
   const previewMutation = useMutation({
@@ -57,7 +60,8 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
     },
     onSuccess: (data) => {
       setPreview(data);
-      setSelectedFileId(data.files.length === 1 ? data.files[0].id : null);
+      setImageError(false);
+      setSelectedFileIds(data.files.length === 1 ? [data.files[0].id] : []);
       setStep('confirm');
     },
     onError: (err: Error) => {
@@ -67,13 +71,13 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
 
   const importMutation = useMutation({
     mutationFn: async () => {
-      if (!preview || !selectedFileId) throw new Error('No file selected');
+      if (!preview || selectedFileIds.length === 0) throw new Error('No files selected');
       const response = await apiClient.request<{ id: string }>({
         method: 'POST',
         url: `/3d-models/import/printables`,
         data: {
           url: preview.sourceUrl,
-          fileId: selectedFileId,
+          fileIds: selectedFileIds,
         },
       });
       return response;
@@ -81,7 +85,7 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['file-browser'] });
       queryClient.invalidateQueries({ queryKey: ['3d-models'] });
-      toast.success(`Imported "${preview?.name}" from Printables`, {
+      toast.success(`Imported ${selectedFileIds.length} file(s) from "${preview?.name}"`, {
         description: `by ${preview?.creator}`,
       });
       handleClose();
@@ -94,7 +98,8 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
   const handleClose = () => {
     setUrl('');
     setPreview(null);
-    setSelectedFileId(null);
+    setSelectedFileIds([]);
+    setImageError(false);
     setStep('url');
     previewMutation.reset();
     importMutation.reset();
@@ -109,11 +114,30 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
   const handleBack = () => {
     setStep('url');
     setPreview(null);
-    setSelectedFileId(null);
+    setSelectedFileIds([]);
+    setImageError(false);
   };
 
   const handleImport = () => {
     importMutation.mutate();
+  };
+
+  const handleToggleFile = (fileId: string) => {
+    setSelectedFileIds((current) =>
+      current.includes(fileId)
+        ? current.filter((id) => id !== fileId)
+        : [...current, fileId],
+    );
+  };
+
+  const handleToggleAllFiles = () => {
+    if (!preview) return;
+
+    setSelectedFileIds((current) =>
+      current.length === preview.files.length
+        ? []
+        : preview.files.map((file) => file.id),
+    );
   };
 
   const footer = step === 'url' ? (
@@ -140,7 +164,7 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
         <Button
           variant="primary"
           onClick={handleImport}
-          disabled={!selectedFileId || importMutation.isPending}
+          disabled={selectedFileIds.length === 0 || importMutation.isPending}
           loading={importMutation.isPending}
         >
           Import
@@ -182,12 +206,17 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
         <div className="space-y-4">
           {/* Model info header */}
           <div className="flex gap-4">
-            {preview.thumbnailUrl && (
+            {preview.thumbnailUrl && !imageError ? (
               <img
                 src={preview.thumbnailUrl}
                 alt={preview.name}
                 className="w-24 h-24 rounded-lg object-cover shrink-0 bg-pf-bg-2"
+                onError={() => setImageError(true)}
               />
+            ) : (
+              <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border border-pf-border bg-pf-bg-2">
+                <CubeIcon className="h-10 w-10 text-pf-text-tertiary opacity-50" ariaLabel={`${preview.name} preview unavailable`} />
+              </div>
             )}
             <div className="min-w-0 space-y-1">
               <h3 className="text-base font-medium text-pf-text-primary truncate">
@@ -213,33 +242,56 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
 
           {/* File picker */}
           <div>
-            <p className="text-sm font-medium text-pf-text-primary mb-2">
-              Select a file to import:
-            </p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-pf-text-primary">
+                Select files to import:
+              </p>
+            </div>
             <div className="space-y-1 max-h-60 overflow-y-auto">
-              {preview.files.map((file) => (
-                <label
-                  key={file.id}
-                  className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                    selectedFileId === file.id
-                      ? 'border-pf-accent bg-pf-accent/5'
-                      : 'border-pf-border hover:bg-pf-bg-2'
-                  }`}
-                >
-                  <Radio
-                    name="printables-file"
-                    value={file.id}
-                    checked={selectedFileId === file.id}
-                    onChange={() => setSelectedFileId(file.id)}
+              {preview.files.length >= multiSelectThreshold && (
+                <label className="flex items-center gap-3 rounded-lg border border-pf-border bg-pf-bg-1 p-2.5 transition-colors hover:bg-pf-bg-2">
+                  <Checkbox
+                    checked={selectedFileIds.length === preview.files.length}
+                    indeterminate={selectedFileIds.length > 0 && selectedFileIds.length < preview.files.length}
+                    onChange={handleToggleAllFiles}
+                    disabled={importMutation.isPending}
+                    aria-label="Select all files"
                   />
-                  <span className="flex-1 text-sm text-pf-text-primary truncate">
-                    {file.name}
+                  <span className="flex-1 text-sm font-medium text-pf-text-primary">
+                    Select all files
                   </span>
                   <span className="text-xs text-pf-text-tertiary shrink-0">
-                    {formatFileSize(file.fileSize)}
+                    {preview.files.length} total
                   </span>
                 </label>
-              ))}
+              )}
+              {preview.files.map((file) => {
+                const isSelected = selectedFileIds.includes(file.id);
+
+                return (
+                  <label
+                    key={file.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'border-pf-accent bg-pf-accent/5'
+                        : 'border-pf-border hover:bg-pf-bg-2'
+                    }`}
+                  >
+                    <Checkbox
+                      checked={isSelected}
+                      onChange={() => handleToggleFile(file.id)}
+                      disabled={importMutation.isPending}
+                      aria-label={`Select ${file.name}`}
+                    />
+                    <span className="flex-1 text-sm text-pf-text-primary truncate">
+                      {file.name}
+                    </span>
+                    <span className="text-xs text-pf-text-tertiary shrink-0">
+                      {formatFileSize(file.fileSize)}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </div>
 
@@ -247,7 +299,7 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
           {importMutation.isPending && (
             <div className="flex items-center gap-2 text-sm text-pf-text-secondary">
               <Spinner size="sm" />
-              <span>Downloading and importing file…</span>
+              <span>Downloading and importing file(s)…</span>
             </div>
           )}
 
