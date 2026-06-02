@@ -407,3 +407,14 @@ Pre-existing state of the React design system (`src/Web/ReactApp/src/styles/`):
 - Screenshots: `.squad/agents/newt/screenshots-2026-06-02/login-{theme}.png` and `login-focus-{theme}.png`.
 - Issues: #467 (backdrop), #468 (logo), #469 (credentials blocker — needed to finish audit).
 
+
+## Learnings
+
+- 2026-06-02: The /login route should use a dedicated page auth surface instead of a modal backdrop. When the route itself is the destination, the shared modal overlay darkens an otherwise empty viewport and makes Light theme read like a disabled gray state; the reusable modal still belongs in in-app "sign in to continue" flows.
+
+
+
+
+## Learnings
+
+- 2026-06-02: The `/login` route should use a dedicated page auth surface instead of a modal backdrop. When the route itself is the destination, the shared modal overlay darkens an otherwise empty viewport and makes Light theme read like a disabled gray state; the reusable modal still belongs in in-app "sign in to continue" flows.
