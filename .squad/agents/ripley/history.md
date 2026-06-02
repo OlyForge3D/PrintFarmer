@@ -29,3 +29,8 @@ Participated in multi-round trio review cycle with strict three-reviewer consens
 
 Older entries (pre-2026-05-26) archived to history-archive.md for size management.
 
+## Learnings
+
+- 2026-06-02: Self-service profile routes need explicit navigation affordances; routing alone is not enough. A default Profile action plus Preferences quick links makes API Keys, Notifications, and Passkeys discoverable.
+- 2026-06-02: Brand assets that must adapt across themes should use inline SVG with `currentColor` so shared auth and layout surfaces inherit the active theme automatically.
+

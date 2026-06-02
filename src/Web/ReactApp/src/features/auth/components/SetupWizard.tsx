@@ -9,6 +9,7 @@ import { useHealthStatus } from '@/common/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
 import { apiClient } from '@/services/api';
+import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 
 // Move password policy outside component to prevent unnecessary re-renders
 const passwordPolicy = { 
@@ -797,11 +798,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           (<div className="text-center py-16">
             <div className="flex items-center justify-center gap-4 mb-6">
               <div className="flex items-center gap-3">
-                <img
-                  src="/printfarmer-logo.svg"
-                  alt="PrintFarmer Logo"
-                  className="h-14 w-14"
-                />
+                <PrintFarmerLogoIcon decorative className="h-14 w-14 text-pf-accent" />
                 <div className="flex flex-col items-start">
                   <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
                   <p className="text-pf-text-secondary text-sm">Initializing system...</p>
@@ -827,11 +824,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           (<>
             <div className="flex items-center gap-4 mb-6">
               <div className="flex items-center gap-3">
-                <img
-                  src="/printfarmer-logo.svg"
-                  alt="PrintFarmer Logo"
-                  className="h-14 w-14"
-                />
+                <PrintFarmerLogoIcon decorative className="h-14 w-14 text-pf-accent" />
                 <div className="flex flex-col items-start">
                   <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
                   <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>

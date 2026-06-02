@@ -27,6 +27,7 @@ import {
   CalendarIcon,
   LocationIcon,
 } from '@/common/components/icons/MdiIcons';
+import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
@@ -409,11 +410,7 @@ export function Layout() {
 
             {/* App logo and name */}
             <div className="flex items-center space-x-2">
-              <img 
-                src="/printfarmer-logo.svg" 
-                alt="PrintFarmer Logo" 
-                className="w-7 h-7" 
-              />
+              <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
               <h1 className="text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
             </div>
           </div>
