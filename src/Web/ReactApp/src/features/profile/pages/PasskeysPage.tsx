@@ -94,8 +94,8 @@ export function PasskeysPage() {
   return (
     <PageTemplate
       title="Passkeys"
-      icon={<KeyIcon className="w-6 h-6" />}
-      description="Manage your registered passkeys for passwordless sign-in."
+      icon={KeyIcon}
+      subtitle="Manage your registered passkeys for passwordless sign-in."
     >
       <div className="space-y-4">
         <div className="flex justify-end">
