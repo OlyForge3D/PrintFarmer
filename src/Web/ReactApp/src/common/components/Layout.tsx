@@ -553,9 +553,10 @@ export function Layout() {
                         Theme
                       </div>
                       {([
-                        { value: 'github-dark' as Theme, label: 'GitHub Dark', desc: 'Dark theme inspired by GitHub' },
-                        { value: 'printfarmer-dark' as Theme, label: 'PrintFarmer Dark', desc: 'Original dark theme' },
-                        { value: 'light' as Theme, label: 'Light', desc: 'Light theme for bright environments' },
+                        { value: 'dark' as Theme, label: 'Mission Control', desc: 'Cool slate-navy with precision-teal' },
+                        { value: 'light' as Theme, label: 'Workshop Daylight', desc: 'Clean, high-contrast light theme' },
+                        { value: 'matrix' as Theme, label: 'Terminal', desc: 'Phosphor-green CRT aesthetic' },
+                        { value: 'blueprint' as Theme, label: 'Schematic', desc: 'Cyanotype drafting aesthetic' },
                       ]).map((t) => (
                         <Button
                           key={t.value}
