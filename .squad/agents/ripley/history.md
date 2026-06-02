@@ -82,6 +82,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 
 ## Learnings
 
+- 2026-06-01 — Ambient System Pulse pill lives in `src/Web/ReactApp/src/features/system/components/SystemPulsePill.tsx` and is mounted from `src/Web/ReactApp/src/common/components/Layout.tsx`. It stays hidden unless `hasRole('farm_admin')` is true and `apiClient.getSystemInfo()` returns data; the top-bar panel traps focus while open, closes on `Escape`, and restores focus to the trigger.
 - 2026-05-26 — Camera management UI polish: camera management lives in `src/Web/ReactApp/src/features/cameras/pages/CamerasPage.tsx`, `src/Web/ReactApp/src/features/cameras/components/CameraManagementPanel.tsx`, and `src/Web/ReactApp/src/features/cameras/components/EditCameraModal.tsx`; printer-card camera rendering is in `src/Web/ReactApp/src/features/printers/components/CameraCard.tsx`.
 - 2026-05-26 — Camera zoom root cause: legacy camera card image rendering used `object-cover`, which cropped MJPEG/snapshot frames inside fixed `aspect-video` containers. Use `object-contain bg-black` on camera media to preserve the full stream frame.
 - 2026-05-26 — Detect-endpoints contract wired: frontend calls `POST /api/cameras/detect-endpoints` with `{ printerId }` and expects camelCase `{ streamUrl, snapshotUrl, source?, cameraType?, message? }`; `EditCameraModal` fills the URL fields from the response.

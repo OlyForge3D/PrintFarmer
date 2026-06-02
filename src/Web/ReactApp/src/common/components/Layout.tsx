@@ -45,6 +45,7 @@ import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinte
 import { printerSignalRService } from '@/services/printer-signalr';
 import { NfcPairingModal } from '@/features/nfc/components/NfcPairingModal';
 import { useNfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
+import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
 // Layout now uses <Outlet /> for nested routes
 
@@ -487,6 +488,8 @@ export function Layout() {
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
             </div>
+
+            <SystemPulsePill />
 
             {/* Pending Tasks Badge */}
             {isAuthenticated && <TasksBadge />}
