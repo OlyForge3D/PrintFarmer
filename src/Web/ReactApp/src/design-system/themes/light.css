@@ -194,3 +194,9 @@
   --pf-gradient-gray-dark-start:     #d8dde6;
   --pf-gradient-gray-dark-end:       #e8ecf2;
 }
+
+/* Light body font override */
+body[data-theme="light"],
+html[data-theme="light"] body {
+  font-family: 'Nunito Sans', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}

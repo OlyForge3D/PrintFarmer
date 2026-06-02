@@ -195,6 +195,12 @@
   --pf-gradient-gray-dark-end:       #16263e;
 }
 
+/* Blueprint body font override */
+body[data-theme="blueprint"],
+html[data-theme="blueprint"] body {
+  font-family: 'DM Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+}
+
 /* Dotted technical underlines on plain links */
 [data-theme="blueprint"] a:not([class]) {
   text-decoration: dotted underline;

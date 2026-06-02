@@ -196,3 +196,9 @@
   --pf-gradient-gray-dark-start:     #243250;
   --pf-gradient-gray-dark-end:       #192340;
 }
+
+/* Dark body font override */
+body[data-theme="dark"],
+html[data-theme="dark"] body {
+  font-family: 'Inter', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}

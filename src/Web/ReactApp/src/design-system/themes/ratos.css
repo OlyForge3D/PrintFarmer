@@ -194,3 +194,9 @@
   --pf-gradient-gray-dark-start:     #1d2a20;
   --pf-gradient-gray-dark-end:       #121912;
 }
+
+/* RatOS body font override */
+body[data-theme="ratos"],
+html[data-theme="ratos"] body {
+  font-family: 'Rajdhani', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}

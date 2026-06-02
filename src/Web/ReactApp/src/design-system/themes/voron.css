@@ -194,3 +194,9 @@
   --pf-gradient-gray-dark-start:     #27272a;
   --pf-gradient-gray-dark-end:       #18181b;
 }
+
+/* Voron body font override */
+body[data-theme="voron"],
+html[data-theme="voron"] body {
+  font-family: 'Chakra Petch', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
