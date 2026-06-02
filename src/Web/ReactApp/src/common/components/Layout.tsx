@@ -495,6 +495,19 @@ export function Layout() {
                         </Button>
                         <Button
                           type="button"
+                          onClick={() => {
+                            navigate('/preferences');
+                            setUserMenuOpen(false);
+                          }}
+                          variant="subtle"
+                          size="sm"
+                          className="w-full justify-start!"
+                          iconLeft={<GearIcon className="h-4 w-4" />}
+                        >
+                          Preferences
+                        </Button>
+                        <Button
+                          type="button"
                           onClick={handleLogout}
                           variant="subtle"
                           size="sm"
