@@ -275,8 +275,8 @@ export function SettingsPage() {
             <span className="h-px flex-1 bg-pf-border" />
           </h3>
 
-          {/* Responsive grid: 1 col mobile, 2 cols tablet, 2-3 cols desktop */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {/* Responsive grid: 1 col mobile, 2 cols tablet+ */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {groupedNavItems[group].map((item) => {
               const meta = metadata.find((m) => m.key === item.key);
               if (!meta) return null;
@@ -289,7 +289,7 @@ export function SettingsPage() {
                   className={clsx(
                     'flex flex-col',
                     // Obico section spans full width due to extra content
-                    hasObico && 'md:col-span-2 xl:col-span-3'
+                    hasObico && 'md:col-span-2'
                   )}
                 >
                   <Card.Header className="pb-2">
