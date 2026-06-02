@@ -489,7 +489,10 @@ export function Layout() {
                         </div>
                         <Button
                           type="button"
-                          onClick={() => setUserMenuOpen(false)}
+                          onClick={() => {
+                            navigate('/profile/api-keys');
+                            setUserMenuOpen(false);
+                          }}
                           variant="subtle"
                           size="sm"
                           className="w-full justify-start!"
