@@ -1,4 +1,78 @@
 ---
+## Merged from Inbox: 2026-06-02T17:45:11Z
+
+## Decision: Profile Settings Discoverability
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-02 |
+| **Agent** | Ripley |
+| **Status** | Proposed |
+
+## Decision
+
+Use the authenticated user menu's **Profile** action as a direct entry point to
+`/profile/api-keys`.
+
+Expose **API Keys**, **Notifications**, and **Passkeys** as dedicated quick links
+inside the Preferences page so all three self-service profile pages are
+reachable without manual URL entry.
+
+## Rationale
+
+The three profile routes already existed, but they were effectively hidden
+because the user menu's Profile action was a no-op and there were no other
+in-app links to those pages.
+
+Making **Profile** open a concrete page preserves the existing menu structure,
+while the Preferences quick links surface the full set of account-management
+pages in an already discoverable settings area.
+
+## Impact
+
+Authenticated users can now find and open API Keys, Notifications, and
+Passkeys from normal navigation flows.
+
+The change avoids adding a new route or expanding sidebar scope while still
+solving the discoverability gap.
+
+
+---
+## Decision: Theme Contrast Tokens For Accent-Filled Controls
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-02 |
+| **Agent** | Newt |
+| **Status** | Proposed |
+
+## Decision
+
+Introduce dedicated theme tokens for text/icons that sit on accent-filled and
+error-filled UI controls, and consume those tokens from shared button, badge,
+and chip variants instead of defaulting to generic white foregrounds.
+
+## Rationale
+
+The authenticated 7-theme QA sweep showed the same failure pattern across
+multiple surfaces: notification badges, selected settings tabs, save buttons,
+and theme-selector chips all become low-contrast when a bright per-theme accent
+is paired with inherited light text.
+
+Treating these as one-off page bugs would keep reintroducing the same problem.
+A shared on-accent/on-danger token contract makes the contrast requirement part
+of the design system instead of a per-page patch.
+
+## Impact
+
+Shared interactive variants can stay legible across dark, light, and stylized
+industrial themes without custom overrides on each page.
+
+Future theme work becomes safer because new palettes only need to define the
+foreground tokens once for all accent-backed controls.
+
+
+---
 ## Merged from Inbox: 2026-06-02T17:07:07Z
 
 # Decision: Login Page Card Presentation
@@ -4372,6 +4446,7 @@ issue: 274
 **Implementation**: Gate Maintenance button on `authViewModel.currentUserRole == "farm_admin"`. Injected @Environment(AuthViewModel.self) consistent with SettingsView/LoginView/RootView. Added 3 unit tests (admin visible, non-admin hidden, unauthenticated hidden).
 
 **Note**: currentUserRole + gate were already partially implemented on origin/development; this PR formalizes branch and adds explicit test coverage.
+
 
 
 

@@ -29,6 +29,14 @@ Participated in multi-round trio review cycle with strict three-reviewer consens
 
 Older entries (pre-2026-05-26) archived to history-archive.md for size management.
 
+## Team Coordination (2026-06-02)
+
+**Scribe Session 17:44:47Z**
+- Merged Profile Settings Discoverability decision (Ripley)
+- Processed 2 inbox decisions; cleaned up inbox workflow
+- Created orchestration logs for ripley-14 and newt-8 sessions
+- decisions.md: 268,270 bytes → 2 entries merged
+
 ## Learnings
 
 - 2026-06-02: Self-service profile routes need explicit navigation affordances; routing alone is not enough. A default Profile action plus Preferences quick links makes API Keys, Notifications, and Passkeys discoverable.

@@ -23,6 +23,22 @@ Newt is a deployment & DevOps specialist. Key contributions:
 - FailureDetectionMonitoringSummary redesign (2026-06-10)
 - Infrastructure automation & cloud deployment
 
+## Team Coordination (2026-06-02)
+
+**Scribe Session 17:44:47Z**
+- Merged Theme Contrast Tokens For Accent-Filled Controls decision (Newt)
+- Processed 2 inbox decisions; cleaned up inbox workflow
+- Created orchestration logs for ripley-14 and newt-8 sessions
+- decisions.md: 268,270 bytes → 2 entries merged
+
+## Learnings
+
+- Completed the authenticated theme QA sweep across Dashboard, Printers, Settings, Preferences, and the major authenticated nav routes for all 7 supported themes.
+- Filed issue #470 for unread notification badge contrast failures across authenticated themes.
+- Filed issue #471 for accent and danger control contrast failures on Settings and Preferences.
+- Filed issue #472 for unreadable theme selector labels on Preferences.
+- The current theme system is still strong at the token/foundation layer, but shared component variants that sit on accent fills need dedicated on-accent foreground tokens instead of generic white text.
+
 ## Archived History
 
 Older entries archived to history-archive.md for size management.
