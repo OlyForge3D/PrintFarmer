@@ -7804,3 +7804,168 @@ scope resolution:
 - Any `ISmartPlugProvider` can now be registered with any DI lifetime (singleton, scoped, transient).
 - Zero behavioral change for existing singleton providers.
 - PR #393 can merge without modification.
+
+# Bishop — #405 Round 3 Re-Verification
+
+**Date**: 2025-06-02
+**Branch**: `squad/405-sqlserver-loginaudit-fix`
+**Range reviewed**: `094d59ea7..2109b51ea` (single commit `2109b51ea`)
+**Verdict**: **APPROVE**
+
+---
+
+## Re-verification scope
+
+Round 2 was already approved. This pass only verifies Kane's narrow follow-up
+addressing Hicks's two documentation/test gaps from `hicks-405-round2.md`.
+
+## Diff inspection
+
+``
+.squad/decisions/inbox/kane-405-revision.md                              | 56 ++++++++++
+src/infra/Data/AppDbContext.cs                                           |  3 +++
+src/tests/Farm.Web.Api.Tests/Controllers/SecurityAuditControllerTests.cs | 35 +++++++
+3 files changed, 94 insertions(+)
+``
+
+- `AppDbContext.cs`: +3 lines, comment-only directly above the existing
+  `HasConversion` block. No behavior change. Explains the lossiness and pins
+  the service contract that prevents it from firing.
+- `SecurityAuditControllerTests.cs`: +35 lines, single new `[Fact]`
+  `GetLoginAudit_Timestamp_SerializesAsUtcIso8601`. Uses existing
+  `SeedEntriesAsync` + `CustomWebApplicationFactory` helpers, parses the raw
+  JSON to inspect the literal timestamp string, and asserts UTC format
+  (`Z` or `+00:00`), parseability, and `Offset == TimeSpan.Zero`. End-to-end
+  through the controller — exactly the gap Hicks flagged.
+- `.squad/decisions/inbox/kane-405-revision.md`: process doc, not code.
+
+## Scope creep check
+
+None. Diff is strictly limited to the two requested items. No unrelated
+refactors, no touched controllers/services/entities, no new dependencies, no
+config changes.
+
+## Conflict markers
+
+`grep -E '^(<<<<<<<|=======|>>>>>>>)'` on both code files: clean.
+
+## Build & tests
+
+``
+cd src/tests/Farm.Web.Api.Tests
+dotnet test --filter "FullyQualifiedName~LoginAudit"
+→ Passed!  - Failed: 0, Passed: 19, Skipped: 0, Total: 19
+``
+
+19/19 across `SecurityAuditControllerTests` (12) + `LoginAuditServiceTests` (7),
+matching Kane's claimed counts. Build: 0 errors, only pre-existing warnings.
+
+## Verdict
+
+**APPROVE** — follow-up is exactly the narrow comment + UTC round-trip test
+Hicks asked for, with zero scope creep and a clean 19/19 green bar.
+
+---
+# Kane — #405 Revision (Round 2 Response)
+
+**Date**: 2025-06-02  
+**Branch**: `squad/405-sqlserver-loginaudit-fix`  
+**Addressing**: Hicks's `REQUEST_CHANGES` blockers from `hicks-405-round2.md`
+
+---
+
+## Blocker 1: SQLite `HasConversion` lossiness
+
+**Decision**: Acceptable in practice — document the constraint, don't change behavior.
+
+`LoginAuditService.RecordAsync` always writes `DateTimeOffset.UtcNow`, so every
+persisted `Timestamp` has offset `+00:00`. The `HasConversion` lossiness only fires
+if a caller writes a non-UTC offset, which the service contract forbids.
+
+**Fix applied**: Added a 3-line comment directly above the `HasConversion` call in
+`AppDbContext.cs` explaining (a) why the conversion exists, (b) that it is lossy for
+non-UTC offsets, and (c) that the service contract forbids that scenario.
+
+``csharp
+// SQLite has no native DateTimeOffset type. We normalize to UTC for storage
+// since LoginAuditService always writes DateTimeOffset.UtcNow. This conversion
+// is LOSSY for non-UTC offsets — that scenario is forbidden by service contract.
+``
+
+---
+
+## Blocker 2: No API round-trip test for UTC timestamps
+
+**Fix applied**: Added `GetLoginAudit_Timestamp_SerializesAsUtcIso8601` to
+`SecurityAuditControllerTests.cs`.
+
+What the test proves end-to-end:
+1. Seeds a `LoginAuditEntry` with `DateTimeOffset.UtcNow` (offset `+00:00`) via EF Core.
+2. GETs `/api/admin/security/login-audit` as an authenticated admin.
+3. Parses the raw response JSON (not the deserialized DTO) to inspect the literal
+   `timestamp` string.
+4. Asserts it ends with `Z` or `+00:00` (both are valid UTC ISO 8601 representations).
+5. Asserts `DateTimeOffset.TryParse` succeeds.
+6. Asserts `parsed.Offset == TimeSpan.Zero`.
+
+The test uses the existing `CustomWebApplicationFactory` + `SeedEntriesAsync` helpers —
+no new mocking layers introduced.
+
+---
+
+## Test counts
+
+| Scope | Before | After |
+|---|---|---|
+| `SecurityAuditControllerTests` | 11 | 12 |
+| `LoginAuditServiceTests` | 7 | 7 |
+| **Total (filter match)** | **18** | **19** |
+
+All 19 passed. Build: 0 errors, all warnings pre-existing.
+
+---
+# Lambert — #371 Home Assistant Settings & Admin Integration
+
+**Branch**: `squad/371-home-assistant-provider`
+**Commit**: `f03fdb538`
+**Date**: 2025-06-01
+
+## Files Added/Modified
+
+| File | Change |
+|---|---|
+| `src/infra/Settings/HomeAssistantSettings.cs` | New `IAppSetting` with `Enabled`, `BaseUrl`, `EncryptedToken` fields |
+| `src/api/Controllers/Admin/AdminHomeAssistantController.cs` | New admin controller with 4 endpoints |
+| `src/tests/Farm.Web.Api.Tests/Controllers/AdminHomeAssistantControllerTests.cs` | 9 unit tests for controller |
+| `src/api/Services/SmartPlug/HomeAssistantSmartPlugProvider.cs` | Updated constructor + `ResolveToken()` fallback |
+| `src/tests/Farm.Web.Api.Tests/Services/SmartPlug/HomeAssistantSmartPlugProviderTests.cs` | Updated factory + added persisted-token test |
+| `src/infra/Data/AppDbContext.cs` | Resolved pre-existing merge conflict (#345 vs #359) |
+
+## Test Coverage
+
+- **Provider tests** (9 tests): token missing → null, valid state parsing, unavailable state, offline device, legacy address format, settings fallback path
+- **Controller tests** (9 tests): settings masked/unmasked display, update with encrypt/skip-re-encrypt/validation, test connection missing URL/token/success, entity discovery missing URL/filter logic
+
+All 19 new/modified tests pass. Pre-existing failures in `MmuToolheadRetroSyncTests` and `OrcaSlicerProfilesProviderTests` are unrelated to this issue.
+
+## Key Decisions
+
+### HTTP error handling in controller
+`POST /test` always returns HTTP 200 with a `success: bool` flag (and optional error message) rather than propagating HTTP errors. This is consistent with other "probe" endpoints in the codebase and avoids frontend having to handle both 4xx/5xx from HA and from our API.
+
+### Auth token storage approach
+Token is stored as `ISensitiveDataProtector.Protect(plainToken)` — uses ASP.NET Core Data Protection (AES-256). The raw encrypted blob is stored in `AppSettingsEntity` (same table as Obico/Spoolman settings). The API never returns the raw encrypted value; it returns `***...{last4}` as a display placeholder. The `PUT /settings` endpoint skips re-encryption if the incoming value starts with `"***"` (the placeholder prefix), which is the same pattern used by other sensitive settings in this codebase.
+
+### Token resolution / singleton–scoped lifetime
+`HomeAssistantSmartPlugProvider` is a singleton. `ISettingsService` is scoped. To avoid captive dependency, the provider receives `IServiceScopeFactory` (singleton-safe) and creates a short-lived scope only on the fallback path (i.e., when `IConfiguration["HomeAssistant:Token"]` is absent). In production this path is rare; in typical deployments the token is supplied via env var and the scope is never opened.
+
+### Polling cadence consistency
+No polling cadence was changed. Power reading is still on-demand via `GetCurrentReadingAsync`, consistent with Kasa/Tasmota/Shelly providers. The HA provider does not poll independently.
+
+## Trio Focus Areas
+
+- **HTTP error handling**: `POST /test` swallows HA errors and returns structured result — deliberate; document in PR
+- **Token storage**: Data Protection blob in shared settings table — same as Obico/OctoPrint tokens; acceptable for V1
+- **Polling cadence**: No change; matches other providers — no follow-up needed
+
+---
