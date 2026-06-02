@@ -31,8 +31,6 @@ function UserSettingsForm({
 }) {
   const [locale, setLocale] = useState(data.locale);
   const [itemsPerPage, setItemsPerPage] = useState(String(data.itemsPerPage));
-  const [defaultSlicerPreset, setDefaultSlicerPreset] = useState(data.defaultSlicerPreset ?? '');
-
   const handleSave = () => {
     const items = Number(itemsPerPage);
     if (items < 1 || items > 200) {
@@ -45,7 +43,7 @@ function UserSettingsForm({
         theme: data.theme, // preserve existing value — theme is controlled by Appearance section
         locale,
         itemsPerPage: items,
-        defaultSlicerPreset: defaultSlicerPreset || null,
+        defaultSlicerPreset: data.defaultSlicerPreset ?? null,
         rowVersion: data.rowVersion,
       },
       {
@@ -85,15 +83,6 @@ function UserSettingsForm({
               value={itemsPerPage}
               onChange={(e) => setItemsPerPage(e.target.value)}
               aria-label="Items per page"
-            />
-          </FormField>
-          <FormField label="Default Slicer Preset">
-            <Input
-              type="text"
-              value={defaultSlicerPreset}
-              onChange={(e) => setDefaultSlicerPreset(e.target.value)}
-              placeholder="e.g. 0.20mm Standard"
-              aria-label="Default slicer preset"
             />
           </FormField>
         </div>

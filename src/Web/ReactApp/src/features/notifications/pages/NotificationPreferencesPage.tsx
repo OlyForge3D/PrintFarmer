@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';
@@ -42,6 +43,7 @@ const FREQUENCY_OPTIONS = [
 ];
 
 export function NotificationPreferencesPage({ embedded = false }: { embedded?: boolean }) {
+  const navigate = useNavigate();
   const { data: preferences, isLoading, error } = useNotificationPreferences();
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
@@ -92,7 +94,9 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
   const handleEnablePush = async () => {
     await pushSubscription.subscribe();
-    if (!pushSubscription.error) {
+    if (pushSubscription.error) {
+      toast.error(pushSubscription.error);
+    } else if (pushSubscription.isSubscribed) {
       toast.success('Browser notifications enabled');
     }
   };
@@ -247,11 +251,20 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     );
   }
 
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" onClick={() => navigate(-1)}>
+        Back
+      </Button>
+      {saveButton}
+    </div>
+  );
+
   return (
     <PageTemplate
       title="Notification Preferences"
       icon={BellIcon}
-      actions={saveButton}
+      actions={headerActions}
     >
       {content}
     </PageTemplate>

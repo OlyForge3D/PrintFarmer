@@ -60,6 +60,11 @@ export function usePushSubscription(): PushSubscriptionState {
 
       // Get VAPID public key from server
       const vapidKey = await apiClient.get('/notifications/push-subscription/vapid-key');
+      if (!vapidKey.data.publicKey) {
+        setError('Push notifications are not configured on this server. Contact your administrator to set up VAPID keys.');
+        setIsLoading(false);
+        return;
+      }
       const applicationServerKey = urlBase64ToUint8Array(vapidKey.data.publicKey);
 
       const subscription = await registration.pushManager.subscribe({
