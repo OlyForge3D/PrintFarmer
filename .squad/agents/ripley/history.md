@@ -2,6 +2,15 @@
 
 Ripley is the frontend architect and API integration specialist.
 
+## 2026-06-02: Theme-specific Body Fonts & Multi-file Import Decisions
+
+**Scope:** React frontend theming, Printables multi-file import modal  
+**Status:** Decisions merged to squad/decisions.md
+
+- Assigned distinct body font to each supported theme (7 themes total: Dark/Inter, Light/Nunito, Blueprint/DM Mono, RatOS/Rajdhani, Voron/Chakra Petch, Farm/Merriweather, Matrix/JetBrains Mono)
+- Updated frontend to send `fileIds: string[]` in Printables import payload for multi-file contract support
+- Used `CubeIcon` as thumbnail fallback for Printables CDN failures
+
 ## 2026-05-31: Trio Review Cycle #355, #371, #405
 Participated in multi-round trio review cycle with strict three-reviewer consensus and fresh-hand rotation (Brett, Kane). Key learnings:
 1. **Reviewer-lockout protocol:** Prevents fatigue in multi-round cycles
@@ -99,6 +108,10 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - 2026-06-01 — `SettingsShell` owns the `tab` and `sub` search params. Embedded pages that also need tab state, like `WorkerManagementPage`, should use a separate query param such as `workerTab` and support an `embedded` mode so they can render inside the settings content area without nesting `PageTemplate`.
 - 2026-06-02T09:00:01-07:00 — Theme body fonts now use per-theme `body[data-theme="X"], html[data-theme="X"] body` overrides. Chosen faces: Dark → Inter, Light → Nunito Sans, Blueprint → DM Mono, RatOS → Rajdhani, Voron → Chakra Petch, Farm → Merriweather Sans; Matrix continues using `var(--pf-font-mono)` / JetBrains Mono.
 - 2026-06-02T09:16:06-07:00 — Dashboard status tic-tacs in `src/Web/ReactApp/src/features/printers/components/PrinterDashboard.tsx` should use `status-idle` tokens for zero-count states and active semantic tokens for non-zero states. RatOS now aligns its `--pf-status-printing-*` and `--pf-status-paused-*` tokens to the Matrix-style green-on-black treatment so Online, Printing, Paused, and Total all stay within the neon-green theme instead of falling back to amber/loading colors.
+- 2026-06-02T09:23:58-07:00 — React route structure is still centralized in `src/Web/ReactApp/src/App.tsx`, while primary sidebar navigation stays in the flat `navigation` array inside `src/Web/ReactApp/src/common/components/Layout.tsx`. Admin-only discovery now mostly flows through the `/settings` shell (`SettingsShell.tsx` + `features/settings/types.ts`) rather than separate sidebar links.
+- 2026-06-02T09:23:58-07:00 — Unreachable user-facing profile routes: `/profile/api-keys`, `/profile/notifications`, and `/profile/passkeys` are all live in `App.tsx`, but there are no in-app links or `navigate()` calls to them. The authenticated user menu still has a `Profile` button that only closes the menu, so self-service profile pages are effectively hidden unless the user knows the URLs.
+- 2026-06-02T09:23:58-07:00 — Stranded route: `/locations/dashboard` renders `LocationDashboardPage`, but `/locations` redirects to Settings > Hardware and there are no links/buttons to `/locations/dashboard`. Filed GitHub issues #465 (profile nav gap) and #466 (location dashboard entry point) from this audit.
+- 2026-06-02T09:23:58-07:00 — Dead/legacy page wrappers found during nav audit: `features/admin/pages/AdminPage.tsx`, `features/monitoring/pages/MonitoringPage.tsx`, `features/slicer/pages/OrcaSlicerPage.tsx`, `features/slicer/pages/ImportOfficialProfilesPage.tsx`, and `features/slicer/pages/SliceJobsPage.tsx` are no longer part of the live route graph; newer entry points use `SettingsShell`, `SystemDashboardPage`/`MonitoringContent`, `NewSliceJobPage`, and `ProfileImportWizardPage` redirects instead.
 
 ### External-reference-app Review Pointer — 2026-05-31
 

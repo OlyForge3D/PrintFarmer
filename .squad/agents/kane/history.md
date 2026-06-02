@@ -1,5 +1,16 @@
 # Kane History
 
+## 2026-06-02: Header Overlay Feasibility for 2-Pane Refactor
+
+**Scope:** React app shell layout, desktop-only corner-anchored overlay design  
+**Status:** Recommendation merged to squad/decisions.md
+
+- Investigated feasibility of moving header items (Connected, System, Notifications, User) to page overlay
+- Recommended hybrid 2-pane shell: desktop content-pane overlay + mobile slim top bar
+- Identified 5 key implementation risks with mitigation strategies
+- Feasibility estimate: Medium (layout refactor + z-index cleanup + hard-coded offset updates)
+- Next steps: prototype behind dev route, validate on high-density pages, audit keyboard/screen-reader access
+
 ## Core Context
 
 Kane is the QA / regression specialist. Key retained context:
@@ -274,3 +285,9 @@ Participated in multi-round trio review cycle. Key learnings:
 - Cost aggregation lives in `JobCostCalculationService.CalculateAndStoreCostsAsync`: it stores nullable component costs, sums non-null components into `PrintJob.TotalCostUsd` (zero when all components are null), and stamps `CostCalculatedAt` with `DateTime.UtcNow`.
 - Completed transitions are in `PrintJobCompletionService`: normal completion around `SyncCompletionAsync` and orphan recovery in `SyncOrphanedJobsAsync`; schedule cost calculation after `SaveChangesAsync` so status persistence is not blocked.
 - Defensive parallel-dependency pattern: keep `IFilamentCostProvider` optional in the constructor, use it first when present, and accept null material cost when Spoolman/provider pricing is unavailable; for power monitors use per-printer `PowerMonitor.ElectricityRateUsdPerKwh` only when present/non-zero, otherwise fall back to farm-wide cost settings.
+
+## Learnings
+
+- 2026-06-02T09:26:33-07:00 — Header architecture: `src/Web/ReactApp/src/common/components/Layout.tsx` uses a `flex flex-col h-screen` shell with a 48px `h-12` global top header. The right side currently holds the connection indicator, `SystemPulsePill`, `NotificationBell`, and the user menu; mobile drawer logic in `Layout.tsx` and the printer-details overlay in `PrintersPage.tsx` both hard-code the current `top-12` header offset.
+- 2026-06-02T09:26:33-07:00 — Overlay patterns: the repo already has reusable floating-surface patterns. `SystemPulsePill` provides an accessible popover with `Escape` close and focus return, `NotificationBell` opens a fixed drawer, and components like `SlicerLeftTools` use `pointer-events-none` on the shell plus `pointer-events-auto` on interactive islands so overlays do not block the whole page.
+- 2026-06-02T09:26:33-07:00 — 2-pane refactor context: UI reorganization issues #435-#440 are the prerequisite wave, while issues #441 and #454 track the follow-on two-pane shell as a separate initiative. The tracked desktop direction is to remove the 48px header, move to a persistent left rail, and let the content pane fill the viewport; mobile keeps a slim top bar + drawer pattern.

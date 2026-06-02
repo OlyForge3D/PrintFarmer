@@ -1,4 +1,642 @@
 ---
+## Merged from Inbox: 2026-06-02T16:36:47Z
+
+# Decision: Unified Design Language System with 4+ Themes
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-02 |
+| **Author** | Newt (Designer, Industrial UI) |
+| **Status** | PROPOSED |
+| **Scope** | Frontend design system, theme architecture |
+
+## Context
+
+PrintFarmer's UI had grown organically with 3 themes (github-dark, printfarmer-dark, light) but lacked a unified design language document and user-requested theme variety. Users expressed interest in visually distinct themes beyond color palette swaps.
+
+## Decision
+
+### 1. Authoritative Design Language Document
+
+Created `src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md` as the single source of truth for:
+- Typography scale (Inter for body, Bebas Neue for industrial display text)
+- Color system with semantic token architecture
+- Spacing scale (4px base unit, powers of 2 progression)
+- Shadow system optimized for dark-first workshop environments
+- Component patterns with variant specifications
+- Accessibility requirements (WCAG 2.2 AA minimum)
+
+### 2. Two New Atmospheric Themes
+
+**Matrix Theme** (`themes/matrix.css`)
+- True black backgrounds (#000000) for maximum CRT authenticity
+- Phosphor green (#00ff41) as primary text and accent
+- Optional scan-line effect via `.matrix-scanlines` class
+- Text glow on headings and interactive elements
+
+**Forge Theme** (`themes/forge.css`)
+- Charred black with warm undertones (#0f0d0b, #1a1714)
+- Copper/amber accent palette (#d47e34) evoking molten metal
+- Cream text (#f5e6d3) for warmth
+- Optional noise texture via `.forge-texture` class
+- Ember glow effects on focus states
+
+### 3. Theme Architecture Updates
+
+- Updated `Theme` type to include `'matrix' | 'forge'`
+- Theme application via `data-theme` attribute on `<html>` element
+- `github-dark` remains default (no attribute needed)
+- Theme toggle cycles through all 6 options (5 explicit + system)
+
+## Alternatives Considered
+
+1. **Simple color palette swap** — Rejected; users wanted distinct visual character, not just different hues
+2. **Blue/Cyber theme** — Considered as 4th; chose Forge for warmth contrast to existing green-heavy themes
+3. **Theme-per-user storage** — Already implemented via localStorage; preserved existing behavior
+
+## Consequences
+
+**Positive:**
+- Clear design reference for all future UI work
+- Users get meaningful visual variety
+- Atmospheric themes (Matrix, Forge) create memorable brand differentiators
+- High contrast mode support for accessibility
+
+**Negative:**
+- Increased CSS bundle size (~15KB for two new themes)
+- Theme tests may need updates (test file references 3 themes)
+
+## Files Changed
+
+| Path | Change |
+|------|--------|
+| `src/design-system/DESIGN-LANGUAGE.md` | Created — authoritative design reference |
+| `src/styles/themes/matrix.css` | Created — Matrix theme |
+| `src/styles/themes/forge.css` | Created — Forge theme |
+| `src/styles/theme.css` | Updated — imports, high-contrast rules |
+| `src/contexts/ThemeContext.tsx` | Updated — Theme type, DOM logic |
+| `src/common/components/ThemeToggle.tsx` | Updated — theme options |
+| `src/common/components/icons/MdiIcons.tsx` | Updated — added icons |
+
+## Validation
+
+- [x] Build passes
+- [x] Lint passes
+- [ ] Theme tests may need assertion updates
+
+---
+
+# Decision: Header Overlay Feasibility for the 2-Pane Refactor
+
+**Author:** Kane (QA / Regression Specialist)
+**Date:** 2026-06-02T09:26:33-07:00
+**Requested by:** Jeff Papiez
+**Status:** Pending team review
+**Scope:** React app shell (`src/Web/ReactApp/src/common/components/Layout.tsx`)
+
+## Summary
+
+Moving the upper-right header items into a floating overlay is feasible.
+
+The current shell still uses a 48px global top header (`h-12`), not a full 64px bar. Even so, removing that row on desktop is still meaningful because it lets the content pane start at the top of the viewport, which matches the tracked 2-pane direction in issues #441 and #454.
+
+My recommendation is a **desktop-only corner-anchored overlay inside the content pane**, paired with the planned persistent left rail. Keep **mobile on a slim top bar + drawer/sheet trigger** instead of trying to force the same floating behavior onto small touch screens.
+
+## Current Implementation
+
+### Layout shell
+
+`Layout.tsx` currently renders:
+
+- a root `flex flex-col h-screen` shell
+- a global top header at `h-12`
+- the main body below it as `flex flex-1 min-h-0 overflow-hidden`
+- a desktop left sidebar and a scrollable main content region
+
+That means the header consumes viewport height before any page content renders.
+
+### Header items in scope
+
+| Element | Current implementation | Purpose |
+|---|---|---|
+| Connected status | Inline dot + label in `Layout.tsx`, driven by `useSignalRConnection('printer')` | Always-visible printer SignalR connection state |
+| System pulse | `SystemPulsePill` from `src/Web/ReactApp/src/features/system/components/SystemPulsePill.tsx` | Farm-admin-only system health pill + accessible popover |
+| Notifications | `NotificationBell` + `NotificationDrawer` | Unread count and notification drawer |
+| User menu | `Layout.tsx` button + dropdown | Auth state, profile, preferences, sign out / sign in |
+
+### Important implementation notes
+
+- `SystemPulsePill` is already an overlay-style control: button trigger, popover panel, `Escape` close, focus return.
+- `NotificationBell` already opens a fixed right-side drawer.
+- The user menu already uses a floating dropdown plus a full-screen click-outside layer.
+- The current user menu does **not** contain an inline theme switcher in `Layout.tsx`; it exposes **Profile**, **Preferences**, and **Sign out** for authenticated users.
+- Adjacent header controls not called out in the request still exist nearby: the printer-attention badge and `TasksBadge`.
+
+## 2-Pane Refactor Context
+
+### What is already decided
+
+The current repo history and issues point to this sequence:
+
+- UI reorganization issues **#435-#440** come first.
+- The true 2-pane migration is tracked separately in **#441** and **#454**.
+- Issue #441 explicitly calls for:
+  - removing the desktop top header
+  - moving to a persistent left rail
+  - letting the content pane use full viewport height
+  - keeping **mobile** on a slim top bar + drawer
+
+That sequencing matters. The overlay question belongs naturally in the 2-pane work, not in the IA cleanup wave.
+
+### Practical implication
+
+If the goal is real vertical-space recovery, simply floating the four right-side controls while leaving the current header chrome in place does not go far enough. The bigger win comes when desktop `Layout.tsx` stops reserving the 48px top row entirely.
+
+## Overlay Approach Options
+
+### 1. Corner-anchored pill group over the content pane **(recommended)**
+
+A compact floating group sits in the top-right of the content pane. Each control remains individually visible: connection/system, notifications, user.
+
+**Pros**
+
+- Best fit for Jeff's request
+- Recovers header height on desktop
+- Keeps high-value actions discoverable
+- Aligns with issue #441 open question about account controls floating in the content pane
+- Reuses patterns already present in the repo (`SystemPulsePill`, `NotificationDrawer`, floating overlay chips)
+
+**Cons**
+
+- Can overlap dense page content if no safe area is reserved
+- Needs deliberate z-index rules
+- Needs a mobile-specific fallback
+
+### 2. Single launcher icon that opens a global actions panel
+
+Replace the four visible controls with one floating launcher. Clicking it opens a panel containing connection state, system health, notifications, and account actions.
+
+**Pros**
+
+- Smallest resting footprint
+- Least risk of persistent content overlap
+- Simplifies visual chrome
+
+**Cons**
+
+- Worst discoverability for notifications/system state
+- Adds a click for common actions
+- Makes connection health less ambient
+- Feels more like hiding controls than improving layout
+
+### 3. Auto-hiding or hover-reveal overlay
+
+Show the overlay only on hover, scroll-up, or edge proximity.
+
+**Pros**
+
+- Maximum visual cleanliness
+- Minimal persistent obstruction
+
+**Cons**
+
+- Weakest accessibility story
+- Poor fit for touch devices
+- Hover-only behavior conflicts with predictable keyboard and screen-reader access
+- Easy to miss critical states like disconnects or unread alerts
+
+I do **not** recommend this approach for the global app shell.
+
+## Recommended Approach
+
+Use a **hybrid 2-pane shell**:
+
+1. **Desktop (`lg+`)**
+   - Remove the global top header row.
+   - Keep brand/navigation ownership in the persistent left rail.
+   - Mount a **top-right floating overlay inside the content pane** for:
+     - connection state
+     - system pulse
+     - notifications
+     - user/account actions
+
+2. **Mobile / tablet below the desktop breakpoint**
+   - Keep the planned slim top bar and drawer pattern from issue #441.
+   - Do not rely on hover or auto-hide behavior.
+   - If needed, collapse the global actions into a single explicit trigger that opens a sheet.
+
+### Why this is the best fit
+
+- It preserves the 2-pane goal of maximizing content height.
+- It answers Jeff's overlay ask without forcing desktop and mobile into the same interaction model.
+- It avoids burying important actions in the left rail footer, where notifications and connection state become less glanceable.
+- It builds on patterns the repo already uses instead of inventing a new interaction family.
+
+## Technical Feasibility
+
+**Estimate: Medium**
+
+This is not a trivial CSS-only move, but it is also not a ground-up rewrite because the core behaviors already exist.
+
+### Changes required
+
+#### Layout structure
+
+`Layout.tsx` would need to change from:
+
+- top header row
+- body below header
+
+to something closer to:
+
+- app shell with persistent rail
+- content pane shell that owns:
+  - a scroll region
+  - a floating overlay layer
+
+The overlay layer should be separate from the scrollable content so the controls stay anchored while the page scrolls.
+
+#### Click-through behavior
+
+Use the existing overlay pattern already seen elsewhere in the repo:
+
+- outer container: `pointer-events-none`
+- actual pills/panels: `pointer-events-auto`
+
+That prevents the floating shell from blocking normal page interaction.
+
+#### Z-index cleanup
+
+Today, z-index usage is inconsistent:
+
+- header: `z-50`
+- desktop sidebar: `z-40`
+- notification drawer: `z-50`
+- modal: `z-50`
+- user-menu click-outside layer: `z-30`
+
+A refactor should normalize this so the overlay sits above content but below modal/dialog surfaces.
+
+#### Hard-coded header offsets
+
+There are at least two direct dependencies on the current 48px header height:
+
+- mobile sidebar overlay in `Layout.tsx` uses `top-12`
+- `PrintersPage.tsx` right-side details overlay uses `top-12`
+
+Those will need to move to the new shell model or they will leave dead space / misalign after the header is removed.
+
+#### Theme integration
+
+This is feasible with current theme tokens. Existing floating surfaces already use patterns like:
+
+- `bg-pf-bg-1/90`
+- `border-pf-border`
+- `backdrop-blur-*`
+
+So the overlay can stay theme-aware without introducing a new styling system.
+
+## Visibility Recommendations by Control
+
+### Connected status
+
+Keep it always available, but consider a more compact resting state:
+
+- healthy: dot-only or compact chip
+- disconnected/degraded: expand to explicit text
+
+Connection state is too important to bury completely.
+
+### System pulse
+
+Keep it visible only for `farm_admin`, matching current behavior.
+
+This control already behaves like an overlay/popover and can move with minimal UX change.
+
+### Notification bell
+
+Keep it directly visible in the desktop overlay. Do not hide it behind a launcher by default.
+
+This is the biggest discoverability risk if the design becomes too clever.
+
+### User menu
+
+Keep the avatar/account trigger visible in the overlay.
+
+If the product really wants a theme switcher here, that is a separate product change; the current implementation only exposes Preferences, not an inline theme picker.
+
+## Risks That Need Mitigation
+
+### 1. Discoverability
+
+Users may miss notifications or account actions if the overlay is too subtle.
+
+**Mitigation:** keep the bell and account trigger always visible on desktop; use badges/tooltips; avoid a hidden-by-default launcher as the primary model.
+
+### 2. Content overlap
+
+Dense pages could end up with important controls or data under the overlay.
+
+**Mitigation:** give the content pane a reserved safe area in the top-right, or allow pages with dense top-right content to opt into extra inset.
+
+### 3. Mobile behavior
+
+Floating desktop overlays do not translate cleanly to touch.
+
+**Mitigation:** keep mobile on a slim top bar or explicit sheet trigger instead of hover/collapse behavior.
+
+### 4. Accessibility
+
+Floating chrome can become confusing if it appears/disappears unexpectedly.
+
+**Mitigation:** use explicit buttons, stable placement, predictable tab order, visible focus states, and no hover-only access path for core actions.
+
+### 5. Layering conflicts
+
+Popover + drawer + modal combinations can fight each other.
+
+**Mitigation:** define a shell-level z-index scale before implementation.
+
+## Suggested Next Steps
+
+1. Treat this as a **sub-decision under #441 / #454**, not as part of #435-#440.
+2. Prototype the **desktop top-right pill-group overlay** behind a dev route or feature flag.
+3. Validate it on the pages most likely to expose overlap problems:
+   - Dashboard
+   - Printers
+   - Settings
+   - Analytics
+   - one dense table page
+4. Audit every `top-12` dependency before removing the desktop header.
+5. Run focused keyboard, screen-reader, and mobile checks before making it the default shell.
+
+## Final Recommendation
+
+Proceed with a **desktop content-pane overlay** for Connected, System, Notifications, and User as part of the tracked 2-pane migration, but keep **mobile on the slim top-bar model**.
+
+This gives the vertical-space win Jeff wants, stays aligned with the 2-pane roadmap, and avoids the accessibility and discoverability problems of a hidden or hover-only overlay.
+---
+
+## Decision Inbox: Printables selected-file backend import
+
+**Author:** Lambert  
+**Date:** 2026-06-02T06:49:25.421-07:00  
+**Status:** Proposed
+
+## Decision
+
+Keep `POST /api/3d-models/import/printables` thin at the controller and move file-selection validation into `PrintablesImportService`.
+
+Treat `fileIds` as an optional selector: when absent or empty, import every STL in the Printables preview; when present, validate every requested ID against the model file list before any download starts, and fail the request with a 400 if any ID is unknown.
+
+Resolve each selected file through the existing Printables client, download the temporary CDN asset, then reuse `IModel3DFileService.UploadModelAsync` and `SetAttributionAsync` for persistence and attribution rather than adding a parallel storage path.
+
+## Why
+
+This preserves the existing controller/service boundary and keeps transport concerns separate from Printables-specific business rules. It also protects the import workflow from partial success caused by mistyped or stale file IDs while preserving backward compatibility for older clients that still send only `url`.
+
+---
+
+## Decision Inbox: System Info API data sources
+
+**Author:** Lambert  
+**Date:** 2026-06-01T15:18:38-07:00  
+**Status:** Proposed
+
+## Decision
+
+Implement `GET /api/system/info` as a thin controller over a read-only infra service.
+Store the DTO contract in `src/infra/Dtos/SystemInfoDtos.cs` rather than creating a new
+`src/shared/` project path, because this repo already keeps API-facing DTOs in `Farm.Infrastructure`.
+
+## Architectural Calls
+
+1. **Controller stays transport-only** — `SystemInfoController` only enforces `farm_admin`
+   and returns the DTO from `ISystemInfoService`.
+2. **Cross-platform host sampling stays inside the service** — Linux uses `/proc/stat` +
+   `/proc/meminfo`; Windows uses `GetSystemTimes` + `GlobalMemoryStatusEx`; unsupported or
+   inaccessible sources fall back to zero or `Process.WorkingSet64` rather than failing the endpoint.
+3. **Archive metrics use existing storage abstraction** — `archiveBytes` comes from the
+   directory tree rooted at `IStoragePathService.GetGcodeStorageDirectory()` and `archiveCount`
+   comes from `AppDbContext.GcodeFiles`.
+4. **Database metadata is provider-driven** — engine name comes from
+   `AppDbContext.Database.ProviderName`; version and size use provider-specific scalar queries
+   with SQLite file-size fallback matching the existing debug endpoint logic.
+
+## Why
+
+This keeps the endpoint read-only, testable, and consistent with the repo's existing DTO/service
+layout. It also avoids hardcoding deployment-specific paths or assuming Linux-only host metrics,
+which matters because PrintFarmer runs on both Windows and Linux.
+
+---
+
+# Decision: PrintFarmer Design Language v2 — Phase 1 (Design Decisions)
+
+**Author:** Newt (Designer — Industrial UI)
+**Date:** 2026-06-02T07:10:54-07:00
+**Requested by:** Jeff Papiez
+**Status:** Pending team review
+**Scope:** React frontend visual design system (`src/Web/ReactApp/`)
+**Spec location:** `src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md`
+
+## Summary
+
+Authored the authoritative `DESIGN-LANGUAGE.md` for PrintFarmer's React UI. This is the Phase 1 deliverable — design decisions and CSS variable contract only. No CSS or TSX code was written. A separate agent will implement from this spec in Phase 2.
+
+## Key Decisions
+
+### 1. Typography — Replace Inter + Bebas Neue
+
+New font stack (all Google Fonts, served as variable fonts where available):
+
+- **IBM Plex Sans** → body, UI, navigation (`--pf-font-sans`)
+- **Space Grotesk** → headlines, page titles (`--pf-font-display`)
+- **JetBrains Mono** → all numeric data, timestamps, IPs, code (`--pf-font-mono`)
+
+Rationale: brief explicitly forbade Inter/Roboto/Arial. Chosen faces have industrial-technical pedigree, distinctive silhouettes, and excellent screen rendering at small sizes.
+
+### 2. Four Themes (full hex palettes in spec)
+
+| Theme | Vibe | Substrate | Primary accent |
+|---|---|---|---|
+| **Light** "Workshop Daylight" | Engineering datasheet | `#f5f7fa` paper-white | `#0d7d75` deep teal |
+| **PrintFarmer Dark** "Mission Control" | Flagship, refined | `#08101f` slate-navy | `#14b8a6` precision teal |
+| **Matrix** "Terminal" | CRT phosphor terminal | `#000000` true black | `#00ff41` phosphor green |
+| **Blueprint** "Schematic" *(creative choice)* | CAD blueprint paper | `#0c1a2e` cyanotype navy | `#38bdf8` blueprint cyan |
+
+Blueprint is my creative choice — it fills the cool-blue palette gap that none of the other three themes occupy and feels at home to CAD-minded operators.
+
+### 3. Token Contract Expanded (~80 → ~140 tokens per theme)
+
+Added: spacing scale, radius scale, shadow scale, glow tokens, motion (duration + easing), z-index scale, full `info` semantic group, status triples for `printing`/`paused`/`error`/`idle`, `--pf-text-on-accent`, `--pf-text-inverse`, `--pf-accent-fg`, `--pf-selection-*`, `--pf-validation-warning-*`, `--pf-modal-bg`.
+
+### 4. Deprecations
+
+- **All 14 `--pf-gradient-*` tokens deprecated** → cards/buttons go flat color; use `--pf-shadow-*` for depth.
+- **`github-dark` theme removed** — was near-duplicate of `printfarmer-dark`; printfarmer-dark becomes the default.
+- **`forge` theme** stays as undocumented "extra" during transition (already exists, low cost to keep).
+- **`--pf-text-light`** (ambiguous) collapses into `--pf-text-secondary`.
+
+### 5. Design Floor
+
+- **4px spacing grid** — strict, no ad-hoc pixel values
+- **Max 8px radius** on rectangular surfaces — industrial, rejects "friendly" rounding
+- **44×44 px touch targets** minimum (matches mobile HIG already documented)
+- **Contrast**: primary text aims for AAA (7:1), secondary at AA floor (4.5:1)
+- **Status conveyed by color + shape** (icon prefix) — never color alone
+- **Numeric data** always in mono with `tabular-nums`
+
+## What This Decision Affects
+
+- Default theme switches from `github-dark` → `printfarmer-dark` (boot UX change)
+- ~140 CSS variables per theme need to be defined (Phase 2 implementation)
+- Font loading in `index.css` changes — `Inter` + `Bebas Neue` `@import` replaced
+- All references to `--font-inter` and `--font-bebas` in components need rename to `--pf-font-sans` / `--pf-font-display`
+- Components using `--pf-gradient-*` need migration to flat color + shadow (codemod recommended)
+- Components using `--pf-text-light` need rename to `--pf-text-secondary` (codemod recommended)
+- `github-dark.css` is deleted; `forge.css` kept as extra
+- Tailwind `@theme` block in `index.css` needs expansion for the new tokens
+
+## What This Decision Does NOT Affect
+
+- No backend (.NET) changes
+- No iOS mobile theme changes (mobile uses its own `pf*` Swift tokens already documented in earlier history)
+- No SignalR / API contract changes
+- The `common/components/ui` component library structure stays as-is; only the tokens they consume change
+
+## Risk & Rollout
+
+- **Risk: medium.** Token rename touches many files (estimated 80–150 component files reference `--pf-gradient-*` or `--pf-text-light` directly). Mitigation: ship as codemod-driven PR, separate from new-token rollout.
+- **Backward compatibility window**: Phase 2 should ship a transitional CSS layer that aliases old tokens to new for one release cycle, so feature branches in flight don't break.
+- **Theme migration is opt-in per user** — existing users on `github-dark` will be migrated to `printfarmer-dark` on next session start with a one-time toast notification.
+
+## Open Questions for Phase 2
+
+1. Should `forge` be promoted to a 5th supported theme, or quietly removed after one release?
+2. Should the `printing` status pulse subtly (animated `box-shadow`) to indicate "live" state, or stay static? My recommendation: subtle 2-second pulse, respecting `prefers-reduced-motion`.
+3. Should we generate the TypeScript theme type from the spec automatically (codegen) or maintain it by hand? My recommendation: codegen via a small script that parses the variable contract section.
+
+## Approval Needed From
+
+- **Ripley** (Engineering Manager) — for scope sign-off and Phase 2 sequencing
+- **Jeff Papiez** (requester) — for theme palette aesthetic and font selection approval
+
+## Files
+
+- `src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md` (NEW — full spec, ~670 lines)
+- `.squad/agents/newt/history.md` (UPDATED — added Phase 1 entry)
+- `.squad/decisions/inbox/newt-design-language.md` (NEW — this file)
+
+---
+
+# Theme QA — Newt — 2026-06-02
+
+## Decisions / recommendations from visual QA audit
+
+1. **Logo asset strategy** — Replace static `/printfarmer-logo.svg` `<img>` references with an inline-SVG React component using `fill="currentColor"`. This is consistent with the project's MdiIcons pattern and is the only clean way to let the logo follow theme accent colors. Filed as issue #468.
+
+2. **Login route should not use Modal wrapper** — Extract LoginModal / RegisterModal body into card components and have `LoginPage` render them directly inside `bg-pf-bg-0`. Reserve the modal wrappers for the in-app "Sign In to continue" flow where there is real underlying app content worth dimming. Filed as issue #467.
+
+3. **QA credential channel needed** — Visual QA cannot be done end-to-end without authenticated access to the deployed instance. Recommend either a shared read-only QA account (preferred), or scripted local bootstrap that seeds a known-credential admin user. Filed as issue #469.
+
+## Theme audit baseline (positive)
+
+The 7-theme system is functioning at the foundation level:
+- Each theme has its own body typeface (Inter / Nunito Sans / JetBrains Mono / DM Mono / Rajdhani / Chakra Petch / Merriweather Sans).
+- Each theme has its own body background and text-primary tokens.
+- Focus rings adapt to per-theme accent color.
+- Matrix phosphor text-shadow is correctly scoped.
+
+The remaining issues are component-level (logo, login backdrop), not token-level.
+
+---
+
+## Decision Inbox: Printables multi-file import modal
+
+**Author:** Ripley  
+**Date:** 2026-06-02T06:40:06.097-07:00  
+**Status:** Proposed
+
+## Decision
+
+Update the Printables import modal to send `fileIds: string[]` immediately, even though the
+current backend still ignores file selection, so the frontend matches the intended multi-file
+contract now.
+
+Use the existing `CubeIcon` as the thumbnail fallback when Printables CDN images fail, so the
+modal stays visually consistent with other 3D model thumbnail placeholders in the app.
+
+## Why
+
+Printables projects commonly contain multiple STL files, so keeping a single-file payload on the
+frontend would preserve a known mismatch and make the eventual backend fix harder to land cleanly.
+Reusing the existing cube placeholder avoids adding a new visual pattern for the same 3D model
+state and keeps the fallback simple when remote thumbnails are blocked by CORS or hotlink rules.
+
+---
+
+# Decision: Theme-specific Body Fonts for PrintFarmer Themes
+
+**Author:** Ripley (Frontend Dev)
+**Date:** 2026-06-02T09:00:01-07:00
+**Requested by:** Jeff Papiez
+**Status:** Pending team review
+**Scope:** React frontend theming (`src/Web/ReactApp/`)
+
+## Summary
+
+Assigned a distinct body font to each supported theme so the visual identity changes with the selected theme instead of only changing colors. The implementation follows the existing Matrix pattern: each theme owns a `body[data-theme="X"], html[data-theme="X"] body` override in its theme stylesheet, while font assets load centrally from `index.html`.
+
+## Key Decisions
+
+### 1. Keep font ownership inside each theme file
+
+Each theme now declares its own body font override in the matching CSS file instead of introducing new shared font tokens or runtime logic. This keeps the change surgical and mirrors the precedent already established by `matrix.css`.
+
+### 2. Choose fonts by theme personality
+
+| Theme | Font | Why |
+|---|---|---|
+| Dark | **Inter** | Clean, neutral, technical default for mission-control UI |
+| Light | **Nunito Sans** | Friendly, readable daylight mode without feeling decorative |
+| Blueprint | **DM Mono** | Drafting-style mono that reinforces schematic/CAD vibes |
+| RatOS | **Rajdhani** | Geometric, tech-forward letterforms that fit neon firmware styling |
+| Voron | **Chakra Petch** | Sharp, industrial shapes that feel aggressive but still readable as body copy |
+| Farm | **Merriweather Sans** | Warm, humanist sans that softens the harvest palette |
+| Matrix | **JetBrains Mono** | Existing mono override remains unchanged |
+
+### 3. Load theme fonts alongside base fonts in `index.html`
+
+All selected Google Fonts are loaded through the existing Google Fonts `<link>` in `src/Web/ReactApp/index.html`. Centralizing imports avoids scattered CSS `@import` usage and preserves the current font-loading pattern.
+
+## What This Decision Affects
+
+- Theme identity now includes typography, not just palette
+- `index.html` carries additional Google Font families for theme switching
+- Each theme stylesheet contains a body font override block matching the Matrix selector pattern
+
+## What This Decision Does Not Affect
+
+- No component-level typography tokens or Tailwind font utilities changed
+- No backend or mobile changes
+- No theme-selection logic changed
+
+## Files
+
+- `src/Web/ReactApp/index.html`
+- `src/Web/ReactApp/src/design-system/themes/dark.css`
+- `src/Web/ReactApp/src/design-system/themes/light.css`
+- `src/Web/ReactApp/src/design-system/themes/blueprint.css`
+- `src/Web/ReactApp/src/design-system/themes/ratos.css`
+- `src/Web/ReactApp/src/design-system/themes/voron.css`
+- `src/Web/ReactApp/src/design-system/themes/farm.css`
+- `.squad/agents/ripley/history.md`
+- `.squad/decisions/inbox/ripley-theme-fonts.md`
+
+---
+
+---
 ## Merged from Inbox: 2026-05-31T09:05:00-07:00
 
 # Decision Inbox: External-reference-app Feature Adoption — Phased Rollout Plan
@@ -3823,3 +4461,4 @@ issue: 274
 **Implementation**: Gate Maintenance button on `authViewModel.currentUserRole == "farm_admin"`. Injected @Environment(AuthViewModel.self) consistent with SettingsView/LoginView/RootView. Added 3 unit tests (admin visible, non-admin hidden, unauthenticated hidden).
 
 **Note**: currentUserRole + gate were already partially implemented on origin/development; this PR formalizes branch and adds explicit test coverage.
+

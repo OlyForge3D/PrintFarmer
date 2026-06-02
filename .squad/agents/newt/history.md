@@ -1,5 +1,17 @@
 # Newt History
 
+## 2026-06-02: Design Language & Theme QA Audit
+
+**Scope:** Frontend design system, visual QA across 7 themes on deployed app  
+**Status:** Decisions and findings merged to squad/decisions.md
+
+- Completed visual QA audit across all 7 supported themes on deployed instance (http://10.0.0.20)
+- Filed issue #467: Login backdrop darkens empty viewport (UX issue)
+- Filed issue #468: Logo SVG not recolorable per-theme (design system gap)
+- Filed issue #469: QA blocked by auth credentials (process improvement)
+- Confirmed 7-theme system functioning at foundation level (body typeface, background, text-primary per-theme)
+- Identified component-level issues (logo, login backdrop) vs token-level (none)
+
 ## Core Context
 
 Newt is a deployment & DevOps specialist. Key contributions:
@@ -359,3 +371,39 @@ Pre-existing state of the React design system (`src/Web/ReactApp/src/styles/`):
 - Icons: `src/Web/ReactApp/src/common/components/icons/MdiIcons.tsx`
 
 ---
+
+---
+
+## Visual QA Audit — Deployed App Themes (2026-06-02)
+
+**Task:** QA visual review across all 7 themes (dark, light, matrix, blueprint, ratos, voron, farm) at http://10.0.0.20.
+**Status:** PARTIAL — login page audited across all 7 themes; authenticated pages blocked by missing credentials.
+
+### What I did
+- Used playwright-cli (msedge backend; Chrome not installed) to drive a real browser against the deployed instance.
+- Switched themes via `localStorage.setItem('pf-theme', ...)` + reload — this works because `ThemeContext` reads `pf-theme` on boot.
+- Captured login-page screenshots for all 7 themes (saved under `.squad/agents/newt/screenshots-2026-06-02/`).
+- Inspected computed styles on `body`, `h2`, dialog wrapper to verify per-theme fonts, backgrounds, fill colors.
+- Probed `/api/setup/status`, `/api/version` to confirm deployment is live + non-virgin.
+
+### Findings (filed as GitHub issues)
+- **#467** (medium) — Login page wraps LoginModal/RegisterModal in a `bg-black/50 backdrop-blur-xs` overlay. On `/login` there is no underlying app content to dim, so the backdrop just paints the viewport gray. Especially damaging on Light theme where the proper body bg `#f5f7fa` reads as `#808080`-ish gray, looking like a disabled state.
+- **#468** (medium) — `/printfarmer-logo.svg` is an `<img>`, not inline SVG, so CSS cannot recolor it. Logo is hardcoded blue across all themes. Clashes hard with Matrix (green), RatOS (green), Voron (red), Farm (orange). Acceptable on Dark, Blueprint, Light by coincidence.
+- **#469** (blocker) — Could not audit authenticated pages (dashboard pills, sidebar nav, settings, slicer, queue, admin, modals). No QA credentials. `admin/password` and `admin/Admin123!` rejected; `/api/auth/register` returns 400 so could not self-provision.
+
+### Positive signals
+- Each theme genuinely has its own typeface (verified via computed `font-family`): Inter, Nunito Sans, JetBrains Mono, DM Mono, Rajdhani, Chakra Petch, Merriweather Sans. Typography part of the design system is working.
+- Body backgrounds per theme are correctly distinct: dark `#08101f`, light `#f5f7fa`, matrix pure black, blueprint navy `#0c1a2e`, ratos `#080a08`, voron `#090909`, farm warm brown `#24150c`.
+- Focus states on inputs use the theme accent color (teal on light, red on voron, etc.) — accent system working.
+- Matrix theme heading text-shadow (phosphor glow) is intentional and looks correct.
+
+### Learnings
+- **`pf-theme` localStorage key is the entry point for non-authenticated theme switching.** Useful for QA: you can audit login pages across all themes without a session.
+- **Logo strategy** (inline SVG with `currentColor` vs static `.svg` file) determines whether the brand mark can theme. PrintFarmer currently uses static `.svg`. Inline-SVG-component is the project's MdiIcons pattern and should be applied to the logo too.
+- **Modal pattern on routes that ARE the app** (login route, setup wizard route) introduces a 50%-opacity backdrop over nothing — UX anti-pattern. Either route-aware backdrop, or extract card body to a non-modal component.
+- **Heading "SIGN IN" purple-tint screenshot artifact** I initially saw is NOT a real bug — it's subpixel rendering bleeding the adjacent blue logo into the leading letters. Confirmed by inspecting computed styles (solid `rgb(232,238,248)` fill, no gradient, no text-shadow). Resolving #468 (themed logo) will also cure this perceptual artifact.
+
+### Files
+- Screenshots: `.squad/agents/newt/screenshots-2026-06-02/login-{theme}.png` and `login-focus-{theme}.png`.
+- Issues: #467 (backdrop), #468 (logo), #469 (credentials blocker — needed to finish audit).
+
