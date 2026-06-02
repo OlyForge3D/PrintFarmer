@@ -35,17 +35,28 @@ interface StatsCardProps {
   title: string;
   value: number;
   icon: React.ComponentType<{ className?: string }>;
-  color: 'blue' | 'green' | 'yellow' | 'gray';
+  color: 'total' | 'online' | 'printing' | 'paused' | 'gray';
   /** Optional link — wraps the card in a clickable link */
   linkTo?: string;
 }
 
 function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) {
-  const colorClasses: Record<string, string> = {
-    blue: 'bg-pf-loading text-pf-text-primary',
-    green: 'bg-pf-status-online-bg text-pf-status-online-text',
-    yellow: 'bg-pf-warning text-pf-text-primary',
-    gray: 'bg-pf-border-medium text-pf-text-secondary',
+  const isActive = value > 0;
+  const inactiveClasses = 'bg-pf-status-idle-bg text-pf-status-idle-text border border-pf-status-idle-border';
+  const colorClasses: Record<StatsCardProps['color'], string> = {
+    total: isActive
+      ? 'bg-pf-success-bg text-pf-success border border-pf-success'
+      : inactiveClasses,
+    online: isActive
+      ? 'bg-pf-status-online-bg text-pf-status-online-text border border-pf-status-online-border'
+      : inactiveClasses,
+    printing: isActive
+      ? 'bg-pf-status-printing-bg text-pf-status-printing-text border border-pf-status-printing-border'
+      : inactiveClasses,
+    paused: isActive
+      ? 'bg-pf-status-paused-bg text-pf-status-paused-text border border-pf-status-paused-border'
+      : inactiveClasses,
+    gray: 'bg-pf-bg-2 text-pf-text-secondary border border-pf-border',
   };
 
   const card = (
@@ -100,10 +111,10 @@ export const PrinterDashboard: React.FC = () => {
     >
       {/* Stats Cards */}
       <div data-tour="stats-cards" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
-        <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
-        <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
-        <StatsCard title="Paused" value={stats.paused} color="yellow" icon={PauseIcon} />
+        <StatsCard title="Total Printers" value={stats.total} color="total" icon={PrinterIcon} />
+        <StatsCard title="Online" value={stats.online} color="online" icon={CheckCircleIcon} />
+        <StatsCard title="Printing" value={stats.printing} color="printing" icon={PlayIcon} />
+        <StatsCard title="Paused" value={stats.paused} color="paused" icon={PauseIcon} />
         <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
         <StatsCard
           title="In Maintenance"

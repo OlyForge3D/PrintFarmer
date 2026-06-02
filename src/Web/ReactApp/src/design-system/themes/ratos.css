@@ -72,14 +72,14 @@
   --pf-status-offline-border: #9f1239;
 
   /* --- Status: Printing ----------------------------------------------------- */
-  --pf-status-printing-bg:     #0b2d1d;
-  --pf-status-printing-text:   #6ee7b7;
-  --pf-status-printing-border: #10b981;
+  --pf-status-printing-bg:     #0f3418;
+  --pf-status-printing-text:   #d9ffe5;
+  --pf-status-printing-border: #3ddc84;
 
   /* --- Status: Paused ------------------------------------------------------- */
-  --pf-status-paused-bg:     #362c07;
-  --pf-status-paused-text:   #fde047;
-  --pf-status-paused-border: #ca8a04;
+  --pf-status-paused-bg:     #102a16;
+  --pf-status-paused-text:   #c8facc;
+  --pf-status-paused-border: #2fb76a;
 
   /* --- Status: Error -------------------------------------------------------- */
   --pf-status-error-bg:     #36070f;

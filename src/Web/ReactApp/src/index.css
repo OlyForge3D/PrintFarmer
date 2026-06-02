@@ -51,6 +51,18 @@
   --color-pf-status-offline-bg: var(--pf-status-offline-bg);
   --color-pf-status-offline-text: var(--pf-status-offline-text);
   --color-pf-status-offline-border: var(--pf-status-offline-border);
+  --color-pf-status-printing-bg: var(--pf-status-printing-bg);
+  --color-pf-status-printing-text: var(--pf-status-printing-text);
+  --color-pf-status-printing-border: var(--pf-status-printing-border);
+  --color-pf-status-paused-bg: var(--pf-status-paused-bg);
+  --color-pf-status-paused-text: var(--pf-status-paused-text);
+  --color-pf-status-paused-border: var(--pf-status-paused-border);
+  --color-pf-status-error-bg: var(--pf-status-error-bg);
+  --color-pf-status-error-text: var(--pf-status-error-text);
+  --color-pf-status-error-border: var(--pf-status-error-border);
+  --color-pf-status-idle-bg: var(--pf-status-idle-bg);
+  --color-pf-status-idle-text: var(--pf-status-idle-text);
+  --color-pf-status-idle-border: var(--pf-status-idle-border);
 
   /* Error and warning */
   --color-pf-error: var(--pf-error);
