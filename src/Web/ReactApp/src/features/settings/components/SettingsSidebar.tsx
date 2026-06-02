@@ -12,6 +12,7 @@ import {
   DatabaseIcon,
   UsersIcon,
   ChevronDownIcon,
+  ServerIcon,
 } from '@/common/components/icons/MdiIcons';
 import type { SettingsCategory } from '@/features/settings/types';
 
@@ -23,6 +24,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   hardware: <WrenchIcon className="w-5 h-5" />,
   notifications: <BellIcon className="w-5 h-5" />,
   integrations: <NetworkIcon className="w-5 h-5" />,
+  system: <ServerIcon className="w-5 h-5" />,
   data: <DatabaseIcon className="w-5 h-5" />,
   users: <UsersIcon className="w-5 h-5" />,
 };
