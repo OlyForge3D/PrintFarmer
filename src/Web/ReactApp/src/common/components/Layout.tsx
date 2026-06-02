@@ -4,7 +4,6 @@ import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirm
 import { TasksBadge } from '@/features/tasks';
 import { NotificationBell } from '@/common/components/NotificationBell';
 import { InstallBanner } from '@/common/components/InstallBanner';
-import { useTheme, Theme } from '@/contexts/ThemeContext';
 import { Button } from '@/common/components/ui';
 import { 
   HomeIcon,
@@ -22,7 +21,6 @@ import {
   HistoryIcon,
   WrenchIcon,
   TrendingUpIcon,
-  CheckIcon,
   AlertIcon,
   ClipboardListIcon,
   PlayIcon,
@@ -171,7 +169,7 @@ export function Layout() {
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const { isSlicerAvailable } = useSlicer();
   const { data: capabilities } = useSystemCapabilities();
-  const { theme, setTheme } = useTheme();
+
   const navigate = useNavigate();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const nfcPairingSession = useNfcPairingSession();
@@ -547,38 +545,6 @@ export function Layout() {
                       </>
                     )}
 
-                    {/* Theme Selection - available to all users */}
-                    <div className="border-t border-pf-border mt-1 pt-1">
-                      <div className="px-4 py-2 text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
-                        Theme
-                      </div>
-                      {([
-                        { value: 'dark' as Theme, label: 'Mission Control', desc: 'Cool slate-navy with precision-teal' },
-                        { value: 'light' as Theme, label: 'Workshop Daylight', desc: 'Clean, high-contrast light theme' },
-                        { value: 'matrix' as Theme, label: 'Terminal', desc: 'Phosphor-green CRT aesthetic' },
-                        { value: 'blueprint' as Theme, label: 'Schematic', desc: 'Cyanotype drafting aesthetic' },
-                        { value: 'ratos' as Theme, label: 'RatOS', desc: 'Black and green firmware aesthetic' },
-                        { value: 'voron' as Theme, label: 'Voron', desc: 'Red-on-black precision engineering' },
-                        { value: 'farm' as Theme, label: 'Farm', desc: 'Warm autumn harvest colors' },
-                      ]).map((t) => (
-                        <Button
-                          key={t.value}
-                          variant="subtle"
-                          onClick={() => setTheme(t.value)}
-                          className={`w-full text-left px-4 py-2 text-sm hover:bg-pf-bg-2 flex items-center gap-2 justify-start ${
-                            theme === t.value ? 'text-pf-accent' : 'text-pf-text-primary'
-                          }`}
-                        >
-                          <span className="flex-1">
-                            <span className="block">{t.label}</span>
-                            <span className="block text-xs text-pf-text-secondary">{t.desc}</span>
-                          </span>
-                          {theme === t.value && (
-                            <CheckIcon className="h-4 w-4 text-pf-accent shrink-0" />
-                          )}
-                        </Button>
-                      ))}
-                    </div>
                   </div>
                 </div>
               )}
