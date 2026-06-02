@@ -1,14 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net;
+using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -147,7 +151,101 @@ public class PrintablesImportServiceTests
             .WithMessage("*HTTP 500*");
     }
 
-    // ── PrintablesImportService.PreviewAsync ──────────────────────────────────
+    // ── PrintablesImportService.ImportAsync ───────────────────────────────────
+
+    [Fact]
+    public async Task ImportAsync_NullFileIds_ImportsAllFiles()
+    {
+        PrintablesGraphQLClient client = new(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
+        Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
+        List<string> uploadedFileNames = [];
+        int uploadIndex = 0;
+
+        _ = modelServiceMock
+            .Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IFormFile file, CancellationToken _) =>
+            {
+                uploadedFileNames.Add(file.FileName);
+                uploadIndex++;
+                return new Model3DUploadResultDto
+                {
+                    Id = Guid.Parse($"00000000-0000-0000-0000-{uploadIndex:000000000000}"),
+                    Name = file.FileName,
+                    FileName = file.FileName,
+                    FileSize = file.Length,
+                    FileType = Path.GetExtension(file.FileName).TrimStart('.'),
+                    UploadedAt = DateTime.UtcNow,
+                    Url = $"/api/3d-models/file/{uploadIndex}",
+                };
+            });
+        _ = modelServiceMock
+            .Setup(s => s.SetAttributionAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        PrintablesImportService service = new(client, modelServiceMock.Object, Mock.Of<ILogger<PrintablesImportService>>());
+
+        IReadOnlyList<Model3DUploadResultDto> result = await service.ImportAsync("https://www.printables.com/model/42-awesome-bracket", null, CancellationToken.None);
+
+        _ = result.Should().HaveCount(2);
+        _ = uploadedFileNames.Should().Equal("bracket_v1.stl", "bracket_v2.stl");
+        modelServiceMock.Verify(s => s.SetAttributionAsync(It.IsAny<Guid>(), "https://www.printables.com/model/42-awesome-bracket", "maker_jane", "CC BY 4.0", It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ImportAsync_SelectedFileIds_ImportsOnlyMatchingFiles()
+    {
+        PrintablesGraphQLClient client = new(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
+        Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
+        List<string> uploadedFileNames = [];
+
+        _ = modelServiceMock
+            .Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IFormFile file, CancellationToken _) =>
+            {
+                uploadedFileNames.Add(file.FileName);
+                return new Model3DUploadResultDto
+                {
+                    Id = Guid.NewGuid(),
+                    Name = file.FileName,
+                    FileName = file.FileName,
+                    FileSize = file.Length,
+                    FileType = Path.GetExtension(file.FileName).TrimStart('.'),
+                    UploadedAt = DateTime.UtcNow,
+                    Url = "/api/3d-models/file/test",
+                };
+            });
+        _ = modelServiceMock
+            .Setup(s => s.SetAttributionAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        PrintablesImportService service = new(client, modelServiceMock.Object, Mock.Of<ILogger<PrintablesImportService>>());
+
+        IReadOnlyList<Model3DUploadResultDto> result = await service.ImportAsync(
+            "https://www.printables.com/model/42-awesome-bracket",
+            ["s2"],
+            CancellationToken.None);
+
+        _ = result.Should().HaveCount(1);
+        _ = uploadedFileNames.Should().Equal("bracket_v2.stl");
+        modelServiceMock.Verify(s => s.SetAttributionAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ImportAsync_UnknownFileIds_ThrowsArgumentException()
+    {
+        PrintablesGraphQLClient client = new(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
+        Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
+        PrintablesImportService service = new(client, modelServiceMock.Object, Mock.Of<ILogger<PrintablesImportService>>());
+
+        Func<Task> act = () => service.ImportAsync(
+            "https://www.printables.com/model/42-awesome-bracket",
+            ["missing-file"],
+            CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*missing-file*");
+        modelServiceMock.Verify(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 
     // ── Controller: preview endpoint ──────────────────────────────────────────
 
@@ -224,28 +322,36 @@ public class PrintablesImportServiceTests
     }
 
     [Fact]
-    public async Task ImportAsync_HappyPath_Returns200WithDto()
+    public async Task ImportAsync_HappyPath_Returns200WithUploadedModels()
     {
-        PrintablesPreviewDto dto = new(
-            ModelId: "42",
-            Name: "Awesome Bracket",
-            Creator: "maker_jane",
-            License: "CC BY 4.0",
-            ThumbnailUrl: "https://media.printables.com/thumb.jpg",
-            SourceUrl: "https://www.printables.com/model/42-awesome-bracket",
-            Files: new List<PrintablesFileEntryDto> { new("s1", "bracket.stl", 1024) });
+        IReadOnlyList<Model3DUploadResultDto> dto =
+        [
+            new Model3DUploadResultDto
+            {
+                Id = Guid.Parse("00000000-0000-0000-0000-000000000042"),
+                Name = "Awesome Bracket",
+                FileName = "bracket.stl",
+                FileSize = 1024,
+                FileType = "stl",
+                UploadedAt = DateTime.UtcNow,
+                Url = "/api/3d-models/file/42",
+            },
+        ];
 
         Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
         _ = svcMock
-            .Setup(s => s.PreviewAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(dto);
 
         PrintablesImportController controller = BuildController(svcMock);
-        IActionResult result = await controller.ImportAsync(new PrintablesImportRequest("https://www.printables.com/model/42-awesome-bracket"), CancellationToken.None);
+        IActionResult result = await controller.ImportAsync(
+            new PrintablesImportRequest { Url = "https://www.printables.com/model/42-awesome-bracket", FileIds = ["s1"] },
+            CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
-        PrintablesPreviewDto returned = Assert.IsType<PrintablesPreviewDto>(ok.Value);
-        _ = returned.ModelId.Should().Be("42");
+        IReadOnlyList<Model3DUploadResultDto> returned = Assert.IsAssignableFrom<IReadOnlyList<Model3DUploadResultDto>>(ok.Value);
+        _ = returned.Should().HaveCount(1);
+        _ = returned[0].Id.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000042"));
     }
 
     [Fact]
@@ -254,7 +360,7 @@ public class PrintablesImportServiceTests
         Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
         PrintablesImportController controller = BuildController(svcMock);
 
-        IActionResult result = await controller.ImportAsync(new PrintablesImportRequest(""), CancellationToken.None);
+        IActionResult result = await controller.ImportAsync(new PrintablesImportRequest { Url = string.Empty }, CancellationToken.None);
 
         _ = Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -265,10 +371,84 @@ public class PrintablesImportServiceTests
         Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
         PrintablesImportController controller = BuildController(svcMock);
 
+        _ = svcMock
+            .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Not a Printables URL."));
+
         IActionResult result = await controller.ImportAsync(
-            new PrintablesImportRequest("https://thingiverse.com/thing:1"),
+            new PrintablesImportRequest { Url = "https://thingiverse.com/thing:1" },
             CancellationToken.None);
 
         _ = Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    private sealed class PrintablesImportTestHttpMessageHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                string body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                using JsonDocument document = JsonDocument.Parse(body);
+                JsonElement root = document.RootElement;
+                string? operationName = root.TryGetProperty("operationName", out JsonElement operationNameEl) && operationNameEl.ValueKind == JsonValueKind.String
+                    ? operationNameEl.GetString()
+                    : null;
+
+                if (string.Equals(operationName, "GetDownloadLink", StringComparison.Ordinal))
+                {
+                    string fileId = root.GetProperty("variables").GetProperty("id").GetString()!;
+                    string link = $"https://downloads.printables.com/{fileId}.stl";
+                    return CreateJsonResponse($$"""
+                    {
+                      "data": {
+                        "getDownloadLink": {
+                          "ok": true,
+                          "errors": [],
+                          "output": {
+                            "link": "{{link}}"
+                          }
+                        }
+                      }
+                    }
+                    """);
+                }
+
+                return CreateJsonResponse("""
+                {
+                  "data": {
+                    "print": {
+                      "id": "42",
+                      "name": "Awesome Bracket",
+                      "user": { "handle": "maker_jane" },
+                      "license": { "name": "CC BY 4.0" },
+                      "image": { "filePath": "https://media.printables.com/thumb.jpg" },
+                      "stls": [
+                        { "id": "s1", "name": "bracket_v1.stl", "fileSize": 100 },
+                        { "id": "s2", "name": "bracket_v2.stl", "fileSize": 200 }
+                      ]
+                    }
+                  }
+                }
+                """);
+            }
+
+            if (request.Method == HttpMethod.Get)
+            {
+                string fileId = request.RequestUri!.Segments.Last().Replace(".stl", string.Empty, StringComparison.OrdinalIgnoreCase);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(Encoding.UTF8.GetBytes($"solid {fileId}")),
+                };
+            }
+
+            throw new InvalidOperationException($"Unhandled request: {request.Method} {request.RequestUri}");
+        }
+
+        private static HttpResponseMessage CreateJsonResponse(string json) =>
+            new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
     }
 }

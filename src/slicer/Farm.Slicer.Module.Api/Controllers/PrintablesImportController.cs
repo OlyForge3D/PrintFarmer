@@ -67,17 +67,17 @@ public sealed class PrintablesImportController(
     }
 
     /// <summary>
-    /// Imports a Printables model URL by validating it and fetching metadata for the selected file workflow.
+    /// Imports one or more files from a Printables model into the local 3D model library.
     /// </summary>
-    /// <param name="request">Import request containing the Printables URL.</param>
+    /// <param name="request">Import request containing the Printables URL and optional selected file IDs.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("/api/3d-models/import/printables")]
-    [ProducesResponseType(typeof(PrintablesPreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<Model3DUploadResultDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> ImportAsync([FromBody] PrintablesImportRequest? request, CancellationToken ct)
     {
-        string? url = request?.Url;
+        string? url = request?.Url?.Trim();
         if (string.IsNullOrWhiteSpace(url))
         {
             return BadRequest("url is required.");
@@ -85,13 +85,12 @@ public sealed class PrintablesImportController(
 
         try
         {
-            _ = PrintablesImportService.ParseModelId(url);
-            PrintablesPreviewDto preview = await _importService.PreviewAsync(url, ct);
-            return Ok(preview);
+            IReadOnlyList<Model3DUploadResultDto> importedModels = await _importService.ImportAsync(url, request?.FileIds, ct);
+            return Ok(importedModels);
         }
         catch (ArgumentException ex)
         {
-            _logger.LogInformation("Bad Printables import URL supplied: {Url} — {Message}", url, ex.Message);
+            _logger.LogInformation("Bad Printables import request supplied for {Url}: {Message}", url, ex.Message);
             return BadRequest(ex.Message);
         }
         catch (PrintablesApiException ex)

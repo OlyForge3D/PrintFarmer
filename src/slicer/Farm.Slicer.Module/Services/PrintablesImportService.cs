@@ -1,4 +1,5 @@
 ﻿using Farm.Slicer.Module.Dtos;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Services;
@@ -45,6 +46,49 @@ public sealed class PrintablesImportService(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Model3DUploadResultDto>> ImportAsync(string printablesUrl, IReadOnlyCollection<string>? fileIds, CancellationToken ct)
+    {
+        string modelId = ParseModelId(printablesUrl);
+
+        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", modelId, printablesUrl);
+
+        PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, printablesUrl, ct);
+        List<PrintablesFileEntryDto> selectedFiles = SelectFilesForImport(preview, fileIds);
+        List<Model3DUploadResultDto> importedModels = new(selectedFiles.Count);
+
+        foreach (PrintablesFileEntryDto selectedFile in selectedFiles)
+        {
+            string downloadUrl = await _graphQlClient.GetStlDownloadUrlAsync(modelId, selectedFile.Id, ct);
+            byte[] fileBytes = await _graphQlClient.DownloadFileAsync(downloadUrl, ct);
+
+            using MemoryStream stream = new(fileBytes, writable: false);
+            FormFile formFile = new(stream, 0, stream.Length, "file", selectedFile.Name)
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "application/octet-stream",
+            };
+
+            Model3DUploadResultDto uploadedModel = await _model3DFileService.UploadModelAsync(formFile, ct);
+            await _model3DFileService.SetAttributionAsync(
+                uploadedModel.Id,
+                sourceUrl: printablesUrl,
+                sourceCreator: preview.Creator,
+                sourceLicense: preview.License,
+                importedAt: DateTime.UtcNow,
+                ct);
+
+            importedModels.Add(uploadedModel);
+        }
+
+        _logger.LogInformation(
+            "Imported {ImportedCount} Printables file(s) from model {ModelId}",
+            importedModels.Count,
+            modelId);
+
+        return importedModels;
+    }
+
+    /// <inheritdoc />
     public async Task PersistAttributionAsync(Guid modelId, string printablesUrl, CancellationToken ct)
     {
         string parsedModelId = ParseModelId(printablesUrl);
@@ -66,6 +110,38 @@ public sealed class PrintablesImportService(
         _logger.LogInformation(
             "Attribution persisted for model record {FileId}: creator={Creator}, license={License}",
             modelId, preview.Creator, preview.License);
+    }
+
+    private static List<PrintablesFileEntryDto> SelectFilesForImport(PrintablesPreviewDto preview, IReadOnlyCollection<string>? fileIds)
+    {
+        if (preview.Files.Count == 0)
+        {
+            throw new ArgumentException("The selected Printables model has no downloadable STL files.", nameof(preview));
+        }
+
+        string[] normalizedFileIds = fileIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+
+        if (normalizedFileIds.Length == 0)
+        {
+            return [.. preview.Files];
+        }
+
+        HashSet<string> selectedIdSet = normalizedFileIds.ToHashSet(StringComparer.Ordinal);
+        HashSet<string> availableIdSet = preview.Files.Select(file => file.Id).ToHashSet(StringComparer.Ordinal);
+        string[] missingIds = normalizedFileIds.Where(id => !availableIdSet.Contains(id)).ToArray();
+
+        if (missingIds.Length > 0)
+        {
+            throw new ArgumentException(
+                $"The selected Printables file IDs were not found in the model: {string.Join(", ", missingIds)}.",
+                nameof(fileIds));
+        }
+
+        return [.. preview.Files.Where(file => selectedIdSet.Contains(file.Id))];
     }
 
     /// <summary>

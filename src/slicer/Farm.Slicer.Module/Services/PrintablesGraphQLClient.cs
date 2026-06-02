@@ -17,6 +17,8 @@ namespace Farm.Slicer.Module.Services;
 public sealed class PrintablesGraphQLClient
 {
     private const string GraphQlEndpoint = "https://api.printables.com/graphql/";
+    private const string DownloadSource = "model_detail";
+    private const string StlDownloadFileType = "stl";
 
     // JSON options reused across requests (camelCase, ignore null).
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
@@ -42,33 +44,130 @@ public sealed class PrintablesGraphQLClient
     /// </exception>
     public async Task<PrintablesPreviewDto> FetchPreviewAsync(string modelId, string sourceUrl, CancellationToken ct)
     {
-        var payload = new
-        {
-            query = """
-                query PrintProfile($id: ID!) {
-                  print(id: $id) {
-                    id
-                    name
-                    user {
-                      handle
+        using JsonDocument doc = await SendGraphQlAsync(
+            new
+            {
+                query = """
+                    query PrintProfile($id: ID!) {
+                      print(id: $id) {
+                        id
+                        name
+                        user {
+                          handle
+                        }
+                        license {
+                          name
+                        }
+                        image {
+                          filePath
+                        }
+                        stls {
+                          id
+                          name
+                          fileSize
+                        }
+                      }
                     }
-                    license {
-                      name
-                    }
-                    image {
-                      filePath
-                    }
-                    stls {
-                      id
-                      name
-                      fileSize
-                    }
-                  }
-                }
-                """,
-            variables = new { id = modelId },
-        };
+                    """,
+                variables = new { id = modelId },
+            },
+            ct);
 
+        JsonElement root = doc.RootElement;
+
+        if (!root.TryGetProperty("data", out JsonElement dataEl) ||
+            !dataEl.TryGetProperty("print", out JsonElement printEl) ||
+            printEl.ValueKind == JsonValueKind.Null)
+        {
+            throw new PrintablesApiException("Model not found on Printables (it may be private or deleted).");
+        }
+
+        return MapToPreviewDto(printEl, sourceUrl);
+    }
+
+    /// <summary>
+    /// Resolves a temporary direct download URL for a selected STL file.
+    /// </summary>
+    /// <param name="modelId">Numeric Printables model ID.</param>
+    /// <param name="fileId">Selected Printables file ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The temporary CDN download URL.</returns>
+    public async Task<string> GetStlDownloadUrlAsync(string modelId, string fileId, CancellationToken ct)
+    {
+        using JsonDocument doc = await SendGraphQlAsync(
+            new
+            {
+                operationName = "GetDownloadLink",
+                query = """
+                    mutation GetDownloadLink($id: ID!, $modelId: ID!, $fileType: DownloadFileTypeEnum!, $source: DownloadSourceEnum!) {
+                      getDownloadLink(id: $id, printId: $modelId, fileType: $fileType, source: $source) {
+                        ok
+                        errors {
+                          field
+                          messages
+                        }
+                        output {
+                          link
+                        }
+                      }
+                    }
+                    """,
+                variables = new
+                {
+                    id = fileId,
+                    modelId,
+                    fileType = StlDownloadFileType,
+                    source = DownloadSource,
+                },
+            },
+            ct);
+
+        JsonElement root = doc.RootElement;
+        if (!root.TryGetProperty("data", out JsonElement dataEl) ||
+            !dataEl.TryGetProperty("getDownloadLink", out JsonElement downloadEl) ||
+            downloadEl.ValueKind == JsonValueKind.Null)
+        {
+            throw new PrintablesApiException($"Printables did not return a download link for file '{fileId}'.");
+        }
+
+        bool isOk = downloadEl.TryGetProperty("ok", out JsonElement okEl) && okEl.ValueKind is JsonValueKind.True or JsonValueKind.False && okEl.GetBoolean();
+        if (!isOk)
+        {
+            string? message = TryGetDownloadErrorMessage(downloadEl);
+            throw new PrintablesApiException(message ?? $"Printables rejected download-link resolution for file '{fileId}'.");
+        }
+
+        if (!downloadEl.TryGetProperty("output", out JsonElement outputEl) ||
+            outputEl.ValueKind == JsonValueKind.Null ||
+            !outputEl.TryGetProperty("link", out JsonElement linkEl) ||
+            linkEl.ValueKind != JsonValueKind.String)
+        {
+            throw new PrintablesApiException($"Printables did not return a usable download link for file '{fileId}'.");
+        }
+
+        return linkEl.GetString()!;
+    }
+
+    /// <summary>
+    /// Downloads the selected Printables file from the temporary CDN URL.
+    /// </summary>
+    /// <param name="downloadUrl">Resolved temporary CDN URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Raw file bytes.</returns>
+    public async Task<byte[]> DownloadFileAsync(string downloadUrl, CancellationToken ct)
+    {
+        try
+        {
+            return await _http.GetByteArrayAsync(downloadUrl, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new PrintablesApiException($"Failed to download Printables file from '{downloadUrl}'.", ex);
+        }
+    }
+
+    private async Task<JsonDocument> SendGraphQlAsync(object payload, CancellationToken ct)
+    {
         HttpResponseMessage response;
 
         try
@@ -85,26 +184,43 @@ public sealed class PrintablesGraphQLClient
             throw new PrintablesApiException($"Printables API returned HTTP {(int)response.StatusCode}.");
         }
 
-        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         JsonElement root = doc.RootElement;
 
-        // Surface GraphQL-level errors first.
         if (root.TryGetProperty("errors", out JsonElement errorsEl) && errorsEl.ValueKind == JsonValueKind.Array)
         {
             string firstError = errorsEl[0].TryGetProperty("message", out JsonElement msg)
                 ? msg.GetString() ?? "Unknown error"
                 : "Unknown GraphQL error";
+            doc.Dispose();
             throw new PrintablesApiException($"Printables GraphQL error: {firstError}");
         }
 
-        if (!root.TryGetProperty("data", out JsonElement dataEl) ||
-            !dataEl.TryGetProperty("print", out JsonElement printEl) ||
-            printEl.ValueKind == JsonValueKind.Null)
+        return doc;
+    }
+
+    private static string? TryGetDownloadErrorMessage(JsonElement downloadEl)
+    {
+        if (!downloadEl.TryGetProperty("errors", out JsonElement errorsEl) || errorsEl.ValueKind != JsonValueKind.Array || errorsEl.GetArrayLength() == 0)
         {
-            throw new PrintablesApiException("Model not found on Printables (it may be private or deleted).");
+            return null;
         }
 
-        return MapToPreviewDto(printEl, sourceUrl);
+        JsonElement firstError = errorsEl[0];
+        if (firstError.TryGetProperty("messages", out JsonElement messagesEl) && messagesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement messageEl in messagesEl.EnumerateArray())
+            {
+                if (messageEl.ValueKind == JsonValueKind.String)
+                {
+                    return messageEl.GetString();
+                }
+            }
+        }
+
+        return firstError.TryGetProperty("field", out JsonElement fieldEl) && fieldEl.ValueKind == JsonValueKind.String
+            ? $"Failed to resolve Printables download link for field '{fieldEl.GetString()}'."
+            : null;
     }
 
     /// <summary>Maps the raw <c>print</c> node from the GraphQL response to a <see cref="PrintablesPreviewDto"/>.</summary>
