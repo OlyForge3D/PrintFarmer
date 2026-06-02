@@ -321,6 +321,7 @@ export function SystemPulsePill() {
   }
 
   if (error || !data) {
+    const errorTone = getHealthTone(SYSTEM_SERVICE_HEALTH.Degraded);
     return (
       <div className="relative">
         <Button
@@ -328,12 +329,15 @@ export function SystemPulsePill() {
           variant="subtle"
           size="sm"
           disabled
-          title="System status unavailable"
-          className="h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] border-pf-border text-pf-text-tertiary opacity-60"
-          aria-label="System status unavailable"
+          title="System status degraded — unable to reach health endpoint"
+          className={clsx(
+            'h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em]',
+            errorTone.buttonClassName,
+          )}
+          aria-label="System status degraded"
         >
           <span className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-pf-text-tertiary opacity-50" aria-hidden="true" />
+            <span className={clsx('h-2.5 w-2.5 rounded-full', errorTone.dotClassName)} aria-hidden="true" />
             <span>System</span>
           </span>
         </Button>

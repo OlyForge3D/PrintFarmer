@@ -20,6 +20,7 @@ import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
+import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
@@ -51,9 +52,7 @@ const SINGLE_PAGE_CONTENT: Record<string, React.ReactNode> = {
   ),
   notifications: (
     <SettingsSection title="Notifications" description="Configure alerts, email, and push notifications.">
-      <div className="py-8 text-center text-pf-text-secondary">
-        <p className="text-sm">Notification settings coming soon.</p>
-      </div>
+      <NotificationPreferencesPage embedded />
     </SettingsSection>
   ),
   integrations: (

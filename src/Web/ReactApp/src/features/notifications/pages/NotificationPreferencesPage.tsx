@@ -41,7 +41,7 @@ const FREQUENCY_OPTIONS = [
   { value: NotificationFrequency.Never, label: 'Disabled' },
 ];
 
-export function NotificationPreferencesPage() {
+export function NotificationPreferencesPage({ embedded = false }: { embedded?: boolean }) {
   const { data: preferences, isLoading, error } = useNotificationPreferences();
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
@@ -98,40 +98,43 @@ export function NotificationPreferencesPage() {
   };
 
   if (isLoading) {
+    const loadingContent = (
+      <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
+        <Spinner size="lg" />
+      </div>
+    );
+    if (embedded) return loadingContent;
     return (
       <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
-          <Spinner size="lg" />
-        </div>
+        {loadingContent}
       </PageTemplate>
     );
   }
 
   if (error) {
+    const errorContent = <Alert variant="error">Failed to load notification preferences</Alert>;
+    if (embedded) return errorContent;
     return (
       <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        <Alert variant="error">Failed to load notification preferences</Alert>
+        {errorContent}
       </PageTemplate>
     );
   }
 
-  return (
-    <PageTemplate
-      title="Notification Preferences"
-      icon={BellIcon}
-      actions={
-        <Button
-          variant="primary"
-          onClick={handleSave}
-          disabled={!isDirty || updateMutation.isPending}
-        >
-          {updateMutation.isPending ? 'Saving...' : 'Save Preferences'}
-        </Button>
-      }
+  const saveButton = (
+    <Button
+      variant="primary"
+      onClick={handleSave}
+      disabled={!isDirty || updateMutation.isPending}
     >
-      <div className="space-y-6 max-w-4xl">
-        {/* Channel Toggles */}
-        <Card>
+      {updateMutation.isPending ? 'Saving...' : 'Save Preferences'}
+    </Button>
+  );
+
+  const content = (
+    <div className="space-y-6 max-w-4xl">
+      {/* Channel Toggles */}
+      <Card>
           <div className="p-4 border-b border-pf-border">
             <h2 className="text-lg font-semibold text-pf-text-primary">Delivery Channels</h2>
             <p className="text-sm text-pf-text-secondary mt-1">Choose how you receive notifications</p>
@@ -233,6 +236,24 @@ export function NotificationPreferencesPage() {
           </div>
         </Card>
       </div>
+    );
+
+  if (embedded) {
+    return (
+      <div>
+        {content}
+        <div className="mt-4 flex justify-end">{saveButton}</div>
+      </div>
+    );
+  }
+
+  return (
+    <PageTemplate
+      title="Notification Preferences"
+      icon={BellIcon}
+      actions={saveButton}
+    >
+      {content}
     </PageTemplate>
   );
 }
