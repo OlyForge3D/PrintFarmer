@@ -201,6 +201,40 @@ html[data-theme="blueprint"] body {
   font-family: 'DM Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
 }
 
+[data-theme="blueprint"] .dashboard-stat-icon-total.bg-pf-success-bg {
+  background-color: #0f2743;
+  color: #93c5fd;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.18);
+}
+
+[data-theme="blueprint"] .dashboard-stat-icon-online.bg-pf-status-online-bg {
+  background-color: #0d3033;
+  color: #99f6e4;
+  border-color: #0f766e;
+  box-shadow: 0 0 14px rgba(45, 212, 191, 0.16);
+}
+
+[data-theme="blueprint"] .dashboard-stat-icon-printing.bg-pf-status-printing-bg {
+  background-color: #082f49;
+  color: #7dd3fc;
+  border-color: #0284c7;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.20);
+}
+
+[data-theme="blueprint"] .dashboard-stat-icon-paused.bg-pf-status-paused-bg {
+  background-color: #422006;
+  color: #fcd34d;
+  border-color: #a16207;
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.18);
+}
+
+[data-theme="blueprint"] .dashboard-stat-icon-gray.bg-pf-bg-2 {
+  background-color: #1a2f4a;
+  color: #cbd5e1;
+  border-color: #4b6788;
+}
+
 /* Dotted technical underlines on plain links */
 [data-theme="blueprint"] a:not([class]) {
   text-decoration: dotted underline;
