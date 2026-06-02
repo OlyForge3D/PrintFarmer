@@ -678,7 +678,7 @@ describe('NewSliceJobPage', () => {
       // This is tested by verifying the page renders without error
     });
 
-    it('uses forceStl viewer URLs and preserves the 3mf file type for preselected library models', async () => {
+    it('preserves the raw 3mf viewer URL and file type for preselected library models', async () => {
       renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
 
       await waitFor(() => {
@@ -699,7 +699,7 @@ describe('NewSliceJobPage', () => {
 
         expect(selectedModel).toEqual(expect.objectContaining({
           url: expect.stringMatching(/\/3d-models\/file\/model-3d-1$/),
-          viewerUrl: expect.stringContaining('/3d-models/file/model-3d-1?forceStl=true'),
+          viewerUrl: expect.stringMatching(/\/3d-models\/file\/model-3d-1$/),
           fileType: '3mf',
         }));
       });

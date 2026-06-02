@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';

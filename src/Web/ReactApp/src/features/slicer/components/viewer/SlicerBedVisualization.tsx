@@ -13,6 +13,7 @@ import { FacePaintOverlay } from './FacePaintOverlay';
 import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
+import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
 
 // W4: Module-level constant to avoid creating new Set on every render
 const EMPTY_FACE_SET = new Set<number>();
@@ -967,6 +968,86 @@ function STLModel({
         <FaceSwatches geometry={geometry} onFaceClick={onLayFlatFaceClick} />
       )}
     </group>
+  );
+}
+
+function UrlModelViewer({
+  fileType,
+  url,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  selected = false,
+  outOfBounds = false,
+  layFlatMode = false,
+  draggable = false,
+  onClick,
+  onDragStart,
+  meshRef,
+  onSelectedMetrics,
+  onLayFlatFaceClick,
+}: {
+  fileType: LoadedModel['fileType'];
+  url: string;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+  selected?: boolean;
+  outOfBounds?: boolean;
+  layFlatMode?: boolean;
+  draggable?: boolean;
+  onClick?: () => void;
+  onDragStart?: (clientX: number, clientY: number) => void;
+  meshRef?: React.RefObject<THREE.Object3D | null>;
+  onSelectedMetrics?: (metrics: {
+    baseSize: [number, number, number];
+    currentSize: [number, number, number];
+    currentScale: [number, number, number];
+  }) => void;
+  onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+}) {
+  if (fileType === '3mf') {
+    return (
+      <ThreeMFViewer
+        url={url}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+        selected={selected}
+        outOfBounds={outOfBounds}
+        layFlatMode={layFlatMode}
+        draggable={draggable}
+        onClick={onClick}
+        onDragStart={onDragStart}
+        meshRef={meshRef}
+        onSelectedMetrics={onSelectedMetrics}
+        onLayFlatFaceClick={onLayFlatFaceClick}
+        renderSelectionBoundingBox={(geometry, isOutOfBounds) => (
+          <SelectionBoundingBox geometry={geometry} outOfBounds={isOutOfBounds} />
+        )}
+        renderFaceSwatches={(geometry, handleFaceClick) => (
+          <FaceSwatches geometry={geometry} onFaceClick={handleFaceClick} />
+        )}
+      />
+    );
+  }
+
+  return (
+    <STLModel
+      url={url}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      selected={selected}
+      outOfBounds={outOfBounds}
+      layFlatMode={layFlatMode}
+      draggable={draggable}
+      onClick={onClick}
+      onDragStart={onDragStart}
+      meshRef={meshRef}
+      onSelectedMetrics={onSelectedMetrics}
+      onLayFlatFaceClick={onLayFlatFaceClick}
+    />
   );
 }
 
@@ -2084,7 +2165,8 @@ function BedScene({
                       : undefined}
                   />
                 ) : (
-                  <STLModel
+                  <UrlModelViewer
+                    fileType={model.fileType}
                     url={model.viewerUrl ?? model.url}
                     position={displayPos}
                     rotation={model.rotation}

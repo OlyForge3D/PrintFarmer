@@ -42,4 +42,6 @@ Older entries (pre-2026-05-26) archived to history-archive.md for size managemen
 - 2026-06-02: Self-service profile routes need explicit navigation affordances; routing alone is not enough. A default Profile action plus Preferences quick links makes API Keys, Notifications, and Passkeys discoverable.
 - 2026-06-02: Brand assets that must adapt across themes should use inline SVG with `currentColor` so shared auth and layout surfaces inherit the active theme automatically.
 - 2026-06-02: Accent-filled controls cannot assume white foregrounds across the 7-theme system; shared `--pf-on-accent` and `--pf-on-danger` tokens need to drive badges, destructive actions, active settings nav, and selected theme chips.
+- 2026-06-02T15:20:56.358-07:00: Native slicer .3mf support now lives in `src/Web/ReactApp/src/features/slicer/utils/threemf-parser.ts` and `src/Web/ReactApp/src/features/slicer/components/ThreeMFViewer.tsx`, with `SlicerBedVisualization.tsx` routing `.stl` and `.3mf` through the same selection and transform flow.
+- 2026-06-02T15:20:56.358-07:00: PrintFarmer’s slicer scene is already Z-up, so BamBuddy’s Y/Z swap does not apply here; raw `/api/3d-models/file/{id}` URLs stay native for `.3mf`, and `?forceStl=true` is only a viewer-side fallback after parse failure.
 

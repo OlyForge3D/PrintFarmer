@@ -1,5 +1,4 @@
 const DEFAULT_MODEL_EXTENSION = 'stl';
-const FORCE_STL_QUERY = 'forceStl=true';
 const STL_COMPATIBLE_FORMAT = '3mf';
 
 export type SlicerViewerFileType = 'stl' | 'ply' | '3mf';
@@ -28,8 +27,8 @@ export function getSlicerViewerFileType(fileName?: string): SlicerViewerFileType
 export function buildSlicerViewerModelUrl(apiBase: string, modelId: string, fileName?: string): string {
   const modelUrl = `${apiBase}/3d-models/file/${modelId}`;
 
-  if (getModelFileExtension(fileName) === STL_COMPATIBLE_FORMAT) {
-    return `${modelUrl}?${FORCE_STL_QUERY}`;
+  if (fileName && getModelFileExtension(fileName) === STL_COMPATIBLE_FORMAT) {
+    return modelUrl;
   }
 
   return modelUrl;

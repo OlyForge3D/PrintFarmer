@@ -6,18 +6,7 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-
-/** Default extruder palette — matches common MMU/AMS color assignments */
-const DEFAULT_EXTRUDER_COLORS: THREE.Color[] = [
-  new THREE.Color('#ef4444'), // Extruder 1 — red
-  new THREE.Color('#3b82f6'), // Extruder 2 — blue
-  new THREE.Color('#22c55e'), // Extruder 3 — green
-  new THREE.Color('#eab308'), // Extruder 4 — yellow
-  new THREE.Color('#a855f7'), // Extruder 5 — purple
-  new THREE.Color('#f97316'), // Extruder 6 — orange
-  new THREE.Color('#06b6d4'), // Extruder 7 — cyan
-  new THREE.Color('#ec4899'), // Extruder 8 — pink
-];
+import { DEFAULT_EXTRUDER_COLORS } from '@/features/slicer/components/viewer/extruderColors';
 
 export interface ColorPaintOverlayProps {
   meshRef: React.RefObject<THREE.Object3D | null>;
