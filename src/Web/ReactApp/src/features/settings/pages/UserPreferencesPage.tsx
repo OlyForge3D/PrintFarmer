@@ -61,7 +61,7 @@ export function UserPreferencesPage() {
                 key={link.href}
                 type="button"
                 variant="subtle"
-                className="h-auto w-full items-start justify-start rounded-lg border border-pf-border px-4 py-3 text-left min-w-0"
+                className="h-auto w-full items-start justify-start rounded-lg border border-pf-border px-4 py-3 text-left min-w-0 whitespace-normal overflow-hidden"
                 iconLeft={link.icon}
                 onClick={() => navigate(link.href)}
               >

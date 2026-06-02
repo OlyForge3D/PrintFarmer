@@ -92,7 +92,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
         </>
       ) : (
         <>
-          {children && <span>{loading ? 'Please wait…' : children}</span>}
+          {children && <span className="min-w-0">{loading ? 'Please wait…' : children}</span>}
           {iconRight && <span className="flex items-center" aria-hidden>{iconRight}</span>}
         </>
       )}
