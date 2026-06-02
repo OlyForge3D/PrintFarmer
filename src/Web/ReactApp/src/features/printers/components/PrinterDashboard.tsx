@@ -53,7 +53,7 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
       <div className="p-5">
         <div className="flex items-center">
           <div className="shrink-0">
-            <div className={`p-3 rounded-md ${colorClasses[color]}`}>
+            <div className={`dashboard-stat-icon dashboard-stat-icon-${color} p-3 rounded-md ${colorClasses[color]}`}>
               <Icon className="h-6 w-6" />
             </div>
           </div>

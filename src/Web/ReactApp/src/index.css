@@ -338,6 +338,23 @@
   width: 100%;
 }
 
+[data-theme='matrix'] .dashboard-stat-icon {
+  background-color: var(--pf-bg-2);
+}
+
+[data-theme='matrix'] .dashboard-stat-icon-blue,
+[data-theme='matrix'] .dashboard-stat-icon-green {
+  color: var(--pf-success);
+}
+
+[data-theme='matrix'] .dashboard-stat-icon-yellow {
+  color: var(--pf-warning);
+}
+
+[data-theme='matrix'] .dashboard-stat-icon-gray {
+  color: var(--pf-text-light);
+}
+
 @layer base {
   html {
     @apply bg-pf-bg-0;
