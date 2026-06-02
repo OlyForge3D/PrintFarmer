@@ -13,7 +13,7 @@ import { Badge, Button } from '@/common/components/ui';
 import { formatFileSize } from '@/common/utils/stlFileUtils';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
-import type { SystemInfo } from '@/types/api';
+import type { SystemInfo, SystemServiceHealth } from '@/types/api';
 
 const EMPTY_VALUE = '—';
 const SYSTEM_INFO_QUERY_KEY = ['system-info'];
@@ -32,9 +32,8 @@ const SYSTEM_SERVICE_HEALTH = {
   Healthy: 'Healthy',
   Degraded: 'Degraded',
   Critical: 'Critical',
-} as const;
+} satisfies Record<SystemServiceHealth, SystemServiceHealth>;
 
-type SystemServiceHealth = (typeof SYSTEM_SERVICE_HEALTH)[keyof typeof SYSTEM_SERVICE_HEALTH];
 type HealthBadgeVariant = 'success' | 'warning' | 'error';
 
 interface HealthTone {
@@ -351,6 +350,7 @@ export function SystemPulsePill() {
           ref={panelRef}
           id={dialogId}
           role="dialog"
+          aria-modal="true"
           aria-labelledby={dialogTitleId}
           tabIndex={-1}
           className="absolute right-0 top-full z-50 mt-2 w-[22rem] overflow-hidden rounded-2xl border border-pf-border/80 bg-pf-bg-1/95 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-md"

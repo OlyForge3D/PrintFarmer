@@ -80,7 +80,7 @@ describe('SystemPulsePill', () => {
     const trigger = screen.getByRole('button', { name: /system/i });
     fireEvent.click(trigger);
 
-    expect(screen.getByRole('dialog', { name: /system pulse/i })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: /system pulse/i })).toHaveAttribute('aria-modal', 'true');
     expect(screen.getByText('CPU')).toBeInTheDocument();
     expect(screen.getByText('Memory')).toBeInTheDocument();
     expect(screen.getByText('Disk')).toBeInTheDocument();
