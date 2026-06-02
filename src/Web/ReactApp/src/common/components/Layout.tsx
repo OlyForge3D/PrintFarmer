@@ -488,7 +488,7 @@ export function Layout() {
                         <Button
                           type="button"
                           onClick={() => {
-                            navigate('/profile/api-keys');
+                            navigate('/preferences');
                             setUserMenuOpen(false);
                           }}
                           variant="subtle"
@@ -496,20 +496,7 @@ export function Layout() {
                           className="w-full justify-start!"
                           iconLeft={<SettingsIcon className="h-4 w-4" />}
                         >
-                          Profile
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            navigate('/preferences');
-                            setUserMenuOpen(false);
-                          }}
-                          variant="subtle"
-                          size="sm"
-                          className="w-full justify-start!"
-                          iconLeft={<GearIcon className="h-4 w-4" />}
-                        >
-                          Preferences
+                          Profile & Preferences
                         </Button>
                         <Button
                           type="button"
