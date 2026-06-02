@@ -25,6 +25,7 @@ import {
   ClipboardListIcon,
   PlayIcon,
   CalendarIcon,
+  LocationIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -127,7 +128,12 @@ const navigation: NavigationElement[] = [
     href: '/spools',
     icon: SpoolIcon
   },
-
+  {
+    name: 'Locations',
+    href: '/locations/dashboard',
+    icon: LocationIcon
+  },
+ 
   // — Management —
   { name: 'Management', isSectionHeader: true },
   {

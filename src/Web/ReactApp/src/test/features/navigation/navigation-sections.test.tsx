@@ -86,16 +86,19 @@ describe('Navigation Section Headers', () => {
   });
 
   describe('Nav cleanup for settings and analytics', () => {
-    it('shows a single Analytics nav entry, keeps Filament Inventory, and removes folded items', () => {
+    it('shows single-entry analytics, keeps hardware entry points, and removes folded items', () => {
       renderLayout();
-
+ 
       const analyticsLink = screen.getByRole('link', { name: /analytics/i });
-
+      const locationsLink = screen.getByRole('link', { name: /locations/i });
+ 
       expect(analyticsLink).toBeInTheDocument();
       expect(analyticsLink).toHaveAttribute('href', '/analytics');
+      expect(locationsLink).toBeInTheDocument();
+      expect(locationsLink).toHaveAttribute('href', '/locations/dashboard');
       expect(screen.getByRole('link', { name: /filament inventory/i })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: /settings/i })).toBeInTheDocument();
-
+ 
       expect(screen.queryByRole('link', { name: /statistics/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /cost analytics/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /api keys/i })).not.toBeInTheDocument();
