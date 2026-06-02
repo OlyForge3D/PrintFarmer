@@ -35,8 +35,8 @@ export function AnalyticsDashboardContent({
   showSummaryCards = true,
 }: AnalyticsDashboardContentProps) {
   const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days, startDate, endDate);
-  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365, startDate, endDate);
-  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365, startDate, endDate);
+  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days, startDate, endDate);
+  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days, startDate, endDate);
   const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days, startDate, endDate);
   const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days, startDate, endDate);
   const { data: forecasts = [] } = useMaintenanceForecast(days);

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockUseStatisticsSummary = vi.fn();
 const mockUsePrinterUtilization = vi.fn();
 const mockUseCostSummary = vi.fn();
+const mockUsePrinters = vi.fn();
 
 vi.mock('@/features/statistics/hooks/useStatistics', () => ({
   useStatisticsSummary: (...args: unknown[]) => mockUseStatisticsSummary(...args),
@@ -14,6 +15,7 @@ vi.mock('@/features/statistics/hooks/useStatistics', () => ({
 
 vi.mock('@/common/hooks/useApi', () => ({
   useCostSummary: (...args: unknown[]) => mockUseCostSummary(...args),
+  usePrinters: (...args: unknown[]) => mockUsePrinters(...args),
 }));
 
 vi.mock('@/features/statistics/pages/StatisticsPage', () => ({
@@ -77,6 +79,11 @@ describe('AnalyticsHubPage', () => {
       ],
       isLoading: false,
     });
+    mockUsePrinters.mockReturnValue({
+      data: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' }],
+      isLoading: false,
+      error: null,
+    });
   });
 
   it('renders KPI summary cards and defaults to the production lens', () => {
@@ -89,9 +96,10 @@ describe('AnalyticsHubPage', () => {
     expect(screen.getByText('95%')).toBeInTheDocument();
     expect(screen.getByText('$12.50')).toBeInTheDocument();
     expect(screen.getByText('$220.40')).toBeInTheDocument();
-    expect(screen.getByText('7.5%')).toBeInTheDocument();
+    expect(screen.getByText('3.8%')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /production/i })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('production-panel')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
   });
 
   it('selects the requested lens from the query string', () => {
@@ -126,5 +134,15 @@ describe('AnalyticsHubPage', () => {
 
     expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Check source').length).toBeGreaterThan(0);
+  });
+
+  it('marks fleet utilization unavailable for the All time preset', async () => {
+    const user = userEvent.setup();
+    renderAnalyticsHub();
+
+    await user.click(screen.getByRole('button', { name: 'All time' }));
+
+    expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
+    expect(screen.getByText('Bounded only')).toBeInTheDocument();
   });
 });

@@ -4,7 +4,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { ChartIcon, PrinterIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { Badge, Card, Tabs, TimePeriodFilter } from '@/common/components/ui';
 import type { TimePeriodFilterValue } from '@/common/components/ui';
-import { useCostSummary } from '@/common/hooks/useApi';
+import { useCostSummary, usePrinters } from '@/common/hooks/useApi';
 import { usePrinterUtilization, useStatisticsSummary, type PrinterUtilization } from '@/features/statistics/hooks/useStatistics';
 import { StatisticsDashboardContent } from '@/features/statistics/pages/StatisticsPage';
 import { CostDashboardContent } from '@/features/statistics/pages/CostDashboardPage';
@@ -57,6 +57,7 @@ function resolvePeriodRange(period: TimePeriodFilterValue) {
       startDate,
       endDate,
       dayCount,
+      isAllTime: false,
     };
   }
 
@@ -64,20 +65,29 @@ function resolvePeriodRange(period: TimePeriodFilterValue) {
     days: period.days,
     startDate: undefined,
     endDate: undefined,
-    dayCount: Math.max(1, period.days ?? 30),
+    dayCount: period.days,
+    isAllTime: period.days === undefined,
   };
 }
 
-function calculateFleetUtilization(utilizationData: PrinterUtilization[] | undefined, dayCount: number): number {
-  if (!utilizationData || utilizationData.length === 0 || dayCount <= 0) {
+function calculateFleetUtilization(
+  utilizationData: PrinterUtilization[] | undefined,
+  printerCount: number | undefined,
+  dayCount?: number,
+): number | null {
+  if (!dayCount || dayCount <= 0 || printerCount === undefined || printerCount < 0) {
+    return null;
+  }
+
+  if (printerCount === 0) {
     return 0;
   }
 
-  const totalPrintHours = utilizationData.reduce((sum, printer) => sum + (printer.totalPrintHours ?? 0), 0);
-  const availableHours = utilizationData.length * dayCount * 24;
+  const totalPrintHours = (utilizationData ?? []).reduce((sum, printer) => sum + (printer.totalPrintHours ?? 0), 0);
+  const availableHours = printerCount * dayCount * 24;
 
   if (availableHours <= 0) {
-    return 0;
+    return null;
   }
 
   return Math.min(100, (totalPrintHours / availableHours) * 100);
@@ -112,7 +122,7 @@ export function AnalyticsHubPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedLens = searchParams.get('lens');
   const activeLens: AnalyticsLens = isAnalyticsLens(requestedLens) ? requestedLens : 'production';
-  const { days, startDate, endDate, dayCount } = resolvePeriodRange(period);
+  const { days, startDate, endDate, dayCount, isAllTime } = resolvePeriodRange(period);
 
   const {
     data: statisticsSummary,
@@ -129,6 +139,11 @@ export function AnalyticsHubPage() {
     isLoading: utilizationLoading,
     error: utilizationError,
   } = usePrinterUtilization(days, startDate, endDate);
+  const {
+    data: printers = [],
+    isLoading: printersLoading,
+    error: printersError,
+  } = usePrinters();
 
   useEffect(() => {
     if (requestedLens === null || isAnalyticsLens(requestedLens)) {
@@ -141,8 +156,8 @@ export function AnalyticsHubPage() {
   }, [requestedLens, searchParams, setSearchParams]);
 
   const fleetUtilization = useMemo(
-    () => calculateFleetUtilization(utilizationData, dayCount),
-    [utilizationData, dayCount],
+    () => calculateFleetUtilization(utilizationData, printers.length, dayCount),
+    [utilizationData, printers.length, dayCount],
   );
 
   const summaryMetrics: SummaryMetric[] = [
@@ -176,10 +191,10 @@ export function AnalyticsHubPage() {
     },
     {
       label: 'Fleet Utilization',
-      value: utilizationError ? 'Unavailable' : `${fleetUtilization.toFixed(1)}%`,
-      source: utilizationError ? 'Check source' : 'Fleet',
-      loading: utilizationLoading,
-      hasError: !!utilizationError,
+      value: utilizationError || printersError || fleetUtilization === null ? 'Unavailable' : `${fleetUtilization.toFixed(1)}%`,
+      source: utilizationError || printersError ? 'Check source' : isAllTime ? 'Bounded only' : 'Fleet',
+      loading: utilizationLoading || printersLoading,
+      hasError: !!utilizationError || !!printersError || fleetUtilization === null,
     },
   ];
 
@@ -198,7 +213,7 @@ export function AnalyticsHubPage() {
       title="Analytics"
       subtitle="One place for production health, cost visibility, and fleet insight."
       icon={TrendingUpIcon}
-      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
+      actions={<TimePeriodFilter value={period} onChange={setPeriod} allowCustom={false} />}
     >
       <div className="space-y-6">
         <section aria-label="Analytics key performance indicators" className="space-y-3">
@@ -210,6 +225,7 @@ export function AnalyticsHubPage() {
                 value={metric.value}
                 source={metric.source}
                 loading={metric.loading}
+                hasError={metric.hasError}
               />
             ))}
           </div>
