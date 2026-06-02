@@ -18,6 +18,8 @@ import {
   mdiChevronRight,
   mdiDelete,
   mdiPencil,
+  mdiMatrix,
+  mdiFire,
   mdiCheck,
   mdiClose,
   mdiDownload,
@@ -3148,6 +3150,58 @@ export function TextToolIcon({ className = 'w-4 h-4', ariaLabel = '3D Text' }: O
       role="img"
     >
       <path fill="currentColor" d={mdiFormatText} />
+    </svg>
+  );
+}
+
+/**
+ * Matrix icon — digital rain/matrix theme
+ *
+ * Material Design icon component for the Matrix theme option.
+ *
+ * @component
+ * @preview ![matrix](https://unpkg.com/@mdi/svg@7.4.47/svg/matrix.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/matrix.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <MatrixIcon className="w-5 h-5" ariaLabel="Matrix theme" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function MatrixIcon({ className = 'w-4 h-4', ariaLabel = 'Matrix theme' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiMatrix} />
+    </svg>
+  );
+}
+
+/**
+ * Fire icon — forge/industrial warmth theme
+ *
+ * Material Design icon component for the Forge theme option.
+ *
+ * @component
+ * @preview ![fire](https://unpkg.com/@mdi/svg@7.4.47/svg/fire.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/fire.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <FireIcon className="w-5 h-5" ariaLabel="Forge theme" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FireIcon({ className = 'w-4 h-4', ariaLabel = 'Forge theme' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFire} />
     </svg>
   );
 }

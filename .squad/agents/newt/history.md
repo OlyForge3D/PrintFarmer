@@ -223,3 +223,139 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 **Rounds 17–19 summarized for size.** Historic context: Designed `PrinterControlsSection` composition (helper function pattern + lazy `.task` injection), fixed Home gate logic (`canHomeAll || canHomeXY || canHomeZ`), clarified ViewModel injection timing, and integrated snapshot testing framework. Final design locked; ready for Hudson integration phase. Details in `history-archive.md`.
 
 ---
+
+## 2026-06-02: PrintFarmer Design Language v2 (Phase 1 — Design Decisions)
+
+**Task:** Author the authoritative `DESIGN-LANGUAGE.md` for PrintFarmer's React UI. Phase 1 (design decisions only — no implementation code).
+**Status:** ✅ COMPLETE — spec written, decision file filed in inbox.
+
+### Audit Findings
+
+Pre-existing state of the React design system (`src/Web/ReactApp/src/styles/`):
+
+- **Fonts:** Inter + Bebas Neue (generic SaaS stack — brief explicitly forbade)
+- **Themes existing:** `github-dark` (default), `printfarmer-dark`, `light`, `matrix`, `forge` — five themes, no single source of truth
+- **Token system:** Solid foundation in `theme.css` + per-theme files in `themes/*.css` with consistent `--pf-*` naming, but gaps: no `printing`/`paused`/`idle` status triples, ambiguous `--pf-text-light`, no `--pf-text-on-accent`, no spacing/radius/duration/z-index tokens defined as variables, 14 `--pf-gradient-*` tokens used inconsistently
+- **Components:** Mature UI library at `common/components/ui/` (Button, Input, Card, Badge, FormField, DataTable, Modal, etc.) — already aligned with token consumption
+- **Default theme:** `github-dark` was the boot default — wrong choice for the PrintFarmer brand
+
+### Decisions Made
+
+1. **Fonts (NEW, replacing Inter + Bebas Neue):**
+   - `--pf-font-sans` = **IBM Plex Sans** (UI body — industrial heritage, IBM-designed for technical interfaces)
+   - `--pf-font-display` = **Space Grotesk** (headlines — geometric grotesque, supports full weight range unlike Bebas)
+   - `--pf-font-mono` = **JetBrains Mono** (all data: temps, IPs, timestamps, durations — purpose-built for technical display with tabular figures and disambiguated glyphs)
+
+2. **Four themes (full hex palettes specified in spec):**
+   - **Light "Workshop Daylight"** — deep teal accent (`#0d7d75`) on cool paper-white; deliberately not washed out
+   - **PrintFarmer Dark "Mission Control"** — refined flagship; cool slate-navy substrate (`#08101f`) with precision-teal accent (`#14b8a6`); replaces github-dark as default
+   - **Matrix "Terminal"** — pure black canvas (`#000000`), phosphor green (`#00ff41`), amber CRT warnings (`#fbbf24`); mono is default body font; opt-in scanlines and text-shadow glow
+   - **Blueprint "Schematic"** — *my creative choice* — cyanotype navy (`#0c1a2e`), cyan blueprint lines (`#38bdf8`), drafting-pencil yellow accent 2 (`#fef08a`); fills the cool-toned palette gap none of the others occupy
+
+3. **Token contract expanded from ~80 to ~140 tokens** — added:
+   - Spacing scale (`--pf-space-*`, 11 tokens)
+   - Radius scale (`--pf-radius-*`, 6 tokens) — industrial-sharp: max 8px on rectangles
+   - Shadow scale (`--pf-shadow-*`, 6 tokens) + glow tokens (`--pf-glow-*`, 4 tokens)
+   - Motion (`--pf-duration-*`, 4 tokens; `--pf-ease-*`, 4 tokens)
+   - Z-index scale (`--pf-z-*`, 8 tokens)
+   - Status triples for `printing`/`paused`/`error`/`idle` (operator-facing printer states)
+   - `info` semantic group as the 4th alongside success/warning/error
+   - `--pf-text-inverse`, `--pf-text-on-accent`, `--pf-accent-fg`, `--pf-selection-*`, `--pf-validation-warning-*`
+
+4. **Deprecations:**
+   - All 14 `--pf-gradient-*` tokens deprecated → flat color + shadow only
+   - `github-dark` theme removed (printfarmer-dark becomes default)
+   - `forge` becomes undocumented "extra" during transition
+   - `--pf-text-light` collapses into `--pf-text-secondary`
+
+5. **Design floor decisions:**
+   - 4px base spacing grid (strict, no inline px values)
+   - Radii max 8px on rectangles (industrial — rejects "friendly" rounded corners)
+   - Touch target floor 44×44 CSS pixels (HIG-aligned, matches mobile spec)
+   - Contrast: text-primary aims for AAA (7:1), text-secondary at AA floor (4.5:1)
+   - Status always color + shape (icon prefix) — never color alone
+   - Numeric data always in mono with `tabular-nums`
+
+### Files Written
+
+- `src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md` (~48 KB, 670 lines) — full authoritative spec
+- `.squad/decisions/inbox/newt-design-language.md` — decision summary for team review
+
+### Learnings
+
+- **Existing system was 70% there.** The token naming convention (`--pf-*`), the per-theme file structure, and the component library that consumes tokens were all solid. The work was *systematizing*, not rebuilding — fill gaps, rename ambiguities, deprecate inconsistencies, document the contract.
+- **5 themes was 1 too many.** github-dark and printfarmer-dark were near-duplicates. Consolidating to printfarmer-dark as the canonical flagship clarifies brand identity.
+- **Blueprint fills a real gap.** Matrix is monochrome green-on-black. PrintFarmer Dark and Forge both use warm-ish dark substrates. Light is bright. Blueprint's cyan-on-navy is the only theme with a genuinely cool-blue palette — daily-driver material for CAD-minded operators.
+- **Mono as a first-class type face matters in this domain.** Operators stare at columns of temperatures and percentages all day. JetBrains Mono with `font-variant-numeric: tabular-nums` is the difference between a dashboard that feels precise and one that feels jittery.
+- **Phase 2 (implementation) will need a migration map.** The token rename from `--pf-text-light` → `--pf-text-secondary` plus removal of all `--pf-gradient-*` tokens will touch many components. Suggest a codemod-driven approach to keep diffs surgical.
+
+---
+
+## 2026-06-02: Comprehensive Design Language System
+
+**Task:** Create unified design language for PrintFarmer with 4 selectable themes
+**Status:** ✅ COMPLETE
+
+### Deliverables Created
+
+1. **Design Language Document**: `src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md` (~16KB)
+   - Typography scale with Inter + Bebas Neue font families
+   - Color system architecture with semantic tokens
+   - Spacing scale and border radii
+   - Shadow system for dark-first environments
+   - Component patterns (buttons, cards, badges, inputs, tables)
+   - Layout grid system and responsive breakpoints
+   - Animation/transition standards
+   - Iconography guidelines using MDI
+   - WCAG 2.2 AA accessibility requirements
+
+2. **New Theme CSS Files:**
+   - `src/Web/ReactApp/src/styles/themes/matrix.css` — The Matrix/RatOS inspired
+     - Deep blacks (#000000 canvas), phosphor green text (#00ff41)
+     - CRT scan-line effect (opt-in), terminal text glow
+     - Glowing focus states, atmospheric card hover effects
+   
+   - `src/Web/ReactApp/src/styles/themes/forge.css` — Industrial warmth
+     - Charred black backgrounds with warm undertones (#0f0d0b)
+     - Copper/amber accent spectrum (#d47e34 primary accent)
+     - Oxidized copper green for success states
+     - Ember glow effects on inputs and buttons
+
+3. **Updated Files:**
+   - `ThemeContext.tsx` — Added `matrix` and `forge` to Theme type, updated toggle cycle
+   - `ThemeToggle.tsx` — Added MatrixIcon and FireIcon to theme selector
+   - `MdiIcons.tsx` — Added mdiMatrix/mdiFire imports + MatrixIcon/FireIcon components
+   - `theme.css` — Added Matrix and Forge high-contrast mode overrides, imported new theme files
+
+### Theme Summary
+
+| Theme | Background | Accent | Character |
+|-------|------------|--------|-----------|
+| Light | #ffffff | #059669 (emerald) | Clean, professional |
+| GitHub Dark | #0d1117 | #58a6ff (blue) | Familiar, GitHub-style |
+| PrintFarmer Dark | #0b1020 | #10b981 (green) | Deep blues, original brand |
+| Matrix | #000000 | #00ff41 (phosphor) | CRT terminal, digital rain |
+| Forge | #0f0d0b | #d47e34 (copper) | Molten metal, manufacturing |
+
+### Validation
+- ✅ Build: Passed (10.19s)
+- ✅ Lint: 0 errors
+
+### Key Decisions
+
+1. **Theme application via `data-theme` attribute** — github-dark is default (no attribute), all others set explicit attribute
+2. **Each theme has distinct visual effects** — Matrix gets phosphor glow/scan-lines, Forge gets ember glow/texture options
+3. **High contrast mode support** — All 5 themes have `@media (prefers-contrast: high)` overrides
+4. **Forge as 4th theme choice** — Copper/amber industrial warmth complements the existing green-centric themes
+
+### File Paths
+
+- Design doc: `src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md`
+- Matrix theme: `src/Web/ReactApp/src/styles/themes/matrix.css`
+- Forge theme: `src/Web/ReactApp/src/styles/themes/forge.css`
+- Theme CSS: `src/Web/ReactApp/src/styles/theme.css`
+- Theme context: `src/Web/ReactApp/src/contexts/ThemeContext.tsx`
+- Theme toggle: `src/Web/ReactApp/src/common/components/ThemeToggle.tsx`
+- Icons: `src/Web/ReactApp/src/common/components/icons/MdiIcons.tsx`
+
+---
