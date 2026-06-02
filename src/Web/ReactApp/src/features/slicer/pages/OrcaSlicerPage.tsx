@@ -25,6 +25,7 @@ import type { ModelListItem } from '@/types/models';
 import { Button, Alert, Select } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { toast } from 'sonner';
+import { buildSlicerViewerModelUrl } from '@/features/slicer/utils/model-file-utils';
 
 const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
   'PLA': { name: 'PLA', nozzleTemp: 210, bedTemp: 60 },
@@ -195,11 +196,14 @@ export const OrcaSlicerPage: React.FC = () => {
       const model = models.find(m => m.id === modelIdFromUrl);
       if (model) {
         const apiBase = getApiBaseUrl();
-        const ext = (model.originalFileName || model.fileName).split('.').pop()?.toLowerCase() || 'stl';
+        const fileName = model.originalFileName || model.fileName;
+        const ext = fileName.split('.').pop()?.toLowerCase() || 'stl';
+        const modelUrl = `${apiBase}/3d-models/file/${model.id}`;
         const newLoadedModel: LoadedModel = {
           id: model.id,
-          url: `${apiBase}/3d-models/file/${model.id}`,
-          fileName: model.originalFileName || model.fileName,
+          url: modelUrl,
+          viewerUrl: buildSlicerViewerModelUrl(apiBase, model.id, fileName),
+          fileName,
           fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : ext === 'step' || ext === 'stp' ? 'step' : 'stl',
           position: [0, 0, 0],
           rotation: [0, 0, 0],
@@ -255,9 +259,11 @@ export const OrcaSlicerPage: React.FC = () => {
           const apiBase = getApiBaseUrl();
           
           const ext = file.name.split('.').pop()?.toLowerCase() || 'stl';
+          const modelUrl = `${apiBase}/3d-models/file/${uploaded.id}`;
           const newModel: LoadedModel = {
             id: uploaded.id,
-            url: `${apiBase}/3d-models/file/${uploaded.id}`,
+            url: modelUrl,
+            viewerUrl: buildSlicerViewerModelUrl(apiBase, uploaded.id, file.name),
             fileName: file.name,
             fileType: ext === 'ply' ? 'ply' : ext === '3mf' ? '3mf' : ext === 'step' || ext === 'stp' ? 'step' : 'stl',
             position: [0, 0, 0],

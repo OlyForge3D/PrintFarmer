@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { FacePaintOverlay } from './FacePaintOverlay';
 import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
+import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
 
 // W4: Module-level constant to avoid creating new Set on every render
 const EMPTY_FACE_SET = new Set<number>();
@@ -20,8 +21,9 @@ const EMPTY_COLOR_FACE_MAP = new Map<number, number>();
 export interface LoadedModel {
   id: string;
   url: string;
+  viewerUrl?: string;
   fileName: string;
-  fileType: 'stl' | 'ply' | '3mf';
+  fileType: 'stl' | 'ply' | '3mf' | 'step';
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
@@ -2057,7 +2059,7 @@ function BedScene({
           const displayPos = assemblyPositions?.get(model.id) ?? model.position;
           return (
             <Suspense key={model.id} fallback={<LoadingIndicator />}>
-              {model.fileType === 'stl' && (
+              {(model.fileType === 'stl' || model.fileType === '3mf') && (
                 model.geometry ? (
                   <PrebuiltSTLModel
                     inputGeometry={model.geometry}
@@ -2083,7 +2085,7 @@ function BedScene({
                   />
                 ) : (
                   <STLModel
-                    url={model.url}
+                    url={model.viewerUrl ?? model.url}
                     position={displayPos}
                     rotation={model.rotation}
                     scale={model.scale}
@@ -2256,74 +2258,78 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   onTextPlace,
   sceneOverlay,
 }) => {
+  const resetKey = `${selectedModelId ?? 'none'}:${models.map((model) => `${model.id}:${model.url}:${model.viewerUrl ?? ''}:${model.fileType}`).join('|')}`;
+
   return (
     <div className={`w-full h-full ${className}`}>
-      <Canvas
-        frameloop="demand"
-        style={{ background: backgroundColor }}
-        gl={{
-          antialias: true,
-          preserveDrawingBuffer: false,
-          alpha: false,
-          powerPreference: 'high-performance',
-        }}
-        shadows
-        camera={{ 
-          fov: 45, 
-          near: 0.1, 
-          far: 10000,
-          position: [300, -300, 250],
-          up: [0, 0, 1] // Z-up: standard 3D printing convention
-        }}
-        onCreated={({ gl, scene }) => {
-          gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.0;
-          scene.background = new THREE.Color('#53535a');
-        }}
-      >
-        <Suspense fallback={null}>
-          <BedScene
-            bedConfig={bedConfig}
-            models={models}
-            selectedModelId={selectedModelId}
-            onModelSelect={onModelSelect}
-            transformMode={transformMode}
-            onModelTransform={onModelTransform}
-            onSelectedModelMetricsChange={onSelectedModelMetricsChange}
-            outOfBoundsModelIds={outOfBoundsModelIds}
-            showAxes={showAxes}
-            showGridLines={showGridLines}
-            layFlatMode={layFlatMode}
-            onLayFlatComplete={onLayFlatComplete}
-            autoOrientTrigger={autoOrientTrigger}
-            measureMode={measureMode}
-            assemblyViewActive={assemblyViewActive}
-            splitTrigger={splitTrigger}
-            cutMode={cutMode}
-            onCutComplete={onCutComplete}
-            onCutCancel={onCutCancel}
-            supportPaintMode={supportPaintMode}
-            supportPaintData={supportPaintData}
-            onSupportPaintUpdate={onSupportPaintUpdate}
-            seamPaintMode={seamPaintMode}
-            seamPaintData={seamPaintData}
-            onSeamPaintUpdate={onSeamPaintUpdate}
-            colorPaintMode={colorPaintMode}
-            colorPaintData={colorPaintData}
-            onColorPaintUpdate={onColorPaintUpdate}
-            activeColorIndex={activeColorIndex}
-            fuzzySkinPaintMode={fuzzySkinPaintMode}
-            fuzzySkinPaintData={fuzzySkinPaintData}
-            onFuzzySkinPaintUpdate={onFuzzySkinPaintUpdate}
-            paintMode={paintMode}
-            paintBrushSize={paintBrushSize}
-            hideBed={hideBed}
-            textPlacementMode={textPlacementMode}
-            onTextPlace={onTextPlace}
-          />
-          {sceneOverlay}
-        </Suspense>
-      </Canvas>
+      <ModelViewerErrorBoundary className="h-full" resetKey={resetKey}>
+        <Canvas
+          frameloop="demand"
+          style={{ background: backgroundColor }}
+          gl={{
+            antialias: true,
+            preserveDrawingBuffer: false,
+            alpha: false,
+            powerPreference: 'high-performance',
+          }}
+          shadows
+          camera={{ 
+            fov: 45, 
+            near: 0.1, 
+            far: 10000,
+            position: [300, -300, 250],
+            up: [0, 0, 1] // Z-up: standard 3D printing convention
+          }}
+          onCreated={({ gl, scene }) => {
+            gl.toneMapping = THREE.ACESFilmicToneMapping;
+            gl.toneMappingExposure = 1.0;
+            scene.background = new THREE.Color('#53535a');
+          }}
+        >
+          <Suspense fallback={null}>
+            <BedScene
+              bedConfig={bedConfig}
+              models={models}
+              selectedModelId={selectedModelId}
+              onModelSelect={onModelSelect}
+              transformMode={transformMode}
+              onModelTransform={onModelTransform}
+              onSelectedModelMetricsChange={onSelectedModelMetricsChange}
+              outOfBoundsModelIds={outOfBoundsModelIds}
+              showAxes={showAxes}
+              showGridLines={showGridLines}
+              layFlatMode={layFlatMode}
+              onLayFlatComplete={onLayFlatComplete}
+              autoOrientTrigger={autoOrientTrigger}
+              measureMode={measureMode}
+              assemblyViewActive={assemblyViewActive}
+              splitTrigger={splitTrigger}
+              cutMode={cutMode}
+              onCutComplete={onCutComplete}
+              onCutCancel={onCutCancel}
+              supportPaintMode={supportPaintMode}
+              supportPaintData={supportPaintData}
+              onSupportPaintUpdate={onSupportPaintUpdate}
+              seamPaintMode={seamPaintMode}
+              seamPaintData={seamPaintData}
+              onSeamPaintUpdate={onSeamPaintUpdate}
+              colorPaintMode={colorPaintMode}
+              colorPaintData={colorPaintData}
+              onColorPaintUpdate={onColorPaintUpdate}
+              activeColorIndex={activeColorIndex}
+              fuzzySkinPaintMode={fuzzySkinPaintMode}
+              fuzzySkinPaintData={fuzzySkinPaintData}
+              onFuzzySkinPaintUpdate={onFuzzySkinPaintUpdate}
+              paintMode={paintMode}
+              paintBrushSize={paintBrushSize}
+              hideBed={hideBed}
+              textPlacementMode={textPlacementMode}
+              onTextPlace={onTextPlace}
+            />
+            {sceneOverlay}
+          </Suspense>
+        </Canvas>
+      </ModelViewerErrorBoundary>
     </div>
   );
 };

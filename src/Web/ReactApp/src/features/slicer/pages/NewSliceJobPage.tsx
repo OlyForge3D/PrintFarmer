@@ -43,6 +43,7 @@ import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
 import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
+import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
@@ -1329,22 +1330,40 @@ export const NewSliceJobPage: React.FC = () => {
     if (selectedModelId) {
       const apiBase = getApiBaseUrl();
       const mdl = models?.find(m => m.id === selectedModelId);
-      const url = `${apiBase}/3d-models/file/${selectedModelId}`;
+      const modelUrl = `${apiBase}/3d-models/file/${selectedModelId}`;
       const fileName = mdl?.originalFileName || mdl?.fileName || 'model.stl';
+      const viewerUrl = buildSlicerViewerModelUrl(apiBase, selectedModelId, fileName);
+      const fileType = getSlicerViewerFileType(fileName);
       queueMicrotask(() => {
-        setModelFileUrl(url);
+        setModelFileUrl(modelUrl);
         if (mdl) {
           setModelFileName(fileName);
         }
-        // Add to bed models if not already present
+        // Add the model to the bed, or refresh its metadata once the model list loads.
         setBedModels(prev => {
-          if (prev.some(m => m.id === selectedModelId)) return prev;
+          const existingModel = prev.find((model) => model.id === selectedModelId);
+
+          if (existingModel) {
+            return prev.map((model) =>
+              model.id === selectedModelId
+                ? {
+                    ...model,
+                    url: modelUrl,
+                    viewerUrl,
+                    fileName,
+                    fileType,
+                  }
+                : model,
+            );
+          }
+
           const offset = prev.length * 30; // offset each model so they don't overlap
           return [...prev, {
             id: selectedModelId,
-            url,
+            url: modelUrl,
+            viewerUrl,
             fileName,
-            fileType: 'stl' as const,
+            fileType,
             position: [offset, 0, 0] as [number, number, number],
             rotation: [0, 0, 0] as [number, number, number],
             scale: [1, 1, 1] as [number, number, number],

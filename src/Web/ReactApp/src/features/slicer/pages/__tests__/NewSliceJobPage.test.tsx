@@ -131,6 +131,21 @@ const mockProfilesSummary = {
   processProfiles: mockProcessProfiles,
 };
 
+const mockModelList = [
+  {
+    id: 'model-3d-1',
+    fileName: 'stored-model.3mf',
+    originalFileName: 'test-model.3mf',
+    uploadedAt: '2026-06-02T00:00:00Z',
+  },
+  {
+    id: 'model-stl-1',
+    fileName: 'stored-model.stl',
+    originalFileName: 'test-model.stl',
+    uploadedAt: '2026-06-02T00:00:00Z',
+  },
+];
+
 const mockSlicers = [
   { id: '1', name: 'orcaslicer-worker-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
   { id: '2', name: 'prusaslicer-worker-1', slicerType: 'PrusaSlicer', version: '2.7.0' }
@@ -231,6 +246,17 @@ vi.mock('../../components/job', () => ({
   ),
 }));
 
+const slicerWorkspaceSpy = vi.fn();
+
+vi.mock('@/features/slicer/components/viewer', () => ({
+  SlicerWorkspace: (props: {
+    models?: Array<{ id: string; url: string; viewerUrl?: string; fileType: string }>;
+  }) => {
+    slicerWorkspaceSpy(props);
+    return <div data-testid="slicer-workspace">Slicer Workspace</div>;
+  },
+}));
+
 // Mock 3D viewer
 vi.mock('@/features/models3d/components/3d/ModelViewer3D', () => ({
   ModelViewer: () => <div data-testid="model-viewer">Model Viewer</div>
@@ -303,6 +329,8 @@ const renderWithProviders = (ui: React.ReactElement, { route = '/slicer' } = {})
 describe('NewSliceJobPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    slicerWorkspaceSpy.mockClear();
+    vi.mocked(apiClient.get).mockResolvedValue({ data: mockModelList } as never);
   });
 
   afterEach(() => {
@@ -648,6 +676,33 @@ describe('NewSliceJobPage', () => {
       
       // The model ID from URL should be captured
       // This is tested by verifying the page renders without error
+    });
+
+    it('uses forceStl viewer URLs and preserves the 3mf file type for preselected library models', async () => {
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-workspace')).toBeInTheDocument();
+      });
+
+      await waitFor(() => {
+        const lastWorkspaceProps = slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as {
+          models?: Array<{ id: string; url: string; viewerUrl?: string; fileType: string }>;
+        } | undefined;
+        const selectedModel = lastWorkspaceProps?.models?.find((model) => model.id === 'model-3d-1');
+
+        expect(selectedModel).toEqual(expect.objectContaining({
+          url: expect.stringMatching(/\/3d-models\/file\/model-3d-1$/),
+          viewerUrl: expect.stringContaining('/3d-models/file/model-3d-1?forceStl=true'),
+          fileType: '3mf',
+        }));
+      });
     });
   });
 
