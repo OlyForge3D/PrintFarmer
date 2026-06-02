@@ -1,11 +1,10 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router';
+import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '@/common/components/SettingsPagelet';
 import { SettingInputType } from '@/types/SettingInputType';
-import { PageTemplate } from '@/common/components/PageTemplate';
-import { SettingsIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, Card } from '@/common/components/ui';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { settingsTour } from '@/features/admin/tours/settings.tour';
 import { HelpButton } from '@/common/components/HelpButton';
@@ -39,11 +38,8 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [fieldErrorsBySection, setFieldErrorsBySection] = useState<Record<string, Record<string, string>>>({});
-  const [activeSection, setActiveSection] = useState<string | null>(null);
 
   const location = useLocation();
-  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const refetchSettingsValues = useCallback(async () => {
     setLoading(true);
@@ -89,62 +85,6 @@ export function SettingsPage() {
     return () => { mounted = false; };
   }, [location, refetchSettingsValues]);
 
-  // Scroll-spy: track which section is currently visible
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    // All section keys from metadata
-    const allSectionKeys = metadata.map(m => m.key);
-
-    const handleScroll = () => {
-      const containerRect = container.getBoundingClientRect();
-      
-      // Find the section that is most visible in the viewport
-      let closestSection: string | null = null;
-      let closestDistance = Infinity;
-
-      for (const key of allSectionKeys) {
-        const el = sectionRefs.current[key];
-        if (!el) continue;
-        
-        const rect = el.getBoundingClientRect();
-        const relativeTop = rect.top - containerRect.top;
-        
-        // Calculate distance from top of viewport (prefer sections near the top)
-        const distance = Math.abs(relativeTop - 100); // 100px offset for header
-        
-        if (relativeTop <= 150 && distance < closestDistance) {
-          closestDistance = distance;
-          closestSection = key;
-        }
-      }
-
-      // If no section found near top, use the first one that's partially visible
-      if (!closestSection) {
-        for (const key of allSectionKeys) {
-          const el = sectionRefs.current[key];
-          if (!el) continue;
-          const rect = el.getBoundingClientRect();
-          if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
-            closestSection = key;
-            break;
-          }
-        }
-      }
-
-      if (closestSection && closestSection !== activeSection) {
-        setActiveSection(closestSection);
-      }
-    };
-
-    container.addEventListener('scroll', handleScroll);
-    // Initial check
-    handleScroll();
-
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [metadata, activeSection]);
-
   // Build navigation items grouped and sorted
   const navItems: NavItem[] = metadata.map(m => ({
     key: m.key,
@@ -177,7 +117,6 @@ export function SettingsPage() {
         const orderA = groupOrderMap[a] ?? 999;
         const orderB = groupOrderMap[b] ?? 999;
         if (orderA !== orderB) return orderA - orderB;
-        // If same order, sort alphabetically
         return a.localeCompare(b);
       });
   }, [groupedNavItems, groupOrderMap, isSlicerAvailable]);
@@ -186,14 +125,6 @@ export function SettingsPage() {
   const getGroupDisplayName = (groupKey: string): string => {
     const group = groupMetadata.find(g => g.key === groupKey);
     return group?.displayName || groupKey;
-  };
-
-  const scrollToSection = (key: string) => {
-    const el = sectionRefs.current[key];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setActiveSection(key);
-    }
   };
 
   const handleFieldChange = (className: string, field: string, value: SettingValue) => {
@@ -303,102 +234,116 @@ export function SettingsPage() {
     return errs;
   };
 
-  return (
-    <PageTemplate
-      title="Settings"
-      subtitle="Configure PrintFarmer application settings"
-      icon={SettingsIcon}
-      titleActions={<HelpButton onClick={startTour} />}
-    >
-      {loading ? (
-        <div className="text-center text-pf-text-secondary">Loading settings...</div>
-      ) : error ? (
-        <div className="text-center text-pf-error">{error}</div>
-      ) : (
-        <div className="flex gap-6" style={{ height: 'calc(100vh - 160px)' }}>
-          {/* Sidebar Navigation - Hidden on small screens */}
-          <nav
-            className="hidden lg:flex w-56 shrink-0 min-h-0 flex-col overflow-hidden rounded-xl border border-pf-border bg-pf-card/60"
-            data-tour="settings-nav"
-          >
-            <div className="h-full overflow-y-auto overscroll-contain pr-2 py-3">
-              <div className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wider mb-3">
-                Sections
-              </div>
-              {sortedGroups.map(group => (
-                <div key={group} className="mb-4">
-                  <div className="text-xs font-medium text-pf-text-secondary mb-2 px-2">
-                    {getGroupDisplayName(group)}
-                  </div>
-                  <ul className="space-y-0.5 ml-3">
-                    {groupedNavItems[group].map(item => (
-                      <li key={item.key}>
-                        <Button
-                          variant={activeSection === item.key ? 'tab' : 'subtle'}
-                          type="button"
-                          onClick={() => scrollToSection(item.key)}
-                          className={`w-full justify-start px-3 py-1.5 text-sm
-                            ${activeSection === item.key ? 'font-medium' : ''}`}
-                          aria-current={activeSection === item.key ? 'true' : undefined}
-                        >
-                          {item.displayName}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </nav>
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16" role="status" aria-label="Loading settings">
+        <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent" />
+      </div>
+    );
+  }
 
-          {/* Main Content Area */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden" data-tour="settings-content">
-            <div 
-              ref={scrollContainerRef}
-              className="flex-1 space-y-6 overflow-y-auto scroll-smooth pr-2"
-            >
-              {/* Application Settings - rendered in same order as sidebar */}
-              {sortedGroups.flatMap(group => 
-                groupedNavItems[group].map(item => {
-                  const meta = metadata.find(m => m.key === item.key);
-                  if (!meta) return null;
-                  return (
-                    <div 
-                      key={meta.key}
-                      ref={el => { sectionRefs.current[meta.key] = el; }}
-                      id={`section-${meta.key}`}
-                    >
-                      <SettingsPagelet
-                        metadata={meta}
-                        values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
-                        onChange={(field, value) => handleFieldChange(meta.key, field, value)}
-                        fieldErrors={fieldErrorsBySection[meta.key]}
-                      />
-                      {meta.key === 'Obico' && (
-                        <div className="mt-4 space-y-4">
-                          <FailureDetectionStatusCard />
-                          <ObicoServersSection />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
-            <div className="py-4 flex justify-end border-t border-pf-border mt-4" data-tour="settings-save">
-              <Button
-                type="button"
-                onClick={handleSave}
-                variant="primary"
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : 'Save All'}
-              </Button>
-            </div>
+  if (error) {
+    return (
+      <div className="py-8 text-center text-pf-error" role="alert">
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-tour="settings-content">
+      {/* Header with Help Button */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-pf-text-secondary">
+          Configure system-wide defaults for your print farm.
+        </p>
+        <HelpButton onClick={startTour} />
+      </div>
+
+      {/* Multi-column grid layout — grouped by category */}
+      {sortedGroups.map((group) => (
+        <section key={group} aria-labelledby={`group-${group}`}>
+          {/* Group header */}
+          <h3
+            id={`group-${group}`}
+            className="text-base font-semibold text-pf-text-primary mb-4 flex items-center gap-2"
+          >
+            <span className="h-px flex-1 bg-pf-border" />
+            <span className="px-3 text-pf-text-secondary uppercase tracking-wider text-xs">
+              {getGroupDisplayName(group)}
+            </span>
+            <span className="h-px flex-1 bg-pf-border" />
+          </h3>
+
+          {/* Responsive grid: 1 col mobile, 2 cols tablet, 2-3 cols desktop */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {groupedNavItems[group].map((item) => {
+              const meta = metadata.find((m) => m.key === item.key);
+              if (!meta) return null;
+
+              const hasObico = meta.key === 'Obico';
+
+              return (
+                <Card
+                  key={meta.key}
+                  className={clsx(
+                    'flex flex-col',
+                    // Obico section spans full width due to extra content
+                    hasObico && 'md:col-span-2 xl:col-span-3'
+                  )}
+                >
+                  <Card.Header className="pb-2">
+                    <h4 className="text-sm font-semibold text-pf-text-primary">
+                      {meta.displayName || meta.className}
+                    </h4>
+                    {meta.description && (
+                      <p className="text-xs text-pf-text-secondary mt-0.5">
+                        {meta.description}
+                      </p>
+                    )}
+                  </Card.Header>
+                  <Card.Body className="flex-1 pt-0">
+                    <SettingsPagelet
+                      metadata={meta}
+                      values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
+                      onChange={(field, value) => handleFieldChange(meta.key, field, value)}
+                      fieldErrors={fieldErrorsBySection[meta.key]}
+                      compact
+                    />
+                    {hasObico && (
+                      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <FailureDetectionStatusCard />
+                        <ObicoServersSection />
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              );
+            })}
           </div>
+        </section>
+      ))}
+
+      {/* Save button bar */}
+      {saveError && (
+        <div className="text-pf-error text-sm" role="alert">
+          {saveError}
         </div>
       )}
-    </PageTemplate>
+      <div
+        className="sticky bottom-0 py-4 flex justify-end border-t border-pf-border bg-pf-bg-0/95 backdrop-blur-xs"
+        data-tour="settings-save"
+      >
+        <Button
+          type="button"
+          onClick={handleSave}
+          variant="primary"
+          disabled={saving}
+          loading={saving}
+        >
+          {saving ? 'Saving...' : 'Save All Settings'}
+        </Button>
+      </div>
+    </div>
   );
 }
