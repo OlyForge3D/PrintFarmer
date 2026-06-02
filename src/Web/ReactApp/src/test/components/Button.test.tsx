@@ -146,7 +146,8 @@ describe('Button', () => {
     it('applies correct variant classes', () => {
       const { rerender } = render(<Button variant="primary">Primary</Button>);
       let button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-pf-accent-bg');
+      expect(button.className).toContain('bg-[var(--pf-button-primary-bg)]');
+      expect(button.className).toContain('text-[var(--pf-on-accent)]');
       
       rerender(<Button variant="secondary">Secondary</Button>);
       button = screen.getByRole('button');
@@ -154,7 +155,8 @@ describe('Button', () => {
       
       rerender(<Button variant="danger">Danger</Button>);
       button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-pf-error');
+      expect(button.className).toContain('bg-[var(--pf-button-danger-bg)]');
+      expect(button.className).toContain('text-[var(--pf-on-danger)]');
     });
   });
 

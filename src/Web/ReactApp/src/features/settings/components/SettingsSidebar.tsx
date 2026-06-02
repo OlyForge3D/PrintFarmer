@@ -133,9 +133,9 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   className={clsx(
                     'w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors',
                     'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                    isActive && 'bg-pf-accent-bg text-pf-text-primary border-l-2 border-pf-accent',
+                    isActive && 'bg-pf-accent-bg text-[var(--pf-on-accent)] border-l-2 border-pf-accent',
                     !isActive && 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary border-l-2 border-transparent',
-                    isMatching && !isActive && 'bg-pf-accent-bg text-pf-text-primary'
+                    isMatching && !isActive && 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
                   )}
                 >
                   <span className="shrink-0" aria-hidden="true">
@@ -275,9 +275,9 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                   className={clsx(
                     'w-full flex items-center gap-3 px-4 py-2.5 text-sm',
                     'focus:outline-hidden focus-visible:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                    isActive && 'bg-pf-accent-bg text-pf-text-primary font-medium',
+                    isActive && 'bg-pf-accent-bg text-[var(--pf-on-accent)] font-medium',
                     !isActive && 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
-                    isMatching && !isActive && 'bg-pf-accent-bg text-pf-text-primary'
+                    isMatching && !isActive && 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
                   )}
                 >
                   <span aria-hidden="true">

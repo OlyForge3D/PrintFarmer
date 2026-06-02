@@ -41,4 +41,5 @@ Older entries (pre-2026-05-26) archived to history-archive.md for size managemen
 
 - 2026-06-02: Self-service profile routes need explicit navigation affordances; routing alone is not enough. A default Profile action plus Preferences quick links makes API Keys, Notifications, and Passkeys discoverable.
 - 2026-06-02: Brand assets that must adapt across themes should use inline SVG with `currentColor` so shared auth and layout surfaces inherit the active theme automatically.
+- 2026-06-02: Accent-filled controls cannot assume white foregrounds across the 7-theme system; shared `--pf-on-accent` and `--pf-on-danger` tokens need to drive badges, destructive actions, active settings nav, and selected theme chips.
 

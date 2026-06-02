@@ -122,7 +122,7 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
               'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
               isActive && 'text-pf-text-primary border-b-2 border-pf-accent -mb-px',
               !isActive && 'text-pf-text-secondary hover:text-pf-text-primary',
-              isMatching && !isActive && 'bg-pf-accent-bg text-pf-text-primary'
+              isMatching && !isActive && 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
             )}
           >
             <span>{subPage.label}</span>

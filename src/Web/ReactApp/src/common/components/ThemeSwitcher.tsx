@@ -71,7 +71,7 @@ export function ThemeSwitcher() {
               'group flex flex-col gap-2 rounded-lg border p-3 text-left transition-all duration-200',
               'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--pf-focus-ring-offset)]',
               isActive
-                ? 'border-[var(--pf-accent)] bg-[var(--pf-accent-bg)]/10 shadow-[var(--pf-glow-accent)]'
+                ? 'border-[var(--pf-accent)] bg-[var(--pf-accent-bg)] text-[var(--pf-on-accent)] shadow-[var(--pf-glow-accent)]'
                 : 'border-[var(--pf-border)] bg-[var(--pf-card-bg)] hover:border-[var(--pf-border-strong)] hover:bg-[var(--pf-hover-overlay)]',
             ].join(' ')}
             title={option.description}
@@ -91,7 +91,7 @@ export function ThemeSwitcher() {
             <span
               className={[
                 'text-sm font-semibold',
-                isActive ? 'text-[var(--pf-accent)]' : 'text-[var(--pf-text-primary)]',
+                isActive ? 'text-[var(--pf-on-accent)]' : 'text-[var(--pf-text-primary)]',
               ].join(' ')}
             >
               {option.label}
@@ -99,7 +99,7 @@ export function ThemeSwitcher() {
 
             {/* Active indicator */}
             {isActive && (
-              <span className="text-xs text-[var(--pf-text-secondary)]">Active</span>
+              <span className="text-xs text-[var(--pf-on-accent)]/80">Active</span>
             )}
           </Button>
         );

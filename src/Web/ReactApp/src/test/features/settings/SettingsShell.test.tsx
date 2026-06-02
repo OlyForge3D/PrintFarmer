@@ -78,6 +78,7 @@ describe('SettingsShell', () => {
     renderSettings();
     const generalCategory = getCategoryButton('General');
     expect(generalCategory).toHaveAttribute('aria-current', 'page');
+    expect(generalCategory.className).toContain('text-[var(--pf-on-accent)]');
   });
 
   it('switches tab on click', () => {

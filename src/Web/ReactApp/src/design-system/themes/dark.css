@@ -30,13 +30,14 @@
   --pf-text-tertiary:  #6b7892;
   --pf-text-muted:     #566275;
   --pf-text-inverse:   #08101f;
-  --pf-text-on-accent: #ffffff;
+  --pf-on-accent:      #ffffff;
+  --pf-text-on-accent: var(--pf-on-accent);
 
   /* --- Accent --------------------------------------------------------------- */
   --pf-accent:       #14b8a6;
   --pf-accent-bg:    #0f766e;
   --pf-accent-hover: #115e59;
-  --pf-accent-fg:    #ffffff;
+  --pf-accent-fg:    var(--pf-on-accent);
   --pf-accent-2:     #60a5fa;
 
   /* --- Semantic: Success ---------------------------------------------------- */
@@ -56,6 +57,7 @@
   --pf-error-bg:     #450a0a;
   --pf-error-border: #7f1d1d;
   --pf-error-fg:     #fecaca;
+  --pf-on-danger:    #fecaca;
 
   /* --- Semantic: Info ------------------------------------------------------- */
   --pf-info:        #60a5fa;
@@ -107,7 +109,7 @@
   --pf-button-primary-bg:     #0f766e;
   --pf-button-primary-hover:  #115e59;
   --pf-button-primary-active: #0d4f4a;
-  --pf-button-primary-text:   #ffffff;
+  --pf-button-primary-text:   var(--pf-on-accent);
   --pf-button-primary-border: transparent;
 
   /* --- Buttons: Secondary --------------------------------------------------- */
@@ -121,7 +123,7 @@
   --pf-button-danger-bg:     #450a0a;
   --pf-button-danger-hover:  #5c0d0d;
   --pf-button-danger-active: #3a0808;
-  --pf-button-danger-text:   #fecaca;
+  --pf-button-danger-text:   var(--pf-on-danger);
   --pf-button-danger-border: #7f1d1d;
 
   /* --- Buttons: Success ----------------------------------------------------- */

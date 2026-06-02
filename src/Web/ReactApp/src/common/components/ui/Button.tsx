@@ -18,9 +18,9 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-pf-accent-bg enabled:hover:bg-pf-accent-hover text-white border border-pf-accent-bg enabled:hover:border-pf-accent-hover shadow-md font-semibold',
+  primary: 'bg-[var(--pf-button-primary-bg)] enabled:hover:bg-[var(--pf-button-primary-hover)] text-[var(--pf-on-accent)] border border-[var(--pf-button-primary-border)] shadow-md font-semibold',
   secondary: 'bg-pf-bg-2 enabled:hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light enabled:hover:border-pf-border',
-  danger: 'bg-pf-error enabled:hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
+  danger: 'bg-[var(--pf-button-danger-bg)] enabled:hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] shadow-md font-semibold',
   subtle: 'bg-transparent enabled:hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
   ghost: '[background:none] enabled:hover:[background:rgba(255,255,255,0.10)] text-inherit border-transparent shadow-none',
   success: 'bg-pf-success-bg enabled:hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
