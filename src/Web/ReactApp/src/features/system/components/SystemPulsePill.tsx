@@ -19,6 +19,8 @@ const EMPTY_VALUE = '—';
 const SYSTEM_INFO_QUERY_KEY = ['system-info'];
 const SYSTEM_INFO_REFETCH_INTERVAL_MS = 30_000;
 const SYSTEM_INFO_STALE_TIME_MS = 10_000;
+const SYSTEM_PULSE_PANEL_MAX_HEIGHT_CLASS = 'max-h-[calc(100vh-4rem)]';
+const SYSTEM_PULSE_PANEL_MAX_WIDTH_CLASS = 'max-w-[calc(100vw-1rem)]';
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
   '[href]',
@@ -374,10 +376,13 @@ export function SystemPulsePill() {
           aria-modal="true"
           aria-labelledby={dialogTitleId}
           tabIndex={-1}
-          className="absolute right-0 top-full z-50 mt-2 w-[22rem] overflow-hidden rounded-2xl border border-pf-border/80 bg-pf-bg-1/95 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-md"
+          className={clsx(
+            'absolute right-0 top-full z-50 mt-2 w-[22rem] overflow-hidden rounded-2xl border border-pf-border/80 bg-pf-bg-1/95 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-md',
+            SYSTEM_PULSE_PANEL_MAX_WIDTH_CLASS,
+          )}
         >
           <div className={clsx('pointer-events-none absolute inset-x-0 top-0 h-16 bg-linear-to-b', tone.panelAccentClassName)} aria-hidden="true" />
-          <div className="relative space-y-4 p-4">
+          <div className={clsx('relative space-y-4 overflow-y-auto p-4', SYSTEM_PULSE_PANEL_MAX_HEIGHT_CLASS)}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
