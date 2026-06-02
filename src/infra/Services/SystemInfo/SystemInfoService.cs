@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
@@ -22,19 +23,35 @@ public class SystemInfoService(
     AppDbContext db,
     IStoragePathService storagePathService,
     IBackgroundServiceMonitor backgroundServiceMonitor,
+    IMemoryCache cache,
     ILogger<SystemInfoService> logger) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
+    private const string CacheKey = "SystemInfo:Snapshot";
 
     private readonly AppDbContext _db = db;
     private readonly IStoragePathService _storagePathService = storagePathService;
     private readonly IBackgroundServiceMonitor _backgroundServiceMonitor = backgroundServiceMonitor;
+    private readonly IMemoryCache _cache = cache;
     private readonly ILogger<SystemInfoService> _logger = logger;
+
+    /// <summary>
+    /// Returns the current system information snapshot, served from a 10-second cache to avoid
+    /// redundant CPU sampling and directory scans when multiple tabs poll simultaneously.
+    /// </summary>
+    public async Task<SystemInfoDto> GetSystemInfoAsync(CancellationToken cancellationToken = default)
+    {
+        return await _cache.GetOrCreateAsync(CacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(10);
+            return await CollectSystemInfoAsync(cancellationToken);
+        }) ?? await CollectSystemInfoAsync(cancellationToken);
+    }
 
     /// <summary>
     /// Collects the current system information snapshot.
     /// </summary>
-    public async Task<SystemInfoDto> GetSystemInfoAsync(CancellationToken cancellationToken = default)
+    private async Task<SystemInfoDto> CollectSystemInfoAsync(CancellationToken cancellationToken = default)
     {
         string appVersion = GetApplicationVersion();
         string storageDirectory = ResolveStorageDirectory();
@@ -313,6 +330,7 @@ public class SystemInfoService(
     }
 
     // Background services degrade when disabled or idle, and become critical when they report explicit errors.
+    // Uses a failure-rate threshold so a single historical failure doesn't permanently mark a healthy service as Degraded.
     private static SystemServiceHealth MapServiceHealth(BackgroundServiceStatus status)
     {
         if (!string.IsNullOrWhiteSpace(status.LastError))
@@ -320,9 +338,22 @@ public class SystemInfoService(
             return SystemServiceHealth.Critical;
         }
 
-        if (!status.IsEnabled || !status.IsRunning || status.FailedRuns > 0)
+        if (!status.IsEnabled || !status.IsRunning)
         {
             return SystemServiceHealth.Degraded;
+        }
+
+        if (status.FailedRuns > 0)
+        {
+            long total = status.FailedRuns + status.SuccessfulRuns;
+
+            // Degrade only if the service has never succeeded, or its failure rate exceeds 10%.
+            bool neverSucceeded = status.SuccessfulRuns == 0;
+            bool highFailureRate = total > 0 && status.FailedRuns * 100 / total > 10;
+            if (neverSucceeded || highFailureRate)
+            {
+                return SystemServiceHealth.Degraded;
+            }
         }
 
         return SystemServiceHealth.Healthy;
