@@ -93,6 +93,7 @@ _Last 5 most-recent learnings preserved from full history. Older entries are in 
 - 2026-06-01T15:18:38-07:00 — Unified analytics hub: `src/Web/ReactApp/src/features/analytics/pages/AnalyticsHubPage.tsx` is now the single analytics destination. It owns the shared `TimePeriodFilter`, KPI summary row, and controlled `?lens=production|cost|fleet` tab state.
 - 2026-06-01T15:18:38-07:00 — Analytics consolidation pattern: keep legacy route-level pages as `PageTemplate` wrappers, but export reusable body components (`StatisticsDashboardContent`, `CostDashboardContent`, `AnalyticsDashboardContent`) so a new hub page can compose them without nested page chrome.
 - 2026-06-01T15:18:38-07:00 — Shared tabs accessibility: `src/Web/ReactApp/src/common/components/ui/Tabs.tsx` now uses roving `tabIndex` plus ArrowLeft/ArrowRight/Home/End keyboard navigation. When testing collapsed sidebar navigation, assert on `href` targets instead of visible link labels because the icon-first layout can hide text.
+- 2026-06-01T15:18:38-07:00 — `SettingsShell` filtered search should narrow visible categories/sub-pages and keep the rendered page aligned with the normalized `tab`/`sub` params. Keep the standalone route components mapped in `SUB_PAGE_CONTENT` so search-driven deep links render the same page content as contextual `/printer-groups` and `/nfc-bindings` routes, and do not steal focus from the search box when the active category changes because of typing.
 
 ### External-reference-app Review Pointer — 2026-05-31
 

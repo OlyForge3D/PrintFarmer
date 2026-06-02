@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useCallback, useRef, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Badge } from '@/common/components/ui';
 import {
@@ -47,6 +47,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const navRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
+  const visibleCategories = useMemo(() => {
+    if (!isFiltering || !matchingCategoryIds) {
+      return categories;
+    }
+
+    return categories.filter((category) => matchingCategoryIds.includes(category.id));
+  }, [categories, isFiltering, matchingCategoryIds]);
+
   // Handle keyboard navigation within sidebar
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -55,11 +63,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          nextIndex = index < categories.length - 1 ? index + 1 : 0;
+          nextIndex = index < visibleCategories.length - 1 ? index + 1 : 0;
           break;
         case 'ArrowUp':
           e.preventDefault();
-          nextIndex = index > 0 ? index - 1 : categories.length - 1;
+          nextIndex = index > 0 ? index - 1 : visibleCategories.length - 1;
           break;
         case 'Home':
           e.preventDefault();
@@ -67,17 +75,17 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
           break;
         case 'End':
           e.preventDefault();
-          nextIndex = categories.length - 1;
+          nextIndex = visibleCategories.length - 1;
           break;
       }
 
       if (nextIndex !== null) {
-        const nextCategory = categories[nextIndex];
+        const nextCategory = visibleCategories[nextIndex];
         const nextButton = itemRefs.current.get(nextCategory.id);
         nextButton?.focus();
       }
     },
-    [categories]
+    [visibleCategories]
   );
 
   // Store ref for each nav item
@@ -108,7 +116,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         aria-label="Settings categories"
       >
         <ul ref={navRef} role="list" className="py-2">
-          {categories.map((category, index) => {
+          {visibleCategories.map((category, index) => {
             const isActive = activeCategory === category.id;
             const isMatching = isMatchingCategory(category.id);
 
@@ -142,7 +150,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
       {/* Mobile dropdown */}
       <MobileCategorySelector
-        categories={categories}
+        categories={visibleCategories}
         activeCategory={activeCategory}
         onCategoryChange={onCategoryChange}
         matchingCategoryIds={matchingCategoryIds}
