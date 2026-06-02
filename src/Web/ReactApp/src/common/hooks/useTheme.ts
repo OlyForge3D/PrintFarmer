@@ -1,14 +1,14 @@
 /**
  * useTheme — Design System v2 hook
  *
- * Exposes only the four new canonical themes. Wraps the full ThemeContext
+ * Exposes the canonical design-system themes. Wraps the full ThemeContext
  * internally so existing code using ThemeContext directly is unaffected.
  */
 import { useTheme as useThemeContext } from '@/contexts/ThemeContext';
 
-export type NewTheme = 'light' | 'dark' | 'matrix' | 'blueprint';
+export type NewTheme = 'light' | 'dark' | 'matrix' | 'blueprint' | 'ratos' | 'voron' | 'farm';
 
-const NEW_THEMES: NewTheme[] = ['light', 'dark', 'matrix', 'blueprint'];
+const NEW_THEMES: NewTheme[] = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm'];
 
 function isNewTheme(t: string): t is NewTheme {
   return NEW_THEMES.includes(t as NewTheme);
@@ -29,6 +29,9 @@ export function useTheme() {
     isDark: activeTheme === 'dark',
     isMatrix: activeTheme === 'matrix',
     isBlueprint: activeTheme === 'blueprint',
+    isRatos: activeTheme === 'ratos',
+    isVoron: activeTheme === 'voron',
+    isFarm: activeTheme === 'farm',
     prefersReducedMotion: ctx.prefersReducedMotion,
     prefersHighContrast: ctx.prefersHighContrast,
   };

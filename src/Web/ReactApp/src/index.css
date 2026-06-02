@@ -7,6 +7,9 @@
 @import './design-system/themes/light.css';
 @import './design-system/themes/matrix.css';
 @import './design-system/themes/blueprint.css';
+@import './design-system/themes/ratos.css';
+@import './design-system/themes/voron.css';
+@import './design-system/themes/farm.css';
 
 @theme {
   /* PrintFarmer Colors — primary backgrounds */

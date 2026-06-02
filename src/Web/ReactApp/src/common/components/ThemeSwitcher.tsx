@@ -33,6 +33,24 @@ const THEME_OPTIONS: ThemeOption[] = [
     description: 'Schematic — cyanotype drafting aesthetic',
     swatches: ['#0c1a2e', '#102137', '#38bdf8', '#e6f2ff'],
   },
+  {
+    id: 'ratos',
+    label: 'RatOS',
+    description: 'Firmware — black and green terminal aesthetic',
+    swatches: ['#080a08', '#0c110d', '#22c55e', '#86efac'],
+  },
+  {
+    id: 'voron',
+    label: 'Voron',
+    description: 'Industrial — red-on-black precision engineering',
+    swatches: ['#090909', '#101012', '#dc2626', '#a1a1aa'],
+  },
+  {
+    id: 'farm',
+    label: 'Farm',
+    description: 'Harvest — warm autumn festival colors',
+    swatches: ['#24150c', '#332113', '#ea580c', '#84cc16'],
+  },
 ];
 
 export function ThemeSwitcher() {

@@ -557,6 +557,9 @@ export function Layout() {
                         { value: 'light' as Theme, label: 'Workshop Daylight', desc: 'Clean, high-contrast light theme' },
                         { value: 'matrix' as Theme, label: 'Terminal', desc: 'Phosphor-green CRT aesthetic' },
                         { value: 'blueprint' as Theme, label: 'Schematic', desc: 'Cyanotype drafting aesthetic' },
+                        { value: 'ratos' as Theme, label: 'RatOS', desc: 'Black and green firmware aesthetic' },
+                        { value: 'voron' as Theme, label: 'Voron', desc: 'Red-on-black precision engineering' },
+                        { value: 'farm' as Theme, label: 'Farm', desc: 'Warm autumn harvest colors' },
                       ]).map((t) => (
                         <Button
                           key={t.value}

@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 
-export type Theme = 'github-dark' | 'printfarmer-dark' | 'light' | 'matrix' | 'forge' | 'dark' | 'blueprint' | 'system';
+export type Theme = 'github-dark' | 'printfarmer-dark' | 'light' | 'matrix' | 'forge' | 'dark' | 'blueprint' | 'ratos' | 'voron' | 'farm' | 'system';
 
 interface ThemeContextType {
   theme: Theme;
