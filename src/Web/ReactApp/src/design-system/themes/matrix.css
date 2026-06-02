@@ -152,9 +152,9 @@
   --pf-selection-text:    #000000;
 
   /* --- Skeleton / Loading --------------------------------------------------- */
-  --pf-skeleton-bg:     #0a120a;
-  --pf-skeleton-bg-alt: #102010;
-  --pf-skeleton-accent: #1a2e1a;
+  --pf-skeleton-bg:     #122212;
+  --pf-skeleton-bg-alt: #1a3318;
+  --pf-skeleton-accent: #2a4a28;
 
   /* --- Glows (strong CRT halos) --------------------------------------------- */
   --pf-glow-accent:  0 0 16px rgba(0, 255, 65, 0.45), 0 0 4px rgba(0, 255, 65, 0.25);
