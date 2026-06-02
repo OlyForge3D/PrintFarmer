@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 
-export type Theme = 'github-dark' | 'printfarmer-dark' | 'light' | 'system';
+export type Theme = 'github-dark' | 'printfarmer-dark' | 'light' | 'matrix' | 'forge' | 'dark' | 'blueprint' | 'system';
 
 interface ThemeContextType {
   theme: Theme;
@@ -17,11 +17,16 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-const THEME_STORAGE_KEY = 'printfarmer-theme';
+const THEME_STORAGE_KEY = 'pf-theme';
+const LEGACY_STORAGE_KEY = 'printfarmer-theme';
+const LEGACY_THEME_MAP: Partial<Record<string, Theme>> = {
+  'printfarmer-dark': 'dark',
+  'github-dark': 'dark',
+};
 
 export function ThemeProvider({ 
   children, 
-  defaultTheme = 'github-dark' as Theme,
+  defaultTheme = 'dark' as Theme,
   storageKey = THEME_STORAGE_KEY 
 }: { 
   children: ReactNode;
@@ -29,7 +34,16 @@ export function ThemeProvider({
   storageKey?: string;
 }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    // Load theme from localStorage or use default
+    // Only migrate from old storage key when using the default key (not custom test keys)
+    if (storageKey === THEME_STORAGE_KEY) {
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (legacy) {
+        const mapped = LEGACY_THEME_MAP[legacy] ?? (legacy as Theme);
+        localStorage.setItem(storageKey, mapped);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        return mapped;
+      }
+    }
     const stored = localStorage.getItem(storageKey);
     return (stored as Theme) || defaultTheme;
   });
@@ -43,7 +57,7 @@ export function ThemeProvider({
 
   // Derive computed theme from theme setting and system preference
   const computedTheme: Exclude<Theme, 'system'> = theme === 'system' 
-    ? (systemPrefersDark ? 'github-dark' : 'light')
+    ? (systemPrefersDark ? 'dark' : 'light')
     : (theme as Exclude<Theme, 'system'>);
 
   const [accessibility, setAccessibility] = useState(() => {
@@ -97,10 +111,12 @@ export function ThemeProvider({
 
   // Apply theme to DOM and save to localStorage
   useEffect(() => {
-    if (computedTheme === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-    } else {
+    // Apply the computed theme via data-theme attribute
+    // github-dark is the default (no attribute needed), others need explicit attribute
+    if (computedTheme === 'github-dark') {
       document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', computedTheme);
     }
 
     // Apply CSS variables for accessibility
@@ -125,7 +141,7 @@ export function ThemeProvider({
 
   const toggleTheme = useCallback(() => {
     setThemeState(current => {
-      const cycle: Theme[] = ['light', 'github-dark', 'printfarmer-dark', 'system'];
+    const cycle: Theme[] = ['light', 'github-dark', 'printfarmer-dark', 'matrix', 'forge', 'system'];
       const currentIndex = cycle.indexOf(current);
       const nextIndex = (currentIndex + 1) % cycle.length;
       return cycle[nextIndex];
@@ -138,7 +154,7 @@ export function ThemeProvider({
     setTheme,
     toggleTheme,
     isLight: computedTheme === 'light',
-    isDark: computedTheme === 'github-dark' || computedTheme === 'printfarmer-dark',
+    isDark: computedTheme !== 'light',
     isSystem: theme === 'system',
     prefersReducedMotion: accessibility.prefersReducedMotion,
     prefersHighContrast: accessibility.prefersHighContrast,

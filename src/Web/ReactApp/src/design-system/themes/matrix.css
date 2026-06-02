@@ -1,0 +1,236 @@
+/* =============================================================================
+   PrintFarmer Matrix — "Terminal"
+   Phosphor-green CRT terminal aesthetic. Pure black canvas, glowing green data.
+   Body font override: --pf-font-mono when [data-theme="matrix"].
+   ============================================================================= */
+
+[data-theme="matrix"] {
+  color-scheme: dark;
+  --pf-theme-name: 'matrix';
+
+  /* --- Surfaces ------------------------------------------------------------- */
+  --pf-bg-0:       #000000;
+  --pf-bg-1:       #050a05;
+  --pf-bg-2:       #0a120a;
+  --pf-panel:      #040804;
+  --pf-card-bg:    #050a05;
+  --pf-sidebar-bg: #030603;
+  --pf-modal-bg:   #080f08;
+
+  /* --- Borders -------------------------------------------------------------- */
+  --pf-border:         #1a2e1a;
+  --pf-border-strong:  #2d4a2d;
+  --pf-border-subtle:  #0d150d;
+  --pf-border-divider: #102010;
+
+  /* --- Text ----------------------------------------------------------------- */
+  --pf-text-primary:   #00ff41;
+  --pf-text-secondary: #4ade80;
+  --pf-text-tertiary:  #22c55e;
+  --pf-text-muted:     #15803d;
+  --pf-text-inverse:   #000000;
+  --pf-text-on-accent: #000000;
+
+  /* --- Accent --------------------------------------------------------------- */
+  --pf-accent:       #00ff41;
+  --pf-accent-bg:    #00cc34;
+  --pf-accent-hover: #00b32d;
+  --pf-accent-fg:    #000000;
+  --pf-accent-2:     #fbbf24;
+
+  /* --- Semantic: Success ---------------------------------------------------- */
+  --pf-success:        #00ff41;
+  --pf-success-bg:     #003d10;
+  --pf-success-border: #00802a;
+  --pf-success-fg:     #7fff96;
+
+  /* --- Semantic: Warning ---------------------------------------------------- */
+  --pf-warning:        #fbbf24;
+  --pf-warning-bg:     #3b2a06;
+  --pf-warning-border: #a16207;
+  --pf-warning-fg:     #fde68a;
+
+  /* --- Semantic: Error ------------------------------------------------------ */
+  --pf-error:        #ff3344;
+  --pf-error-bg:     #3d0008;
+  --pf-error-border: #991b25;
+  --pf-error-fg:     #ff8088;
+
+  /* --- Semantic: Info ------------------------------------------------------- */
+  --pf-info:        #00d4ff;
+  --pf-info-bg:     #003344;
+  --pf-info-border: #006688;
+  --pf-info-fg:     #7fe0ff;
+
+  /* --- Status: Online ------------------------------------------------------- */
+  --pf-status-online-bg:     #001a08;
+  --pf-status-online-text:   #00ff41;
+  --pf-status-online-border: #00802a;
+
+  /* --- Status: Offline ------------------------------------------------------ */
+  --pf-status-offline-bg:     #1a0004;
+  --pf-status-offline-text:   #ff3344;
+  --pf-status-offline-border: #660010;
+
+  /* --- Status: Printing ----------------------------------------------------- */
+  --pf-status-printing-bg:     #001a1f;
+  --pf-status-printing-text:   #00d4ff;
+  --pf-status-printing-border: #006688;
+
+  /* --- Status: Paused ------------------------------------------------------- */
+  --pf-status-paused-bg:     #1f1500;
+  --pf-status-paused-text:   #fbbf24;
+  --pf-status-paused-border: #a16207;
+
+  /* --- Status: Error -------------------------------------------------------- */
+  --pf-status-error-bg:     #1a0004;
+  --pf-status-error-text:   #ff3344;
+  --pf-status-error-border: #991b25;
+
+  /* --- Status: Idle --------------------------------------------------------- */
+  --pf-status-idle-bg:     #0a120a;
+  --pf-status-idle-text:   #4ade80;
+  --pf-status-idle-border: #1a2e1a;
+
+  /* --- Controls ------------------------------------------------------------- */
+  --pf-control-bg:            #050a05;
+  --pf-control-border:        #1a2e1a;
+  --pf-control-border-hover:  #2d4a2d;
+  --pf-control-border-focus:  #00ff41;
+  --pf-control-text:          #00ff41;
+  --pf-control-placeholder:   #15803d;
+  --pf-control-disabled-bg:   #0a120a;
+  --pf-control-disabled-text: #15803d;
+
+  /* --- Buttons: Primary ----------------------------------------------------- */
+  --pf-button-primary-bg:     #00cc34;
+  --pf-button-primary-hover:  #00b32d;
+  --pf-button-primary-active: #009926;
+  --pf-button-primary-text:   #000000;
+  --pf-button-primary-border: transparent;
+
+  /* --- Buttons: Secondary --------------------------------------------------- */
+  --pf-button-secondary-bg:     transparent;
+  --pf-button-secondary-hover:  #0a120a;
+  --pf-button-secondary-active: rgba(0, 255, 65, 0.15);
+  --pf-button-secondary-text:   #00ff41;
+  --pf-button-secondary-border: #1a2e1a;
+
+  /* --- Buttons: Danger ------------------------------------------------------ */
+  --pf-button-danger-bg:     #3d0008;
+  --pf-button-danger-hover:  #540010;
+  --pf-button-danger-active: #2a0005;
+  --pf-button-danger-text:   #ff8088;
+  --pf-button-danger-border: #991b25;
+
+  /* --- Buttons: Success ----------------------------------------------------- */
+  --pf-button-success-bg:     #003d10;
+  --pf-button-success-hover:  #004d14;
+  --pf-button-success-active: #002e0c;
+  --pf-button-success-text:   #7fff96;
+  --pf-button-success-border: #00802a;
+
+  /* --- Validation ----------------------------------------------------------- */
+  --pf-validation-error-bg:       #3d0008;
+  --pf-validation-error-border:   #991b25;
+  --pf-validation-error-text:     #ff8088;
+  --pf-validation-success-bg:     #003d10;
+  --pf-validation-success-border: #00802a;
+  --pf-validation-success-text:   #7fff96;
+  --pf-validation-warning-bg:     #3b2a06;
+  --pf-validation-warning-border: #a16207;
+  --pf-validation-warning-text:   #fde68a;
+
+  /* --- Feedback ------------------------------------------------------------- */
+  --pf-focus-ring:        rgba(0, 255, 65, 0.6);
+  --pf-focus-ring-offset: #000000;
+  --pf-hover-overlay:     rgba(0, 255, 65, 0.08);
+  --pf-active-overlay:    rgba(0, 255, 65, 0.15);
+  --pf-selection-bg:      #00ff41;
+  --pf-selection-text:    #000000;
+
+  /* --- Skeleton / Loading --------------------------------------------------- */
+  --pf-skeleton-bg:     #0a120a;
+  --pf-skeleton-bg-alt: #102010;
+  --pf-skeleton-accent: #1a2e1a;
+
+  /* --- Glows (strong CRT halos) --------------------------------------------- */
+  --pf-glow-accent:  0 0 16px rgba(0, 255, 65, 0.45), 0 0 4px rgba(0, 255, 65, 0.25);
+  --pf-glow-success: 0 0 16px rgba(0, 255, 65, 0.45);
+  --pf-glow-warning: 0 0 16px rgba(251, 191, 36, 0.40);
+  --pf-glow-error:   0 0 16px rgba(255, 51, 68, 0.45);
+
+  /* --- Domain --------------------------------------------------------------- */
+  --pf-home-homed-bg:     #003d10;
+  --pf-home-not-homed-bg: #3b2a06;
+
+  /* --- Legacy tokens (backward compatibility) ------------------------------- */
+  --pf-border-light:  #2d4a2d;
+  --pf-border-medium: #1a2e1a;
+  --pf-border-dark:   #0d150d;
+  --pf-border-gray:   #3d5c3d;
+  --pf-text-light:    #7fff96;
+  --pf-success-hover: #004d14;
+  --pf-error-hover:   #540010;
+  --pf-error-text:    #ff8088;
+  --pf-warning-text:  #fde68a;
+  --pf-loading:       #00ff41;
+  --pf-loading-border: #00cc34;
+  --pf-disabled:      #15803d;
+  --pf-btn-glow:      0 0 12px rgba(0, 255, 65, 0.25), 0 0 4px rgba(0, 255, 65, 0.15);
+  --pf-link:          #fbbf24;
+  /* Gradient tokens mapped to flat fallbacks */
+  --pf-gradient-primary-start:       #050a05;
+  --pf-gradient-primary-end:         #000000;
+  --pf-gradient-secondary-start:     #0a120a;
+  --pf-gradient-secondary-end:       #050a05;
+  --pf-gradient-success-start:       #003d10;
+  --pf-gradient-success-end:         #001a08;
+  --pf-gradient-green-start:         #003d10;
+  --pf-gradient-green-end:           #001a08;
+  --pf-gradient-green-active-start:  #004d14;
+  --pf-gradient-green-active-end:    #003d10;
+  --pf-gradient-gray-start:          #2d4a2d;
+  --pf-gradient-gray-end:            #1a2e1a;
+  --pf-gradient-gray-dark-start:     #1a2e1a;
+  --pf-gradient-gray-dark-end:       #0d150d;
+}
+
+/* Matrix body font override — mono as body face */
+body[data-theme="matrix"],
+html[data-theme="matrix"] body {
+  font-family: var(--pf-font-mono);
+}
+
+/* Phosphor glow on headings */
+[data-theme="matrix"] h1,
+[data-theme="matrix"] h2,
+[data-theme="matrix"] h3 {
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5), 0 0 20px rgba(0, 255, 65, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="matrix"] h1,
+  [data-theme="matrix"] h2,
+  [data-theme="matrix"] h3 {
+    text-shadow: none;
+  }
+}
+
+/* CRT scanlines (opt-in via .matrix-scanlines on body/root) */
+@media (prefers-reduced-motion: no-preference) {
+  .matrix-scanlines::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: var(--pf-z-tooltip);
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 1px,
+      rgba(0, 0, 0, 0.15) 1px,
+      rgba(0, 0, 0, 0.15) 2px
+    );
+  }
+}

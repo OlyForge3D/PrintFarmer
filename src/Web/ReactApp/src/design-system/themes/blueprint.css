@@ -1,0 +1,212 @@
+/* =============================================================================
+   PrintFarmer Blueprint — "Schematic"
+   Deep cyanotype paper, white technical line work, drafting-pencil yellow.
+   ============================================================================= */
+
+[data-theme="blueprint"] {
+  color-scheme: dark;
+  --pf-theme-name: 'blueprint';
+
+  /* --- Surfaces ------------------------------------------------------------- */
+  --pf-bg-0:       #0c1a2e;
+  --pf-bg-1:       #102137;
+  --pf-bg-2:       #15293f;
+  --pf-panel:      #0e1d33;
+  --pf-card-bg:    #102137;
+  --pf-sidebar-bg: #0a1729;
+  --pf-modal-bg:   #13243a;
+
+  /* --- Borders -------------------------------------------------------------- */
+  --pf-border:         #1d3552;
+  --pf-border-strong:  #2a4d7a;
+  --pf-border-subtle:  #16263e;
+  --pf-border-divider: #1a2f4a;
+
+  /* --- Text ----------------------------------------------------------------- */
+  --pf-text-primary:   #e6f2ff;
+  --pf-text-secondary: #9ec5e8;
+  --pf-text-tertiary:  #6790b8;
+  --pf-text-muted:     #4d7299;
+  --pf-text-inverse:   #0c1a2e;
+  --pf-text-on-accent: #0c1a2e;
+
+  /* --- Accent --------------------------------------------------------------- */
+  --pf-accent:       #38bdf8;
+  --pf-accent-bg:    #0284c7;
+  --pf-accent-hover: #0369a1;
+  --pf-accent-fg:    #ffffff;
+  --pf-accent-2:     #fef08a;
+
+  /* --- Semantic: Success ---------------------------------------------------- */
+  --pf-success:        #4ade80;
+  --pf-success-bg:     #052e16;
+  --pf-success-border: #166534;
+  --pf-success-fg:     #bbf7d0;
+
+  /* --- Semantic: Warning ---------------------------------------------------- */
+  --pf-warning:        #fbbf24;
+  --pf-warning-bg:     #422006;
+  --pf-warning-border: #a16207;
+  --pf-warning-fg:     #fef08a;
+
+  /* --- Semantic: Error ------------------------------------------------------ */
+  --pf-error:        #f87171;
+  --pf-error-bg:     #3a0a0a;
+  --pf-error-border: #991b1b;
+  --pf-error-fg:     #fecaca;
+
+  /* --- Semantic: Info ------------------------------------------------------- */
+  --pf-info:        #38bdf8;
+  --pf-info-bg:     #082f49;
+  --pf-info-border: #0369a1;
+  --pf-info-fg:     #bae6fd;
+
+  /* --- Status: Online ------------------------------------------------------- */
+  --pf-status-online-bg:     #052e16;
+  --pf-status-online-text:   #86efac;
+  --pf-status-online-border: #166534;
+
+  /* --- Status: Offline ------------------------------------------------------ */
+  --pf-status-offline-bg:     #3a0a0a;
+  --pf-status-offline-text:   #fca5a5;
+  --pf-status-offline-border: #7f1d1d;
+
+  /* --- Status: Printing ----------------------------------------------------- */
+  --pf-status-printing-bg:     #082f49;
+  --pf-status-printing-text:   #7dd3fc;
+  --pf-status-printing-border: #0369a1;
+
+  /* --- Status: Paused ------------------------------------------------------- */
+  --pf-status-paused-bg:     #422006;
+  --pf-status-paused-text:   #fcd34d;
+  --pf-status-paused-border: #a16207;
+
+  /* --- Status: Error -------------------------------------------------------- */
+  --pf-status-error-bg:     #3a0a0a;
+  --pf-status-error-text:   #fca5a5;
+  --pf-status-error-border: #991b1b;
+
+  /* --- Status: Idle --------------------------------------------------------- */
+  --pf-status-idle-bg:     #15293f;
+  --pf-status-idle-text:   #9ec5e8;
+  --pf-status-idle-border: #2a4d7a;
+
+  /* --- Controls ------------------------------------------------------------- */
+  --pf-control-bg:            #102137;
+  --pf-control-border:        #1d3552;
+  --pf-control-border-hover:  #2a4d7a;
+  --pf-control-border-focus:  #38bdf8;
+  --pf-control-text:          #e6f2ff;
+  --pf-control-placeholder:   #4d7299;
+  --pf-control-disabled-bg:   #15293f;
+  --pf-control-disabled-text: #4d7299;
+
+  /* --- Buttons: Primary ----------------------------------------------------- */
+  --pf-button-primary-bg:     #0284c7;
+  --pf-button-primary-hover:  #0369a1;
+  --pf-button-primary-active: #025587;
+  --pf-button-primary-text:   #ffffff;
+  --pf-button-primary-border: transparent;
+
+  /* --- Buttons: Secondary --------------------------------------------------- */
+  --pf-button-secondary-bg:     transparent;
+  --pf-button-secondary-hover:  #15293f;
+  --pf-button-secondary-active: rgba(56, 189, 248, 0.12);
+  --pf-button-secondary-text:   #e6f2ff;
+  --pf-button-secondary-border: #1d3552;
+
+  /* --- Buttons: Danger ------------------------------------------------------ */
+  --pf-button-danger-bg:     #3a0a0a;
+  --pf-button-danger-hover:  #4d0d0d;
+  --pf-button-danger-active: #2e0808;
+  --pf-button-danger-text:   #fecaca;
+  --pf-button-danger-border: #991b1b;
+
+  /* --- Buttons: Success ----------------------------------------------------- */
+  --pf-button-success-bg:     #052e16;
+  --pf-button-success-hover:  #063a1c;
+  --pf-button-success-active: #042410;
+  --pf-button-success-text:   #bbf7d0;
+  --pf-button-success-border: #166534;
+
+  /* --- Validation ----------------------------------------------------------- */
+  --pf-validation-error-bg:       #3a0a0a;
+  --pf-validation-error-border:   #991b1b;
+  --pf-validation-error-text:     #fecaca;
+  --pf-validation-success-bg:     #052e16;
+  --pf-validation-success-border: #166534;
+  --pf-validation-success-text:   #bbf7d0;
+  --pf-validation-warning-bg:     #422006;
+  --pf-validation-warning-border: #a16207;
+  --pf-validation-warning-text:   #fef08a;
+
+  /* --- Feedback ------------------------------------------------------------- */
+  --pf-focus-ring:        rgba(56, 189, 248, 0.55);
+  --pf-focus-ring-offset: #0c1a2e;
+  --pf-hover-overlay:     rgba(56, 189, 248, 0.06);
+  --pf-active-overlay:    rgba(56, 189, 248, 0.12);
+  --pf-selection-bg:      #0284c7;
+  --pf-selection-text:    #ffffff;
+
+  /* --- Skeleton / Loading --------------------------------------------------- */
+  --pf-skeleton-bg:     #15293f;
+  --pf-skeleton-bg-alt: #1a2f4a;
+  --pf-skeleton-accent: #2a4d7a;
+
+  /* --- Glows (cyan line glow) ----------------------------------------------- */
+  --pf-glow-accent:  0 0 14px rgba(56, 189, 248, 0.30);
+  --pf-glow-success: 0 0 12px rgba(74, 222, 128, 0.20);
+  --pf-glow-warning: 0 0 12px rgba(251, 191, 36, 0.25);
+  --pf-glow-error:   0 0 12px rgba(248, 113, 113, 0.25);
+
+  /* --- Domain --------------------------------------------------------------- */
+  --pf-home-homed-bg:     #052e16;
+  --pf-home-not-homed-bg: #422006;
+
+  /* --- Legacy tokens (backward compatibility) ------------------------------- */
+  --pf-border-light:  #2a4d7a;
+  --pf-border-medium: #1d3552;
+  --pf-border-dark:   #16263e;
+  --pf-border-gray:   #2a4d7a;
+  --pf-text-light:    #9ec5e8;
+  --pf-success-hover: #063a1c;
+  --pf-error-hover:   #4d0d0d;
+  --pf-error-text:    #fecaca;
+  --pf-warning-text:  #fef08a;
+  --pf-loading:       #38bdf8;
+  --pf-loading-border: #0284c7;
+  --pf-disabled:      #4d7299;
+  --pf-btn-glow:      0 0 14px rgba(56, 189, 248, 0.30);
+  --pf-link:          #fef08a;
+  /* Gradient tokens mapped to flat fallbacks */
+  --pf-gradient-primary-start:       #102137;
+  --pf-gradient-primary-end:         #0c1a2e;
+  --pf-gradient-secondary-start:     #15293f;
+  --pf-gradient-secondary-end:       #102137;
+  --pf-gradient-success-start:       #052e16;
+  --pf-gradient-success-end:         #031a0c;
+  --pf-gradient-green-start:         #052e16;
+  --pf-gradient-green-end:           #031a0c;
+  --pf-gradient-green-active-start:  #063a1c;
+  --pf-gradient-green-active-end:    #052e16;
+  --pf-gradient-gray-start:          #2a4d7a;
+  --pf-gradient-gray-end:            #1d3552;
+  --pf-gradient-gray-dark-start:     #1d3552;
+  --pf-gradient-gray-dark-end:       #16263e;
+}
+
+/* Dotted technical underlines on plain links */
+[data-theme="blueprint"] a:not([class]) {
+  text-decoration: dotted underline;
+  text-decoration-color: var(--pf-accent);
+}
+
+/* Blueprint grid overlay (opt-in via .blueprint-grid on body/container) */
+@media (prefers-reduced-motion: no-preference) {
+  .blueprint-grid {
+    background-image:
+      linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}

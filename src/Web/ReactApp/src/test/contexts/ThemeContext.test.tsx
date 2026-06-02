@@ -174,7 +174,7 @@ describe('ThemeContext', () => {
       });
       
       expect(screen.getByTestId('theme')).toHaveTextContent('system');
-      expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark'); // matchMedia mocked to dark
+      expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark'); // matchMedia mocked to dark
       expect(localStorageMock.setItem).toHaveBeenCalledWith('test-theme', 'system');
     });
   });
@@ -198,7 +198,19 @@ describe('ThemeContext', () => {
       });
       expect(screen.getByTestId('theme')).toHaveTextContent('printfarmer-dark');
       
-      // printfarmer-dark → system
+      // printfarmer-dark → matrix
+      await act(async () => {
+        screen.getByTestId('toggle-theme').click();
+      });
+      expect(screen.getByTestId('theme')).toHaveTextContent('matrix');
+      
+      // matrix → forge
+      await act(async () => {
+        screen.getByTestId('toggle-theme').click();
+      });
+      expect(screen.getByTestId('theme')).toHaveTextContent('forge');
+      
+      // forge → system
       await act(async () => {
         screen.getByTestId('toggle-theme').click();
       });
@@ -221,10 +233,30 @@ describe('ThemeContext', () => {
       expect(screen.getByTestId('theme')).toHaveTextContent('printfarmer-dark');
     });
 
-    it('toggles from printfarmer-dark to system', async () => {
+    it('toggles from printfarmer-dark to matrix', async () => {
       renderWithThemeProvider(<TestComponent />, { defaultTheme: 'printfarmer-dark' });
       
-      // printfarmer-dark → system
+      // printfarmer-dark → matrix
+      await act(async () => {
+        screen.getByTestId('toggle-theme').click();
+      });
+      expect(screen.getByTestId('theme')).toHaveTextContent('matrix');
+    });
+
+    it('toggles from matrix to forge', async () => {
+      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'matrix' });
+      
+      // matrix → forge
+      await act(async () => {
+        screen.getByTestId('toggle-theme').click();
+      });
+      expect(screen.getByTestId('theme')).toHaveTextContent('forge');
+    });
+
+    it('toggles from forge to system', async () => {
+      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'forge' });
+      
+      // forge → system
       await act(async () => {
         screen.getByTestId('toggle-theme').click();
       });
@@ -243,12 +275,12 @@ describe('ThemeContext', () => {
   });
 
   describe('system theme detection', () => {
-    it('detects system dark theme preference as github-dark', () => {
+    it('detects system dark theme preference as dark', () => {
       window.matchMedia = createMockMatchMedia(true);
       
       renderWithThemeProvider(<TestComponent />, { defaultTheme: 'system' });
       
-      expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark');
+      expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark');
     });
 
     it('detects system light theme preference as light', () => {
@@ -276,7 +308,7 @@ describe('ThemeContext', () => {
       
       renderWithThemeProvider(<TestComponent />, { defaultTheme: 'system' });
       
-      expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark');
+      expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark');
       
       // Simulate system theme change
       const mediaQueryList = mockMatchMedia.mock.results[0].value;
@@ -440,7 +472,7 @@ describe('ThemeContext', () => {
     it('useComputedTheme returns computed theme', () => {
       renderWithThemeProvider(<TestHooks />, { defaultTheme: 'system' });
       
-      expect(screen.getByTestId('hook-computed-theme')).toHaveTextContent('github-dark');
+      expect(screen.getByTestId('hook-computed-theme')).toHaveTextContent('dark');
     });
 
     it('useAccessibilityPreferences returns preferences', () => {

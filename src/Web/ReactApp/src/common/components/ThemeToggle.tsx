@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
-import { SunIcon, MoonIcon, MonitorIcon } from '@/common/components/icons/MdiIcons';
+import { SunIcon, MoonIcon, MonitorIcon, MatrixIcon, FireIcon } from '@/common/components/icons/MdiIcons';
 import { useTheme } from '@/contexts/ThemeContext';
 import type { Theme } from '@/contexts/ThemeContext';
 
@@ -24,6 +24,8 @@ export function ThemeToggle({
     { value: 'light', label: 'Light', icon: SunIcon },
     { value: 'github-dark', label: 'GitHub Dark', icon: MoonIcon },
     { value: 'printfarmer-dark', label: 'PrintFarmer Dark', icon: MoonIcon },
+    { value: 'matrix', label: 'Matrix', icon: MatrixIcon },
+    { value: 'forge', label: 'Forge', icon: FireIcon },
     { value: 'system', label: 'System', icon: MonitorIcon },
   ];
 
@@ -92,7 +94,8 @@ export function ThemeToggle({
 
   // Compact variant - cycle through themes
   const currentTheme = themes.find(t => t.value === theme) || themes[0];
-  const computedThemeLabel = themes.find(t => t.value === computedTheme)?.label || computedTheme;
+  const computedThemeLabel = themes.find(t => t.value === computedTheme)?.label 
+    || (computedTheme.charAt(0).toUpperCase() + computedTheme.slice(1));
   const Icon = currentTheme.icon;
 
   return (

@@ -7,11 +7,31 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-  <!-- Adaptive theme colors -->
-  <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0b1524" media="(prefers-color-scheme: dark)" />
+    <!-- Adaptive theme colors -->
+    <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1524" media="(prefers-color-scheme: dark)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PrintFarmer</title>
+    <!-- Google Fonts: IBM Plex Sans, Space Grotesk, JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <!-- Early theme init: prevent flash of unstyled theme -->
+    <script>
+      (function () {
+        var VALID = ['light', 'dark', 'matrix', 'blueprint'];
+        var stored = localStorage.getItem('pf-theme');
+        // Migrate from old key
+        if (!stored) {
+          var legacy = localStorage.getItem('printfarmer-theme');
+          if (legacy) {
+            stored = (legacy === 'printfarmer-dark' || legacy === 'github-dark') ? 'dark' : legacy;
+          }
+        }
+        var theme = VALID.indexOf(stored) !== -1 ? stored : 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
