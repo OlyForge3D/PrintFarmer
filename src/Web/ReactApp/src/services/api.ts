@@ -105,7 +105,6 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
-  SystemInfo,
   DispatchHistoryPageDto,
   FailureDetectionEvent,
   NotificationDto,
@@ -2352,11 +2351,6 @@ export class ApiClient {
 
   async getFeatureFlags(): Promise<Record<string, boolean>> {
     const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
-    return response.data;
-  }
-
-  async getSystemInfo(): Promise<SystemInfo> {
-    const response = await this.client.get<SystemInfo>('/system/info');
     return response.data;
   }
 
