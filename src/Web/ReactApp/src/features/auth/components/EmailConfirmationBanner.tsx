@@ -35,12 +35,12 @@ export function EmailConfirmationBanner() {
   };
 
   return (
-    <div className="border-b border-pf-border" style={{ backgroundColor: 'var(--pf-warning-bg)' }}>
+    <div className="border-b border-pf-border bg-pf-bg-2">
       <div className="max-w-7xl mx-auto py-3 px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between flex-wrap">
           <div className="flex items-center flex-1">
-            <span className="flex p-2 rounded-lg bg-pf-bg-2">
-              <EmailIcon className="h-5 w-5" style={{ color: 'var(--pf-warning)' }} />
+            <span className="flex p-2 rounded-lg bg-pf-bg-1">
+              <EmailIcon className="h-5 w-5 text-pf-warning" />
             </span>
             <p className="ml-3 font-medium text-pf-text-primary">
               <span className="md:hidden">Please verify your email</span>
@@ -54,8 +54,7 @@ export function EmailConfirmationBanner() {
               variant="subtle"
               onClick={handleResend}
               disabled={sending}
-              className="flex items-center justify-center bg-pf-bg-2 hover:bg-pf-border"
-              style={{ color: 'var(--pf-warning)' }}
+              className="flex items-center justify-center bg-pf-bg-1 hover:bg-pf-border text-pf-warning"
               iconLeft={sending ? <RefreshIcon className="h-4 w-4" /> : <EmailIcon className="h-4 w-4" />}
             >
               {sending ? 'Sending...' : 'Resend Email'}
@@ -65,7 +64,7 @@ export function EmailConfirmationBanner() {
               size="sm"
               onClick={() => setDismissed(true)}
               aria-label="Dismiss"
-              className="p-1 text-pf-warning"
+              className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
             >
               <CloseIcon className="h-5 w-5" />
             </Button>

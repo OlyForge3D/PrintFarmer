@@ -61,13 +61,13 @@ export function UserPreferencesPage() {
                 key={link.href}
                 type="button"
                 variant="subtle"
-                className="h-auto w-full items-start justify-start rounded-lg border border-pf-border px-4 py-3 text-left"
+                className="h-auto w-full items-start justify-start rounded-lg border border-pf-border px-4 py-3 text-left min-w-0"
                 iconLeft={link.icon}
                 onClick={() => navigate(link.href)}
               >
-                <span className="flex flex-col items-start gap-1">
+                <span className="flex flex-col items-start gap-1 min-w-0">
                   <span className="text-sm font-semibold text-pf-text-primary">{link.title}</span>
-                  <span className="text-xs text-pf-text-secondary">{link.description}</span>
+                  <span className="text-xs text-pf-text-secondary break-words">{link.description}</span>
                 </span>
               </Button>
             ))}

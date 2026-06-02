@@ -4,12 +4,6 @@ import { Card, Button, Input, Select, FormField, Spinner } from '@/common/compon
 import { useUserSettings, useUpdateUserSettings } from '@/features/settings/hooks/useUserSettings';
 import type { UserSettingsResponse } from '@/features/settings/types';
 
-const THEME_OPTIONS = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-];
-
 const LOCALE_OPTIONS = [
   { value: 'en', label: 'English' },
   { value: 'de', label: 'Deutsch' },
@@ -35,7 +29,6 @@ function UserSettingsForm({
   data: UserSettingsResponse;
   mutation: ReturnType<typeof useUpdateUserSettings>;
 }) {
-  const [theme, setTheme] = useState(data.theme);
   const [locale, setLocale] = useState(data.locale);
   const [itemsPerPage, setItemsPerPage] = useState(String(data.itemsPerPage));
   const [defaultSlicerPreset, setDefaultSlicerPreset] = useState(data.defaultSlicerPreset ?? '');
@@ -49,7 +42,7 @@ function UserSettingsForm({
 
     mutation.mutate(
       {
-        theme,
+        theme: data.theme, // preserve existing value — theme is controlled by Appearance section
         locale,
         itemsPerPage: items,
         defaultSlicerPreset: defaultSlicerPreset || null,
@@ -71,19 +64,6 @@ function UserSettingsForm({
       </Card.Header>
       <Card.Body>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField label="Theme">
-            <Select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value)}
-              aria-label="Theme"
-            >
-              {THEME_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </Select>
-          </FormField>
           <FormField label="Locale">
             <Select
               value={locale}

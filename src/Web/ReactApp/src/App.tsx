@@ -1,6 +1,7 @@
 // Common components
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { ErrorBoundary } from '@/common/components/ErrorBoundary';
+import { NotFoundPage } from '@/common/components/NotFoundPage';
 import { Layout } from '@/common/components/Layout';
 import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
 import { SetupWizard } from '@/features/auth/components/SetupWizard';
@@ -236,6 +237,7 @@ function AuthenticatedAppRoutes() {
         <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing&sub=profiles" replace />} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

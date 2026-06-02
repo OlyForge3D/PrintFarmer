@@ -99,7 +99,7 @@ export function ThemeSwitcher() {
 
             {/* Active indicator */}
             {isActive && (
-              <span className="text-xs text-[var(--pf-on-accent)]/80">Active</span>
+              <span className="text-xs text-[var(--pf-on-accent)]/80 mt-0.5">✓ Active</span>
             )}
           </Button>
         );

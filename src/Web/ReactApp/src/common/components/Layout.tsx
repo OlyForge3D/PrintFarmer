@@ -33,10 +33,11 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
+import { RouteErrorBoundary } from '@/common/components/ErrorBoundary';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
 import { printerSignalRService } from '@/services/printer-signalr';
@@ -641,7 +642,7 @@ export function Layout() {
                           onClick={() => { setSidebarOpen(false); }}
                           className={({ isActive }: { isActive: boolean }) =>
                             `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                              ? 'bg-pf-bg-2 text-pf-accent'
+                              ? 'bg-pf-bg-2 text-pf-accent font-semibold border-l-3 border-pf-accent'
                               : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                             }`
                           }
@@ -752,7 +753,7 @@ export function Layout() {
                         onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
                           `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                            ? 'bg-pf-bg-2 text-pf-accent'
+                            ? `bg-pf-bg-2 text-pf-accent font-semibold${navbarCollapsed ? '' : ' border-l-3 border-pf-accent'}`
                             : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                           }`
                         }
@@ -820,7 +821,15 @@ export function Layout() {
           <PlatformBanner />
           <InstallBanner />
           <div className="pt-2 pr-2 pl-2">
-            <Outlet />
+            <RouteErrorBoundary>
+              <Suspense fallback={
+                <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading page">
+                  <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+                </div>
+              }>
+                <Outlet />
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         </main>
       </div>

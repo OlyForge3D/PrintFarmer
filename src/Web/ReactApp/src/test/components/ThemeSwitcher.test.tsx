@@ -22,7 +22,7 @@ describe('ThemeSwitcher', () => {
   it('uses the on-accent token for the active theme chip', () => {
     render(<ThemeSwitcher />);
 
-    const activeChip = screen.getByRole('radio', { name: /Matrix\s*Active/ });
+    const activeChip = screen.getByRole('radio', { name: /Matrix\s*✓\s*Active/ });
     expect(activeChip.className).toContain('bg-[var(--pf-accent-bg)]');
     expect(activeChip.className).toContain('text-[var(--pf-on-accent)]');
   });
