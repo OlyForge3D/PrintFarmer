@@ -1,9 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router';
+import { PageTemplate } from '@/common/components/PageTemplate';
+import { SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
+import { Skeleton } from '@/common/components/skeletons/Skeleton';
+import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
 import { SettingsSearch } from '@/features/settings/components/SettingsSearch';
+import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
-import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import {
   SETTINGS_CATEGORIES,
   DEFAULT_CATEGORY,
@@ -28,22 +33,27 @@ import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
 
 const LazySlicerProfilesPage = lazy(() =>
-  import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage }))
+  import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage })),
 );
 
 const LazyWorkerManagementPage = lazy(() =>
-  import('@/features/slicer/pages/WorkerManagementPage').then((mod) => ({ default: mod.WorkerManagementPage }))
+  import('@/features/slicer/pages/WorkerManagementPage').then((mod) => ({ default: mod.WorkerManagementPage })),
 );
+
+const SETTINGS_FRAME_NOISE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E\")";
 
 function TabLoader() {
   return (
-    <div className="flex items-center justify-center py-12" role="status" aria-label="Loading">
-      <div className="pf-animate-spin rounded-full h-6 w-6 border-b-2 border-pf-accent"></div>
+    <div className="space-y-5 py-3" role="status" aria-label="Loading settings section">
+      <div className="space-y-2">
+        <Skeleton width="40%" />
+        <Skeleton width="70%" />
+      </div>
+      <FormSkeleton fields={4} />
     </div>
   );
 }
 
-/** Content mapping for categories with no sub-pages */
 const SINGLE_PAGE_CONTENT: Record<string, React.ReactNode> = {
   general: (
     <SettingsSection title="General Settings" description="Farm name, timezone, and system configuration.">
@@ -62,7 +72,6 @@ const SINGLE_PAGE_CONTENT: Record<string, React.ReactNode> = {
   ),
 };
 
-/** Content mapping for sub-pages (category.subPage) */
 const SUB_PAGE_CONTENT: Record<string, React.ReactNode> = {
   'slicing.bed-types': <BedTypeAdminPage />,
   'slicing.profiles': (
@@ -99,8 +108,8 @@ export const SettingsShell: React.FC = () => {
   const normalizedQuery = query.trim().toLowerCase();
 
   const activeCategory = useMemo(
-    () => SETTINGS_CATEGORIES.some((category) => category.id === requestedCategory) ? requestedCategory : DEFAULT_CATEGORY,
-    [requestedCategory]
+    () => (SETTINGS_CATEGORIES.some((category) => category.id === requestedCategory) ? requestedCategory : DEFAULT_CATEGORY),
+    [requestedCategory],
   );
 
   const shouldFocusSectionRef = useRef(false);
@@ -115,17 +124,17 @@ export const SettingsShell: React.FC = () => {
         const targetCategory = SETTINGS_CATEGORIES.find((category) => category.id === categoryId);
         const matchingTargetSubPage = !normalizedQuery || !targetCategory
           ? undefined
-          : targetCategory.subPages.find((subPage) =>
+          : targetCategory.subPages.find((subPage) => (
               subPage.label.toLowerCase().includes(normalizedQuery)
               || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
-            );
+            ));
 
         if (matchingTargetSubPage) {
           next.set('sub', matchingTargetSubPage.id);
         } else if (!normalizedQuery) {
-          const defaultSub = getDefaultSubPage(categoryId);
-          if (defaultSub) {
-            next.set('sub', defaultSub);
+          const defaultSubPage = getDefaultSubPage(categoryId);
+          if (defaultSubPage) {
+            next.set('sub', defaultSubPage);
           } else {
             next.delete('sub');
           }
@@ -136,7 +145,7 @@ export const SettingsShell: React.FC = () => {
         return next;
       });
     },
-    [normalizedQuery, setSearchParams]
+    [normalizedQuery, setSearchParams],
   );
 
   const handleSubPageChange = useCallback(
@@ -147,7 +156,7 @@ export const SettingsShell: React.FC = () => {
         return next;
       });
     },
-    [setSearchParams]
+    [setSearchParams],
   );
 
   const handleSearchChange = useCallback(
@@ -162,37 +171,40 @@ export const SettingsShell: React.FC = () => {
         return next;
       }, { replace: true });
     },
-    [setSearchParams]
+    [setSearchParams],
   );
 
-  // Filter categories and sub-pages based on search query
   const { matchingCategoryIds, matchingSubPageIds, firstMatchingSubPageCategoryId, isFiltering } = useMemo(() => {
     if (!normalizedQuery) {
-      return { matchingCategoryIds: undefined, matchingSubPageIds: undefined, firstMatchingSubPageCategoryId: undefined, isFiltering: false };
+      return {
+        matchingCategoryIds: undefined,
+        matchingSubPageIds: undefined,
+        firstMatchingSubPageCategoryId: undefined,
+        isFiltering: false,
+      };
     }
 
-    const lower = normalizedQuery;
     const categoryIds: string[] = [];
     const subPageIds: string[] = [];
     let firstSubPageCategoryId: string | undefined;
 
-    for (const cat of SETTINGS_CATEGORIES) {
-      const categoryMatches =
-        cat.label.toLowerCase().includes(lower) || cat.keywords.some((kw) => kw.includes(lower));
+    for (const category of SETTINGS_CATEGORIES) {
+      const categoryMatches = category.label.toLowerCase().includes(normalizedQuery)
+        || category.keywords.some((keyword) => keyword.includes(normalizedQuery));
 
       if (categoryMatches) {
-        categoryIds.push(cat.id);
+        categoryIds.push(category.id);
       }
 
-      for (const sub of cat.subPages) {
-        const subMatches =
-          sub.label.toLowerCase().includes(lower) || sub.keywords.some((kw) => kw.includes(lower));
+      for (const subPage of category.subPages) {
+        const subPageMatches = subPage.label.toLowerCase().includes(normalizedQuery)
+          || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery));
 
-        if (subMatches) {
-          subPageIds.push(sub.id);
-          firstSubPageCategoryId ??= cat.id;
-          if (!categoryIds.includes(cat.id)) {
-            categoryIds.push(cat.id);
+        if (subPageMatches) {
+          subPageIds.push(subPage.id);
+          firstSubPageCategoryId ??= category.id;
+          if (!categoryIds.includes(category.id)) {
+            categoryIds.push(category.id);
           }
         }
       }
@@ -206,7 +218,6 @@ export const SettingsShell: React.FC = () => {
     };
   }, [normalizedQuery]);
 
-  // Auto-navigate to first matching category if current is not in results
   const effectiveCategory = useMemo(() => {
     if (!isFiltering || !matchingCategoryIds || matchingCategoryIds.length === 0) {
       return activeCategory;
@@ -222,7 +233,7 @@ export const SettingsShell: React.FC = () => {
 
   const currentCategory = useMemo(
     () => SETTINGS_CATEGORIES.find((category) => category.id === effectiveCategory) ?? SETTINGS_CATEGORIES[0],
-    [effectiveCategory]
+    [effectiveCategory],
   );
 
   const currentCategoryMatchesQuery = useMemo(() => {
@@ -276,6 +287,10 @@ export const SettingsShell: React.FC = () => {
   }, [currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage]);
 
   const hasSubTabs = currentCategory.subPages.length >= 2;
+  const renderedContentKey = currentCategory.subPages.length === 0
+    ? currentCategory.id
+    : `${currentCategory.id}.${activeSubPage}`;
+  const activeSubPageLabel = currentCategory.subPages.find((subPage) => subPage.id === activeSubPage)?.label;
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
   const previousCategoryRef = useRef<string | null>(null);
 
@@ -284,11 +299,10 @@ export const SettingsShell: React.FC = () => {
       return `${currentCategory.label} settings selected`;
     }
 
-    const activeSubPageLabel = currentCategory.subPages.find((subPage) => subPage.id === activeSubPage)?.label;
     return activeSubPageLabel
       ? `${currentCategory.label} settings, ${activeSubPageLabel} section selected`
       : `${currentCategory.label} settings selected`;
-  }, [currentCategory, activeSubPage, hasSubTabs]);
+  }, [activeSubPageLabel, currentCategory.label, hasSubTabs]);
 
   useEffect(() => {
     if (isFiltering && matchingCategoryIds?.length === 0) {
@@ -310,6 +324,7 @@ export const SettingsShell: React.FC = () => {
       || (activeSubPage !== '' && currentCategory.subPages.length > 0 && (requestedCategory !== null || isFiltering));
     const categoryMismatch = shouldSyncCategory && requestedCategory !== effectiveCategory;
     const subMismatch = shouldSyncSub && (requestedSubPage ?? '') !== activeSubPage;
+
     if (!categoryMismatch && !subMismatch) {
       return;
     }
@@ -369,9 +384,7 @@ export const SettingsShell: React.FC = () => {
     previousCategoryRef.current = currentCategory.id;
   }, [currentCategory.id, hasSubTabs, activeSubPage]);
 
-  // Render content based on current category and sub-page
   const content = useMemo(() => {
-    // Categories with no sub-pages use SINGLE_PAGE_CONTENT
     if (currentCategory.subPages.length === 0) {
       return SINGLE_PAGE_CONTENT[currentCategory.id] ?? (
         <SettingsSection>
@@ -382,77 +395,66 @@ export const SettingsShell: React.FC = () => {
       );
     }
 
-    // Categories with sub-pages use SUB_PAGE_CONTENT
-    const contentKey = `${currentCategory.id}.${activeSubPage}`;
-    return SUB_PAGE_CONTENT[contentKey] ?? (
+    return SUB_PAGE_CONTENT[renderedContentKey] ?? (
       <div className="py-8 text-center text-pf-text-secondary">
-        <p className="text-sm">Content not found for {contentKey}</p>
+        <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [currentCategory, activeSubPage]);
+  }, [currentCategory, renderedContentKey]);
 
-  // Show no results message if search returns nothing
-  if (isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <h1 className="text-xl font-semibold text-pf-text-primary">Settings</h1>
-          <SettingsSearch value={query} onChange={handleSearchChange} />
-        </div>
-        <div className="py-12 text-center text-pf-text-secondary">
-          <p className="text-sm">No settings found matching &ldquo;{query}&rdquo;</p>
-        </div>
+  const shellContent = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0 ? (
+    <div className="relative px-6 py-12 text-center">
+      <div className="mx-auto max-w-md rounded-3xl border border-dashed border-pf-border bg-pf-bg-0/75 px-6 py-10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <p className="text-sm font-medium text-pf-text-primary">No matching settings</p>
+        <p className="mt-2 text-sm text-pf-text-secondary">
+          We couldn&apos;t find anything for &ldquo;{query}&rdquo;. Try a broader term like hardware, theme, or users.
+        </p>
       </div>
-    );
-  }
+    </div>
+  ) : (
+    <div className="relative flex flex-col md:flex-row">
+      <SettingsSidebar
+        categories={SETTINGS_CATEGORIES}
+        activeCategory={effectiveCategory}
+        onCategoryChange={handleCategoryChange}
+        matchingCategoryIds={matchingCategoryIds}
+        isFiltering={isFiltering}
+        searchQuery={query}
+      />
 
-  return (
-    <div className="space-y-4">
-      {/* Header with title and search */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-xl font-semibold text-pf-text-primary">Settings</h1>
-        <SettingsSearch value={query} onChange={handleSearchChange} />
-      </div>
+      <div className="relative flex-1 px-4 py-4 md:px-6 md:py-6">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-pf-bg-1/90 via-pf-bg-1/30 to-transparent" aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-y-0 left-0 hidden w-px bg-gradient-to-b from-transparent via-pf-border to-transparent md:block" aria-hidden="true" />
 
-      {/* Main layout: sidebar + content */}
-      <div className="flex flex-col md:flex-row gap-0 md:gap-0 min-h-[500px] border border-pf-border rounded-lg overflow-hidden bg-pf-bg-0">
-        {/* Sidebar navigation */}
-        <SettingsSidebar
-          categories={SETTINGS_CATEGORIES}
-          activeCategory={effectiveCategory}
-          onCategoryChange={handleCategoryChange}
-          matchingCategoryIds={matchingCategoryIds}
+        <p className="sr-only" aria-live="polite">
+          {sectionAnnouncement}
+        </p>
+
+        <div className="relative mb-5 space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
+            {activeSubPageLabel ? `${currentCategory.label} / ${activeSubPageLabel}` : currentCategory.label}
+          </p>
+          <h3
+            id="settings-content-heading"
+            ref={sectionHeadingRef}
+            tabIndex={-1}
+            className="text-xl font-semibold text-pf-text-primary"
+          >
+            {currentCategory.label}
+          </h3>
+        </div>
+
+        <SettingsSubTabs
+          subPages={currentCategory.subPages}
+          activeSubPage={activeSubPage}
+          onSubPageChange={handleSubPageChange}
+          matchingSubPageIds={matchingCurrentSubPageIds}
           isFiltering={isFiltering}
+          ariaLabel={`${currentCategory.label} settings`}
+          searchQuery={query}
         />
 
-        {/* Content area */}
-        <div className="flex-1 p-4 md:p-6">
-          <p className="sr-only" aria-live="polite">
-            {sectionAnnouncement}
-          </p>
-
-          <div className="mb-4">
-            <h2
-              id="settings-content-heading"
-              ref={sectionHeadingRef}
-              tabIndex={-1}
-              className="text-lg font-semibold text-pf-text-primary"
-            >
-              {currentCategory.label}
-            </h2>
-          </div>
-
-          {/* Sub-tabs (only for categories with 2+ sub-pages) */}
-          <SettingsSubTabs
-            subPages={currentCategory.subPages}
-            activeSubPage={activeSubPage}
-            onSubPageChange={handleSubPageChange}
-            matchingSubPageIds={matchingCurrentSubPageIds}
-            isFiltering={isFiltering}
-            ariaLabel={`${currentCategory.label} settings`}
-          />
-
-          {/* Page content */}
+        <SettingsContentTransition key={renderedContentKey}>
           {hasSubTabs ? (
             <section role="tabpanel" id={`panel-${activeSubPage}`} aria-labelledby={`tab-${activeSubPage}`}>
               {content}
@@ -460,8 +462,25 @@ export const SettingsShell: React.FC = () => {
           ) : (
             <section aria-labelledby="settings-content-heading">{content}</section>
           )}
-        </div>
+        </SettingsContentTransition>
       </div>
     </div>
+  );
+
+  return (
+    <PageTemplate
+      title="Settings"
+      subtitle="Configure your farm, hardware, and account"
+      icon={SettingsIcon}
+      actions={<SettingsSearch value={query} onChange={handleSearchChange} />}
+      backgroundColor="bg-transparent"
+      includeTopPadding={false}
+    >
+      <div className="relative isolate overflow-hidden rounded-[1.5rem] border border-pf-border/70 bg-pf-bg-0/95 shadow-[0_18px_60px_-38px_rgba(0,0,0,0.78)] backdrop-blur-sm">
+        <div className="pointer-events-none absolute inset-0 opacity-[0.02]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/95 to-pf-bg-1/20" aria-hidden="true" />
+        {shellContent}
+      </div>
+    </PageTemplate>
   );
 };

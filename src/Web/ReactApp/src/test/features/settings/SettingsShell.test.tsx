@@ -66,9 +66,10 @@ function getCategoryButton(name: string | RegExp) {
 }
 
 describe('SettingsShell', () => {
-  it('renders the settings heading and category tabs', () => {
+  it('renders the settings page template header and category tabs', () => {
     renderSettings();
-    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByText('Configure your farm, hardware, and account')).toBeInTheDocument();
     expect(getCategoryButton('General')).toBeInTheDocument();
     expect(getCategoryButton('Hardware')).toBeInTheDocument();
     expect(getCategoryButton('Users')).toBeInTheDocument();
@@ -78,7 +79,8 @@ describe('SettingsShell', () => {
     renderSettings();
     const generalCategory = getCategoryButton('General');
     expect(generalCategory).toHaveAttribute('aria-current', 'page');
-    expect(generalCategory.className).toContain('text-[var(--pf-on-accent)]');
+    expect(generalCategory.className).toContain('bg-pf-accent-bg/12');
+    expect(generalCategory.className).toContain('text-pf-text-primary');
   });
 
   it('switches tab on click', () => {
@@ -109,14 +111,14 @@ describe('SettingsShell', () => {
 
   it('shows empty state when no tabs match search', () => {
     renderSettings('/settings?q=xyznonexistent');
-    expect(screen.getByText(/No settings found matching/)).toBeInTheDocument();
+    expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
   it('clears stale tab and sub params when search returns no results', () => {
     renderSettings('/settings?tab=hardware&sub=cameras&q=xyznonexistent');
-    expect(screen.getByText(/No settings found matching/)).toBeInTheDocument();
+    expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
@@ -178,8 +180,18 @@ describe('SettingsShell', () => {
     const searchInput = screen.getByLabelText('Search settings');
     searchInput.focus();
     fireEvent.change(searchInput, { target: { value: 'email' } });
-    // After typing, the notifications category should match and become active.
     expect(getCategoryButton(/^Notifications/)).toHaveAttribute('aria-current', 'page');
     expect(searchInput).toHaveFocus();
+  });
+
+  it('focuses search from the slash shortcut and clears the query', () => {
+    renderSettings('/settings?q=hardware');
+
+    fireEvent.keyDown(window, { key: '/' });
+    const searchInput = screen.getByLabelText('Search settings');
+    expect(searchInput).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(searchInput).toHaveValue('');
   });
 });

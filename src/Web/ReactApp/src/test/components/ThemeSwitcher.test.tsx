@@ -22,8 +22,15 @@ describe('ThemeSwitcher', () => {
   it('uses the on-accent token for the active theme chip', () => {
     render(<ThemeSwitcher />);
 
-    const activeChip = screen.getByRole('radio', { name: /Matrix\s*✓\s*Active/ });
+    const activeChip = screen.getByRole('radio', { name: /Matrix/ });
     expect(activeChip.className).toContain('bg-[var(--pf-accent-bg)]');
     expect(activeChip.className).toContain('text-[var(--pf-on-accent)]');
+  });
+
+  it('renders a live preview for the active theme', () => {
+    render(<ThemeSwitcher />);
+
+    expect(screen.getByText('Matrix live preview')).toBeInTheDocument();
+    expect(screen.getByText('Farm overview')).toBeInTheDocument();
   });
 });

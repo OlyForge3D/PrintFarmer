@@ -48,4 +48,5 @@ Older entries (pre-2026-05-26) archived to history-archive.md for size managemen
 - 2026-06-02T21:58:53.720-07:00: The models-library viewer should keep its mock bed palette aligned with the slicer workspace (`#2a2a3a` bed, `#4a4a6a` outline, `#555577`/`#7777aa` grid) so `.3mf` and `.stl` previews feel consistent across pages.
 - 2026-06-03T10:36:27.015-07:00: The unified Files route now lives in `src/Web/ReactApp/src/features/files/pages/FilesPage.tsx`; it merges model and G-code queries into one client-sorted browser, drives the lens from `?type=`, and rewrites legacy `/files/gcode` and `/files/3d-models` links back to `/files`.
 - 2026-06-03T10:36:27.015-07:00: Entry points that want a prefiltered unified library should link with query params, not child routes; `src/Web/ReactApp/src/features/queue/components/QueueJobsTable.tsx` now targets `/files?type=gcode`.
+- 2026-06-03T11:34:00-07:00: Settings search is easier to scan when matches are highlighted inline and the search box supports the `/` focus shortcut; `SettingsSidebar.tsx`, `SettingsSubTabs.tsx`, and `SettingsSearch.tsx` now treat search as navigational affordance instead of a badge-only filter.
 
