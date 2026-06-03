@@ -422,7 +422,9 @@ function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryL
       setFallbackUrl(null);
 
       try {
-        const response = await apiClient.get<ArrayBuffer>(url, { responseType: 'arraybuffer' });
+        // url is already fully-qualified (built via getApiBaseUrl()); override baseURL
+        // to avoid Axios double-prefixing it with the instance's /api baseURL.
+        const response = await apiClient.get<ArrayBuffer>(url, { responseType: 'arraybuffer', baseURL: '' });
         if (cancelled) return;
 
         const parsed = await parseThreeMfArchive(response.data);
