@@ -70,6 +70,7 @@ interface PlateJsonData {
 
 interface ThreeMfRenderableMeshSource {
   objectId: string;
+  buildItemIndex: number;
   plateId: number | null;
   extruderIndex: number;
   geometry: THREE.BufferGeometry;
@@ -77,6 +78,7 @@ interface ThreeMfRenderableMeshSource {
 
 export interface ThreeMfRenderableMesh {
   objectId: string;
+  buildItemIndex: number;
   plateId: number | null;
   extruderIndex: number;
   geometry: THREE.BufferGeometry;
@@ -753,6 +755,7 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
   }
 
   if (buildItems.length > 0) {
+    let buildItemIndex = 0;
     for (const buildItem of buildItems) {
       const objectData = objectMap.get(buildItem.objectId);
       if (!objectData) {
@@ -763,24 +766,29 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
         chargeRenderBudget(mesh.vertices.length / 3, mesh.triangles.length / 3);
         renderableMeshes.push({
           objectId: buildItem.objectId,
+          buildItemIndex,
           plateId: buildItem.plateId,
           extruderIndex: mesh.extruderIndex,
           geometry: createBufferGeometry(await transformVertices(mesh.vertices, buildItem.transform), mesh.triangles),
         });
       }
+      buildItemIndex++;
     }
   } else {
+    let buildItemIndex = 0;
     for (const objectData of objectMap.values()) {
       const plateId = objectData.name ? plateJsonData.objectPlateIdsByName.get(objectData.name) ?? objectData.plateId : objectData.plateId;
       for (const mesh of objectData.meshes) {
         chargeRenderBudget(mesh.vertices.length / 3, mesh.triangles.length / 3);
         renderableMeshes.push({
           objectId: objectData.id,
+          buildItemIndex,
           plateId,
           extruderIndex: mesh.extruderIndex,
           geometry: createBufferGeometry(mesh.vertices, mesh.triangles),
         });
       }
+      buildItemIndex++;
     }
   }
 

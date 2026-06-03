@@ -61,6 +61,10 @@ function getExtruderColor(index: number): string {
 }
 
 function createSelectionGeometry(geometries: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  if (geometries.length === 0) {
+    return new THREE.BufferGeometry();
+  }
+
   if (geometries.length === 1) {
     const geometry = geometries[0].clone();
     geometry.computeBoundingBox();
@@ -97,6 +101,7 @@ function usePreparedDisplayData(
 
     const { meshes: workingGeometries, center, size } = cloneThreeMfMeshesDroppedToBed(
       meshesToRender.map((mesh) => ({
+        buildItemIndex: mesh.buildItemIndex,
         extruderIndex: mesh.extruderIndex,
         geometry: mesh.geometry,
       })),
