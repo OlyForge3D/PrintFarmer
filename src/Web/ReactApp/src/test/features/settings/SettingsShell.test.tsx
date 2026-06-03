@@ -79,7 +79,9 @@ beforeAll(() => {
 describe('SettingsShell', () => {
   it('renders compact settings headings without the legacy page header row', () => {
     renderSettings();
-    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    // Both desktop (sidebar) and mobile h1 render in jsdom (no media query filtering)
+    const h1s = screen.getAllByRole('heading', { level: 1, name: 'Settings' });
+    expect(h1s.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();

@@ -561,6 +561,8 @@ export const SettingsShell: React.FC = () => {
                 <div className="pf-settings-scroll-pane h-full overflow-y-auto overscroll-contain">
                   {toolbar}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
+                    {/* Mobile-only h1 — desktop h1 lives in SettingsSidebar (hidden below md) */}
+                    <h1 className="mb-3 text-lg leading-none text-pf-text-primary md:hidden">Settings</h1>
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
