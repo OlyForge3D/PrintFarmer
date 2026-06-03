@@ -77,9 +77,10 @@ beforeAll(() => {
 });
 
 describe('SettingsShell', () => {
-  it('renders the shell without the legacy page header row', () => {
+  it('renders compact settings headings without the legacy page header row', () => {
     renderSettings();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
     expect(getCategoryButton('General')).toBeInTheDocument();
@@ -101,6 +102,7 @@ describe('SettingsShell', () => {
     fireEvent.click(hardwareCategory);
     expect(hardwareCategory).toHaveAttribute('aria-current', 'page');
     expect(getCategoryButton('General')).not.toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { level: 2, name: 'Hardware' })).toHaveFocus();
   });
 
   it('deep-links to a specific tab via URL', () => {

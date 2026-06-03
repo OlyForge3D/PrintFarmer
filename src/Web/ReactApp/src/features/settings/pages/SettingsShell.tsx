@@ -47,7 +47,6 @@ const SETTINGS_FRAME_GRID = [
   'linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
   'linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
 ].join(', ');
-const SETTINGS_SHELL_HEIGHT = 'calc(100dvh - 3.5rem)';
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -450,16 +449,7 @@ export const SettingsShell: React.FC = () => {
       sectionHeadingRef.current.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
     }
 
-    if (hasSubTabs && activeSubPage) {
-      const activeTab = document.getElementById(`tab-${activeSubPage}`);
-      if (activeTab instanceof HTMLElement) {
-        activeTab.focus();
-      } else {
-        sectionHeadingRef.current?.focus();
-      }
-    } else {
-      sectionHeadingRef.current?.focus();
-    }
+    sectionHeadingRef.current?.focus();
 
     shouldFocusSectionRef.current = false;
     previousRenderedKeyRef.current = activeDestinationKey;
@@ -520,17 +510,11 @@ export const SettingsShell: React.FC = () => {
     </div>
   );
 
-  const shellStyle = {
-    height: SETTINGS_SHELL_HEIGHT,
-    minHeight: SETTINGS_SHELL_HEIGHT,
-  } as const;
-
   return (
     <>
       <div
         data-settings-shell
-        className="pf-settings-surface relative isolate"
-        style={shellStyle}
+        className="pf-settings-surface relative isolate flex h-full min-h-0 flex-col"
       >
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
           <div className="absolute inset-0 rounded-[1.5rem] bg-pf-bg-0/95" />
@@ -566,7 +550,7 @@ export const SettingsShell: React.FC = () => {
                 searchQuery={query}
               />
 
-              <div className="relative min-h-0 border-t border-pf-border/70 md:border-t-0 md:border-l md:border-pf-border/70">
+              <div className="relative flex-1 min-h-0 border-t border-pf-border/70 md:border-t-0 md:border-l md:border-pf-border/70">
                 <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
 
@@ -581,9 +565,9 @@ export const SettingsShell: React.FC = () => {
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
                       tabIndex={-1}
-                      className="sr-only"
+                      className="mb-5 w-fit text-2xl leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent md:mb-6 md:text-[2rem]"
                     >
-                      {sectionAnnouncement}
+                      {currentCategory.label}
                     </h2>
 
                     <SettingsContentTransition key={renderedContentKey} className="relative">

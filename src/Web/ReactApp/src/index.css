@@ -381,7 +381,7 @@
     font-family: var(--pf-font-sans);
   }
   
-  h1, h2, h3, h4, h5, h6 {
+  h1, h2 {
     @apply font-bebas font-bold uppercase text-pf-text-primary;
   }
   
@@ -420,15 +420,7 @@
     scrollbar-gutter: stable;
   }
 
-  .pf-settings-surface .bg-pf-panel :is(h1, h2, h3, h4, h5, h6) {
-    font-family: var(--pf-font-sans);
-    font-weight: 600;
-    letter-spacing: normal;
-    text-transform: none;
-  }
-
   .pf-settings-surface input[type='number'] {
-    font-family: var(--pf-font-mono);
     font-variant-numeric: tabular-nums;
   }
 }

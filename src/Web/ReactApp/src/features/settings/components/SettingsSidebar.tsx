@@ -94,8 +94,8 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         aria-label="Settings categories"
       >
         <div className="border-b border-pf-border/70 px-4 py-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary">Settings</p>
-          <p className="mt-2 text-sm text-pf-text-secondary">
+          <h1 className="text-lg leading-none text-pf-text-primary">Settings</h1>
+          <p className="mt-3 text-sm text-pf-text-secondary">
             Hardware, slicing, user access, and system administration.
           </p>
         </div>
@@ -121,9 +121,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
                       'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
                       'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
-                      isActive && 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
-                      !isActive && 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
-                      isMatching && !isActive && 'bg-pf-bg-1/75 text-pf-text-primary',
+                      isActive
+                        ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
+                        : isMatching
+                          ? 'bg-pf-bg-1/75 text-pf-text-primary hover:border-pf-border/80 hover:bg-pf-bg-1/80'
+                          : 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
                     )}
                   >
                     <span
@@ -290,9 +292,11 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                     'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
                     'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
                     'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
-                    isActive && 'border-pf-accent/35 bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
-                    !isActive && 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
-                    isMatching && !isActive && 'bg-pf-bg-1/75 text-pf-text-primary',
+                    isActive
+                      ? 'border-pf-accent/35 bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
+                      : isMatching
+                        ? 'bg-pf-bg-1/75 text-pf-text-primary hover:border-pf-border/80 hover:bg-pf-bg-1/80'
+                        : 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
                   )}
                 >
                   <span className={clsx(isActive ? 'text-pf-accent' : 'text-pf-text-secondary')} aria-hidden="true">
