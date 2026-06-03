@@ -3,6 +3,7 @@ import { useLoader } from '@react-three/fiber';
 import { Select } from '@/common/components/ui';
 import { DEFAULT_EXTRUDER_COLORS } from '@/features/slicer/components/viewer/extruderColors';
 import { apiClient } from '@/services/api';
+import { cloneThreeMfMeshesDroppedToBed } from '@/features/slicer/utils/threemf-display';
 import { disposeParsedThreeMfModel, parseThreeMfArchive, ThreeMfSecurityError, type ParsedThreeMfModel } from '@/features/slicer/utils/threemf-parser';
 import { STLLoader } from 'three-stdlib';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -94,21 +95,12 @@ function usePreparedDisplayData(
       : parsedModel.meshes.filter((mesh) => mesh.plateId === selectedPlateValue);
     const meshesToRender = visibleMeshes.length > 0 ? visibleMeshes : parsedModel.meshes;
 
-    const workingGeometries = meshesToRender.map((mesh) => ({
-      extruderIndex: mesh.extruderIndex,
-      geometry: mesh.geometry.clone(),
-    }));
-
-    const bounds = new THREE.Box3();
-    for (const mesh of workingGeometries) {
-      mesh.geometry.computeBoundingBox();
-      if (mesh.geometry.boundingBox) {
-        bounds.union(mesh.geometry.boundingBox);
-      }
-    }
-
-    const center = bounds.getCenter(new THREE.Vector3());
-    const size = bounds.getSize(new THREE.Vector3());
+    const { meshes: workingGeometries, center, size } = cloneThreeMfMeshesDroppedToBed(
+      meshesToRender.map((mesh) => ({
+        extruderIndex: mesh.extruderIndex,
+        geometry: mesh.geometry,
+      })),
+    );
     const halfZ = size.z / 2;
 
     for (const mesh of workingGeometries) {
