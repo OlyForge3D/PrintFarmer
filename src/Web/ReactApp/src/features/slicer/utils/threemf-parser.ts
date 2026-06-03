@@ -8,6 +8,32 @@ const PLATE_JSON_SUFFIX = '.json';
 const YIELD_EVERY_N_VERTICES = 20_000;
 const YIELD_EVERY_N_TRIANGLES = 20_000;
 const PRODUCTION_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/production/2015/06';
+const MAX_ENTRY_SIZE = 200 * 1024 * 1024;
+const MAX_TOTAL_SIZE = 500 * 1024 * 1024;
+const MAX_XML_SIZE = 50 * 1024 * 1024;
+const MAX_TOTAL_TRIANGLES = 5_000_000;
+const MAX_TOTAL_VERTICES = 15_000_000;
+const MAX_RENDER_INSTANCES = 1_000;
+
+/** Thrown for security/resource-limit violations. Must NOT trigger STL fallback. */
+export class ThreeMfSecurityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ThreeMfSecurityError';
+  }
+}
+
+/** Tracks cumulative mesh complexity across the entire archive. */
+interface ComplexityBudget {
+  totalVertices: number;
+  totalTriangles: number;
+}
+
+interface ZipEntryWithSize extends JSZip.JSZipObject {
+  _data?: {
+    uncompressedSize?: number;
+  };
+}
 
 interface RawMeshData {
   vertices: number[];
@@ -66,8 +92,45 @@ function nextTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function getZipEntryUncompressedSize(entry: JSZip.JSZipObject): number {
+  const size = (entry as ZipEntryWithSize)._data?.uncompressedSize;
+  return Number.isFinite(size) && size != null && size >= 0 ? size : 0;
+}
+
+function validateZipEntrySizes(zip: JSZip): void {
+  let totalUncompressedSize = 0;
+
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) {
+      continue;
+    }
+
+    const entrySize = getZipEntryUncompressedSize(entry);
+    if (entrySize > MAX_ENTRY_SIZE) {
+      throw new ThreeMfSecurityError('The 3MF archive contains a file that exceeds the 200 MB unpacked size limit.');
+    }
+
+    totalUncompressedSize += entrySize;
+    if (totalUncompressedSize > MAX_TOTAL_SIZE) {
+      throw new ThreeMfSecurityError('The 3MF archive exceeds the 500 MB unpacked size limit.');
+    }
+  }
+}
+
 function normalizeZipPath(path: string): string {
-  return path.replace(/^\/+/, '').replace(/\\/g, '/');
+  const normalizedPath = path.replace(/^\/+/, '').replace(/\\/g, '/');
+  if (!normalizedPath) {
+    return '';
+  }
+
+  const segments = normalizedPath.split('/');
+  return segments.some((segment) => segment === '..') ? '' : normalizedPath;
+}
+
+function assertXmlSize(xml: string): void {
+  if (xml.length > MAX_XML_SIZE) {
+    throw new ThreeMfSecurityError('The 3MF archive contains an XML file that exceeds the 50 MB size limit.');
+  }
 }
 
 function getXmlParserError(doc: Document): string | null {
@@ -147,10 +210,19 @@ function parseTransform(transformValue: string | null): THREE.Matrix4 {
   return transform;
 }
 
-async function parseMeshElement(meshElement: Element, extruderIndex: number): Promise<RawMeshData | null> {
+async function parseMeshElement(meshElement: Element, extruderIndex: number, budget: ComplexityBudget): Promise<RawMeshData | null> {
   const vertices: number[] = [];
   const triangles: number[] = [];
   const vertexElements = meshElement.getElementsByTagName('vertex');
+
+  if (vertexElements.length > MAX_TOTAL_VERTICES) {
+    throw new ThreeMfSecurityError(`The 3MF mesh is too complex to render safely (more than ${MAX_TOTAL_VERTICES.toLocaleString()} vertices).`);
+  }
+
+  budget.totalVertices += vertexElements.length;
+  if (budget.totalVertices > MAX_TOTAL_VERTICES) {
+    throw new ThreeMfSecurityError(`The 3MF archive exceeds the cumulative vertex limit of ${MAX_TOTAL_VERTICES.toLocaleString()}.`);
+  }
 
   for (let index = 0; index < vertexElements.length; index += 1) {
     const vertex = vertexElements[index];
@@ -166,6 +238,15 @@ async function parseMeshElement(meshElement: Element, extruderIndex: number): Pr
   }
 
   const triangleElements = meshElement.getElementsByTagName('triangle');
+  if (triangleElements.length > MAX_TOTAL_TRIANGLES) {
+    throw new ThreeMfSecurityError(`The 3MF mesh is too complex to render safely (more than ${MAX_TOTAL_TRIANGLES.toLocaleString()} triangles).`);
+  }
+
+  budget.totalTriangles += triangleElements.length;
+  if (budget.totalTriangles > MAX_TOTAL_TRIANGLES) {
+    throw new ThreeMfSecurityError(`The 3MF archive exceeds the cumulative triangle limit of ${MAX_TOTAL_TRIANGLES.toLocaleString()}.`);
+  }
+
   for (let index = 0; index < triangleElements.length; index += 1) {
     const triangle = triangleElements[index];
     triangles.push(
@@ -190,36 +271,8 @@ async function parseMeshElement(meshElement: Element, extruderIndex: number): Pr
   };
 }
 
-async function parseDocumentMeshes(doc: Document, defaultExtruderIndex: number, objectId?: string | null): Promise<RawMeshData[]> {
-  const meshes: RawMeshData[] = [];
-  const rootObjects = Array.from(doc.getElementsByTagName('object'));
-  const targetObjects = objectId
-    ? rootObjects.filter((element) => element.getAttribute('id') === objectId)
-    : rootObjects;
-
-  if (targetObjects.length > 0) {
-    for (const targetObject of targetObjects) {
-      const directMeshChildren = Array.from(targetObject.children).filter((child) => child.tagName.toLowerCase().endsWith('mesh'));
-      for (const meshElement of directMeshChildren) {
-        const parsedMesh = await parseMeshElement(meshElement, defaultExtruderIndex);
-        if (parsedMesh) {
-          meshes.push(parsedMesh);
-        }
-      }
-    }
-
-    return meshes;
-  }
-
-  const looseMeshElements = Array.from(doc.getElementsByTagName('mesh'));
-  for (const meshElement of looseMeshElements) {
-    const parsedMesh = await parseMeshElement(meshElement, defaultExtruderIndex);
-    if (parsedMesh) {
-      meshes.push(parsedMesh);
-    }
-  }
-
-  return meshes;
+function findObjectElementById(doc: Document, objectId: string): Element | null {
+  return Array.from(doc.getElementsByTagName('object')).find((element) => element.getAttribute('id') === objectId) ?? null;
 }
 
 async function parseModelSettings(zip: JSZip, parser: DOMParser): Promise<ModelSettingsData> {
@@ -237,6 +290,7 @@ async function parseModelSettings(zip: JSZip, parser: DOMParser): Promise<ModelS
   }
 
   const xml = await settingsFile.async('string');
+  assertXmlSize(xml);
   const doc = parser.parseFromString(xml, 'application/xml');
   if (getXmlParserError(doc)) {
     return result;
@@ -355,17 +409,103 @@ async function transformVertices(vertices: number[], transform: THREE.Matrix4): 
   return transformed;
 }
 
+async function loadModelDocument(
+  modelPath: string,
+  zip: JSZip,
+  parser: DOMParser,
+  modelCache: Map<string, Document | null>,
+): Promise<Document | null> {
+  let modelDocument = modelCache.get(modelPath);
+  if (modelDocument !== undefined) {
+    return modelDocument;
+  }
+
+  const componentFile = zip.file(modelPath);
+  if (!componentFile) {
+    modelCache.set(modelPath, null);
+    return null;
+  }
+
+  const componentXml = await componentFile.async('string');
+  assertXmlSize(componentXml);
+  const parsedDoc = parser.parseFromString(componentXml, 'application/xml');
+  modelDocument = getXmlParserError(parsedDoc) ? null : parsedDoc;
+  modelCache.set(modelPath, modelDocument);
+  return modelDocument;
+}
+
+async function parseComponentMeshes(
+  doc: Document,
+  documentPath: string,
+  targetObjectId: string | null,
+  zip: JSZip,
+  parser: DOMParser,
+  settings: ModelSettingsData,
+  modelCache: Map<string, Document | null>,
+  objectCache: Map<string, RawObjectData | null>,
+  visited: Set<string>,
+  overrideExtruderIndex: number,
+  budget: ComplexityBudget,
+): Promise<RawMeshData[]> {
+  const targetObjects = targetObjectId
+    ? [findObjectElementById(doc, targetObjectId)].filter((element): element is Element => element != null)
+    : Array.from(doc.getElementsByTagName('object'));
+
+  const meshes: RawMeshData[] = [];
+  for (const targetObject of targetObjects) {
+    const parsedObject = await parseObjectMeshes(
+      targetObject,
+      zip,
+      parser,
+      settings,
+      modelCache,
+      objectCache,
+      doc,
+      documentPath,
+      visited,
+      budget,
+    );
+
+    if (!parsedObject) {
+      continue;
+    }
+
+    for (const mesh of parsedObject.meshes) {
+      meshes.push({
+        ...mesh,
+        extruderIndex: overrideExtruderIndex,
+      });
+    }
+  }
+
+  return meshes;
+}
+
 async function parseObjectMeshes(
   objectElement: Element,
   zip: JSZip,
   parser: DOMParser,
   settings: ModelSettingsData,
   modelCache: Map<string, Document | null>,
+  objectCache: Map<string, RawObjectData | null>,
+  currentDoc: Document,
+  currentDocumentPath: string,
+  visited: Set<string> = new Set(),
+  budget: ComplexityBudget = { totalVertices: 0, totalTriangles: 0 },
 ): Promise<RawObjectData | null> {
   const objectId = objectElement.getAttribute('id');
   if (!objectId) {
     return null;
   }
+
+  const cacheKey = `${currentDocumentPath}#${objectId}`;
+  const cachedObject = objectCache.get(cacheKey);
+  if (cachedObject !== undefined) {
+    return cachedObject;
+  }
+
+  const activeVisited = new Set(visited);
+  activeVisited.add(cacheKey);
 
   const defaultExtruderIndex = settings.objectExtruders.get(objectId) ?? parseExtruderIndex(
     objectElement.getAttribute('p:extruder') || objectElement.getAttributeNS(PRODUCTION_NAMESPACE, 'extruder'),
@@ -376,7 +516,7 @@ async function parseObjectMeshes(
 
   for (const child of Array.from(objectElement.children)) {
     if (child.tagName.toLowerCase().endsWith('mesh')) {
-      const parsedMesh = await parseMeshElement(child, defaultExtruderIndex);
+      const parsedMesh = await parseMeshElement(child, defaultExtruderIndex, budget);
       if (parsedMesh) {
         meshes.push(parsedMesh);
       }
@@ -385,38 +525,72 @@ async function parseObjectMeshes(
 
   for (const componentElement of Array.from(objectElement.getElementsByTagName('component'))) {
     await nextTick();
-    const componentPath = normalizeZipPath(
-      componentElement.getAttribute('p:path') || componentElement.getAttributeNS(PRODUCTION_NAMESPACE, 'path') || '',
-    );
-    if (!componentPath) {
+
+    const rawComponentPath = componentElement.getAttribute('p:path') || componentElement.getAttributeNS(PRODUCTION_NAMESPACE, 'path') || '';
+    const componentPath = normalizeZipPath(rawComponentPath);
+    const componentObjectId = componentElement.getAttribute('objectid');
+
+    if (rawComponentPath && !componentPath) {
+      console.warn(`Skipping invalid 3MF component path: ${rawComponentPath}`);
       continue;
     }
 
-    const componentObjectId = componentElement.getAttribute('objectid');
+    if (!componentPath && !componentObjectId) {
+      continue;
+    }
+
+    const componentReferenceKey = componentPath
+      ? `${componentPath}#${componentObjectId ?? '*'}`
+      : `${currentDocumentPath}#${componentObjectId}`;
+
+    if (activeVisited.has(componentReferenceKey)) {
+      console.warn(`Skipping circular 3MF component reference: ${componentReferenceKey}`);
+      continue;
+    }
+
     const partKey = componentObjectId ? `${objectId}:${componentObjectId}` : null;
     const componentExtruderIndex = partKey
       ? settings.partExtruders.get(partKey) ?? defaultExtruderIndex
       : defaultExtruderIndex;
+    const componentVisited = new Set(activeVisited);
+    componentVisited.add(componentReferenceKey);
 
-    let componentDoc = modelCache.get(componentPath);
-    if (componentDoc === undefined) {
-      const componentFile = zip.file(componentPath);
-      if (!componentFile) {
-        modelCache.set(componentPath, null);
+    let componentMeshes: RawMeshData[] = [];
+    if (!componentPath && componentObjectId) {
+      componentMeshes = await parseComponentMeshes(
+        currentDoc,
+        currentDocumentPath,
+        componentObjectId,
+        zip,
+        parser,
+        settings,
+        modelCache,
+        objectCache,
+        componentVisited,
+        componentExtruderIndex,
+        budget,
+      );
+    } else if (componentPath) {
+      const componentDoc = await loadModelDocument(componentPath, zip, parser, modelCache);
+      if (!componentDoc) {
         continue;
       }
 
-      const componentXml = await componentFile.async('string');
-      const parsedDoc = parser.parseFromString(componentXml, 'application/xml');
-      componentDoc = getXmlParserError(parsedDoc) ? null : parsedDoc;
-      modelCache.set(componentPath, componentDoc);
+      componentMeshes = await parseComponentMeshes(
+        componentDoc,
+        componentPath,
+        componentObjectId,
+        zip,
+        parser,
+        settings,
+        modelCache,
+        objectCache,
+        componentVisited,
+        componentExtruderIndex,
+        budget,
+      );
     }
 
-    if (!componentDoc) {
-      continue;
-    }
-
-    const componentMeshes = await parseDocumentMeshes(componentDoc, componentExtruderIndex, componentObjectId);
     const componentTransform = parseTransform(componentElement.getAttribute('transform'));
     const hasComponentTransform = componentElement.hasAttribute('transform');
 
@@ -430,17 +604,18 @@ async function parseObjectMeshes(
     }
   }
 
-  if (meshes.length === 0) {
-    return null;
-  }
+  const parsedObject = meshes.length === 0
+    ? null
+    : {
+      id: objectId,
+      meshes,
+      defaultExtruderIndex,
+      plateId: parsePlateIdFromAttributes(objectElement) ?? settings.objectPlateIds.get(objectId) ?? null,
+      name: objectName ?? null,
+    } satisfies RawObjectData;
 
-  return {
-    id: objectId,
-    meshes,
-    defaultExtruderIndex,
-    plateId: parsePlateIdFromAttributes(objectElement) ?? settings.objectPlateIds.get(objectId) ?? null,
-    name: objectName ?? null,
-  };
+  objectCache.set(cacheKey, parsedObject);
+  return parsedObject;
 }
 
 function findMainModelPath(zip: JSZip): string | null {
@@ -485,13 +660,15 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
     throw new Error('Unsupported or corrupt 3MF archive.');
   }
 
+  validateZipEntrySizes(zip);
+
   const parser = new DOMParser();
   const settings = await parseModelSettings(zip, parser);
   const plateJsonData = await parsePlateJsonMetadata(zip);
   const mainModelPath = findMainModelPath(zip);
 
   if (!mainModelPath) {
-    throw new Error('The 3MF archive does not contain a model definition.');
+    throw new Error('No model file found in the 3MF archive.');
   }
 
   const mainModelFile = zip.file(mainModelPath);
@@ -500,16 +677,30 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
   }
 
   const mainXml = await mainModelFile.async('string');
+  assertXmlSize(mainXml);
   const mainDoc = parser.parseFromString(mainXml, 'application/xml');
   if (getXmlParserError(mainDoc)) {
     throw new Error('The 3MF model XML could not be parsed.');
   }
 
   const objectMap = new Map<string, RawObjectData>();
-  const modelCache = new Map<string, Document | null>();
+  const modelCache = new Map<string, Document | null>([[mainModelPath, mainDoc]]);
+  const objectCache = new Map<string, RawObjectData | null>();
+  const budget: ComplexityBudget = { totalVertices: 0, totalTriangles: 0 };
 
   for (const objectElement of Array.from(mainDoc.getElementsByTagName('object'))) {
-    const parsedObject = await parseObjectMeshes(objectElement, zip, parser, settings, modelCache);
+    const parsedObject = await parseObjectMeshes(
+      objectElement,
+      zip,
+      parser,
+      settings,
+      modelCache,
+      objectCache,
+      mainDoc,
+      mainModelPath,
+      undefined,
+      budget,
+    );
     if (parsedObject) {
       objectMap.set(parsedObject.id, parsedObject);
     }
@@ -539,6 +730,27 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
   }
 
   const renderableMeshes: ThreeMfRenderableMeshSource[] = [];
+  let renderVertexCount = 0;
+  let renderTriangleCount = 0;
+
+  function chargeRenderBudget(vertexCount: number, triangleCount: number): void {
+    renderVertexCount += vertexCount;
+    renderTriangleCount += triangleCount;
+    if (renderVertexCount > MAX_TOTAL_VERTICES) {
+      throw new ThreeMfSecurityError(
+        `The 3MF archive exceeds the render vertex limit of ${MAX_TOTAL_VERTICES.toLocaleString()} (repeated instances counted).`,
+      );
+    }
+    if (renderTriangleCount > MAX_TOTAL_TRIANGLES) {
+      throw new ThreeMfSecurityError(
+        `The 3MF archive exceeds the render triangle limit of ${MAX_TOTAL_TRIANGLES.toLocaleString()} (repeated instances counted).`,
+      );
+    }
+  }
+
+  if (buildItems.length > MAX_RENDER_INSTANCES) {
+    throw new ThreeMfSecurityError(`The 3MF archive contains more than ${MAX_RENDER_INSTANCES} build items.`);
+  }
 
   if (buildItems.length > 0) {
     for (const buildItem of buildItems) {
@@ -548,6 +760,7 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
       }
 
       for (const mesh of objectData.meshes) {
+        chargeRenderBudget(mesh.vertices.length / 3, mesh.triangles.length / 3);
         renderableMeshes.push({
           objectId: buildItem.objectId,
           plateId: buildItem.plateId,
@@ -560,6 +773,7 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
     for (const objectData of objectMap.values()) {
       const plateId = objectData.name ? plateJsonData.objectPlateIdsByName.get(objectData.name) ?? objectData.plateId : objectData.plateId;
       for (const mesh of objectData.meshes) {
+        chargeRenderBudget(mesh.vertices.length / 3, mesh.triangles.length / 3);
         renderableMeshes.push({
           objectId: objectData.id,
           plateId,

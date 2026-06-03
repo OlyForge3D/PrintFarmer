@@ -11,6 +11,7 @@ import { STLLoader } from 'three-stdlib';
 import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PerspectiveIcon, OrthographicIcon, RecenterIcon, RulerIcon, SimplifyIcon } from '../../../../common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
 import { MeasurementTool } from './MeasurementTool';
@@ -18,6 +19,8 @@ import { MeasurementOverlay } from './MeasurementOverlay';
 import { DecimationPanel } from './DecimationPanel';
 import { decimateGeometry, type DecimationResult } from '../../utils/meshDecimation';
 import { exportSTL } from '../../utils/stlExporter';
+import { apiClient } from '@/services/api';
+import { parseThreeMfArchive, disposeParsedThreeMfModel, ThreeMfSecurityError } from '@/features/slicer/utils/threemf-parser';
 
 export interface ModelViewerProps {
   modelUrl: string;
@@ -386,6 +389,162 @@ function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChan
       receiveShadow={viewMode === 'solid'}
     >
       {renderMaterial()}
+    </mesh>
+  );
+}
+
+/**
+ * Client-side .3mf model renderer using the hardened parser.
+ * Falls back to backend STL conversion on non-security parse errors.
+ */
+function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryLoaded }: {
+  url: string;
+  viewMode?: ViewMode;
+  onDimensionsChange?: (dimensions: ModelDimensions) => void;
+  onGeometryLoaded?: (geometry: THREE.BufferGeometry) => void;
+}) {
+  const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
+  const geometryRef = useRef<THREE.BufferGeometry | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Dispose previous geometry on re-run (url change)
+    if (geometryRef.current) {
+      geometryRef.current.dispose();
+      geometryRef.current = null;
+    }
+
+    async function load(): Promise<void> {
+      setGeometry(null);
+      setError(null);
+      setFallbackUrl(null);
+
+      try {
+        const response = await apiClient.get<ArrayBuffer>(url, { responseType: 'arraybuffer' });
+        if (cancelled) return;
+
+        const parsed = await parseThreeMfArchive(response.data);
+        if (cancelled) {
+          disposeParsedThreeMfModel(parsed);
+          return;
+        }
+
+        // Merge all meshes into a single geometry for the Models page viewer
+        const geometries = parsed.meshes.map((m) => m.geometry);
+        let merged: THREE.BufferGeometry;
+        if (geometries.length === 1) {
+          merged = geometries[0].clone();
+        } else {
+          const result = mergeGeometries(geometries.map((g) => g.clone()), false);
+          merged = result ?? geometries[0].clone();
+        }
+
+        disposeParsedThreeMfModel(parsed);
+
+        // Center and orient (same transform as STLModel)
+        merged.computeBoundingBox();
+        if (merged.boundingBox) {
+          const bbox = merged.boundingBox;
+          const centerX = (bbox.min.x + bbox.max.x) / 2;
+          const centerY = (bbox.min.y + bbox.max.y) / 2;
+          const minZ = bbox.min.z;
+          merged.translate(-centerX, -centerY, -minZ);
+
+          const width = bbox.max.x - bbox.min.x;
+          const depth = bbox.max.y - bbox.min.y;
+          const height = bbox.max.z - bbox.min.z;
+          onDimensionsChange?.({ width, depth, height, volume: width * depth * height });
+        }
+
+        merged.computeVertexNormals();
+        merged.computeBoundingBox();
+        merged.computeBoundingSphere();
+
+        if (!cancelled) {
+          geometryRef.current = merged;
+          setGeometry(merged);
+          onGeometryLoaded?.(merged.clone());
+        } else {
+          merged.dispose();
+        }
+      } catch (err) {
+        if (cancelled) return;
+
+        const message = err instanceof Error ? err.message : 'Failed to parse 3MF';
+        setError(message);
+
+        // Security errors must NOT fall back to STL
+        if (!(err instanceof ThreeMfSecurityError)) {
+          const separator = url.includes('?') ? '&' : '?';
+          setFallbackUrl(`${url}${separator}forceStl=true`);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [url, onDimensionsChange, onGeometryLoaded]);
+
+  // Dispose geometry on unmount
+  useEffect(() => {
+    return () => {
+      geometryRef.current?.dispose();
+      geometryRef.current = null;
+    };
+  }, []);
+
+  // Security error — show error, no fallback
+  if (error && !fallbackUrl) {
+    return (
+      <Html center>
+        <div className="max-w-xs rounded-lg border border-red-500/40 bg-pf-bg-1/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
+          {error}
+        </div>
+      </Html>
+    );
+  }
+
+  // Non-security parse error — fall back to backend STL conversion
+  if (fallbackUrl) {
+    return <STLModel url={fallbackUrl} viewMode={viewMode} onDimensionsChange={onDimensionsChange} onGeometryLoaded={onGeometryLoaded} />;
+  }
+
+  // Loading state
+  if (!geometry) {
+    return (
+      <Html center>
+        <div className="rounded-lg border border-pf-border bg-pf-bg-2/90 px-4 py-2 text-sm text-pf-text-primary shadow-lg backdrop-blur-sm">
+          Loading 3MF…
+        </div>
+      </Html>
+    );
+  }
+
+  const materialProps = {
+    color: '#0969da',
+    metalness: 0.3,
+    roughness: 0.4,
+  };
+
+  return (
+    <mesh
+      geometry={geometry}
+      position={[0, 0, 0]}
+      castShadow={viewMode === 'solid'}
+      receiveShadow={viewMode === 'solid'}
+    >
+      <meshStandardMaterial
+        {...materialProps}
+        wireframe={viewMode === 'wireframe'}
+        transparent={viewMode === 'xray'}
+        opacity={viewMode === 'xray' ? 0.3 : 1}
+        side={viewMode === 'xray' ? THREE.DoubleSide : THREE.FrontSide}
+      />
     </mesh>
   );
 }
@@ -852,7 +1011,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       case 'ply':
         return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       case '3mf':
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
+        return <ThreeMFModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       default:
         return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
     }

@@ -2165,29 +2165,43 @@ function BedScene({
                       : undefined}
                   />
                 ) : (
-                  <UrlModelViewer
-                    fileType={model.fileType}
-                    url={model.viewerUrl ?? model.url}
-                    position={displayPos}
-                    rotation={model.rotation}
-                    scale={model.scale}
-                    selected={model.id === selectedModelId}
-                    outOfBounds={outOfBoundsModelIds?.has(model.id)}
-                    layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={!isToolActive}
-                    onClick={() => onModelSelect?.(model.id)}
-                    onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
-                    onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
-                    meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
-                    onSelectedMetrics={model.id === selectedModelId
-                      ? (metrics) => onSelectedModelMetricsChange?.({
-                        modelId: model.id,
-                        baseSize: metrics.baseSize,
-                        currentSize: metrics.currentSize,
-                        currentScale: metrics.currentScale,
-                      })
-                      : undefined}
-                  />
+                  <ModelViewerErrorBoundary
+                    resetKey={`${model.id}:${model.viewerUrl ?? model.url}`}
+                    fallback={(
+                      <Html center>
+                        <div
+                          className="max-w-xs rounded-lg border border-pf-border bg-pf-bg-1/95 px-4 py-3 text-center text-sm text-pf-text-primary shadow-lg backdrop-blur-sm"
+                          role="alert"
+                        >
+                          Failed to load this 3D model. Select another model or retry with a refreshed source.
+                        </div>
+                      </Html>
+                    )}
+                  >
+                    <UrlModelViewer
+                      fileType={model.fileType}
+                      url={model.viewerUrl ?? model.url}
+                      position={displayPos}
+                      rotation={model.rotation}
+                      scale={model.scale}
+                      selected={model.id === selectedModelId}
+                      outOfBounds={outOfBoundsModelIds?.has(model.id)}
+                      layFlatMode={model.id === selectedModelId && layFlatMode}
+                      draggable={!isToolActive}
+                      onClick={() => onModelSelect?.(model.id)}
+                      onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
+                      onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
+                      meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
+                      onSelectedMetrics={model.id === selectedModelId
+                        ? (metrics) => onSelectedModelMetricsChange?.({
+                          modelId: model.id,
+                          baseSize: metrics.baseSize,
+                          currentSize: metrics.currentSize,
+                          currentScale: metrics.currentScale,
+                        })
+                        : undefined}
+                    />
+                  </ModelViewerErrorBoundary>
                 )
               )}
             </Suspense>

@@ -3,7 +3,7 @@ import { useLoader } from '@react-three/fiber';
 import { Select } from '@/common/components/ui';
 import { DEFAULT_EXTRUDER_COLORS } from '@/features/slicer/components/viewer/extruderColors';
 import { apiClient } from '@/services/api';
-import { disposeParsedThreeMfModel, parseThreeMfArchive, type ParsedThreeMfModel } from '@/features/slicer/utils/threemf-parser';
+import { disposeParsedThreeMfModel, parseThreeMfArchive, ThreeMfSecurityError, type ParsedThreeMfModel } from '@/features/slicer/utils/threemf-parser';
 import { STLLoader } from 'three-stdlib';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -322,7 +322,10 @@ export function ThreeMFViewer({
         }
 
         setParseError(error instanceof Error ? error.message : 'Failed to parse 3MF model.');
-        setFallbackUrl(buildFallbackStlUrl(url));
+        // Security/limit errors must NOT fall back to STL — the file is malicious or too large.
+        if (!(error instanceof ThreeMfSecurityError)) {
+          setFallbackUrl(buildFallbackStlUrl(url));
+        }
       }
     }
 
