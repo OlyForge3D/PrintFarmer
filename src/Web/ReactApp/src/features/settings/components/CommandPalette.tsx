@@ -1,4 +1,3 @@
-/* eslint-disable local/pf-no-raw-html-controls */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
@@ -6,8 +5,10 @@ import { ArrowRightIcon, CloseIcon, SearchIcon } from '@/common/components/icons
 import { Button, Input } from '@/common/components/ui';
 import { getSettingsCategoryIcon, type SettingsCommandItem } from '@/features/settings/settings-navigation';
 
-const ANIMATION_DURATION_MS = 120;
+const PREMIUM_TRANSITION_MS = 280;
 const MAX_VISIBLE_ITEMS = 12;
+const PREMIUM_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
+const COMMAND_HINT_TEXT = '↑↓ navigate · ↵ open · esc close';
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
   'a[href]',
@@ -17,6 +18,10 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 const COMMAND_PALETTE_NOISE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E\")";
+const COMMAND_PALETTE_GRID = [
+  'linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
+  'linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
+].join(', ');
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -181,13 +186,6 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
     return results.slice(0, MAX_VISIBLE_ITEMS);
   }, [items, query]);
 
-  useEffect(() => {
-    if (activeIndex <= filteredItems.length - 1) {
-      return;
-    }
-
-    setActiveIndex(0);
-  }, [activeIndex, filteredItems.length]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -206,25 +204,32 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
     if (isOpen) {
       previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       shouldRestoreFocusRef.current = true;
-      setIsRendered(true);
-      setQuery('');
-      setActiveIndex(0);
 
-      const animationFrame = window.requestAnimationFrame(() => {
-        setIsVisible(true);
-      });
+      const openTimeout = window.setTimeout(() => {
+        setIsRendered(true);
+        setQuery('');
+        setActiveIndex(0);
+        window.requestAnimationFrame(() => {
+          setIsVisible(true);
+        });
+      }, 0);
 
-      return () => window.cancelAnimationFrame(animationFrame);
+      return () => window.clearTimeout(openTimeout);
     }
 
-    setIsVisible(false);
-    const timeout = window.setTimeout(() => setIsRendered(false), prefersReducedMotion ? 0 : ANIMATION_DURATION_MS);
+    const closeAnimationFrame = window.requestAnimationFrame(() => {
+      setIsVisible(false);
+    });
+    const timeout = window.setTimeout(() => setIsRendered(false), prefersReducedMotion ? 0 : PREMIUM_TRANSITION_MS);
 
     if (shouldRestoreFocusRef.current) {
       previousFocusRef.current?.focus();
     }
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.cancelAnimationFrame(closeAnimationFrame);
+      window.clearTimeout(timeout);
+    };
   }, [isOpen, prefersReducedMotion]);
 
   useEffect(() => {
@@ -308,20 +313,24 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
     }
   }, [handleDismiss]);
 
+  const boundedActiveIndex = filteredItems.length === 0 ? 0 : Math.min(activeIndex, filteredItems.length - 1);
+
   const handleInputKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (filteredItems.length === 0) {
       return;
     }
 
+    const currentActiveIndex = Math.min(activeIndex, filteredItems.length - 1);
+
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActiveResult(activeIndex + 1);
+      setActiveResult(currentActiveIndex + 1);
       return;
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setActiveResult(activeIndex - 1);
+      setActiveResult(currentActiveIndex - 1);
       return;
     }
 
@@ -337,33 +346,38 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
       return;
     }
 
-    if (event.key === 'Enter' && filteredItems[activeIndex]) {
+    if (event.key === 'Enter' && filteredItems[currentActiveIndex]) {
       event.preventDefault();
-      handleSelect(filteredItems[activeIndex].item);
+      handleSelect(filteredItems[currentActiveIndex].item);
     }
   }, [activeIndex, filteredItems, handleSelect, setActiveResult]);
 
   if (!isRendered) {
     return null;
   }
-
-  const activeOption = filteredItems[activeIndex];
+  const activeOption = filteredItems[boundedActiveIndex];
   const activeOptionId = activeOption ? `${listboxId}-${activeOption.item.id}` : undefined;
+  const transitionStyle = {
+    transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+    transitionTimingFunction: PREMIUM_EASING,
+  } as const;
 
   return createPortal(
     <div
       className={clsx(
-        'fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+        'fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh] transition-opacity motion-reduce:transition-none',
         isVisible ? 'opacity-100' : 'opacity-0',
       )}
+      style={transitionStyle}
       onClick={handleDismiss}
       aria-hidden={false}
     >
       <div
         className={clsx(
-          'absolute inset-0 bg-pf-bg-2/72 backdrop-blur-sm transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+          'absolute inset-0 bg-pf-bg-2/72 backdrop-blur-sm transition-opacity motion-reduce:transition-none',
           isVisible ? 'opacity-100' : 'opacity-0',
         )}
+        style={transitionStyle}
         aria-hidden="true"
       />
 
@@ -377,13 +391,15 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         onKeyDown={handleDialogKeyDown}
         onClick={(event) => event.stopPropagation()}
         className={clsx(
-          'relative w-full max-w-[32rem] overflow-hidden rounded-[1.75rem] border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition duration-[120ms] ease-out motion-reduce:transition-none',
-          isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-[0.985] opacity-0',
+          'relative w-full max-w-[32rem] overflow-hidden rounded-[1.75rem] border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[transform,opacity] motion-reduce:transition-none',
+          isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.985] opacity-0',
         )}
+        style={transitionStyle}
       >
-        <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: COMMAND_PALETTE_NOISE, backgroundSize: '140px 140px' }} aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-0 opacity-[0.08]" style={{ backgroundImage: COMMAND_PALETTE_GRID, backgroundSize: '24px 24px' }} aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-0 opacity-[0.05]" style={{ backgroundImage: COMMAND_PALETTE_NOISE, backgroundSize: '140px 140px' }} aria-hidden="true" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-pf-border to-transparent" aria-hidden="true" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-pf-accent-bg/12 via-transparent to-transparent" aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-pf-accent-bg/14 via-transparent to-transparent" aria-hidden="true" />
 
         <div className="relative border-b border-pf-border/70 px-5 py-4">
           <div className="flex items-start justify-between gap-3">
@@ -398,7 +414,8 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
               size="sm"
               onClick={handleDismiss}
               aria-label="Close command palette"
-              className="rounded-full p-2 text-pf-text-secondary transition-colors duration-[120ms] ease-out hover:bg-pf-bg-1 hover:text-pf-text-primary focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset motion-reduce:transition-none"
+              className="rounded-full p-2 text-pf-text-secondary transition-colors hover:bg-pf-bg-1 hover:text-pf-text-primary focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset motion-reduce:transition-none"
+              style={transitionStyle}
               iconCenter={<span aria-hidden="true"><CloseIcon className="h-4 w-4" ariaLabel="Close" /></span>}
             />
           </div>
@@ -434,10 +451,10 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
 
         <div className="relative px-3 py-3">
           {filteredItems.length > 0 ? (
-            <div id={listboxId} role="listbox" aria-label="Settings search results" className="space-y-1.5">
+            <div id={listboxId} role="listbox" aria-label="Settings search results" className="max-h-[24rem] space-y-1.5 overflow-y-auto pr-1">
               {filteredItems.map((result, index) => {
                 const Icon = getSettingsCategoryIcon(result.item.categoryId);
-                const isActive = index === activeIndex;
+                const isActive = index === boundedActiveIndex;
 
                 return (
                   <div
@@ -456,11 +473,12 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => handleSelect(result.item)}
                     className={clsx(
-                      'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition duration-[120ms] ease-out motion-reduce:transition-none',
+                      'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-[transform,background-color,color,border-color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
                       isActive
-                        ? 'border-pf-accent/60 bg-pf-accent-bg/14 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                        ? 'border-pf-accent/60 bg-pf-accent-bg/22 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
                         : 'border-transparent bg-pf-bg-1/55 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/75 hover:text-pf-text-primary',
                     )}
+                    style={transitionStyle}
                   >
                     <span
                       className={clsx(
@@ -485,9 +503,10 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                     <span aria-hidden="true">
                       <ArrowRightIcon
                         className={clsx(
-                          'mt-1 h-4 w-4 shrink-0 transition-transform duration-[120ms] ease-out motion-reduce:transition-none',
+                          'mt-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none',
                           isActive ? 'translate-x-0 text-pf-accent' : 'text-pf-text-tertiary group-hover:translate-x-0.5',
                         )}
+                        style={transitionStyle}
                         ariaLabel="Open setting"
                       />
                     </span>
@@ -501,6 +520,10 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
               <p className="mt-2 text-sm text-pf-text-secondary">Try a broader term like theme, workers, audit, or camera.</p>
             </div>
           )}
+        </div>
+
+        <div className="border-t border-pf-border/70 px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
+          {COMMAND_HINT_TEXT}
         </div>
       </div>
     </div>,

@@ -1530,3 +1530,30 @@ All three can merge in parallel (no conflicts between them), respecting #376's s
 ---
 ---
 ---
+### 2026-06-02T20:37:41-07:00: Workflow gate — feature branches + pre-PR review
+**By:** Jeff Papiez (via Copilot)
+**What:** 
+1. All work MUST be done in a feature branch — never commit directly to development.
+2. Before submitting a PR, request review from the code review trio (Bishop, Hicks, Vasquez).
+3. Issues discovered during review MUST be fixed on the branch BEFORE raising the PR.
+**Why:** User request — repeated violations of the pre-PR review gate. This tightens the workflow: no direct pushes to development, and the review gate happens before (not after) the PR is opened.
+
+### 20260603-113637: User directive
+**By:** Jeff Papiez (via Copilot)
+**What:** Add Command-K (command palette) to the settings UI polish pass. Previously excluded, now included.
+**Why:** User request — changed their mind after learning what Command-K is.
+
+### 2026-06-03T12:22:16-07:00: User directive
+**By:** Jeff Papiez (via Copilot)
+**What:** Newt should always use the premium-frontend-ui skill (.github/skills/premium-frontend-ui/SKILL.md) when performing UI assessments or new design work.
+**Why:** User request — captured for team memory
+
+### 2026-06-03T12:24:48-07:00: User directive — Settings page layout redesign
+**By:** Jeff Papiez (via Copilot)
+**What:** Settings page layout must be restructured as a 2-pane layout:
+1. Remove the full-width "Settings" header bar — it wastes horizontal space
+2. Left pane: fixed navigation sidebar running full viewport height (never scrolls with content)
+3. Right pane: settings sub-page content takes entire remaining width
+4. Only the right pane scrolls — left nav stays fixed/pinned
+5. Remove redundant title+description on each sub-page (the nav already tells you where you are)
+**Why:** Current layout wastes space and creates distracting scroll behavior where the whole page moves instead of just the content area.

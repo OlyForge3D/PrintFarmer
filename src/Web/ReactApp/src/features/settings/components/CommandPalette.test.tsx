@@ -86,4 +86,17 @@ describe('CommandPalette', () => {
     expect(input).toHaveFocus();
     expect(input).toHaveValue('email');
   });
+
+  it('renders keyboard hint text in the footer', () => {
+    render(
+      <CommandPalette
+        isOpen
+        items={items}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('↑↓ navigate · ↵ open · esc close')).toBeInTheDocument();
+  });
 });

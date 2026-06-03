@@ -4,6 +4,9 @@ import clsx from 'clsx';
 import { SettingsMatchText } from '@/features/settings/components/SettingsMatchText';
 import type { SettingsSubPage } from '@/features/settings/types';
 
+const PREMIUM_TRANSITION_MS = 280;
+const PREMIUM_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
+
 interface SettingsSubTabsProps {
   subPages: SettingsSubPage[];
   activeSubPage: string;
@@ -117,9 +120,14 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
     return null;
   }
 
+  const transitionStyle = {
+    transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+    transitionTimingFunction: PREMIUM_EASING,
+  } as const;
+
   return (
-    <div className="relative mb-5 overflow-x-auto border-b border-pf-border/70">
-      <div ref={tabListRef} role="tablist" aria-label={ariaLabel} className="relative flex min-w-max items-center gap-1">
+    <div className="relative mt-4 overflow-x-auto">
+      <div ref={tabListRef} role="tablist" aria-label={ariaLabel} className="relative flex min-w-max items-center gap-2 pb-2">
         {visibleSubPages.map((subPage, index) => {
           const isActive = activeSubPage === subPage.id;
           const isMatching = isMatchingSubPage(subPage.id);
@@ -137,12 +145,14 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
               onClick={() => onSubPageChange(subPage.id)}
               onKeyDown={(event) => handleKeyDown(event, index)}
               className={clsx(
-                'relative inline-flex items-center px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors duration-150 motion-reduce:transition-none',
+                'relative inline-flex items-center rounded-2xl border border-transparent px-4 py-2.5 text-sm font-medium whitespace-nowrap',
                 'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                isActive && 'text-pf-text-primary',
-                !isActive && 'text-pf-text-secondary hover:text-pf-text-primary',
-                isMatching && !isActive && 'rounded-t-xl bg-pf-bg-1/85 text-pf-text-primary',
+                'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
+                isActive && 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
+                !isActive && 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
+                isMatching && !isActive && 'bg-pf-bg-1/85 text-pf-text-primary',
               )}
+              style={transitionStyle}
             >
               <SettingsMatchText text={subPage.label} query={searchQuery} />
             </button>
@@ -152,10 +162,13 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
         {indicatorStyle ? (
           <span
             aria-hidden="true"
-            className="absolute bottom-0 h-[2px] rounded-full bg-pf-accent transition-[transform,width] duration-150 ease-out motion-reduce:transition-none"
+            className="absolute bottom-0 h-[2px] rounded-full bg-pf-accent will-change-transform motion-reduce:transition-none"
             style={{
               width: `${indicatorStyle.width}px`,
               transform: `translateX(${indicatorStyle.left}px)`,
+              transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+              transitionProperty: 'transform, width',
+              transitionTimingFunction: PREMIUM_EASING,
             }}
           />
         ) : null}

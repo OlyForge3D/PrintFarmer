@@ -381,7 +381,7 @@
     font-family: var(--pf-font-sans);
   }
   
-  h1, h2, h3, h4, h5, h6 {
+  h1, h2 {
     @apply font-bebas font-bold uppercase text-pf-text-primary;
   }
   
@@ -397,11 +397,30 @@
   @keyframes pf-settings-content-in {
     from {
       opacity: 0;
-      transform: translateY(4px);
+      transform: translateY(8px);
     }
     to {
       opacity: 1;
       transform: translateY(0);
     }
+  }
+
+  @keyframes pf-settings-nav-item-in {
+    from {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .pf-settings-scroll-pane {
+    scrollbar-gutter: stable;
+  }
+
+  .pf-settings-surface input[type='number'] {
+    font-variant-numeric: tabular-nums;
   }
 }
