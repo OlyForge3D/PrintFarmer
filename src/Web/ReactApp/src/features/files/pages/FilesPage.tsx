@@ -100,11 +100,12 @@ const LEGACY_SEGMENT_TO_FILTER: Partial<Record<string, FileTypeFilter>> = {
   models: 'models',
   '3d-models': 'models',
   gcode: 'gcode',
-  harvest: 'all',
 };
+const LEGACY_ACTION_SEGMENTS = new Set(['harvest']);
 const MODEL_FILE_EXTENSIONS = new Set(['3mf', 'stl', 'step', 'stp']);
 const GCODE_FILE_EXTENSIONS = new Set(['gcode', 'gco', 'g', 'ngc', 'gc']);
 const DEFAULT_FETCH_PAGE_SIZE = 100;
+const MAX_FETCH_PAGES = 10; // Cap at 1000 files per source to prevent runaway requests
 const FILE_BROWSER_SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: 'date', label: 'Date' },
   { value: 'name', label: 'Name' },
@@ -405,8 +406,13 @@ async function fetchAllModels(search: string, sortBy: SortOption, sortOrder: 'as
     descending: sortOrder === 'desc',
   };
 
+  if (signal?.aborted) throw new Error('Query was cancelled');
+
   const firstPage = (await apiClient.get3DModelsQuery(request)) as unknown as Model3DSearchResponse;
-  const totalPages = Math.max(firstPage.totalPages ?? 1, 1);
+  const totalPages = Math.min(firstPage.totalPages ?? 1, MAX_FETCH_PAGES);
+
+  if (signal?.aborted) throw new Error('Query was cancelled');
+
   const remainingPages = totalPages > 1
     ? await Promise.all(
         Array.from({ length: totalPages - 1 }, (_, index) =>
@@ -415,9 +421,7 @@ async function fetchAllModels(search: string, sortBy: SortOption, sortOrder: 'as
       )
     : [];
 
-  if (signal?.aborted) {
-    throw new Error('Query was cancelled');
-  }
+  if (signal?.aborted) throw new Error('Query was cancelled');
 
   return [
     ...(firstPage.models ?? []),
@@ -443,8 +447,13 @@ async function fetchAllGcode(
     sortOrder,
   };
 
+  if (signal?.aborted) throw new Error('Query was cancelled');
+
   const firstPage = await apiClient.getGcodeFilesQuery(request as never) as GetGcodeFilesResponse;
-  const totalPages = Math.max(firstPage.totalPages ?? 1, 1);
+  const totalPages = Math.min(firstPage.totalPages ?? 1, MAX_FETCH_PAGES);
+
+  if (signal?.aborted) throw new Error('Query was cancelled');
+
   const remainingPages = totalPages > 1
     ? await Promise.all(
         Array.from({ length: totalPages - 1 }, (_, index) =>
@@ -453,9 +462,7 @@ async function fetchAllGcode(
       )
     : [];
 
-  if (signal?.aborted) {
-    throw new Error('Query was cancelled');
-  }
+  if (signal?.aborted) throw new Error('Query was cancelled');
 
   return [
     ...(firstPage.files ?? []),
@@ -500,6 +507,14 @@ export function FilesPage() {
 
   useEffect(() => {
     const legacySegment = location.pathname.replace(/^\/files\/?/, '').split('/')[0];
+
+    // Legacy /files/harvest → open harvest modal at /files
+    if (LEGACY_ACTION_SEGMENTS.has(legacySegment)) {
+      setShowHarvestModal(true);
+      navigate('/files', { replace: true });
+      return;
+    }
+
     const normalizedFilter = LEGACY_SEGMENT_TO_FILTER[legacySegment];
     const tabFilter = LEGACY_SEGMENT_TO_FILTER[searchParams.get('tab') ?? ''];
     const replacementFilter = normalizedFilter ?? tabFilter;
@@ -555,7 +570,7 @@ export function FilesPage() {
     }
 
     const link = document.createElement('a');
-    link.href = `/api/3d-models/file/${model.id}`;
+    link.href = `${getApiBaseUrl()}/3d-models/file/${model.id}`;
     link.download = model.name;
     link.style.display = 'none';
     document.body.appendChild(link);
@@ -580,8 +595,9 @@ export function FilesPage() {
 
   const fetcher = useCallback(async (params: unknown, signal?: AbortSignal) => {
     const query = params as UnifiedQueryParams;
+    // 'other' can contain uncategorized files from either source, so fetch both
     const shouldFetchModels = query.filter !== 'gcode';
-    const shouldFetchGcode = query.filter === 'all' || query.filter === 'gcode';
+    const shouldFetchGcode = query.filter === 'all' || query.filter === 'gcode' || query.filter === 'other';
 
     const [models, gcodeFiles] = await Promise.all([
       shouldFetchModels ? fetchAllModels(query.search, query.sortBy, query.sortOrder, signal) : Promise.resolve([]),
@@ -1191,11 +1207,18 @@ export function FilesPage() {
       />
 
       {viewerModel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`3D preview of ${viewerModel.name}`}
+          onKeyDown={(e) => { if (e.key === 'Escape') setViewerModel(null); }}
+          onClick={(e) => { if (e.target === e.currentTarget) setViewerModel(null); }}
+        >
           <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg border border-pf-border bg-pf-bg-1 shadow-xl">
             <div className="flex shrink-0 items-center justify-between border-b border-pf-border p-4">
               <h3 className="text-lg font-medium text-pf-text-primary">{viewerModel.name}</h3>
-              <Button onClick={() => setViewerModel(null)} variant="subtle" size="sm">
+              <Button onClick={() => setViewerModel(null)} variant="subtle" size="sm" aria-label="Close preview">
                 Close
               </Button>
             </div>
@@ -1203,7 +1226,7 @@ export function FilesPage() {
               <Suspense fallback={<ViewerSkeleton variant="model" className="h-128 w-full" />}>
                 {(viewerModel.url || viewerModel.id) && viewerModel.fileType && (
                   <ModelViewer
-                    modelUrl={viewerModel.url || `/api/3d-models/file/${viewerModel.id}`}
+                    modelUrl={viewerModel.url || `${getApiBaseUrl()}/3d-models/file/${viewerModel.id}`}
                     fileType={viewerModel.fileType}
                     showGrid={true}
                     className="h-128 w-full"

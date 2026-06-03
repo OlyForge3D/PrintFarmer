@@ -25,4 +25,4 @@ UI/UX Designer providing alternative design perspectives and competitive PoCs. S
 
 ## Model
 
-- Preferred: `claude-opus-4.8`
+- Preferred: `gtp-5.5`
