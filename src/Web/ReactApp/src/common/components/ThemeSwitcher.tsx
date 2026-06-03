@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import clsx from 'clsx';
 import { ChevronDownIcon, ChevronUpIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
@@ -254,22 +254,68 @@ function ThemePreview({ option }: { option: ThemeOption }) {
 export function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
   const [showMobilePreview, setShowMobilePreview] = useState(false);
+  const optionRefs = useRef<Map<NewTheme, HTMLButtonElement>>(new Map());
   const activeOption = useMemo(() => THEME_OPTIONS.find((option) => option.id === theme) ?? THEME_OPTIONS[0], [theme]);
+
+  const moveSelection = useCallback((nextIndex: number) => {
+    const nextOption = THEME_OPTIONS[nextIndex];
+    if (!nextOption) {
+      return;
+    }
+
+    setTheme(nextOption.id);
+    optionRefs.current.get(nextOption.id)?.focus();
+  }, [setTheme]);
+
+  const handleOptionKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault();
+        moveSelection((index + 1) % THEME_OPTIONS.length);
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault();
+        moveSelection((index - 1 + THEME_OPTIONS.length) % THEME_OPTIONS.length);
+        break;
+      case 'Home':
+        event.preventDefault();
+        moveSelection(0);
+        break;
+      case 'End':
+        event.preventDefault();
+        moveSelection(THEME_OPTIONS.length - 1);
+        break;
+      default:
+        break;
+    }
+  }, [moveSelection]);
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start lg:gap-5">
       <div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" role="radiogroup" aria-label="Color theme">
-          {THEME_OPTIONS.map((option) => {
-            const isActive = theme === option.id;
+          {THEME_OPTIONS.map((option, index) => {
+            const isActive = activeOption.id === option.id;
 
             return (
               <Button
                 key={option.id}
+                ref={(element) => {
+                  if (element) {
+                    optionRefs.current.set(option.id, element);
+                  } else {
+                    optionRefs.current.delete(option.id);
+                  }
+                }}
+                type="button"
                 variant="unstyled"
                 role="radio"
                 aria-checked={isActive}
+                tabIndex={isActive ? 0 : -1}
                 onClick={() => setTheme(option.id)}
+                onKeyDown={(event) => handleOptionKeyDown(event, index)}
                 className={clsx(
                   'group flex flex-col gap-2 rounded-2xl border p-3 text-left transition-all duration-200',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--pf-focus-ring-offset)]',

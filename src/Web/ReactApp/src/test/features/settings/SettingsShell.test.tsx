@@ -213,7 +213,7 @@ describe('SettingsShell', () => {
     launcher.focus();
     fireEvent.click(launcher);
 
-    const paletteSearch = screen.getByRole('searchbox', { name: 'Search settings command palette' });
+    const paletteSearch = screen.getByRole('combobox', { name: 'Search settings command palette' });
     expect(paletteSearch).toHaveFocus();
 
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
@@ -225,7 +225,7 @@ describe('SettingsShell', () => {
     renderSettings();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-    const paletteSearch = screen.getByRole('searchbox', { name: 'Search settings command palette' });
+    const paletteSearch = screen.getByRole('combobox', { name: 'Search settings command palette' });
     fireEvent.change(paletteSearch, { target: { value: 'lgnadt' } });
     fireEvent.keyDown(paletteSearch, { key: 'ArrowDown' });
     fireEvent.keyDown(paletteSearch, { key: 'Enter' });

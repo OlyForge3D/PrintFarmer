@@ -159,6 +159,7 @@ function HighlightedFuzzyText({ text, matches }: { text: string; matches: number
 export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPaletteProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const listboxId = useId();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [isRendered, setIsRendered] = useState(isOpen);
@@ -166,7 +167,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => getReducedMotionPreference());
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const resultRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const resultRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(true);
 
@@ -246,15 +247,24 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
     };
   }, [isRendered]);
 
-  const focusResult = useCallback((index: number) => {
-    const result = filteredItems[index];
-    if (!result) {
+  useEffect(() => {
+    const activeItem = filteredItems[activeIndex];
+    if (!activeItem) {
       return;
     }
 
-    setActiveIndex(index);
-    resultRefs.current.get(result.item.id)?.focus();
-  }, [filteredItems]);
+    const activeElement = resultRefs.current.get(activeItem.item.id);
+    activeElement?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, filteredItems]);
+
+  const setActiveResult = useCallback((nextIndex: number) => {
+    if (filteredItems.length === 0) {
+      return;
+    }
+
+    const normalizedIndex = (nextIndex + filteredItems.length) % filteredItems.length;
+    setActiveIndex(normalizedIndex);
+  }, [filteredItems.length]);
 
   const handleDismiss = useCallback(() => {
     shouldRestoreFocusRef.current = true;
@@ -295,22 +305,35 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
     if (event.key === 'Escape') {
       event.preventDefault();
       handleDismiss();
-      return;
     }
+  }, [handleDismiss]);
 
-    if (event.target !== inputRef.current) {
+  const handleInputKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (filteredItems.length === 0) {
       return;
     }
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      focusResult(Math.min(activeIndex + 1, filteredItems.length - 1));
+      setActiveResult(activeIndex + 1);
       return;
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      focusResult(Math.max(activeIndex - 1, 0));
+      setActiveResult(activeIndex - 1);
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveResult(0);
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      setActiveResult(filteredItems.length - 1);
       return;
     }
 
@@ -318,41 +341,14 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
       event.preventDefault();
       handleSelect(filteredItems[activeIndex].item);
     }
-  }, [activeIndex, filteredItems, focusResult, handleDismiss, handleSelect]);
-
-  const handleResultKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      focusResult(index === filteredItems.length - 1 ? 0 : index + 1);
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      focusResult(index === 0 ? filteredItems.length - 1 : index - 1);
-      return;
-    }
-
-    if (event.key === 'Home') {
-      event.preventDefault();
-      focusResult(0);
-      return;
-    }
-
-    if (event.key === 'End') {
-      event.preventDefault();
-      focusResult(filteredItems.length - 1);
-      return;
-    }
-
-    if (event.key === 'Backspace' && !query) {
-      inputRef.current?.focus();
-    }
-  }, [filteredItems.length, focusResult, query]);
+  }, [activeIndex, filteredItems, handleSelect, setActiveResult]);
 
   if (!isRendered) {
     return null;
   }
+
+  const activeOption = filteredItems[activeIndex];
+  const activeOptionId = activeOption ? `${listboxId}-${activeOption.item.id}` : undefined;
 
   return createPortal(
     <div
@@ -414,13 +410,20 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
             <Input
               ref={inputRef}
               type="search"
+              role="combobox"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setActiveIndex(0);
+                inputRef.current?.focus();
               }}
+              onKeyDown={handleInputKeyDown}
               placeholder="Search settings, sections, or keywords"
               aria-label="Search settings command palette"
+              aria-autocomplete="list"
+              aria-controls={filteredItems.length > 0 ? listboxId : undefined}
+              aria-expanded={filteredItems.length > 0}
+              aria-activedescendant={activeOptionId}
               className="h-12 pl-9 pr-24 text-sm"
             />
             <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary sm:inline-flex">
@@ -431,14 +434,15 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
 
         <div className="relative px-3 py-3">
           {filteredItems.length > 0 ? (
-            <div role="listbox" aria-label="Settings search results" className="space-y-1.5">
+            <div id={listboxId} role="listbox" aria-label="Settings search results" className="space-y-1.5">
               {filteredItems.map((result, index) => {
                 const Icon = getSettingsCategoryIcon(result.item.categoryId);
                 const isActive = index === activeIndex;
 
                 return (
-                  <button
+                  <div
                     key={result.item.id}
+                    id={`${listboxId}-${result.item.id}`}
                     ref={(element) => {
                       if (element) {
                         resultRefs.current.set(result.item.id, element);
@@ -446,14 +450,13 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                         resultRefs.current.delete(result.item.id);
                       }
                     }}
-                    type="button"
                     role="option"
                     aria-selected={isActive}
+                    onMouseMove={() => setActiveIndex(index)}
+                    onMouseDown={(event) => event.preventDefault()}
                     onClick={() => handleSelect(result.item)}
-                    onFocus={() => setActiveIndex(index)}
-                    onKeyDown={(event) => handleResultKeyDown(event, index)}
                     className={clsx(
-                      'group flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition duration-[120ms] ease-out motion-reduce:transition-none',
+                      'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition duration-[120ms] ease-out motion-reduce:transition-none',
                       isActive
                         ? 'border-pf-accent/60 bg-pf-accent-bg/14 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
                         : 'border-transparent bg-pf-bg-1/55 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/75 hover:text-pf-text-primary',
@@ -488,7 +491,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                         ariaLabel="Open setting"
                       />
                     </span>
-                  </button>
+                  </div>
                 );
               })}
             </div>
