@@ -1,19 +1,68 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Card, Button, Input, FormField, Spinner } from '@/common/components/ui';
-import { LockIcon } from '@/common/components/icons/MdiIcons';
+import { AlertCircleIcon, LockIcon } from '@/common/components/icons/MdiIcons';
+import { Skeleton } from '@/common/components/skeletons/Skeleton';
+import { Alert, Button, Card, FormField, Input } from '@/common/components/ui';
 import { useFarmSettings, useUpdateFarmSettings } from '@/features/settings/hooks/useFarmSettings';
 import type { FarmSettingsResponse } from '@/features/settings/types';
 
+const disabledInputClassName = 'disabled:border-pf-border disabled:bg-pf-bg-2 disabled:text-pf-text-secondary disabled:cursor-not-allowed';
+
 export function FarmSettingsSection() {
-  const { data, isLoading, error } = useFarmSettings();
+  const { data, isLoading, error, refetch, isFetching } = useFarmSettings();
   const mutation = useUpdateFarmSettings();
 
-  if (isLoading) return <Spinner className="mx-auto" />;
-  if (error) return <div className="text-pf-error">Failed to load farm settings.</div>;
-  if (!data) return null;
+  if (isLoading) {
+    return <FarmSettingsSkeleton />;
+  }
+
+  if (error) {
+    return (
+      <Alert type="error" title="Unable to load farm settings">
+        <div className="flex items-start gap-3">
+          <AlertCircleIcon className="mt-0.5 h-5 w-5 shrink-0" ariaLabel="Error" />
+          <div className="space-y-3">
+            <p>Farm-wide defaults could not be loaded right now.</p>
+            <Button type="button" variant="secondary" size="sm" loading={isFetching} onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </div>
+        </div>
+      </Alert>
+    );
+  }
+
+  if (!data) {
+    return null;
+  }
 
   return <FarmSettingsForm data={data} mutation={mutation} />;
+}
+
+function FarmSettingsSkeleton() {
+  return (
+    <Card>
+      <Card.Header>
+        <Skeleton width="28%" />
+        <Skeleton width="52%" />
+      </Card.Header>
+      <Card.Body>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={`farm-settings-skeleton-${index}`} className="space-y-2">
+              <Skeleton width="55%" />
+              <Skeleton height={40} />
+            </div>
+          ))}
+        </div>
+      </Card.Body>
+      <Card.Footer>
+        <div className="flex justify-end">
+          <Skeleton width="160px" height={40} />
+        </div>
+      </Card.Footer>
+    </Card>
+  );
 }
 
 function FarmSettingsForm({
@@ -61,18 +110,18 @@ function FarmSettingsForm({
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold text-pf-text-primary">Farm Settings</h2>
           {!canWrite && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-pf-bg-2 px-2 py-0.5 text-xs text-pf-text-secondary border border-pf-border">
-              <LockIcon className="w-3 h-3" />
+            <span className="inline-flex items-center gap-1 rounded-md border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-xs text-pf-text-secondary">
+              <LockIcon className="h-3 w-3" />
               Admin only
             </span>
           )}
         </div>
-        <p className="text-sm text-pf-text-secondary mt-1">
+        <p className="mt-1 text-sm text-pf-text-secondary">
           Farm-wide cost and energy defaults. {!canWrite && 'Contact an administrator to change these values.'}
         </p>
       </Card.Header>
       <Card.Body>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <FormField label="Electricity Rate (per kWh)">
             <Input
               type="number"
@@ -83,6 +132,7 @@ function FarmSettingsForm({
               onChange={(e) => setElectricityRate(e.target.value)}
               disabled={!canWrite}
               aria-label="Electricity rate per kWh"
+              className={!canWrite ? disabledInputClassName : undefined}
             />
           </FormField>
           <FormField label="Default Machine Hourly Rate">
@@ -95,6 +145,7 @@ function FarmSettingsForm({
               onChange={(e) => setHourlyRate(e.target.value)}
               disabled={!canWrite}
               aria-label="Default machine hourly rate"
+              className={!canWrite ? disabledInputClassName : undefined}
             />
           </FormField>
           <FormField label="Average Printer Wattage">
@@ -107,23 +158,20 @@ function FarmSettingsForm({
               onChange={(e) => setWattage(e.target.value)}
               disabled={!canWrite}
               aria-label="Average printer wattage"
+              className={!canWrite ? disabledInputClassName : undefined}
             />
           </FormField>
         </div>
       </Card.Body>
-      {canWrite && (
+      {canWrite ? (
         <Card.Footer>
           <div className="flex justify-end">
-            <Button
-              variant="primary"
-              onClick={handleSave}
-              disabled={mutation.isPending}
-            >
+            <Button variant="primary" onClick={handleSave} disabled={mutation.isPending}>
               {mutation.isPending ? 'Saving...' : 'Save Farm Settings'}
             </Button>
           </div>
         </Card.Footer>
-      )}
+      ) : null}
     </Card>
   );
 }

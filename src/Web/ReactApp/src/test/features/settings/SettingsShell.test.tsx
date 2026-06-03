@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -65,10 +65,22 @@ function getCategoryButton(name: string | RegExp) {
   return screen.getByRole('button', { name });
 }
 
+beforeAll(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+});
+
 describe('SettingsShell', () => {
-  it('renders the settings heading and category tabs', () => {
+  it('renders the settings page template header and category tabs', () => {
     renderSettings();
-    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByText('Configure your farm, hardware, and account')).toBeInTheDocument();
     expect(getCategoryButton('General')).toBeInTheDocument();
     expect(getCategoryButton('Hardware')).toBeInTheDocument();
     expect(getCategoryButton('Users')).toBeInTheDocument();
@@ -78,7 +90,8 @@ describe('SettingsShell', () => {
     renderSettings();
     const generalCategory = getCategoryButton('General');
     expect(generalCategory).toHaveAttribute('aria-current', 'page');
-    expect(generalCategory.className).toContain('text-[var(--pf-on-accent)]');
+    expect(generalCategory.className).toContain('bg-pf-accent-bg/12');
+    expect(generalCategory.className).toContain('text-pf-text-primary');
   });
 
   it('switches tab on click', () => {
@@ -109,14 +122,14 @@ describe('SettingsShell', () => {
 
   it('shows empty state when no tabs match search', () => {
     renderSettings('/settings?q=xyznonexistent');
-    expect(screen.getByText(/No settings found matching/)).toBeInTheDocument();
+    expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
   it('clears stale tab and sub params when search returns no results', () => {
     renderSettings('/settings?tab=hardware&sub=cameras&q=xyznonexistent');
-    expect(screen.getByText(/No settings found matching/)).toBeInTheDocument();
+    expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
@@ -178,8 +191,49 @@ describe('SettingsShell', () => {
     const searchInput = screen.getByLabelText('Search settings');
     searchInput.focus();
     fireEvent.change(searchInput, { target: { value: 'email' } });
-    // After typing, the notifications category should match and become active.
     expect(getCategoryButton(/^Notifications/)).toHaveAttribute('aria-current', 'page');
     expect(searchInput).toHaveFocus();
+  });
+
+  it('focuses search from the slash shortcut and clears the query', () => {
+    renderSettings('/settings?q=hardware');
+
+    fireEvent.keyDown(window, { key: '/' });
+    const searchInput = screen.getByLabelText('Search settings');
+    expect(searchInput).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(searchInput).toHaveValue('');
+  });
+
+  it('opens the command palette from the header button and returns focus on escape', () => {
+    renderSettings();
+
+    const launcher = screen.getByRole('button', { name: /Command palette/i });
+    launcher.focus();
+    fireEvent.click(launcher);
+
+    const paletteSearch = screen.getByRole('combobox', { name: 'Search settings command palette' });
+    expect(paletteSearch).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
+    expect(launcher).toHaveFocus();
+  });
+
+  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched settings section', () => {
+    renderSettings();
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const paletteSearch = screen.getByRole('combobox', { name: 'Search settings command palette' });
+    fireEvent.change(paletteSearch, { target: { value: 'lgnadt' } });
+    fireEvent.keyDown(paletteSearch, { key: 'ArrowDown' });
+    fireEvent.keyDown(paletteSearch, { key: 'Enter' });
+
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
+    expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Login Audit' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
   });
 });

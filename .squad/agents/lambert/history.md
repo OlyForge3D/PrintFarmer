@@ -97,6 +97,8 @@ external-reference-app repo ([external reference repo]) was reviewed by Brett. T
 
 ## Learnings
 
+- **2026-06-03 — Settings accessibility patterns.** `ThemeSwitcher` in `src/Web/ReactApp/src/common/components/ThemeSwitcher.tsx` now follows the ARIA radio-group model with roving `tabIndex` and wraparound Arrow/Home/End navigation, so only the selected theme is tabbable. `CommandPalette` in `src/Web/ReactApp/src/features/settings/components/CommandPalette.tsx` uses an input-driven `combobox` + `listbox` + `aria-activedescendant` pattern with non-button `role="option"` rows, keeping typing focus in the filter field while arrows move the active result.
+
 - **2026-05-31 — Printables import foundation (#349, PR #375).** `IPrintablesImportService` + `PrintablesGraphQLClient` + `GET /api/3d-models/printables/preview?url=` in `Farm.Slicer.Module.Api`. URL parsing via compiled `Regex` — accepts `/model/{id}` and `/model/{id}-{slug}` forms; `ParseModelId` is `public static` so tests can call it directly. GraphQL client uses raw `HttpClient` (named, 15 s timeout, User-Agent header) — no StrawberryShake. `PrintablesApiException` separates upstream errors (→ 502) from bad-URL parse errors (→ 400). DI in `SlicerApiExtensions.AddSlicerApiServices` via `AddHttpClient<PrintablesGraphQLClient>` + `AddScoped<IPrintablesImportService>`. Tests: URL parsing (Theory), mocked HttpMessageHandler for GraphQL client, Moq for controller outcomes — 18 tests, all green.
 
 - **2026-05-31T16:42:** Before committing, scrub message for forbidden external refs: "bambuddy", "maziggy", "Bambu Buddy", github.com/maziggy/bambuddy. Acceptable alternatives: "adoption plan", "Phase N work breakdown", or standalone feature description. See .squad/decisions.md 2026-05-31T09:42 entry.
