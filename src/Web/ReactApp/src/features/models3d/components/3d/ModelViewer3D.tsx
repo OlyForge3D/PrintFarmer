@@ -851,8 +851,11 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       case 'ply':
         return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
-      case '3mf':
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
+      case '3mf': {
+        // Fallback to backend STL conversion until the shared ThreeMFViewer is wired into the models page.
+        const fallback3mfUrl = `${modelUrl}${modelUrl.includes('?') ? '&' : '?'}forceStl=true`;
+        return <STLModel url={fallback3mfUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
+      }
       default:
         return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
     }

@@ -6,6 +6,7 @@ interface ModelViewerErrorBoundaryProps {
   children: ReactNode;
   className?: string;
   resetKey?: string;
+  fallback?: ReactNode;
 }
 
 interface ModelViewerErrorBoundaryState {
@@ -22,10 +23,9 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
     };
   }
 
-  static getDerivedStateFromError(): ModelViewerErrorBoundaryState {
+  static getDerivedStateFromError(): Partial<ModelViewerErrorBoundaryState> {
     return {
       hasError: true,
-      retryNonce: 0,
     };
   }
 
@@ -48,6 +48,10 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
 
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback) {
+        return <React.Fragment key={this.state.retryNonce}>{this.props.fallback}</React.Fragment>;
+      }
+
       return (
         <div
           className={`flex h-full w-full items-center justify-center bg-pf-bg-0 p-4 ${this.props.className ?? ''}`.trim()}
