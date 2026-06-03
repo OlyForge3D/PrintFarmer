@@ -514,7 +514,7 @@ export const SettingsShell: React.FC = () => {
     <>
       <div
         data-settings-shell
-        className="pf-settings-surface relative isolate flex h-full min-h-0 flex-col"
+        className="pf-settings-surface relative isolate flex flex-1 min-h-0 flex-col"
       >
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
           <div className="absolute inset-0 rounded-[1.5rem] bg-pf-bg-0/95" />

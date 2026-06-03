@@ -416,6 +416,20 @@
     }
   }
 
+  main[data-main-content]:has([data-settings-shell]) {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  main[data-main-content]:has([data-settings-shell]) > div:has(> [data-settings-shell]) {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+  }
+
   .pf-settings-scroll-pane {
     scrollbar-gutter: stable;
   }
