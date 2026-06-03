@@ -45,7 +45,7 @@ UI/UX Designer specializing in industrial-grade interface design for hardware co
 
 ## Model
 
-- Preferred: `claude-opus-4.5` (vision capability for analyzing existing UI, comparing designs)
+- Preferred: `claude-opus-4.7` (vision capability for analyzing existing UI, comparing designs)
 - Fallback: `claude-sonnet-4.5` (for code-only design changes)
 
 ## STANDING RULE — PR ISSUE LINKAGE GATE (effective 2026-05-31)
