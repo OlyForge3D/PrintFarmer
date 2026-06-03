@@ -20,6 +20,7 @@ import { DecimationPanel } from './DecimationPanel';
 import { decimateGeometry, type DecimationResult } from '../../utils/meshDecimation';
 import { exportSTL } from '../../utils/stlExporter';
 import { apiClient } from '@/services/api';
+import { cloneThreeMfMeshesDroppedToBed } from '@/features/slicer/utils/threemf-display';
 import { parseThreeMfArchive, disposeParsedThreeMfModel, ThreeMfSecurityError } from '@/features/slicer/utils/threemf-parser';
 
 export interface ModelViewerProps {
@@ -107,7 +108,7 @@ function TexturedPrintBed({
         <edgesGeometry attach="geometry">
           <boxGeometry args={[width, depth, height]} />
         </edgesGeometry>
-        <lineBasicMaterial color="#ffffff" linewidth={2} />
+        <lineBasicMaterial color="#4a4a6a" linewidth={2} />
       </lineSegments>
     </>
   );
@@ -137,11 +138,9 @@ function PlainPrintBed({
       >
         <boxGeometry args={[width, depth, height]} />
         <meshStandardMaterial
-          color="#1e40af"
-          metalness={0.2}
-          roughness={0.6}
-          transparent={true}
-          opacity={0.7}
+          color="#2a2a3a"
+          metalness={0.05}
+          roughness={0.85}
         />
       </mesh>
 
@@ -150,7 +149,7 @@ function PlainPrintBed({
         <edgesGeometry attach="geometry">
           <boxGeometry args={[width, depth, height]} />
         </edgesGeometry>
-        <lineBasicMaterial color="#ffffff" linewidth={2} />
+        <lineBasicMaterial color="#4a4a6a" linewidth={2} />
       </lineSegments>
     </>
   );
@@ -280,7 +279,7 @@ function MockPrintBed({ modelDimensions }: { modelDimensions: ModelDimensions | 
       {/* Bed surface */}
       <mesh position={[0, 0, -thickness / 2]} receiveShadow userData={{ isBed: true }}>
         <boxGeometry args={[bedWidth, bedDepth, thickness]} />
-        <meshStandardMaterial color="#1a1a2e" metalness={0.2} roughness={0.6} />
+        <meshStandardMaterial color="#2a2a3a" metalness={0.05} roughness={0.85} />
       </mesh>
 
       {/* Bed edge outline */}
@@ -297,13 +296,13 @@ function MockPrintBed({ modelDimensions }: { modelDimensions: ModelDimensions | 
           <bufferGeometry>
             <float32BufferAttribute attach="attributes-position" args={[cellLines, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#555577" transparent opacity={0.4} />
+          <lineBasicMaterial color="#555577" transparent opacity={0.5} />
         </lineSegments>
         <lineSegments>
           <bufferGeometry>
             <float32BufferAttribute attach="attributes-position" args={[sectionLines, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#7777aa" transparent opacity={0.6} />
+          <lineBasicMaterial color="#7777aa" transparent opacity={0.7} />
         </lineSegments>
       </group>
     </group>
@@ -432,14 +431,19 @@ function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryL
           return;
         }
 
-        // Merge all meshes into a single geometry for the Models page viewer
-        const geometries = parsed.meshes.map((m) => m.geometry);
+        // Drop each 3MF mesh to the bed first so stacked source transforms do not render as floating parts.
+        const droppedMeshes = cloneThreeMfMeshesDroppedToBed(parsed.meshes).meshes;
+        const geometries = droppedMeshes.map((mesh) => mesh.geometry);
         let merged: THREE.BufferGeometry;
         if (geometries.length === 1) {
           merged = geometries[0].clone();
         } else {
-          const result = mergeGeometries(geometries.map((g) => g.clone()), false);
+          const result = mergeGeometries(geometries.map((geometry) => geometry.clone()), false);
           merged = result ?? geometries[0].clone();
+        }
+
+        for (const mesh of droppedMeshes) {
+          mesh.geometry.dispose();
         }
 
         disposeParsedThreeMfModel(parsed);
@@ -1041,7 +1045,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   }
 
   return (
-    <div className={`${className} border border-pf-border rounded-lg overflow-hidden relative`} style={{ backgroundColor: '#2d3748' }}>
+    <div className={`${className} border border-pf-border rounded-lg overflow-hidden relative`} style={{ backgroundColor: '#2a2a3a' }}>
       <Canvas
         camera={{ 
           position: [150, -150, 120], // Isometric view looking at the XY bed plane
@@ -1049,7 +1053,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           up: [0, 0, 1] // Z-up: standard 3D printing convention (Z = height)
         }}
         shadows
-        style={{ backgroundColor: '#2d3748' }} // Darker gray background
+        style={{ backgroundColor: '#2a2a3a' }}
         onCreated={({ gl }) => {
           gl.shadowMap.enabled = true;
           gl.shadowMap.type = THREE.PCFSoftShadowMap;
