@@ -1,14 +1,17 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { SearchIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
+import { Button } from '@/common/components/ui';
+import { CommandPalette } from '@/features/settings/components/CommandPalette';
 import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
 import { SettingsSearch } from '@/features/settings/components/SettingsSearch';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
+import { buildSettingsCommandItems, resolveSettingsNavigationTarget, type SettingsCommandItem } from '@/features/settings/settings-navigation';
 import {
   SETTINGS_CATEGORIES,
   DEFAULT_CATEGORY,
@@ -41,6 +44,26 @@ const LazyWorkerManagementPage = lazy(() =>
 );
 
 const SETTINGS_FRAME_NOISE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E\")";
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+}
+
+function scrollBehavior(): ScrollBehavior {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'smooth';
+  }
+
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
 
 function TabLoader() {
   return (
@@ -101,6 +124,7 @@ const SUB_PAGE_CONTENT: Record<string, React.ReactNode> = {
 
 export const SettingsShell: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   const requestedCategory = searchParams.get('tab');
   const requestedSubPage = searchParams.get('sub');
@@ -113,6 +137,8 @@ export const SettingsShell: React.FC = () => {
   );
 
   const shouldFocusSectionRef = useRef(false);
+  const previousRenderedKeyRef = useRef<string | null>(null);
+  const commandPaletteItems = useMemo(() => buildSettingsCommandItems(), []);
 
   const handleCategoryChange = useCallback(
     (categoryId: string) => {
@@ -150,6 +176,7 @@ export const SettingsShell: React.FC = () => {
 
   const handleSubPageChange = useCallback(
     (subPageId: string) => {
+      shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('sub', subPageId);
@@ -170,6 +197,33 @@ export const SettingsShell: React.FC = () => {
         }
         return next;
       }, { replace: true });
+    },
+    [setSearchParams],
+  );
+
+  const openCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(true);
+  }, []);
+
+  const closeCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(false);
+  }, []);
+
+  const navigateToSetting = useCallback(
+    (item: SettingsCommandItem) => {
+      const target = resolveSettingsNavigationTarget(item.categoryId, item.subPageId);
+      shouldFocusSectionRef.current = true;
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', target.categoryId);
+        if (target.subPageId) {
+          next.set('sub', target.subPageId);
+        } else {
+          next.delete('sub');
+        }
+        return next;
+      });
+      setIsCommandPaletteOpen(false);
     },
     [setSearchParams],
   );
@@ -292,7 +346,6 @@ export const SettingsShell: React.FC = () => {
     : `${currentCategory.id}.${activeSubPage}`;
   const activeSubPageLabel = currentCategory.subPages.find((subPage) => subPage.id === activeSubPage)?.label;
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
-  const previousCategoryRef = useRef<string | null>(null);
 
   const sectionAnnouncement = useMemo(() => {
     if (!hasSubTabs) {
@@ -303,6 +356,26 @@ export const SettingsShell: React.FC = () => {
       ? `${currentCategory.label} settings, ${activeSubPageLabel} section selected`
       : `${currentCategory.label} settings selected`;
   }, [activeSubPageLabel, currentCategory.label, hasSubTabs]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== 'k'
+        || (!event.ctrlKey && !event.metaKey)
+        || event.altKey
+        || event.shiftKey
+        || isEditableTarget(event.target)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setIsCommandPaletteOpen(true);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (isFiltering && matchingCategoryIds?.length === 0) {
@@ -355,20 +428,42 @@ export const SettingsShell: React.FC = () => {
   ]);
 
   useEffect(() => {
-    if (previousCategoryRef.current === null) {
-      previousCategoryRef.current = currentCategory.id;
-      return;
-    }
+    const activeDestinationKey = hasSubTabs && activeSubPage
+      ? `${currentCategory.id}.${activeSubPage}`
+      : currentCategory.id;
 
-    if (previousCategoryRef.current === currentCategory.id) {
+    if (previousRenderedKeyRef.current === null) {
+      previousRenderedKeyRef.current = activeDestinationKey;
       return;
     }
 
     if (!shouldFocusSectionRef.current) {
-      previousCategoryRef.current = currentCategory.id;
+      previousRenderedKeyRef.current = activeDestinationKey;
       return;
     }
 
+    if (previousRenderedKeyRef.current === activeDestinationKey) {
+      if (typeof sectionHeadingRef.current?.scrollIntoView === 'function') {
+        sectionHeadingRef.current.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
+      }
+      if (hasSubTabs && activeSubPage) {
+        const activeTab = document.getElementById(`tab-${activeSubPage}`);
+        if (activeTab instanceof HTMLElement) {
+          activeTab.focus();
+        } else {
+          sectionHeadingRef.current?.focus();
+        }
+      } else {
+        sectionHeadingRef.current?.focus();
+      }
+
+      shouldFocusSectionRef.current = false;
+      return;
+    }
+
+    if (typeof sectionHeadingRef.current?.scrollIntoView === 'function') {
+      sectionHeadingRef.current.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
+    }
     if (hasSubTabs && activeSubPage) {
       const activeTab = document.getElementById(`tab-${activeSubPage}`);
       if (activeTab instanceof HTMLElement) {
@@ -381,7 +476,7 @@ export const SettingsShell: React.FC = () => {
     }
 
     shouldFocusSectionRef.current = false;
-    previousCategoryRef.current = currentCategory.id;
+    previousRenderedKeyRef.current = activeDestinationKey;
   }, [currentCategory.id, hasSubTabs, activeSubPage]);
 
   const content = useMemo(() => {
@@ -468,19 +563,47 @@ export const SettingsShell: React.FC = () => {
   );
 
   return (
-    <PageTemplate
-      title="Settings"
-      subtitle="Configure your farm, hardware, and account"
-      icon={SettingsIcon}
-      actions={<SettingsSearch value={query} onChange={handleSearchChange} />}
-      backgroundColor="bg-transparent"
-      includeTopPadding={false}
-    >
-      <div className="relative isolate overflow-hidden rounded-[1.5rem] border border-pf-border/70 bg-pf-bg-0/95 shadow-[0_18px_60px_-38px_rgba(0,0,0,0.78)] backdrop-blur-sm">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.02]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} aria-hidden="true" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/95 to-pf-bg-1/20" aria-hidden="true" />
-        {shellContent}
-      </div>
-    </PageTemplate>
+    <>
+      <PageTemplate
+        title="Settings"
+        subtitle="Configure your farm, hardware, and account"
+        icon={SettingsIcon}
+        actions={(
+          <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
+            <Button
+              type="button"
+              variant="subtle"
+              size="md"
+              onClick={openCommandPalette}
+              iconLeft={<SearchIcon className="h-4 w-4" ariaLabel="Open command palette" />}
+              className="h-11 justify-between rounded-2xl border border-pf-border/70 bg-pf-bg-0/70 px-4 text-sm text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-sm sm:min-w-[12rem]"
+            >
+              <span className="inline-flex items-center gap-3">
+                <span>Command palette</span>
+                <span className="rounded-md border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
+                  {typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K'}
+                </span>
+              </span>
+            </Button>
+            <SettingsSearch value={query} onChange={handleSearchChange} />
+          </div>
+        )}
+        backgroundColor="bg-transparent"
+        includeTopPadding={false}
+      >
+        <div className="relative isolate overflow-hidden rounded-[1.5rem] border border-pf-border/70 bg-pf-bg-0/95 shadow-[0_18px_60px_-38px_rgba(0,0,0,0.78)] backdrop-blur-sm">
+          <div className="pointer-events-none absolute inset-0 opacity-[0.02]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/95 to-pf-bg-1/20" aria-hidden="true" />
+          {shellContent}
+        </div>
+      </PageTemplate>
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        items={commandPaletteItems}
+        onClose={closeCommandPalette}
+        onSelect={navigateToSetting}
+      />
+    </>
   );
 };

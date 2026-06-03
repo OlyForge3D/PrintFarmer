@@ -1,32 +1,10 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useCallback, useRef, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import {
-  GearIcon,
-  PackageIcon,
-  LayersIcon,
-  WrenchIcon,
-  BellIcon,
-  NetworkIcon,
-  DatabaseIcon,
-  UsersIcon,
-  ChevronDownIcon,
-  ServerIcon,
-} from '@/common/components/icons/MdiIcons';
+import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
 import { SettingsMatchText } from '@/features/settings/components/SettingsMatchText';
+import { getSettingsCategoryIcon } from '@/features/settings/settings-navigation';
 import type { SettingsCategory } from '@/features/settings/types';
-
-const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  general: <GearIcon className="h-5 w-5" />,
-  filament: <PackageIcon className="h-5 w-5" />,
-  slicing: <LayersIcon className="h-5 w-5" />,
-  hardware: <WrenchIcon className="h-5 w-5" />,
-  notifications: <BellIcon className="h-5 w-5" />,
-  integrations: <NetworkIcon className="h-5 w-5" />,
-  system: <ServerIcon className="h-5 w-5" />,
-  data: <DatabaseIcon className="h-5 w-5" />,
-  users: <UsersIcon className="h-5 w-5" />,
-};
 
 interface SettingsSidebarProps {
   categories: SettingsCategory[];
@@ -115,6 +93,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         <div className="rounded-r-3xl border-r border-pf-border/70 bg-pf-bg-0/70 px-3 py-3 backdrop-blur-sm">
           <ul ref={navRef} role="list" className="space-y-1">
             {visibleCategories.map((category, index) => {
+              const Icon = getSettingsCategoryIcon(category.id);
               const isActive = activeCategory === category.id;
               const isMatching = isMatchingCategory(category.id);
 
@@ -150,7 +129,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         )}
                         aria-hidden="true"
                       >
-                        {CATEGORY_ICONS[category.id] ?? <GearIcon className="h-5 w-5" />}
+                        <Icon className="h-5 w-5" />
                       </span>
                       <span className="min-w-0 flex-1 truncate font-medium tracking-[0.01em]">
                         <SettingsMatchText text={category.label} query={searchQuery} />
@@ -198,6 +177,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   const [isOpen, setIsOpen] = useState(false);
 
   const activeLabel = categories.find((category) => category.id === activeCategory)?.label ?? 'Select';
+  const ActiveIcon = getSettingsCategoryIcon(activeCategory);
 
   useEffect(() => {
     if (!isOpen) {
@@ -256,7 +236,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="text-pf-accent" aria-hidden="true">
-            {CATEGORY_ICONS[activeCategory] ?? <GearIcon className="h-5 w-5" />}
+            <ActiveIcon className="h-5 w-5" />
           </span>
           <span className="truncate">{activeLabel}</span>
         </span>
@@ -270,6 +250,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
           className="absolute z-50 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0/95 p-1 shadow-lg backdrop-blur-md"
         >
           {categories.map((category) => {
+            const Icon = getSettingsCategoryIcon(category.id);
             const isActive = activeCategory === category.id;
             const isMatching = isMatchingCategory(category.id);
 
@@ -288,7 +269,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                   )}
                 >
                   <span className={clsx(isActive ? 'text-pf-accent' : 'text-pf-text-secondary')} aria-hidden="true">
-                    {CATEGORY_ICONS[category.id] ?? <GearIcon className="h-5 w-5" />}
+                    <Icon className="h-5 w-5" />
                   </span>
                   <span className="min-w-0 flex-1 truncate">
                     <SettingsMatchText text={category.label} query={searchQuery} />
