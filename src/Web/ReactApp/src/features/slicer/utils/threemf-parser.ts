@@ -13,6 +13,7 @@ const MAX_TOTAL_SIZE = 500 * 1024 * 1024;
 const MAX_XML_SIZE = 50 * 1024 * 1024;
 const MAX_TOTAL_TRIANGLES = 5_000_000;
 const MAX_TOTAL_VERTICES = 15_000_000;
+const MAX_RENDER_INSTANCES = 1_000;
 
 /** Thrown for security/resource-limit violations. Must NOT trigger STL fallback. */
 export class ThreeMfSecurityError extends Error {
@@ -729,6 +730,27 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
   }
 
   const renderableMeshes: ThreeMfRenderableMeshSource[] = [];
+  let renderVertexCount = 0;
+  let renderTriangleCount = 0;
+
+  function chargeRenderBudget(vertexCount: number, triangleCount: number): void {
+    renderVertexCount += vertexCount;
+    renderTriangleCount += triangleCount;
+    if (renderVertexCount > MAX_TOTAL_VERTICES) {
+      throw new ThreeMfSecurityError(
+        `The 3MF archive exceeds the render vertex limit of ${MAX_TOTAL_VERTICES.toLocaleString()} (repeated instances counted).`,
+      );
+    }
+    if (renderTriangleCount > MAX_TOTAL_TRIANGLES) {
+      throw new ThreeMfSecurityError(
+        `The 3MF archive exceeds the render triangle limit of ${MAX_TOTAL_TRIANGLES.toLocaleString()} (repeated instances counted).`,
+      );
+    }
+  }
+
+  if (buildItems.length > MAX_RENDER_INSTANCES) {
+    throw new ThreeMfSecurityError(`The 3MF archive contains more than ${MAX_RENDER_INSTANCES} build items.`);
+  }
 
   if (buildItems.length > 0) {
     for (const buildItem of buildItems) {
@@ -738,6 +760,7 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
       }
 
       for (const mesh of objectData.meshes) {
+        chargeRenderBudget(mesh.vertices.length / 3, mesh.triangles.length / 3);
         renderableMeshes.push({
           objectId: buildItem.objectId,
           plateId: buildItem.plateId,
@@ -750,6 +773,7 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
     for (const objectData of objectMap.values()) {
       const plateId = objectData.name ? plateJsonData.objectPlateIdsByName.get(objectData.name) ?? objectData.plateId : objectData.plateId;
       for (const mesh of objectData.meshes) {
+        chargeRenderBudget(mesh.vertices.length / 3, mesh.triangles.length / 3);
         renderableMeshes.push({
           objectId: objectData.id,
           plateId,
