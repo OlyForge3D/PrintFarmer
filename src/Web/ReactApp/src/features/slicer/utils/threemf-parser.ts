@@ -14,6 +14,20 @@ const MAX_XML_SIZE = 50 * 1024 * 1024;
 const MAX_TOTAL_TRIANGLES = 5_000_000;
 const MAX_TOTAL_VERTICES = 15_000_000;
 
+/** Thrown for security/resource-limit violations. Must NOT trigger STL fallback. */
+export class ThreeMfSecurityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ThreeMfSecurityError';
+  }
+}
+
+/** Tracks cumulative mesh complexity across the entire archive. */
+interface ComplexityBudget {
+  totalVertices: number;
+  totalTriangles: number;
+}
+
 interface ZipEntryWithSize extends JSZip.JSZipObject {
   _data?: {
     uncompressedSize?: number;
@@ -92,12 +106,12 @@ function validateZipEntrySizes(zip: JSZip): void {
 
     const entrySize = getZipEntryUncompressedSize(entry);
     if (entrySize > MAX_ENTRY_SIZE) {
-      throw new Error('The 3MF archive contains a file that exceeds the 200 MB unpacked size limit.');
+      throw new ThreeMfSecurityError('The 3MF archive contains a file that exceeds the 200 MB unpacked size limit.');
     }
 
     totalUncompressedSize += entrySize;
     if (totalUncompressedSize > MAX_TOTAL_SIZE) {
-      throw new Error('The 3MF archive exceeds the 500 MB unpacked size limit.');
+      throw new ThreeMfSecurityError('The 3MF archive exceeds the 500 MB unpacked size limit.');
     }
   }
 }
@@ -114,7 +128,7 @@ function normalizeZipPath(path: string): string {
 
 function assertXmlSize(xml: string): void {
   if (xml.length > MAX_XML_SIZE) {
-    throw new Error('The 3MF archive contains an XML file that exceeds the 50 MB size limit.');
+    throw new ThreeMfSecurityError('The 3MF archive contains an XML file that exceeds the 50 MB size limit.');
   }
 }
 
@@ -195,13 +209,18 @@ function parseTransform(transformValue: string | null): THREE.Matrix4 {
   return transform;
 }
 
-async function parseMeshElement(meshElement: Element, extruderIndex: number): Promise<RawMeshData | null> {
+async function parseMeshElement(meshElement: Element, extruderIndex: number, budget: ComplexityBudget): Promise<RawMeshData | null> {
   const vertices: number[] = [];
   const triangles: number[] = [];
   const vertexElements = meshElement.getElementsByTagName('vertex');
 
   if (vertexElements.length > MAX_TOTAL_VERTICES) {
-    throw new Error(`The 3MF mesh is too complex to render safely (more than ${MAX_TOTAL_VERTICES.toLocaleString()} vertices).`);
+    throw new ThreeMfSecurityError(`The 3MF mesh is too complex to render safely (more than ${MAX_TOTAL_VERTICES.toLocaleString()} vertices).`);
+  }
+
+  budget.totalVertices += vertexElements.length;
+  if (budget.totalVertices > MAX_TOTAL_VERTICES) {
+    throw new ThreeMfSecurityError(`The 3MF archive exceeds the cumulative vertex limit of ${MAX_TOTAL_VERTICES.toLocaleString()}.`);
   }
 
   for (let index = 0; index < vertexElements.length; index += 1) {
@@ -219,7 +238,12 @@ async function parseMeshElement(meshElement: Element, extruderIndex: number): Pr
 
   const triangleElements = meshElement.getElementsByTagName('triangle');
   if (triangleElements.length > MAX_TOTAL_TRIANGLES) {
-    throw new Error(`The 3MF mesh is too complex to render safely (more than ${MAX_TOTAL_TRIANGLES.toLocaleString()} triangles).`);
+    throw new ThreeMfSecurityError(`The 3MF mesh is too complex to render safely (more than ${MAX_TOTAL_TRIANGLES.toLocaleString()} triangles).`);
+  }
+
+  budget.totalTriangles += triangleElements.length;
+  if (budget.totalTriangles > MAX_TOTAL_TRIANGLES) {
+    throw new ThreeMfSecurityError(`The 3MF archive exceeds the cumulative triangle limit of ${MAX_TOTAL_TRIANGLES.toLocaleString()}.`);
   }
 
   for (let index = 0; index < triangleElements.length; index += 1) {
@@ -420,6 +444,7 @@ async function parseComponentMeshes(
   objectCache: Map<string, RawObjectData | null>,
   visited: Set<string>,
   overrideExtruderIndex: number,
+  budget: ComplexityBudget,
 ): Promise<RawMeshData[]> {
   const targetObjects = targetObjectId
     ? [findObjectElementById(doc, targetObjectId)].filter((element): element is Element => element != null)
@@ -437,6 +462,7 @@ async function parseComponentMeshes(
       doc,
       documentPath,
       visited,
+      budget,
     );
 
     if (!parsedObject) {
@@ -464,6 +490,7 @@ async function parseObjectMeshes(
   currentDoc: Document,
   currentDocumentPath: string,
   visited: Set<string> = new Set(),
+  budget: ComplexityBudget = { totalVertices: 0, totalTriangles: 0 },
 ): Promise<RawObjectData | null> {
   const objectId = objectElement.getAttribute('id');
   if (!objectId) {
@@ -488,7 +515,7 @@ async function parseObjectMeshes(
 
   for (const child of Array.from(objectElement.children)) {
     if (child.tagName.toLowerCase().endsWith('mesh')) {
-      const parsedMesh = await parseMeshElement(child, defaultExtruderIndex);
+      const parsedMesh = await parseMeshElement(child, defaultExtruderIndex, budget);
       if (parsedMesh) {
         meshes.push(parsedMesh);
       }
@@ -540,6 +567,7 @@ async function parseObjectMeshes(
         objectCache,
         componentVisited,
         componentExtruderIndex,
+        budget,
       );
     } else if (componentPath) {
       const componentDoc = await loadModelDocument(componentPath, zip, parser, modelCache);
@@ -558,6 +586,7 @@ async function parseObjectMeshes(
         objectCache,
         componentVisited,
         componentExtruderIndex,
+        budget,
       );
     }
 
@@ -656,6 +685,7 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
   const objectMap = new Map<string, RawObjectData>();
   const modelCache = new Map<string, Document | null>([[mainModelPath, mainDoc]]);
   const objectCache = new Map<string, RawObjectData | null>();
+  const budget: ComplexityBudget = { totalVertices: 0, totalTriangles: 0 };
 
   for (const objectElement of Array.from(mainDoc.getElementsByTagName('object'))) {
     const parsedObject = await parseObjectMeshes(
@@ -667,6 +697,8 @@ export async function parseThreeMfArchive(arrayBuffer: ArrayBuffer): Promise<Par
       objectCache,
       mainDoc,
       mainModelPath,
+      undefined,
+      budget,
     );
     if (parsedObject) {
       objectMap.set(parsedObject.id, parsedObject);
