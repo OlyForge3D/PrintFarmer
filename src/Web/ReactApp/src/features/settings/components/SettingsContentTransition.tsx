@@ -10,7 +10,7 @@ export function SettingsContentTransition({ children, className }: SettingsConte
   return (
     <div
       className={clsx(
-        'motion-safe:animate-[pf-settings-content-in_150ms_ease-out] motion-reduce:animate-none',
+        'motion-safe:animate-[pf-settings-content-in_280ms_cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none',
         className,
       )}
     >

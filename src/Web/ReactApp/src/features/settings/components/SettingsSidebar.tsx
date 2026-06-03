@@ -1,10 +1,14 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useCallback, useRef, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
 import { SettingsMatchText } from '@/features/settings/components/SettingsMatchText';
 import { getSettingsCategoryIcon } from '@/features/settings/settings-navigation';
 import type { SettingsCategory } from '@/features/settings/types';
+
+const NAV_ITEM_STAGGER_MS = 18;
+const PREMIUM_TRANSITION_MS = 280;
+const PREMIUM_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 interface SettingsSidebarProps {
   categories: SettingsCategory[];
@@ -23,7 +27,6 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   isFiltering = false,
   searchQuery,
 }) => {
-  const navRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const visibleCategories = useMemo(() => {
@@ -87,11 +90,18 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   return (
     <>
       <nav
-        className="hidden w-64 shrink-0 self-start md:sticky md:top-4 md:block"
+        className="hidden h-full min-h-0 flex-col bg-pf-bg-0/72 backdrop-blur-xl md:flex"
         aria-label="Settings categories"
       >
-        <div className="rounded-r-3xl border-r border-pf-border/70 bg-pf-bg-0/70 px-3 py-3 backdrop-blur-sm">
-          <ul ref={navRef} role="list" className="space-y-1">
+        <div className="border-b border-pf-border/70 px-4 py-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary">Settings</p>
+          <p className="mt-2 text-sm text-pf-text-secondary">
+            Hardware, slicing, user access, and system administration.
+          </p>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <ul role="list" className="space-y-1.5">
             {visibleCategories.map((category, index) => {
               const Icon = getSettingsCategoryIcon(category.id);
               const isActive = activeCategory === category.id;
@@ -105,28 +115,38 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     onClick={() => onCategoryChange(category.id)}
                     onKeyDown={(event) => handleKeyDown(event, index)}
                     aria-current={isActive ? 'page' : undefined}
+                    style={{ animationDelay: `${index * NAV_ITEM_STAGGER_MS}ms` }}
                     className={clsx(
-                      'group relative w-full overflow-hidden rounded-2xl text-left text-sm',
+                      'group relative w-full rounded-[1.1rem] border border-transparent px-4 py-3 text-left text-sm',
+                      'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
                       'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                      isActive && 'bg-pf-accent-bg/12 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]',
-                      !isActive && 'text-pf-text-secondary hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
-                      isMatching && !isActive && 'bg-pf-bg-1/70 text-pf-text-primary',
+                      'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
+                      isActive && 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
+                      !isActive && 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
+                      isMatching && !isActive && 'bg-pf-bg-1/75 text-pf-text-primary',
                     )}
                   >
                     <span
                       aria-hidden="true"
                       className={clsx(
-                        'absolute inset-y-2 left-0 w-[3px] rounded-r-full transition-opacity duration-150 motion-reduce:transition-none',
-                        isActive ? 'bg-pf-accent opacity-100' : 'bg-pf-accent opacity-0 group-hover:opacity-45',
+                        'absolute inset-y-3 left-0 w-[3px] rounded-r-full transition-opacity motion-reduce:transition-none',
+                        isActive ? 'bg-pf-accent opacity-100' : 'bg-pf-accent opacity-0 group-hover:opacity-55',
                       )}
+                      style={{
+                        transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+                        transitionTimingFunction: PREMIUM_EASING,
+                      }}
                     />
-                    <span className="flex items-center gap-3 px-4 py-3">
+                    <span className="flex items-center gap-3">
                       <span
                         className={clsx(
-                          'shrink-0 transition-all duration-[120ms] ease-out motion-reduce:transition-none',
+                          'shrink-0 transition-colors motion-reduce:transition-none',
                           isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
-                          !isActive && 'group-hover:translate-x-[2px]',
                         )}
+                        style={{
+                          transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+                          transitionTimingFunction: PREMIUM_EASING,
+                        }}
                         aria-hidden="true"
                       >
                         <Icon className="h-5 w-5" />
@@ -177,7 +197,6 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   const [isOpen, setIsOpen] = useState(false);
 
   const activeLabel = categories.find((category) => category.id === activeCategory)?.label ?? 'Select';
-  const ActiveIcon = getSettingsCategoryIcon(activeCategory);
 
   useEffect(() => {
     if (!isOpen) {
@@ -223,8 +242,13 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
     return matchingCategoryIds.includes(categoryId);
   };
 
+  const transitionStyle = {
+    transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+    transitionTimingFunction: PREMIUM_EASING,
+  } as const;
+
   return (
-    <div ref={dropdownRef} className="relative mb-4 md:hidden">
+    <div ref={dropdownRef} className="relative border-b border-pf-border/70 px-4 py-4 md:hidden">
       <button
         ref={buttonRef}
         type="button"
@@ -232,24 +256,24 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         aria-expanded={isOpen}
         aria-controls="settings-category-menu"
         aria-label={`Settings category: ${activeLabel}`}
-        className="flex w-full items-center justify-between gap-2 rounded-2xl border border-pf-border bg-pf-bg-1/80 px-4 py-3 text-sm font-medium text-pf-text-primary shadow-sm backdrop-blur-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+        className="flex w-full items-center justify-between gap-2 rounded-2xl border border-pf-border/80 bg-pf-bg-1/85 px-4 py-3 text-sm font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="text-pf-accent" aria-hidden="true">
-            <ActiveIcon className="h-5 w-5" />
+            {React.createElement(getSettingsCategoryIcon(activeCategory), { className: 'h-5 w-5' })}
           </span>
           <span className="truncate">{activeLabel}</span>
         </span>
-        <ChevronDownIcon className={clsx('h-5 w-5 transition-transform', isOpen && 'rotate-180')} />
+        <ChevronDownIcon className={clsx('h-5 w-5', isOpen && 'rotate-180')} style={transitionStyle} />
       </button>
 
       {isOpen && (
         <ul
           id="settings-category-menu"
           aria-label="Settings categories"
-          className="absolute z-50 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0/95 p-1 shadow-lg backdrop-blur-md"
+          className="absolute inset-x-4 top-[calc(100%-0.25rem)] z-50 max-h-72 overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0/95 p-1 shadow-lg backdrop-blur-md"
         >
-          {categories.map((category) => {
+          {categories.map((category, index) => {
             const Icon = getSettingsCategoryIcon(category.id);
             const isActive = activeCategory === category.id;
             const isMatching = isMatchingCategory(category.id);
@@ -260,12 +284,15 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                   type="button"
                   onClick={() => handleSelect(category.id)}
                   aria-current={isActive ? 'page' : undefined}
+                  style={{ animationDelay: `${index * NAV_ITEM_STAGGER_MS}ms` }}
                   className={clsx(
-                    'flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm',
-                    'focus:outline-hidden focus-visible:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                    isActive && 'bg-pf-accent-bg/12 font-medium text-pf-text-primary',
-                    !isActive && 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
-                    isMatching && !isActive && 'bg-pf-bg-1/80 text-pf-text-primary',
+                    'flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-2.5 text-left text-sm',
+                    'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
+                    'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
+                    'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
+                    isActive && 'border-pf-accent/35 bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
+                    !isActive && 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
+                    isMatching && !isActive && 'bg-pf-bg-1/75 text-pf-text-primary',
                   )}
                 >
                   <span className={clsx(isActive ? 'text-pf-accent' : 'text-pf-text-secondary')} aria-hidden="true">

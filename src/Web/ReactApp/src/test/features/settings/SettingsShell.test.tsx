@@ -77,10 +77,11 @@ beforeAll(() => {
 });
 
 describe('SettingsShell', () => {
-  it('renders the settings page template header and category tabs', () => {
+  it('renders the shell without the legacy page header row', () => {
     renderSettings();
-    expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByText('Configure your farm, hardware, and account')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
     expect(getCategoryButton('General')).toBeInTheDocument();
     expect(getCategoryButton('Hardware')).toBeInTheDocument();
     expect(getCategoryButton('Users')).toBeInTheDocument();
@@ -90,7 +91,7 @@ describe('SettingsShell', () => {
     renderSettings();
     const generalCategory = getCategoryButton('General');
     expect(generalCategory).toHaveAttribute('aria-current', 'page');
-    expect(generalCategory.className).toContain('bg-pf-accent-bg/12');
+    expect(generalCategory.className).toContain('bg-pf-accent-bg/25');
     expect(generalCategory.className).toContain('text-pf-text-primary');
   });
 
@@ -206,26 +207,25 @@ describe('SettingsShell', () => {
     expect(searchInput).toHaveValue('');
   });
 
-  it('opens the command palette from the header button and returns focus on escape', () => {
+  it('opens the command palette from the header button and returns focus on escape', async () => {
     renderSettings();
 
     const launcher = screen.getByRole('button', { name: /Command palette/i });
     launcher.focus();
     fireEvent.click(launcher);
 
-    const paletteSearch = screen.getByRole('combobox', { name: 'Search settings command palette' });
+    const paletteSearch = await screen.findByRole('combobox', { name: 'Search settings command palette' });
     expect(paletteSearch).toHaveFocus();
 
-    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
-    expect(launcher).toHaveFocus();
+    fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
+    expect(await screen.findByRole('button', { name: /Command palette/i })).toHaveFocus();
   });
 
-  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched settings section', () => {
+  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched settings section', async () => {
     renderSettings();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-    const paletteSearch = screen.getByRole('combobox', { name: 'Search settings command palette' });
+    const paletteSearch = await screen.findByRole('combobox', { name: 'Search settings command palette' });
     fireEvent.change(paletteSearch, { target: { value: 'lgnadt' } });
     fireEvent.keyDown(paletteSearch, { key: 'ArrowDown' });
     fireEvent.keyDown(paletteSearch, { key: 'Enter' });
