@@ -572,9 +572,9 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
  */
 export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
   // Extract all filter criteria from the file
-  const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
-  const requiredNozzle = file.extractedNozzleDiameter;
-  const requiredMaterial = file.extractedMaterial;
+  const requiredModel = file?.extractedPrinterModel || file?.extractedPrinterModelName;
+  const requiredNozzle = file?.extractedNozzleDiameter;
+  const requiredMaterial = file?.extractedMaterial;
   
   // Memoize the printer promise - re-fetch when any filter criteria changes
   // Pass all criteria to server for filtering (consistent with auto-assign logic)
@@ -583,7 +583,7 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
     [requiredModel, requiredNozzle, requiredMaterial]
   );
 
-  if (!isOpen) return null;
+  if (!isOpen || !file) return null;
 
   return (
     <Suspense fallback={

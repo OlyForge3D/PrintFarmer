@@ -335,13 +335,14 @@ export function ThemeSwitcher() {
                   ))}
                 </div>
 
-                <span className={clsx('text-sm font-semibold', isActive ? 'text-[var(--pf-on-accent)]' : 'text-[var(--pf-text-primary)]')}>
-                  {option.label}
-                </span>
-
-                <span className={clsx('text-xs', isActive ? 'text-[var(--pf-on-accent)]/80' : 'text-pf-text-secondary')}>
-                  {option.description}
-                </span>
+                <div>
+                  <span className={clsx('text-sm font-semibold', isActive ? 'text-[var(--pf-on-accent)]' : 'text-[var(--pf-text-primary)]')}>
+                    {option.label}
+                  </span>
+                  <span className={clsx('mt-1 block text-xs', isActive ? 'text-[var(--pf-on-accent)]/80' : 'text-pf-text-secondary')}>
+                    {option.description}
+                  </span>
+                </div>
 
                 {isActive ? <span className="mt-0.5 text-xs text-[var(--pf-on-accent)]/80">✓ Active</span> : null}
               </Button>
