@@ -657,10 +657,9 @@ export function FilesPage() {
       key: 'category',
       label: 'Type',
       render: (file) => (
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={getSourceBadgeVariant(file)}>{getSourceLabel(file)}</Badge>
-          <Badge variant={getFileCategory(file) === 'other' ? 'warning' : 'default'}>{getFileExtension(file)}</Badge>
-        </div>
+        <span className="text-xs font-medium uppercase text-pf-text-secondary">
+          {getFileExtension(file)}
+        </span>
       ),
     },
     {
