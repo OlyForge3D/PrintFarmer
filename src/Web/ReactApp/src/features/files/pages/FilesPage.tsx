@@ -112,7 +112,11 @@ const FILE_BROWSER_SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: 'size', label: 'Size' },
 ];
 
-function getNormalizedExtension(name: string, fallback?: string): string {
+function getNormalizedExtension(name: string | null | undefined, fallback?: string): string {
+  if (!name) {
+    return fallback?.replace(/^\./, '').trim().toLowerCase() || '';
+  }
+
   const rawExtension = name.split('.').pop() ?? fallback ?? '';
   return rawExtension.replace(/^\./, '').trim().toLowerCase();
 }
@@ -133,9 +137,9 @@ function classifyModel(model: Model): Exclude<FileTypeFilter, 'all'> {
 function toUnifiedModel(model: Model): UnifiedFileRecord {
   return {
     source: 'model',
-    actualId: model.id,
-    path: model.path,
-    displayName: model.name,
+    actualId: model.id ?? '',
+    path: model.path ?? '',
+    displayName: model.name ?? 'Untitled',
     fileSize: model.fileSize,
     uploadedAt: normalizeUploadedAt(model.uploadedAt),
     thumbnailUrl: model.thumbnailUrl,
@@ -149,9 +153,9 @@ function toUnifiedModel(model: Model): UnifiedFileRecord {
 function toUnifiedGcode(file: GcodeFile): UnifiedFileRecord {
   return {
     source: 'gcode',
-    actualId: file.id,
-    path: file.path,
-    displayName: file.name,
+    actualId: file.id ?? '',
+    path: file.path ?? '',
+    displayName: file.name ?? 'Untitled',
     fileSize: file.fileSize,
     uploadedAt: normalizeUploadedAt(file.uploadedAt),
     thumbnailUrl: file.thumbnailUrl,
@@ -170,11 +174,11 @@ function compareFiles(a: UnifiedFileRecord, b: UnifiedFileRecord, sortBy: SortOp
   } else if (sortBy === 'date') {
     comparison = new Date(a.uploadedAt ?? 0).getTime() - new Date(b.uploadedAt ?? 0).getTime();
   } else {
-    comparison = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+    comparison = (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' });
   }
 
   if (comparison === 0) {
-    comparison = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+    comparison = (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' });
   }
 
   return sortOrder === 'asc' ? comparison : comparison * -1;
@@ -605,8 +609,8 @@ export function FilesPage() {
     ]);
 
     const mergedFiles = [
-      ...models.map(toUnifiedModel),
-      ...gcodeFiles.map(toUnifiedGcode),
+      ...models.filter((model): model is Model => model != null).map(toUnifiedModel),
+      ...gcodeFiles.filter((file): file is GcodeFile => file != null).map(toUnifiedGcode),
     ].filter((file) => query.filter === 'all' || file.filter === query.filter);
 
     mergedFiles.sort((left, right) => compareFiles(left, right, query.sortBy, query.sortOrder));
