@@ -2044,7 +2044,7 @@ export class ApiClient {
 
       // Build URL with params
       const params = new URLSearchParams({ path: virtualPath });
-      xhr.open("POST", `/api/gcode-files/upload?${params.toString()}`);
+      xhr.open("POST", `${getApiBaseUrl()}/gcode-files/upload?${params.toString()}`);
 
       // Set auth header if available
       const token = localStorage.getItem("auth-token");
@@ -2108,7 +2108,7 @@ export class ApiClient {
 
       // Build URL with params
       const params = new URLSearchParams({ path: virtualPath });
-      xhr.open("POST", `/api/3d-models/upload?${params.toString()}`);
+      xhr.open("POST", `${getApiBaseUrl()}/3d-models/upload?${params.toString()}`);
 
       // Set auth header if available
       const token = localStorage.getItem("auth-token");

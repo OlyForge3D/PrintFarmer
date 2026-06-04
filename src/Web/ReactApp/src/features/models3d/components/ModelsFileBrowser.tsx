@@ -14,6 +14,7 @@ import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
 import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -145,7 +146,7 @@ export const ModelsFileBrowser = ({
     if (file.isDirectory) return;
     const model3dFile = file.meta?.model3d as { name?: string } | undefined;
     const originalName = model3dFile?.name || file.fileName;
-    const downloadUrl = `/api/3d-models/file/${file.id}`;
+    const downloadUrl = `${getApiBaseUrl()}/3d-models/file/${file.id}`;
     
     // Create a link with the original filename for download
     const link = document.createElement('a');

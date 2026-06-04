@@ -6,6 +6,7 @@ import { Button } from '@/common/components/ui';
 import { ContextMenu } from '@/common/components/ContextMenu';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useContextMenu } from '@/common/hooks/useContextMenu';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import type { Model } from '@/types/models';
 import type { ModelGridViewProps } from '@/types/components';
@@ -185,7 +186,7 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                     const model = models.find(m => m.id === selectedModelId);
                     if (model) {
                       const a = document.createElement('a');
-                      a.href = `/api/3d-models/file/${model.id}`;
+                      a.href = `${getApiBaseUrl()}/3d-models/file/${model.id}`;
                       a.download = model.fileName;
                       a.click();
                     }

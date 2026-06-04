@@ -1,3 +1,4 @@
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from './api';
 
 // Artifact metadata DTO (from slicer-host GET /api/artifacts/{id}/metadata)
@@ -299,7 +300,7 @@ export class SliceJobService {
    * Maps to GET /api/artifacts/{id} which streams the file as PhysicalFile.
    */
   getArtifactDownloadUrl(artifactId: string): string {
-    return `/api/artifacts/${artifactId}`;
+    return `${getApiBaseUrl()}/artifacts/${artifactId}`;
   }
 
   /**

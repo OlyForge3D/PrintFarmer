@@ -19,6 +19,7 @@ import {
   EyeIcon,
   ExternalLinkIcon,
 } from '@/common/components/icons/MdiIcons';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import {
   sliceJobService,
@@ -154,7 +155,7 @@ export function SliceJobsPanel() {
   }, [jobs]);
 
   const handleDownloadArtifact = (jobId: string) => {
-    window.open(`/api/artifacts/job/${jobId}`, '_blank');
+    window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank');
   };
 
   const toggleExpand = (jobId: string) => {

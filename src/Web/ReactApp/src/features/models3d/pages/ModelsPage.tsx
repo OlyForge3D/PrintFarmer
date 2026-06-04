@@ -11,6 +11,7 @@ import { Button } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ModelsFileBrowser } from '@/features/models3d/components/ModelsFileBrowser';
 import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -167,7 +168,7 @@ export const ModelsPage: React.FC = () => {
                 >
                   {(viewerModel.url || viewerModel.id) && viewerModel.fileType && (
                     <ModelViewer
-                      modelUrl={viewerModel.url || `/api/3d-models/file/${viewerModel.id}`}
+                      modelUrl={viewerModel.url || `${getApiBaseUrl()}/3d-models/file/${viewerModel.id}`}
                       fileType={viewerModel.fileType}
                       showGrid={true}
                       className="h-128 w-full"

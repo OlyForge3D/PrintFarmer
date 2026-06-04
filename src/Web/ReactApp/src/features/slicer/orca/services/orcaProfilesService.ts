@@ -14,7 +14,7 @@ export const orcaProfilesService = {
    */
   async previewBundle(bundleJson: string): Promise<OrcaBundlePreview> {
     return apiClient.post<OrcaBundlePreview>(
-      `/api/slicer/profiles/import/orca/preview`,
+      `/slicer/profiles/import/orca/preview`,
       { bundleJson }
     );
   },
@@ -27,7 +27,7 @@ export const orcaProfilesService = {
     request: ImportOrcaBundleRequest
   ): Promise<ImportOrcaBundleResult> {
     return apiClient.post<ImportOrcaBundleResult>(
-      `/api/slicer/profiles/import/orca`,
+      `/slicer/profiles/import/orca`,
       request
     );
   },
@@ -38,7 +38,7 @@ export const orcaProfilesService = {
    */
   async exportBundle(request?: ExportOrcaBundleRequest): Promise<string> {
     return apiClient.post<string>(
-      `/api/slicer/profiles/export/orca`,
+      `/slicer/profiles/export/orca`,
       request || {}
     );
   },
@@ -50,7 +50,7 @@ export const orcaProfilesService = {
     preview: OrcaBundlePreview
   ): Promise<OrcaBundleMappingResult> {
     return apiClient.post<OrcaBundleMappingResult>(
-      `/api/slicer/profiles/import/orca/map`,
+      `/slicer/profiles/import/orca/map`,
       preview
     );
   },

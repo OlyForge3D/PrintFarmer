@@ -2546,7 +2546,7 @@ function SliceJobProgressPanel({
               variant="success"
               size="sm"
               iconLeft={<DownloadIcon className="w-3.5 h-3.5" />}
-              onClick={() => window.open(`/api/artifacts/job/${jobId}`, '_blank')}
+              onClick={() => window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank')}
             >
               Download G-code
             </Button>
