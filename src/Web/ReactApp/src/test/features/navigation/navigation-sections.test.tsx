@@ -97,8 +97,8 @@ describe('Navigation Section Headers', () => {
  
       const analyticsLink = screen.getByRole('link', { name: /analytics/i });
       const locationsLink = screen.getByRole('link', { name: /locations/i });
-      const settingsLink = container.querySelector('a[href="/settings"]');
-      const adminLink = container.querySelector('a[href="/admin/settings"]');
+      const settingsLink = container.querySelector('a[href="/admin/settings"]');
+      const adminLink = container.querySelector('a[href="/admin/manage"]');
  
       expect(analyticsLink).toBeInTheDocument();
       expect(analyticsLink).toHaveAttribute('href', '/analytics');
@@ -120,8 +120,8 @@ describe('Navigation Section Headers', () => {
       mockUserRole = 'operator';
       const { container } = renderLayout();
 
-      expect(container.querySelector('a[href="/settings"]')).toBeInTheDocument();
       expect(container.querySelector('a[href="/admin/settings"]')).not.toBeInTheDocument();
+      expect(container.querySelector('a[href="/admin/manage"]')).not.toBeInTheDocument();
     });
   });
 
