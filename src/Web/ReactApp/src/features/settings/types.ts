@@ -91,6 +91,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     description: 'Bed types, slicer profiles, and print process defaults.',
     keywords: ['slicer', 'slice', 'profile', 'orcaslicer', 'prusaslicer', 'bed type', 'nozzle', 'process', 'print settings'],
     subPages: [
+      { id: 'defaults', label: 'Defaults', description: 'Configure slicer defaults and print process behavior.', keywords: ['default', 'process', 'print settings', 'nozzle', 'speed'] },
       { id: 'bed-types', label: 'Bed Types', description: 'Manage bed surfaces and plate presets.', keywords: ['bed', 'type', 'surface', 'plate'] },
       { id: 'profiles', label: 'Slicer Profiles', description: 'Review OrcaSlicer and PrusaSlicer profile libraries.', keywords: ['profile', 'slicer', 'orcaslicer', 'prusaslicer', 'process'] },
     ],

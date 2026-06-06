@@ -13,6 +13,7 @@ import { SettingsSection } from '@/features/settings/components/SettingsSection'
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
+import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import {
   buildSettingsCommandItems,
   resolveSettingsNavigationTarget,
@@ -115,7 +116,11 @@ function UserPreferencesPanel() {
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
   general: (
     <SettingsSection>
-      <SettingsPage />
+      <SettingsPage
+        allowedGroups={['General']}
+        introText="Configure farm identity, timezone, and other farm-wide defaults."
+        afterContent={<FarmSettingsSection />}
+      />
     </SettingsSection>
   ),
   integrations: (
@@ -145,6 +150,14 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'profile.passkeys': (
     <SettingsSection>
       <PasskeysPage embedded />
+    </SettingsSection>
+  ),
+  'slicing.defaults': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={['Slicing']}
+        introText="Configure slicer defaults, process behavior, and plate-related settings for the farm."
+      />
     </SettingsSection>
   ),
   'slicing.bed-types': <BedTypeAdminPage />,

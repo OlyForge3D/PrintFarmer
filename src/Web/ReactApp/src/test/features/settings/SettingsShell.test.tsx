@@ -28,6 +28,33 @@ vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
   NotificationPreferencesPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="notification-preferences-page" data-embedded={String(embedded)}>Notification Preferences Page</div>,
 }));
 
+vi.mock('@/features/admin/pages/SettingsPage', () => ({
+  SettingsPage: ({
+    allowedGroups,
+    introText,
+    afterContent,
+  }: {
+    allowedGroups?: string[];
+    introText?: string;
+    afterContent?: React.ReactNode;
+  }) => (
+    <div>
+      <div
+        data-testid="legacy-settings-page"
+        data-groups={allowedGroups?.join(',') ?? 'all'}
+        data-intro={introText ?? ''}
+      >
+        Legacy Settings Page
+      </div>
+      {afterContent}
+    </div>
+  ),
+}));
+
+vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
+  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
+}));
+
 const authState = {
   roles: ['farm_admin'],
 };
@@ -141,6 +168,8 @@ describe('SettingsShell', () => {
 
     expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
+    expect(screen.getByTestId('farm-settings-section')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
   });
@@ -192,6 +221,30 @@ describe('SettingsShell', () => {
     expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
+  });
+
+  it('shows only farm-wide categories in the System scope sidebar', () => {
+    renderSettings('/settings?scope=system');
+
+    expect(getCategoryButton('General')).toBeInTheDocument();
+    expect(getCategoryButton('Slicing')).toBeInTheDocument();
+    expect(getCategoryButton('Hardware')).toBeInTheDocument();
+    expect(getCategoryButton('Integrations')).toBeInTheDocument();
+    expect(getCategoryButton('Quotas')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Data' })).not.toBeInTheDocument();
+  });
+
+  it('opens Slicing on the defaults sub-page inside System Settings', () => {
+    renderSettings('/settings?scope=system&tab=slicing');
+
+    expect(getCategoryButton('Slicing')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Defaults' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'Slicing');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=defaults');
   });
 
   it('deep-links to hardware printer groups and renders the mapped page', () => {

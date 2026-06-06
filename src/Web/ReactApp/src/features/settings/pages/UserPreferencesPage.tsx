@@ -3,7 +3,6 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { SettingsIcon, BellIcon, KeyIcon, ShieldIcon } from '@/common/components/icons/MdiIcons';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { Button } from '@/common/components/ui';
-import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
 
 const profileLinks = [
@@ -33,7 +32,7 @@ export function UserPreferencesPage() {
   return (
     <PageTemplate
       title="Preferences"
-      subtitle="Farm-wide defaults and personal settings"
+      subtitle="Personal appearance, profile, and security settings"
       icon={SettingsIcon}
     >
       <div className="max-w-6xl space-y-6">
@@ -73,7 +72,6 @@ export function UserPreferencesPage() {
           </div>
         </section>
 
-        <FarmSettingsSection />
         <UserSettingsSection />
       </div>
     </PageTemplate>
