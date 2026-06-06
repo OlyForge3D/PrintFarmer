@@ -7,7 +7,7 @@ function LocationEcho({ testId }: { testId: string }) {
   return <div data-testid={testId}>{`${location.pathname}${location.search}`}</div>;
 }
 
-function SettingsRedirect({
+function LegacySettingsRedirect({
   to,
   searchParamMap,
 }: {
@@ -33,33 +33,32 @@ function SettingsRedirect({
   return <Navigate to={nextLocation} replace />;
 }
 
-function RedirectTest({ from }: { from: string }) {
+function renderRedirect(from: string) {
   return render(
     <MemoryRouter initialEntries={[from]}>
       <Routes>
         <Route path="/settings" element={<LocationEcho testId="settings-location" />} />
         <Route path="/analytics" element={<LocationEcho testId="analytics-location" />} />
-        <Route path="/printers" element={<LocationEcho testId="printers-location" />} />
         <Route path="/profile/api-keys" element={<LocationEcho testId="api-keys-location" />} />
         <Route path="/nfc-bindings" element={<LocationEcho testId="nfc-bindings-location" />} />
         <Route path="/printer-groups" element={<LocationEcho testId="printer-groups-location" />} />
-        <Route path="/spools" element={<Navigate to="/settings?tab=filament" replace />} />
-        <Route path="/spools/:tabId" element={<Navigate to="/settings?tab=filament" replace />} />
-        <Route path="/cameras" element={<Navigate to="/settings?tab=hardware" replace />} />
-        <Route path="/cameras/:tabId" element={<Navigate to="/settings?tab=hardware" replace />} />
-        <Route path="/nfc-devices" element={<Navigate to="/settings?tab=hardware" replace />} />
-        <Route path="/locations" element={<Navigate to="/settings?tab=hardware" replace />} />
+        <Route path="/admin/printers" element={<LocationEcho testId="admin-printers-location" />} />
+        <Route path="/preferences" element={<Navigate to="/settings" replace />} />
+        <Route path="/cameras" element={<Navigate to="/settings?scope=system&tab=hardware&sub=cameras" replace />} />
+        <Route path="/cameras/:tabId" element={<Navigate to="/settings?scope=system&tab=hardware&sub=cameras" replace />} />
+        <Route path="/nfc-devices" element={<Navigate to="/settings?scope=system&tab=hardware&sub=nfc" replace />} />
+        <Route path="/locations" element={<Navigate to="/settings?scope=system&tab=hardware&sub=locations" replace />} />
         <Route path="/users" element={<Navigate to="/settings?scope=admin&tab=users&sub=accounts" replace />} />
         <Route path="/statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="/statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
         <Route path="/admin" element={<Navigate to="/settings?scope=admin" replace />} />
         <Route path="/admin/system" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
-        <Route path="/admin/workers" element={<SettingsRedirect to="/settings?scope=admin&tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
+        <Route path="/admin/settings-legacy" element={<Navigate to="/settings?scope=system&tab=general" replace />} />
+        <Route path="/admin/workers" element={<LegacySettingsRedirect to="/settings?scope=admin&tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
         <Route path="/admin/users" element={<Navigate to="/settings?scope=admin&tab=users&sub=accounts" replace />} />
         <Route path="/admin/tags" element={<Navigate to="/settings?scope=admin&tab=data&sub=tags" replace />} />
         <Route path="/admin/data" element={<Navigate to="/settings?scope=admin&tab=data&sub=management" replace />} />
         <Route path="/admin/security/login-audit" element={<Navigate to="/settings?scope=admin&tab=users&sub=audit" replace />} />
-        <Route path="/admin/printers" element={<Navigate to="/printers" replace />} />
         <Route path="/admin/file-health" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
         <Route path="/admin/monitoring" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
         <Route path="/admin/slicer-profiles" element={<Navigate to="/settings?scope=system&tab=slicing&sub=profiles" replace />} />
@@ -71,21 +70,21 @@ function RedirectTest({ from }: { from: string }) {
         <Route path="/slice-jobs" element={<Navigate to="/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs" replace />} />
         <Route path="/slicer-profiles" element={<Navigate to="/settings?scope=system&tab=slicing&sub=profiles" replace />} />
       </Routes>
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
 describe('Settings nav migration redirects', () => {
   const settingsRedirectCases = [
-    { from: '/spools', expected: '/settings?tab=filament', label: '/spools → filament' },
-    { from: '/spools/active', expected: '/settings?tab=filament', label: '/spools/:tabId → filament' },
-    { from: '/cameras', expected: '/settings?tab=hardware', label: '/cameras → hardware' },
-    { from: '/cameras/manage', expected: '/settings?tab=hardware', label: '/cameras/:tabId → hardware' },
-    { from: '/nfc-devices', expected: '/settings?tab=hardware', label: '/nfc-devices → hardware' },
-    { from: '/locations', expected: '/settings?tab=hardware', label: '/locations → hardware' },
+    { from: '/preferences', expected: '/settings', label: '/preferences → /settings' },
+    { from: '/cameras', expected: '/settings?scope=system&tab=hardware&sub=cameras', label: '/cameras → system cameras' },
+    { from: '/cameras/manage', expected: '/settings?scope=system&tab=hardware&sub=cameras', label: '/cameras/:tabId → system cameras' },
+    { from: '/nfc-devices', expected: '/settings?scope=system&tab=hardware&sub=nfc', label: '/nfc-devices → system nfc devices' },
+    { from: '/locations', expected: '/settings?scope=system&tab=hardware&sub=locations', label: '/locations → system locations' },
     { from: '/users', expected: '/settings?scope=admin&tab=users&sub=accounts', label: '/users → admin accounts' },
     { from: '/admin', expected: '/settings?scope=admin', label: '/admin → admin landing' },
     { from: '/admin/system', expected: '/settings?scope=admin&tab=operations&sub=status', label: '/admin/system → admin status' },
+    { from: '/admin/settings-legacy', expected: '/settings?scope=system&tab=general', label: '/admin/settings-legacy → system general' },
     { from: '/admin/workers', expected: '/settings?scope=admin&tab=operations&sub=workers', label: '/admin/workers → admin workers' },
     { from: '/admin/workers?tab=jobs', expected: '/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs', label: '/admin/workers?tab=jobs → admin workers jobs tab' },
     { from: '/admin/users', expected: '/settings?scope=admin&tab=users&sub=accounts', label: '/admin/users → admin accounts' },
@@ -106,7 +105,7 @@ describe('Settings nav migration redirects', () => {
 
   settingsRedirectCases.forEach(({ from, expected, label }) => {
     it(`redirects ${label}`, () => {
-      RedirectTest({ from });
+      renderRedirect(from);
       expect(screen.getByTestId('settings-location')).toHaveTextContent(expected);
     });
   });
@@ -118,7 +117,7 @@ describe('Settings nav migration redirects', () => {
 
   analyticsRedirectCases.forEach(({ from, expected, label }) => {
     it(`redirects ${label}`, () => {
-      RedirectTest({ from });
+      renderRedirect(from);
       expect(screen.getByTestId('analytics-location')).toHaveTextContent(expected);
     });
   });
@@ -127,12 +126,12 @@ describe('Settings nav migration redirects', () => {
     { from: '/profile/api-keys', testId: 'api-keys-location', expected: '/profile/api-keys', label: '/profile/api-keys stays live' },
     { from: '/nfc-bindings', testId: 'nfc-bindings-location', expected: '/nfc-bindings', label: '/nfc-bindings stays live' },
     { from: '/printer-groups', testId: 'printer-groups-location', expected: '/printer-groups', label: '/printer-groups stays live' },
-    { from: '/admin/printers', testId: 'printers-location', expected: '/printers', label: '/admin/printers moves to printers' },
+    { from: '/admin/printers', testId: 'admin-printers-location', expected: '/admin/printers', label: '/admin/printers stays live' },
   ];
 
   survivingRouteCases.forEach(({ from, testId, expected, label }) => {
     it(label, () => {
-      RedirectTest({ from });
+      renderRedirect(from);
       expect(screen.getByTestId(testId)).toHaveTextContent(expected);
     });
   });

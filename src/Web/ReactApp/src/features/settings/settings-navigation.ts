@@ -48,6 +48,12 @@ const LEGACY_CATEGORY_ALIASES: Record<string, ResolvedSettingsNavigationTarget> 
 };
 
 const LEGACY_CATEGORY_WITH_SUBPAGE_ALIASES: Record<string, Partial<Record<string, ResolvedSettingsNavigationTarget>>> = {
+  system: {
+    status: { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
+    workers: { scopeId: 'admin', categoryId: 'operations', subPageId: 'workers' },
+    monitoring: { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
+    'file-health': { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
+  },
   users: {
     'api-keys': { scopeId: 'user', categoryId: 'profile', subPageId: 'api-keys' },
     accounts: { scopeId: 'admin', categoryId: 'users', subPageId: 'accounts' },

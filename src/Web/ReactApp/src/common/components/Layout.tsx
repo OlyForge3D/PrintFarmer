@@ -167,6 +167,11 @@ const navigation: NavigationElement[] = [
     name: 'Settings',
     href: '/settings',
     icon: GearIcon,
+  },
+  {
+    name: 'Admin',
+    href: '/settings?scope=admin',
+    icon: SettingsIcon,
     requiredRole: 'farm_admin'
   },
 
@@ -488,7 +493,7 @@ export function Layout() {
                         <Button
                           type="button"
                           onClick={() => {
-                            navigate('/preferences');
+                            navigate('/settings');
                             setUserMenuOpen(false);
                           }}
                           variant="subtle"

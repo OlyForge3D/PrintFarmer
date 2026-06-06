@@ -185,6 +185,17 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=notifications');
   });
 
+  it('maps legacy system worker links into Admin Settings workers', () => {
+    renderSettings('/settings?tab=system&sub=workers&workerTab=jobs');
+
+    expect(getCategoryButton('Operations')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Workers' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=admin');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=operations');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=workers');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('workerTab=jobs');
+  });
+
   it('renders passkeys from the existing profile page inside User Settings', () => {
     setAuthRoles(['farm_admin']);
     renderSettings('/settings?scope=user&tab=profile&sub=passkeys');
