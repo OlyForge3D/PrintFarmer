@@ -116,6 +116,9 @@ function UserPreferencesPanel() {
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
   general: (
     <SettingsSection>
+      {/* ASSUMPTION: allowedGroups filtering relies on the backend returning ALL setting groups
+         in the metadata response. If the backend ever pre-filters groups server-side, this
+         client-side filter becomes a no-op and settings will silently disappear. */}
       <SettingsPage
         allowedGroups={['General']}
         introText="Configure farm identity, timezone, and other farm-wide defaults."
