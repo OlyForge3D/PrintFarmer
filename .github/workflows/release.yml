@@ -136,7 +136,7 @@ jobs:
         run: echo "Signatures verified (non-fatal) where possible." >> RELEASE_NOTES.md
 
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@v2.3.1
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: scorecard.json
           results_format: json
