@@ -170,7 +170,7 @@ const navigation: NavigationElement[] = [
   },
   {
     name: 'Admin',
-    href: '/settings?scope=admin',
+    href: '/admin/settings',
     icon: SettingsIcon,
     requiredRole: 'farm_admin'
   },

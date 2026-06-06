@@ -187,7 +187,15 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'data.management': <DataManagementPage />,
 };
 
-export const SettingsShell: React.FC = () => {
+interface SettingsShellProps {
+  /** Lock the shell to a specific route-level scope group.
+   * - 'user': only user settings (no scope switcher)
+   * - 'admin': system + admin scopes (scope switcher between them)
+   * If omitted, shows all scopes the user can access (legacy behavior). */
+  routeScope?: 'user' | 'admin';
+}
+
+export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const { hasRole } = useAuth();
   const isFarmAdmin = hasRole('farm_admin');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -199,10 +207,15 @@ export const SettingsShell: React.FC = () => {
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
 
-  const availableScopes = useMemo(
-    () => SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin),
-    [isFarmAdmin],
-  );
+  const availableScopes = useMemo(() => {
+    if (routeScope === 'user') {
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'user');
+    }
+    if (routeScope === 'admin') {
+      return SETTINGS_SCOPES.filter((scope) => scope.adminOnly && isFarmAdmin);
+    }
+    return SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin);
+  }, [isFarmAdmin, routeScope]);
   const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
   const accessibleCategories = useMemo(
     () => availableScopes.flatMap((scope) => getSettingsCategoriesForScope(scope.id)),
@@ -711,10 +724,10 @@ export const SettingsShell: React.FC = () => {
           </p>
           <button
             type="button"
-            onClick={() => setSearchParams({ scope: 'user' })}
+            onClick={() => setSearchParams({})}
             className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-pf-accent text-white hover:bg-pf-accent/90 transition-colors"
           >
-            Go to User Settings
+            Go to My Settings
           </button>
         </div>
       </div>
