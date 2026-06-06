@@ -18,7 +18,6 @@ import {
   getDefaultSubPage,
   getSettingsCategory,
   getSettingsScope,
-  getSettingsScopeForCategory,
   isSettingsScope,
   type SettingsScopeId,
 } from '@/features/settings/types';
@@ -190,6 +189,3 @@ export function buildSettingsCommandItems(): SettingsCommandItem[] {
   });
 }
 
-export function getScopeForResolvedTarget(target: ResolvedSettingsNavigationTarget): SettingsScopeId {
-  return getSettingsScopeForCategory(target.categoryId);
-}
