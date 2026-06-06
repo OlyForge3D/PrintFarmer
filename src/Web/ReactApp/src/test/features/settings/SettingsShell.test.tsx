@@ -16,13 +16,16 @@ vi.mock('@/features/profile/pages/ApiKeysPage', () => ({
   ApiKeysPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="api-keys-page" data-embedded={String(embedded)}>API Keys Page</div>,
 }));
 
-// Mock auth context
+vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
+  NotificationPreferencesPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="notification-preferences-page" data-embedded={String(embedded)}>Notification Preferences Page</div>,
+}));
+
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
     user: { id: '1', email: 'admin@test.com', isActive: true, roles: ['farm_admin'] },
     isAuthenticated: true,
     isLoading: false,
-    hasRole: () => true,
+    hasRole: (role: string) => role === 'farm_admin',
     hasPermission: () => true,
     logout: vi.fn(),
   }),
@@ -30,13 +33,12 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     user: { id: '1', email: 'admin@test.com', isActive: true, roles: ['farm_admin'] },
     isAuthenticated: true,
     isLoading: false,
-    hasRole: () => true,
+    hasRole: (role: string) => role === 'farm_admin',
     hasPermission: () => true,
     logout: vi.fn(),
   }),
 }));
 
-// Mock slicer context
 vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true }),
 }));
@@ -57,7 +59,7 @@ function renderSettings(initialRoute = '/settings') {
         <SettingsShell />
         <LocationProbe />
       </MemoryRouter>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -77,40 +79,46 @@ beforeAll(() => {
 });
 
 describe('SettingsShell', () => {
-  it('renders compact settings headings without the legacy page header row', () => {
+  it('renders the new scoped settings shell and admin-visible scope switcher', () => {
     renderSettings();
-    // Both desktop (sidebar) and mobile h1 render in jsdom (no media query filtering)
+
     const h1s = screen.getAllByRole('heading', { level: 1, name: 'Settings' });
     expect(h1s.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
-    expect(getCategoryButton('General')).toBeInTheDocument();
-    expect(getCategoryButton('Hardware')).toBeInTheDocument();
-    expect(getCategoryButton('Users')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'User' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'System' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Admin/i })).toBeInTheDocument();
+    expect(getCategoryButton('Profile')).toBeInTheDocument();
   });
 
-  it('defaults to the General tab', () => {
+  it('defaults to the User Settings profile category and preferences sub-page', () => {
     renderSettings();
-    const generalCategory = getCategoryButton('General');
-    expect(generalCategory).toHaveAttribute('aria-current', 'page');
-    expect(generalCategory.className).toContain('bg-pf-accent-bg/25');
-    expect(generalCategory.className).toContain('text-pf-text-primary');
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('switches tab on click', () => {
+  it('switches to System Settings from the scope switcher', () => {
     renderSettings();
-    const hardwareCategory = getCategoryButton('Hardware');
-    fireEvent.click(hardwareCategory);
-    expect(hardwareCategory).toHaveAttribute('aria-current', 'page');
-    expect(getCategoryButton('General')).not.toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('heading', { level: 2, name: 'Hardware' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'System' }));
+
+    expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
   });
 
-  it('deep-links to a specific tab via URL', () => {
+  it('maps legacy notifications links into User Settings', () => {
     renderSettings('/settings?tab=notifications');
-    const notificationsCategory = getCategoryButton('Notifications');
-    expect(notificationsCategory).toHaveAttribute('aria-current', 'page');
+
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Notifications' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('notification-preferences-page')).toHaveAttribute('data-embedded', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=notifications');
   });
 
   it('renders search input', () => {
@@ -118,14 +126,17 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('searchbox')).toBeInTheDocument();
   });
 
-  it('filters tabs by search query', () => {
+  it('filters across scopes and lands on Slicing when searching for slicer', () => {
     renderSettings('/settings?q=slicer');
+
     expect(getCategoryButton(/^Slicing/)).toHaveAttribute('aria-current', 'page');
-    expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /^Slicer Profiles/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=profiles');
   });
 
-  it('shows empty state when no tabs match search', () => {
+  it('shows empty state when no categories match search', () => {
     renderSettings('/settings?q=xyznonexistent');
     expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
@@ -133,14 +144,14 @@ describe('SettingsShell', () => {
   });
 
   it('clears stale tab and sub params when search returns no results', () => {
-    renderSettings('/settings?tab=hardware&sub=cameras&q=xyznonexistent');
+    renderSettings('/settings?scope=system&tab=hardware&sub=cameras&q=xyznonexistent');
     expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
   it('deep-links to hardware printer groups and renders the mapped page', () => {
-    renderSettings('/settings?tab=hardware&sub=printer-groups');
+    renderSettings('/settings?scope=system&tab=hardware&sub=printer-groups');
     expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Printer Groups' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('printer-groups-page')).toHaveAttribute('data-embedded', 'true');
@@ -152,6 +163,7 @@ describe('SettingsShell', () => {
     expect(screen.queryByRole('tab', { name: 'Locations' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /^NFC Bindings/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('nfc-bindings-page')).toHaveAttribute('data-embedded', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=nfc-bindings');
   });
@@ -161,42 +173,49 @@ describe('SettingsShell', () => {
     expect(getCategoryButton(/^Hardware/)).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: /^Cameras/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: /^Locations/ })).toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
 
     fireEvent.click(getCategoryButton(/^Hardware/));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
   });
 
-  it('normalizes stale or incomplete sub-page params to the rendered destination', () => {
+  it('normalizes stale or incomplete system sub-page params to the rendered destination', () => {
     renderSettings('/settings?tab=hardware&sub=not-real');
     expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
   });
 
-  it('keeps API Keys reachable under Users settings', () => {
+  it('keeps API Keys reachable under User Settings through legacy links', () => {
     renderSettings('/settings?tab=users&sub=api-keys');
-    expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'API Keys' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('api-keys-page')).toHaveAttribute('data-embedded', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=api-keys');
   });
 
   it('prefers direct sub-page matches over earlier category keyword matches', () => {
     renderSettings('/settings?q=api');
-    expect(getCategoryButton(/^Users/)).toHaveAttribute('aria-current', 'page');
+    expect(getCategoryButton(/^Profile/)).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: /^API Keys/ })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=api-keys');
   });
 
-  it('updates search value from input', () => {
+  it('updates search value from input and can land on single-page categories', () => {
     renderSettings();
     const searchInput = screen.getByLabelText('Search settings');
     searchInput.focus();
-    fireEvent.change(searchInput, { target: { value: 'email' } });
-    expect(getCategoryButton(/^Notifications/)).toHaveAttribute('aria-current', 'page');
+    fireEvent.change(searchInput, { target: { value: 'quota' } });
+    expect(getCategoryButton(/^Quotas/)).toHaveAttribute('aria-current', 'page');
     expect(searchInput).toHaveFocus();
   });
 
@@ -225,7 +244,7 @@ describe('SettingsShell', () => {
     expect(await screen.findByRole('button', { name: /Command palette/i })).toHaveFocus();
   });
 
-  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched settings section', async () => {
+  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched admin section', async () => {
     renderSettings();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
@@ -237,6 +256,7 @@ describe('SettingsShell', () => {
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
     expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Login Audit' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=admin');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
   });

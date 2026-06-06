@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
 import { SettingsMatchText } from '@/features/settings/components/SettingsMatchText';
 import { getSettingsCategoryIcon } from '@/features/settings/settings-navigation';
-import type { SettingsCategory } from '@/features/settings/types';
+import type { SettingsCategory, SettingsScope, SettingsScopeId } from '@/features/settings/types';
 
 const NAV_ITEM_STAGGER_MS = 18;
 const PREMIUM_TRANSITION_MS = 280;
@@ -12,8 +12,11 @@ const PREMIUM_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 interface SettingsSidebarProps {
   categories: SettingsCategory[];
+  activeScope: SettingsScopeId;
   activeCategory: string;
+  availableScopes: SettingsScope[];
   onCategoryChange: (categoryId: string) => void;
+  onScopeChange: (scopeId: SettingsScopeId) => void;
   matchingCategoryIds?: string[];
   isFiltering?: boolean;
   searchQuery?: string;
@@ -21,8 +24,11 @@ interface SettingsSidebarProps {
 
 export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   categories,
+  activeScope,
   activeCategory,
+  availableScopes,
   onCategoryChange,
+  onScopeChange,
   matchingCategoryIds,
   isFiltering = false,
   searchQuery,
@@ -36,6 +42,19 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
     return categories.filter((category) => matchingCategoryIds.includes(category.id));
   }, [categories, isFiltering, matchingCategoryIds]);
+
+  const primaryScopes = useMemo(
+    () => availableScopes.filter((scope) => scope.id !== 'admin'),
+    [availableScopes],
+  );
+  const adminScope = useMemo(
+    () => availableScopes.find((scope) => scope.id === 'admin'),
+    [availableScopes],
+  );
+  const activeScopeMeta = useMemo(
+    () => availableScopes.find((scope) => scope.id === activeScope) ?? availableScopes[0],
+    [activeScope, availableScopes],
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -91,13 +110,41 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     <>
       <nav
         className="hidden h-full min-h-0 flex-col bg-pf-bg-0/72 backdrop-blur-xl md:flex"
-        aria-label="Settings categories"
+        aria-label={`${activeScopeMeta?.label ?? 'Settings'} categories`}
       >
         <div className="border-b border-pf-border/70 px-4 py-5">
-          <h1 className="text-lg leading-none text-pf-text-primary">Settings</h1>
+          <h1 className="text-lg leading-none text-pf-text-primary">
+            {activeScope === 'admin' ? 'Admin' : 'Settings'}
+          </h1>
           <p className="mt-3 text-sm text-pf-text-secondary">
-            Hardware, slicing, user access, and system administration.
+            {activeScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.'}
           </p>
+
+          {primaryScopes.length > 1 ? (
+            <ScopeSwitcher
+              scopes={primaryScopes}
+              activeScope={activeScope}
+              onScopeChange={onScopeChange}
+              className="mt-4"
+            />
+          ) : null}
+
+          {adminScope ? (
+            <button
+              type="button"
+              onClick={() => onScopeChange(adminScope.id)}
+              aria-pressed={activeScope === adminScope.id}
+              className={clsx(
+                'mt-3 flex w-full items-center justify-between rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
+                activeScope === adminScope.id
+                  ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary'
+                  : 'border-pf-border/80 bg-pf-bg-1/75 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/90 hover:text-pf-text-primary',
+              )}
+            >
+              <span className="font-medium">{adminScope.label}</span>
+              <span className="text-xs uppercase tracking-[0.14em] text-pf-text-tertiary">Operations</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
@@ -167,8 +214,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
       <MobileCategorySelector
         categories={visibleCategories}
+        activeScope={activeScope}
         activeCategory={activeCategory}
+        availableScopes={availableScopes}
         onCategoryChange={onCategoryChange}
+        onScopeChange={onScopeChange}
         matchingCategoryIds={matchingCategoryIds}
         isFiltering={isFiltering}
         searchQuery={searchQuery}
@@ -177,10 +227,49 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   );
 };
 
+interface ScopeSwitcherProps {
+  scopes: SettingsScope[];
+  activeScope: SettingsScopeId;
+  onScopeChange: (scopeId: SettingsScopeId) => void;
+  className?: string;
+}
+
+function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeSwitcherProps) {
+  return (
+    <div className={clsx('rounded-2xl border border-pf-border/80 bg-pf-bg-1/75 p-1', className)} role="tablist" aria-label="Settings scopes">
+      <div className="grid grid-cols-2 gap-1">
+        {scopes.map((scope) => {
+          const isActive = scope.id === activeScope;
+          return (
+            <button
+              key={scope.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onScopeChange(scope.id)}
+              className={clsx(
+                'rounded-xl px-3 py-2 text-sm font-medium transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
+                isActive
+                  ? 'bg-pf-accent-bg/30 text-pf-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
+                  : 'text-pf-text-secondary hover:bg-pf-bg-0/85 hover:text-pf-text-primary',
+              )}
+            >
+              {scope.id === 'user' ? 'User' : scope.id === 'system' ? 'System' : scope.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface MobileCategorySelectorProps {
   categories: SettingsCategory[];
+  activeScope: SettingsScopeId;
   activeCategory: string;
+  availableScopes: SettingsScope[];
   onCategoryChange: (categoryId: string) => void;
+  onScopeChange: (scopeId: SettingsScopeId) => void;
   matchingCategoryIds?: string[];
   isFiltering?: boolean;
   searchQuery?: string;
@@ -188,8 +277,11 @@ interface MobileCategorySelectorProps {
 
 const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   categories,
+  activeScope,
   activeCategory,
+  availableScopes,
   onCategoryChange,
+  onScopeChange,
   matchingCategoryIds,
   isFiltering = false,
   searchQuery,
@@ -199,6 +291,8 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   const [isOpen, setIsOpen] = useState(false);
 
   const activeLabel = categories.find((category) => category.id === activeCategory)?.label ?? 'Select';
+  const primaryScopes = availableScopes.filter((scope) => scope.id !== 'admin');
+  const adminScope = availableScopes.find((scope) => scope.id === 'admin');
 
   useEffect(() => {
     if (!isOpen) {
@@ -236,6 +330,11 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
     setIsOpen(false);
   };
 
+  const handleScopeSelect = (scopeId: SettingsScopeId) => {
+    onScopeChange(scopeId);
+    setIsOpen(false);
+  };
+
   const isMatchingCategory = (categoryId: string) => {
     if (!isFiltering || !matchingCategoryIds) {
       return false;
@@ -251,6 +350,32 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
 
   return (
     <div ref={dropdownRef} className="relative border-b border-pf-border/70 px-4 py-4 md:hidden">
+      {primaryScopes.length > 1 ? (
+        <ScopeSwitcher
+          scopes={primaryScopes}
+          activeScope={activeScope}
+          onScopeChange={handleScopeSelect}
+          className="mb-3"
+        />
+      ) : null}
+
+      {adminScope ? (
+        <button
+          type="button"
+          onClick={() => handleScopeSelect(adminScope.id)}
+          aria-pressed={activeScope === adminScope.id}
+          className={clsx(
+            'mb-3 flex w-full items-center justify-between rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
+            activeScope === adminScope.id
+              ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary'
+              : 'border-pf-border/80 bg-pf-bg-1/75 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/90 hover:text-pf-text-primary',
+          )}
+        >
+          <span className="font-medium">{adminScope.label}</span>
+          <span className="text-xs uppercase tracking-[0.14em] text-pf-text-tertiary">Operations</span>
+        </button>
+      ) : null}
+
       <button
         ref={buttonRef}
         type="button"
@@ -269,7 +394,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         <ChevronDownIcon className={clsx('h-5 w-5', isOpen && 'rotate-180')} style={transitionStyle} />
       </button>
 
-      {isOpen && (
+      {isOpen ? (
         <ul
           id="settings-category-menu"
           aria-label="Settings categories"
@@ -310,7 +435,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
             );
           })}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 };
