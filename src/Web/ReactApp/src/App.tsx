@@ -239,7 +239,7 @@ function AuthenticatedAppRoutes() {
         <Route path="locations" element={<Navigate to="/settings?scope=system&tab=hardware&sub=locations" replace />} />
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
-        <Route path="users" element={<Navigate to="/settings?scope=admin&tab=users&sub=accounts" replace />} />
+        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/settings?scope=admin&tab=users&sub=accounts" replace /></ProtectedRoute>} />
         <Route path="settings" element={<SettingsShell />} />
         <Route path="settings/system" element={<ProtectedRoute requiredRole="farm_admin"><SettingsScopeRedirect scope="system" /></ProtectedRoute>} />
         <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/settings?scope=system&tab=general" replace /></ProtectedRoute>} />
