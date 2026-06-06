@@ -38,37 +38,38 @@ function renderRedirect(from: string) {
     <MemoryRouter initialEntries={[from]}>
       <Routes>
         <Route path="/settings" element={<LocationEcho testId="settings-location" />} />
+        <Route path="/admin/settings" element={<LocationEcho testId="settings-location" />} />
         <Route path="/analytics" element={<LocationEcho testId="analytics-location" />} />
         <Route path="/profile/api-keys" element={<LocationEcho testId="api-keys-location" />} />
         <Route path="/nfc-bindings" element={<LocationEcho testId="nfc-bindings-location" />} />
         <Route path="/printer-groups" element={<LocationEcho testId="printer-groups-location" />} />
         <Route path="/admin/printers" element={<LocationEcho testId="admin-printers-location" />} />
         <Route path="/preferences" element={<Navigate to="/settings" replace />} />
-        <Route path="/cameras" element={<Navigate to="/settings?scope=system&tab=hardware&sub=cameras" replace />} />
-        <Route path="/cameras/:tabId" element={<Navigate to="/settings?scope=system&tab=hardware&sub=cameras" replace />} />
-        <Route path="/nfc-devices" element={<Navigate to="/settings?scope=system&tab=hardware&sub=nfc" replace />} />
-        <Route path="/locations" element={<Navigate to="/settings?scope=system&tab=hardware&sub=locations" replace />} />
-        <Route path="/users" element={<Navigate to="/settings?scope=admin&tab=users&sub=accounts" replace />} />
+        <Route path="/cameras" element={<Navigate to="/admin/settings?scope=system&tab=hardware&sub=cameras" replace />} />
+        <Route path="/cameras/:tabId" element={<Navigate to="/admin/settings?scope=system&tab=hardware&sub=cameras" replace />} />
+        <Route path="/nfc-devices" element={<Navigate to="/admin/settings?scope=system&tab=hardware&sub=nfc" replace />} />
+        <Route path="/locations" element={<Navigate to="/admin/settings?scope=system&tab=hardware&sub=locations" replace />} />
+        <Route path="/users" element={<Navigate to="/admin/settings?scope=admin&tab=users&sub=accounts" replace />} />
         <Route path="/statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="/statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
-        <Route path="/admin" element={<Navigate to="/settings?scope=admin" replace />} />
-        <Route path="/admin/system" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
-        <Route path="/admin/settings-legacy" element={<Navigate to="/settings?scope=system&tab=general" replace />} />
-        <Route path="/admin/workers" element={<LegacySettingsRedirect to="/settings?scope=admin&tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
-        <Route path="/admin/users" element={<Navigate to="/settings?scope=admin&tab=users&sub=accounts" replace />} />
-        <Route path="/admin/tags" element={<Navigate to="/settings?scope=admin&tab=data&sub=tags" replace />} />
-        <Route path="/admin/data" element={<Navigate to="/settings?scope=admin&tab=data&sub=management" replace />} />
-        <Route path="/admin/security/login-audit" element={<Navigate to="/settings?scope=admin&tab=users&sub=audit" replace />} />
-        <Route path="/admin/file-health" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
-        <Route path="/admin/monitoring" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
-        <Route path="/admin/slicer-profiles" element={<Navigate to="/settings?scope=system&tab=slicing&sub=profiles" replace />} />
-        <Route path="/admin/bed-types" element={<Navigate to="/settings?scope=system&tab=slicing&sub=bed-types" replace />} />
-        <Route path="/admin/custom-fields" element={<Navigate to="/settings?scope=system&tab=hardware&sub=custom-fields" replace />} />
-        <Route path="/admin/webhooks" element={<Navigate to="/settings?scope=system&tab=integrations" replace />} />
-        <Route path="/admin/quotas" element={<Navigate to="/settings?scope=system&tab=quotas" replace />} />
-        <Route path="/admin/cameras" element={<Navigate to="/settings?scope=system&tab=hardware&sub=cameras" replace />} />
-        <Route path="/slice-jobs" element={<Navigate to="/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs" replace />} />
-        <Route path="/slicer-profiles" element={<Navigate to="/settings?scope=system&tab=slicing&sub=profiles" replace />} />
+        <Route path="/admin" element={<Navigate to="/admin/settings" replace />} />
+        <Route path="/admin/system" element={<Navigate to="/admin/settings?scope=admin&tab=operations&sub=status" replace />} />
+        <Route path="/admin/settings-legacy" element={<Navigate to="/admin/settings?scope=system&tab=general" replace />} />
+        <Route path="/admin/workers" element={<LegacySettingsRedirect to="/admin/settings?scope=admin&tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
+        <Route path="/admin/users" element={<Navigate to="/admin/settings?scope=admin&tab=users&sub=accounts" replace />} />
+        <Route path="/admin/tags" element={<Navigate to="/admin/settings?scope=admin&tab=data&sub=tags" replace />} />
+        <Route path="/admin/data" element={<Navigate to="/admin/settings?scope=admin&tab=data&sub=management" replace />} />
+        <Route path="/admin/security/login-audit" element={<Navigate to="/admin/settings?scope=admin&tab=users&sub=audit" replace />} />
+        <Route path="/admin/file-health" element={<Navigate to="/admin/settings?scope=admin&tab=operations&sub=status" replace />} />
+        <Route path="/admin/monitoring" element={<Navigate to="/admin/settings?scope=admin&tab=operations&sub=status" replace />} />
+        <Route path="/admin/slicer-profiles" element={<Navigate to="/admin/settings?scope=system&tab=slicing&sub=profiles" replace />} />
+        <Route path="/admin/bed-types" element={<Navigate to="/admin/settings?scope=system&tab=slicing&sub=bed-types" replace />} />
+        <Route path="/admin/custom-fields" element={<Navigate to="/admin/settings?scope=system&tab=hardware&sub=custom-fields" replace />} />
+        <Route path="/admin/webhooks" element={<Navigate to="/admin/settings?scope=system&tab=integrations" replace />} />
+        <Route path="/admin/quotas" element={<Navigate to="/admin/settings?scope=system&tab=quotas" replace />} />
+        <Route path="/admin/cameras" element={<Navigate to="/admin/settings?scope=system&tab=hardware&sub=cameras" replace />} />
+        <Route path="/slice-jobs" element={<Navigate to="/admin/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs" replace />} />
+        <Route path="/slicer-profiles" element={<Navigate to="/admin/settings?scope=system&tab=slicing&sub=profiles" replace />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -77,30 +78,30 @@ function renderRedirect(from: string) {
 describe('Settings nav migration redirects', () => {
   const settingsRedirectCases = [
     { from: '/preferences', expected: '/settings', label: '/preferences → /settings' },
-    { from: '/cameras', expected: '/settings?scope=system&tab=hardware&sub=cameras', label: '/cameras → system cameras' },
-    { from: '/cameras/manage', expected: '/settings?scope=system&tab=hardware&sub=cameras', label: '/cameras/:tabId → system cameras' },
-    { from: '/nfc-devices', expected: '/settings?scope=system&tab=hardware&sub=nfc', label: '/nfc-devices → system nfc devices' },
-    { from: '/locations', expected: '/settings?scope=system&tab=hardware&sub=locations', label: '/locations → system locations' },
-    { from: '/users', expected: '/settings?scope=admin&tab=users&sub=accounts', label: '/users → admin accounts' },
-    { from: '/admin', expected: '/settings?scope=admin', label: '/admin → admin landing' },
-    { from: '/admin/system', expected: '/settings?scope=admin&tab=operations&sub=status', label: '/admin/system → admin status' },
-    { from: '/admin/settings-legacy', expected: '/settings?scope=system&tab=general', label: '/admin/settings-legacy → system general' },
-    { from: '/admin/workers', expected: '/settings?scope=admin&tab=operations&sub=workers', label: '/admin/workers → admin workers' },
-    { from: '/admin/workers?tab=jobs', expected: '/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs', label: '/admin/workers?tab=jobs → admin workers jobs tab' },
-    { from: '/admin/users', expected: '/settings?scope=admin&tab=users&sub=accounts', label: '/admin/users → admin accounts' },
-    { from: '/admin/tags', expected: '/settings?scope=admin&tab=data&sub=tags', label: '/admin/tags → admin tags' },
-    { from: '/admin/data', expected: '/settings?scope=admin&tab=data&sub=management', label: '/admin/data → admin data management' },
-    { from: '/admin/security/login-audit', expected: '/settings?scope=admin&tab=users&sub=audit', label: '/admin/security/login-audit → admin audit' },
-    { from: '/admin/file-health', expected: '/settings?scope=admin&tab=operations&sub=status', label: '/admin/file-health → admin status' },
-    { from: '/admin/monitoring', expected: '/settings?scope=admin&tab=operations&sub=status', label: '/admin/monitoring → admin status' },
-    { from: '/admin/slicer-profiles', expected: '/settings?scope=system&tab=slicing&sub=profiles', label: '/admin/slicer-profiles → system slicing profiles' },
-    { from: '/admin/bed-types', expected: '/settings?scope=system&tab=slicing&sub=bed-types', label: '/admin/bed-types → system bed types' },
-    { from: '/admin/custom-fields', expected: '/settings?scope=system&tab=hardware&sub=custom-fields', label: '/admin/custom-fields → system custom fields' },
-    { from: '/admin/webhooks', expected: '/settings?scope=system&tab=integrations', label: '/admin/webhooks → system integrations' },
-    { from: '/admin/quotas', expected: '/settings?scope=system&tab=quotas', label: '/admin/quotas → system quotas' },
-    { from: '/admin/cameras', expected: '/settings?scope=system&tab=hardware&sub=cameras', label: '/admin/cameras → system cameras' },
-    { from: '/slice-jobs', expected: '/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs', label: '/slice-jobs → admin workers jobs tab' },
-    { from: '/slicer-profiles', expected: '/settings?scope=system&tab=slicing&sub=profiles', label: '/slicer-profiles → system slicing profiles' },
+    { from: '/cameras', expected: '/admin/settings?scope=system&tab=hardware&sub=cameras', label: '/cameras → system cameras' },
+    { from: '/cameras/manage', expected: '/admin/settings?scope=system&tab=hardware&sub=cameras', label: '/cameras/:tabId → system cameras' },
+    { from: '/nfc-devices', expected: '/admin/settings?scope=system&tab=hardware&sub=nfc', label: '/nfc-devices → system nfc devices' },
+    { from: '/locations', expected: '/admin/settings?scope=system&tab=hardware&sub=locations', label: '/locations → system locations' },
+    { from: '/users', expected: '/admin/settings?scope=admin&tab=users&sub=accounts', label: '/users → admin accounts' },
+    { from: '/admin', expected: '/admin/settings', label: '/admin → admin landing' },
+    { from: '/admin/system', expected: '/admin/settings?scope=admin&tab=operations&sub=status', label: '/admin/system → admin status' },
+    { from: '/admin/settings-legacy', expected: '/admin/settings?scope=system&tab=general', label: '/admin/settings-legacy → system general' },
+    { from: '/admin/workers', expected: '/admin/settings?scope=admin&tab=operations&sub=workers', label: '/admin/workers → admin workers' },
+    { from: '/admin/workers?tab=jobs', expected: '/admin/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs', label: '/admin/workers?tab=jobs → admin workers jobs tab' },
+    { from: '/admin/users', expected: '/admin/settings?scope=admin&tab=users&sub=accounts', label: '/admin/users → admin accounts' },
+    { from: '/admin/tags', expected: '/admin/settings?scope=admin&tab=data&sub=tags', label: '/admin/tags → admin tags' },
+    { from: '/admin/data', expected: '/admin/settings?scope=admin&tab=data&sub=management', label: '/admin/data → admin data management' },
+    { from: '/admin/security/login-audit', expected: '/admin/settings?scope=admin&tab=users&sub=audit', label: '/admin/security/login-audit → admin audit' },
+    { from: '/admin/file-health', expected: '/admin/settings?scope=admin&tab=operations&sub=status', label: '/admin/file-health → admin status' },
+    { from: '/admin/monitoring', expected: '/admin/settings?scope=admin&tab=operations&sub=status', label: '/admin/monitoring → admin status' },
+    { from: '/admin/slicer-profiles', expected: '/admin/settings?scope=system&tab=slicing&sub=profiles', label: '/admin/slicer-profiles → system slicing profiles' },
+    { from: '/admin/bed-types', expected: '/admin/settings?scope=system&tab=slicing&sub=bed-types', label: '/admin/bed-types → system bed types' },
+    { from: '/admin/custom-fields', expected: '/admin/settings?scope=system&tab=hardware&sub=custom-fields', label: '/admin/custom-fields → system custom fields' },
+    { from: '/admin/webhooks', expected: '/admin/settings?scope=system&tab=integrations', label: '/admin/webhooks → system integrations' },
+    { from: '/admin/quotas', expected: '/admin/settings?scope=system&tab=quotas', label: '/admin/quotas → system quotas' },
+    { from: '/admin/cameras', expected: '/admin/settings?scope=system&tab=hardware&sub=cameras', label: '/admin/cameras → system cameras' },
+    { from: '/slice-jobs', expected: '/admin/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs', label: '/slice-jobs → admin workers jobs tab' },
+    { from: '/slicer-profiles', expected: '/admin/settings?scope=system&tab=slicing&sub=profiles', label: '/slicer-profiles → system slicing profiles' },
   ];
 
   settingsRedirectCases.forEach(({ from, expected, label }) => {

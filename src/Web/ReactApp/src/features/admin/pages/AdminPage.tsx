@@ -4,7 +4,7 @@ import { Navigate } from 'react-router';
 export function AdminPage() {
   return (
     <ProtectedRoute requiredRole="farm_admin">
-      <Navigate to="/settings?scope=admin" replace />
+      <Navigate to="/admin/settings" replace />
     </ProtectedRoute>
   );
 }

@@ -187,7 +187,15 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'data.management': <DataManagementPage />,
 };
 
-export const SettingsShell: React.FC = () => {
+interface SettingsShellProps {
+  /** Lock the shell to a specific route-level scope group.
+   * - 'user': only user settings (no scope switcher)
+   * - 'admin': system + admin scopes (scope switcher between them)
+   * If omitted, shows all scopes the user can access (legacy behavior). */
+  routeScope?: 'user' | 'admin';
+}
+
+export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const { hasRole } = useAuth();
   const isFarmAdmin = hasRole('farm_admin');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -199,10 +207,15 @@ export const SettingsShell: React.FC = () => {
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
 
-  const availableScopes = useMemo(
-    () => SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin),
-    [isFarmAdmin],
-  );
+  const availableScopes = useMemo(() => {
+    if (routeScope === 'user') {
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'user');
+    }
+    if (routeScope === 'admin') {
+      return SETTINGS_SCOPES.filter((scope) => scope.adminOnly && isFarmAdmin);
+    }
+    return SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin);
+  }, [isFarmAdmin, routeScope]);
   const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
   const accessibleCategories = useMemo(
     () => availableScopes.flatMap((scope) => getSettingsCategoriesForScope(scope.id)),
@@ -691,6 +704,35 @@ export const SettingsShell: React.FC = () => {
       ) : null}
     </div>
   );
+
+  // If the user explicitly requested an admin-only scope they can't access, show access denied
+  const requestedScopeMeta = SETTINGS_SCOPES.find((s) => s.id === requestedScope);
+  if (requestedScope && requestedScopeMeta?.adminOnly && !isFarmAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center max-w-md mx-auto px-6">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-pf-warning/10 mb-4">
+            <svg className="w-6 h-6 text-pf-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
+            Access Denied
+          </h2>
+          <p className="text-pf-text-secondary mb-6">
+            You don&apos;t have permission to access {requestedScopeMeta.label}. Contact your farm administrator for access.
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearchParams({})}
+            className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-pf-accent text-white hover:bg-pf-accent/90 transition-colors"
+          >
+            Go to My Settings
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
