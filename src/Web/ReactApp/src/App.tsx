@@ -241,8 +241,8 @@ function AuthenticatedAppRoutes() {
         <Route path="security/login-audit" element={<Navigate to="/settings?tab=users" replace />} />
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
-        <Route path="slice-jobs" element={<Navigate to="/admin/workers?tab=jobs" replace />} />
-        <Route path="slicer-profiles" element={<Navigate to="/settings?tab=slicing&sub=profiles" replace />} />
+        <Route path="slice-jobs" element={<Navigate to="/settings?scope=admin&tab=operations&sub=workers&workerTab=jobs" replace />} />
+        <Route path="slicer-profiles" element={<Navigate to="/settings?scope=system&tab=slicing&sub=profiles" replace />} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
         <Route path="*" element={<NotFoundPage />} />
