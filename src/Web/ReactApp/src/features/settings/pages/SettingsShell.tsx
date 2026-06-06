@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
@@ -44,6 +44,7 @@ import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
+import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
 import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
 
 const LazySlicerProfilesPage = lazy(() =>
@@ -111,26 +112,6 @@ function UserPreferencesPanel() {
   );
 }
 
-function PasskeysSettingsPanel() {
-  const navigate = useNavigate();
-
-  return (
-    <SettingsSection>
-      <div className="rounded-2xl border border-pf-border bg-pf-bg-0 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-        <h3 className="text-lg font-semibold text-pf-text-primary">Passkeys</h3>
-        <p className="mt-1 text-sm text-pf-text-secondary">
-          Manage passwordless sign-in devices from the existing profile route while the new navigation rolls out.
-        </p>
-        <div className="mt-4">
-          <Button type="button" variant="primary" onClick={() => navigate('/profile/passkeys')}>
-            Open Passkeys
-          </Button>
-        </div>
-      </div>
-    </SettingsSection>
-  );
-}
-
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
   general: (
     <SettingsSection>
@@ -161,7 +142,11 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       <NotificationPreferencesPage embedded />
     </SettingsSection>
   ),
-  'profile.passkeys': <PasskeysSettingsPanel />,
+  'profile.passkeys': (
+    <SettingsSection>
+      <PasskeysPage embedded />
+    </SettingsSection>
+  ),
   'slicing.bed-types': <BedTypeAdminPage />,
   'slicing.profiles': (
     <Suspense fallback={<TabLoader />}>

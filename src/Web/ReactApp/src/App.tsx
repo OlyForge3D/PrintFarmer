@@ -92,6 +92,13 @@ function RouteSuspense({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<RouteLoader />}>{children}</Suspense>;
 }
 
+function SettingsScopeRedirect({ scope }: { scope: 'system' }) {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  searchParams.set('scope', scope);
+  return <Navigate to={`/settings?${searchParams.toString()}`} replace />;
+}
+
 /**
  * Route-level gate that blocks access to a feature when platform
  * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
@@ -202,13 +209,14 @@ function AuthenticatedAppRoutes() {
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<Navigate to="/settings?tab=users" replace />} />
-        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsShell /></ProtectedRoute>} />
+        <Route path="settings" element={<SettingsShell />} />
+        <Route path="settings/system" element={<ProtectedRoute requiredRole="farm_admin"><SettingsScopeRedirect scope="system" /></ProtectedRoute>} />
         <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         {/*
          * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
          * API key management is a per-user feature — every authenticated user needs
          * access to create/revoke their own keys. Admins can also reach ApiKeysPage
-         * via the Settings shell (users tab), but the direct /profile/api-keys route
+         * via the User Settings profile section, but the direct /profile/api-keys route
          * must remain open to all authenticated users to avoid a regression.
          */}
         <Route path="preferences" element={<UserPreferencesPage />} />

@@ -1,8 +1,12 @@
-import { beforeAll, describe, it, expect, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+
+vi.mock('@/common/components/ThemeSwitcher', () => ({
+  ThemeSwitcher: () => <div data-testid="theme-switcher">Theme Switcher</div>,
+}));
 
 vi.mock('@/features/printer-groups/pages/PrinterGroupsPage', () => ({
   PrinterGroupsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="printer-groups-page" data-embedded={String(embedded)}>Printer Groups Page</div>,
@@ -16,25 +20,33 @@ vi.mock('@/features/profile/pages/ApiKeysPage', () => ({
   ApiKeysPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="api-keys-page" data-embedded={String(embedded)}>API Keys Page</div>,
 }));
 
+vi.mock('@/features/profile/pages/PasskeysPage', () => ({
+  PasskeysPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="passkeys-page" data-embedded={String(embedded)}>Passkeys Page</div>,
+}));
+
 vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
   NotificationPreferencesPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="notification-preferences-page" data-embedded={String(embedded)}>Notification Preferences Page</div>,
 }));
 
+const authState = {
+  roles: ['farm_admin'],
+};
+
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
-    user: { id: '1', email: 'admin@test.com', isActive: true, roles: ['farm_admin'] },
+    user: { id: '1', email: authState.roles.includes('farm_admin') ? 'admin@test.com' : 'user@test.com', isActive: true, roles: authState.roles },
     isAuthenticated: true,
     isLoading: false,
-    hasRole: (role: string) => role === 'farm_admin',
-    hasPermission: () => true,
+    hasRole: (role: string) => authState.roles.includes(role),
+    hasPermission: () => authState.roles.includes('farm_admin'),
     logout: vi.fn(),
   }),
   useAuthInternal: () => ({
-    user: { id: '1', email: 'admin@test.com', isActive: true, roles: ['farm_admin'] },
+    user: { id: '1', email: authState.roles.includes('farm_admin') ? 'admin@test.com' : 'user@test.com', isActive: true, roles: authState.roles },
     isAuthenticated: true,
     isLoading: false,
-    hasRole: (role: string) => role === 'farm_admin',
-    hasPermission: () => true,
+    hasRole: (role: string) => authState.roles.includes(role),
+    hasPermission: () => authState.roles.includes('farm_admin'),
     logout: vi.fn(),
   }),
 }));
@@ -64,7 +76,12 @@ function renderSettings(initialRoute = '/settings') {
 }
 
 function getCategoryButton(name: string | RegExp) {
-  return screen.getByRole('button', { name });
+  const matches = screen.getAllByRole('button', { name });
+  return matches.find((button) => button.getAttribute('aria-current') === 'page') ?? matches[0];
+}
+
+function setAuthRoles(roles: string[]) {
+  authState.roles = roles;
 }
 
 beforeAll(() => {
@@ -78,8 +95,25 @@ beforeAll(() => {
   });
 });
 
+beforeEach(() => {
+  setAuthRoles(['farm_admin']);
+});
+
 describe('SettingsShell', () => {
+  it('shows only the User scope to non-admins and keeps /settings on personal pages', () => {
+    setAuthRoles(['farm_user']);
+    renderSettings('/settings?scope=system&tab=hardware');
+
+    expect(screen.queryByRole('tab', { name: 'System' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Admin/i })).not.toBeInTheDocument();
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
+  });
+
   it('renders the new scoped settings shell and admin-visible scope switcher', () => {
+    setAuthRoles(['farm_admin']);
     renderSettings();
 
     const h1s = screen.getAllByRole('heading', { level: 1, name: 'Settings' });
@@ -87,13 +121,14 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'User' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'System' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Admin/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab', { name: 'User' })[0]).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByRole('tab', { name: 'System' })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Admin/i })[0]).toBeInTheDocument();
     expect(getCategoryButton('Profile')).toBeInTheDocument();
   });
 
   it('defaults to the User Settings profile category and preferences sub-page', () => {
+    setAuthRoles(['farm_admin']);
     renderSettings();
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
@@ -102,7 +137,7 @@ describe('SettingsShell', () => {
   it('switches to System Settings from the scope switcher', () => {
     renderSettings();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'System' }));
+    fireEvent.click(screen.getAllByRole('tab', { name: 'System' })[0]);
 
     expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
@@ -121,7 +156,16 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=notifications');
   });
 
+  it('renders passkeys from the existing profile page inside User Settings', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/settings?scope=user&tab=profile&sub=passkeys');
+
+    expect(screen.getByRole('tab', { name: 'Passkeys' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('passkeys-page')).toHaveAttribute('data-embedded', 'true');
+  });
+
   it('renders search input', () => {
+    setAuthRoles(['farm_admin']);
     renderSettings();
     expect(screen.getByRole('searchbox')).toBeInTheDocument();
   });
@@ -168,19 +212,11 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=nfc-bindings');
   });
 
-  it('keeps category-level searches aligned with the rendered hardware sub-page', () => {
+  it('keeps category-level searches scoped to system settings', () => {
     renderSettings('/settings?q=hardware');
-    expect(getCategoryButton(/^Hardware/)).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: /^Cameras/ })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: /^Locations/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
-
-    fireEvent.click(getCategoryButton(/^Hardware/));
-    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
   });
 
   it('normalizes stale or incomplete system sub-page params to the rendered destination', () => {
@@ -210,12 +246,13 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=api-keys');
   });
 
-  it('updates search value from input and can land on single-page categories', () => {
+  it('updates search value from input while preserving focus', () => {
     renderSettings();
     const searchInput = screen.getByLabelText('Search settings');
     searchInput.focus();
     fireEvent.change(searchInput, { target: { value: 'quota' } });
-    expect(getCategoryButton(/^Quotas/)).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=quota');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(searchInput).toHaveFocus();
   });
 

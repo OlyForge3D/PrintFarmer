@@ -161,11 +161,13 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   },
 ];
 
+export const USER_SETTINGS_CATEGORIES = SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'user');
+
 const settingsCategoryLookup = new Map(SETTINGS_CATEGORIES.map((category) => [category.id, category]));
 const settingsScopeLookup = new Map(SETTINGS_SCOPES.map((scope) => [scope.id, scope]));
 
 export const SETTINGS_CATEGORIES_BY_SCOPE: Record<SettingsScopeId, SettingsCategory[]> = {
-  user: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'user'),
+  user: USER_SETTINGS_CATEGORIES,
   system: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'system'),
   admin: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'admin'),
 };
