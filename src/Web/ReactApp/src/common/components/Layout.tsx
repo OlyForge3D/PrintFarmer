@@ -167,6 +167,11 @@ const navigation: NavigationElement[] = [
     name: 'Settings',
     href: '/settings',
     icon: GearIcon,
+  },
+  {
+    name: 'Admin',
+    href: '/settings?scope=admin',
+    icon: SettingsIcon,
     requiredRole: 'farm_admin'
   },
 
@@ -488,7 +493,7 @@ export function Layout() {
                         <Button
                           type="button"
                           onClick={() => {
-                            navigate('/preferences');
+                            navigate('/settings');
                             setUserMenuOpen(false);
                           }}
                           variant="subtle"
@@ -583,7 +588,7 @@ export function Layout() {
                   
                   const hasChildren = !!navItem.children?.length;
                   return (
-                    <div key={navItem.name} className="flex flex-col relative">
+                    <div key={navItem.href} className="flex flex-col relative">
                       {hasChildren ? (
                         <details open={isExpanded} className="group">
                           <summary
@@ -604,7 +609,7 @@ export function Layout() {
                               const ChildIcon = child.icon;
                               return (
                                 <NavLink
-                                  key={child.name}
+                                  key={child.href}
                                   to={child.href}
                                   onClick={() => { setSidebarOpen(false); }}
                                   className={({ isActive }: { isActive: boolean }) =>
@@ -679,11 +684,11 @@ export function Layout() {
                 const Icon = navItem.icon;
                 const isExpanded = !!computedExpanded[navItem.name];
                 const isHovered = hoveredNavItem === navItem.name;
-                
+
                 const hasChildren = !!navItem.children?.length;
                 return (
-                  <div 
-                    key={navItem.name} 
+                  <div
+                    key={navItem.href}
                     className="flex flex-col relative"
                     onMouseEnter={() => navbarCollapsed && hasChildren && setHoveredNavItem(navItem.name)}
                     onMouseLeave={() => setHoveredNavItem(null)}
@@ -714,7 +719,7 @@ export function Layout() {
                             const ChildIcon = child.icon;
                             return (
                               <NavLink
-                                key={child.name}
+                                key={child.href}
                                 to={child.href}
                                 onClick={() => { /* child nav */ }}
                                 className={({ isActive }: { isActive: boolean }) =>
@@ -762,7 +767,7 @@ export function Layout() {
                             const ChildIcon = child.icon;
                             return (
                               <NavLink
-                                key={child.name}
+                                key={child.href}
                                 to={child.href}
                                 className={({ isActive }: { isActive: boolean }) =>
                                   `flex items-center px-3 py-2 text-sm transition-colors ${isActive

@@ -13,7 +13,11 @@ import {
   type PasskeyCredentialDto,
 } from '@/services/passkeyService';
 
-export function PasskeysPage() {
+interface PasskeysPageProps {
+  embedded?: boolean;
+}
+
+export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<PasskeyCredentialDto | null>(null);
   const [editTarget, setEditTarget] = useState<PasskeyCredentialDto | null>(null);
@@ -91,12 +95,8 @@ export function PasskeysPage() {
     return passkey.deviceName || passkey.aaguidDescription || 'Unnamed passkey';
   }
 
-  return (
-    <PageTemplate
-      title="Passkeys"
-      icon={KeyIcon}
-      subtitle="Manage your registered passkeys for passwordless sign-in."
-    >
+  const content = (
+    <>
       <div className="space-y-4">
         <div className="flex justify-end">
           <Button
@@ -110,26 +110,26 @@ export function PasskeysPage() {
         </div>
 
         {isLoading && (
-          <div className="text-center py-8 text-pf-text-secondary">Loading passkeys…</div>
+          <div className="py-8 text-center text-pf-text-secondary">Loading passkeys…</div>
         )}
 
         {!isLoading && passkeys.length === 0 && (
-          <div className="text-center py-8 text-pf-text-secondary">
-            <KeyIcon className="w-12 h-12 mx-auto mb-2 opacity-40" />
+          <div className="py-8 text-center text-pf-text-secondary">
+            <KeyIcon className="mx-auto mb-2 h-12 w-12 opacity-40" />
             <p>No passkeys registered yet.</p>
-            <p className="text-sm mt-1">Add a passkey for fast, secure sign-in.</p>
+            <p className="mt-1 text-sm">Add a passkey for fast, secure sign-in.</p>
           </div>
         )}
 
         {!isLoading && passkeys.length > 0 && (
-          <div className="border border-pf-border rounded-lg divide-y divide-pf-border">
+          <div className="divide-y divide-pf-border rounded-lg border border-pf-border">
             {passkeys.map((passkey) => (
               <div
                 key={passkey.id}
-                className="flex items-center justify-between px-4 py-3 gap-4"
+                className="flex items-center justify-between gap-4 px-4 py-3"
               >
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-pf-text-primary truncate">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium text-pf-text-primary">
                     {getDisplayName(passkey)}
                   </div>
                   <div className="text-sm text-pf-text-secondary">
@@ -137,14 +137,14 @@ export function PasskeysPage() {
                     {passkey.lastUsedAt && <> · Last used {formatDate(passkey.lastUsedAt)}</>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex shrink-0 items-center gap-2">
                   <Button
                     variant="subtle"
                     size="sm"
                     onClick={() => handleStartEdit(passkey)}
                     aria-label={`Rename ${getDisplayName(passkey)}`}
                   >
-                    <EditIcon className="w-4 h-4" />
+                    <EditIcon className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="subtle"
@@ -152,7 +152,7 @@ export function PasskeysPage() {
                     onClick={() => setDeleteTarget(passkey)}
                     aria-label={`Remove ${getDisplayName(passkey)}`}
                   >
-                    <DeleteIcon className="w-4 h-4" />
+                    <DeleteIcon className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -286,6 +286,20 @@ export function PasskeysPage() {
           }}
         />
       </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <PageTemplate
+      title="Passkeys"
+      icon={KeyIcon}
+      subtitle="Manage your registered passkeys for passwordless sign-in."
+    >
+      {content}
     </PageTemplate>
   );
 }

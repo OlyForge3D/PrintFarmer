@@ -1,20 +1,33 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
+import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { Button } from '@/common/components/ui';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CommandPalette } from '@/features/settings/components/CommandPalette';
 import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
 import { SettingsSearch } from '@/features/settings/components/SettingsSearch';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
-import { buildSettingsCommandItems, resolveSettingsNavigationTarget, type SettingsCommandItem } from '@/features/settings/settings-navigation';
+import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
+import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import {
-  SETTINGS_CATEGORIES,
-  DEFAULT_CATEGORY,
+  buildSettingsCommandItems,
+  resolveSettingsNavigationTarget,
+  type SettingsCommandItem,
+} from '@/features/settings/settings-navigation';
+import {
+  DEFAULT_SCOPE,
+  SETTINGS_SCOPES,
+  getDefaultCategoryForScope,
   getDefaultSubPage,
+  getSettingsCategoriesForScope,
+  getSettingsCategory,
+  getSettingsScope,
+  getSettingsScopeForCategory,
 } from '@/features/settings/types';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
@@ -32,6 +45,7 @@ import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
+import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
 import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
 
 const LazySlicerProfilesPage = lazy(() =>
@@ -80,15 +94,33 @@ function TabLoader() {
   );
 }
 
+function UserPreferencesPanel() {
+  return (
+    <SettingsSection>
+      <div className="space-y-6">
+        <section className="rounded-2xl border border-pf-border bg-pf-bg-0 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <h3 className="text-lg font-semibold text-pf-text-primary">Appearance</h3>
+          <p className="mt-1 text-sm text-pf-text-secondary">
+            Choose a theme and preview the dashboard surface in real time.
+          </p>
+          <div className="mt-4">
+            <ThemeSwitcher />
+          </div>
+        </section>
+        <UserSettingsSection />
+      </div>
+    </SettingsSection>
+  );
+}
+
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
   general: (
     <SettingsSection>
-      <SettingsPage />
-    </SettingsSection>
-  ),
-  notifications: (
-    <SettingsSection>
-      <NotificationPreferencesPage embedded />
+      <SettingsPage
+        allowedGroups={['General']}
+        introText="Configure farm identity, timezone, and other farm-wide defaults."
+        afterContent={<FarmSettingsSection />}
+      />
     </SettingsSection>
   ),
   integrations: (
@@ -96,9 +128,38 @@ const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
       <WebhooksAdminPage />
     </SettingsSection>
   ),
+  quotas: (
+    <SettingsSection>
+      <QuotaManagementPage />
+    </SettingsSection>
+  ),
 };
 
 const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
+  'profile.preferences': <UserPreferencesPanel />,
+  'profile.api-keys': (
+    <SettingsSection>
+      <ApiKeysPage embedded />
+    </SettingsSection>
+  ),
+  'profile.notifications': (
+    <SettingsSection>
+      <NotificationPreferencesPage embedded />
+    </SettingsSection>
+  ),
+  'profile.passkeys': (
+    <SettingsSection>
+      <PasskeysPage embedded />
+    </SettingsSection>
+  ),
+  'slicing.defaults': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={['Slicing']}
+        introText="Configure slicer defaults, process behavior, and plate-related settings for the farm."
+      />
+    </SettingsSection>
+  ),
   'slicing.bed-types': <BedTypeAdminPage />,
   'slicing.profiles': (
     <Suspense fallback={<TabLoader />}>
@@ -111,46 +172,98 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'hardware.nfc-bindings': <NfcBindingsPage embedded />,
   'hardware.locations': <LocationManagementAdminPage />,
   'hardware.custom-fields': <CustomFieldsAdminPage />,
-  'system.status': <SystemStatusPage />,
-  'system.workers': (
+  'operations.status': <SystemStatusPage />,
+  'operations.workers': (
     <Suspense fallback={<TabLoader />}>
       <LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />
     </Suspense>
   ),
-  'data.tags': <TagAdminPage />,
-  'data.quotas': <QuotaManagementPage />,
-  'data.management': <DataManagementPage />,
   'users.accounts': <UserManagementPage />,
-  'users.api-keys': <ApiKeysPage embedded />,
   'users.audit': <LoginAuditPage />,
+  'data.tags': <TagAdminPage />,
+  'data.management': <DataManagementPage />,
 };
 
 export const SettingsShell: React.FC = () => {
+  const { hasRole } = useAuth();
+  const isFarmAdmin = hasRole('farm_admin');
   const [searchParams, setSearchParams] = useSearchParams();
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
+  const requestedScope = searchParams.get('scope');
   const requestedCategory = searchParams.get('tab');
   const requestedSubPage = searchParams.get('sub');
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
 
-  const activeCategory = useMemo(
-    () => (SETTINGS_CATEGORIES.some((category) => category.id === requestedCategory) ? requestedCategory : DEFAULT_CATEGORY),
-    [requestedCategory],
+  const availableScopes = useMemo(
+    () => SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin),
+    [isFarmAdmin],
   );
+  const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
+  const accessibleCategories = useMemo(
+    () => availableScopes.flatMap((scope) => getSettingsCategoriesForScope(scope.id)),
+    [availableScopes],
+  );
+
+  const resolvedRequestedTarget = useMemo(
+    () => resolveSettingsNavigationTarget(requestedCategory, requestedSubPage, requestedScope),
+    [requestedCategory, requestedScope, requestedSubPage],
+  );
+
+  const activeScope = useMemo(() => {
+    return availableScopes.some((scope) => scope.id === resolvedRequestedTarget.scopeId)
+      ? resolvedRequestedTarget.scopeId
+      : fallbackScopeId;
+  }, [availableScopes, fallbackScopeId, resolvedRequestedTarget.scopeId]);
+
+  const activeCategory = useMemo(() => {
+    return accessibleCategories.some((category) => category.id === resolvedRequestedTarget.categoryId)
+      ? resolvedRequestedTarget.categoryId
+      : getDefaultCategoryForScope(activeScope);
+  }, [accessibleCategories, activeScope, resolvedRequestedTarget.categoryId]);
 
   const shouldFocusSectionRef = useRef(false);
   const previousRenderedKeyRef = useRef<string | null>(null);
-  const commandPaletteItems = useMemo(() => buildSettingsCommandItems(), []);
+  const commandPaletteItems = useMemo(
+    () => buildSettingsCommandItems().filter((item) => availableScopes.some((scope) => scope.id === item.scopeId)),
+    [availableScopes],
+  );
 
-  const handleCategoryChange = useCallback(
-    (categoryId: string) => {
+  const handleScopeChange = useCallback(
+    (scopeId: string) => {
+      if (!availableScopes.some((scope) => scope.id === scopeId)) {
+        return;
+      }
+
+      const defaultCategoryId = getDefaultCategoryForScope(scopeId as typeof activeScope);
+      const defaultSubPageId = getDefaultSubPage(defaultCategoryId);
       shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        next.set('tab', categoryId);
+        next.set('scope', scopeId);
+        next.set('tab', defaultCategoryId);
+        if (defaultSubPageId) {
+          next.set('sub', defaultSubPageId);
+        } else {
+          next.delete('sub');
+        }
+        return next;
+      });
+    },
+    [availableScopes, setSearchParams],
+  );
 
-        const targetCategory = SETTINGS_CATEGORIES.find((category) => category.id === categoryId);
+  const handleCategoryChange = useCallback(
+    (categoryId: string) => {
+      const target = resolveSettingsNavigationTarget(categoryId, undefined, activeScope);
+      const targetCategory = getSettingsCategory(target.categoryId);
+      shouldFocusSectionRef.current = true;
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('scope', target.scopeId);
+        next.set('tab', target.categoryId);
+
         const matchingTargetSubPage = !normalizedQuery || !targetCategory
           ? undefined
           : targetCategory.subPages.find((subPage) => (
@@ -161,7 +274,7 @@ export const SettingsShell: React.FC = () => {
         if (matchingTargetSubPage) {
           next.set('sub', matchingTargetSubPage.id);
         } else if (!normalizedQuery) {
-          const defaultSubPage = getDefaultSubPage(categoryId);
+          const defaultSubPage = getDefaultSubPage(target.categoryId);
           if (defaultSubPage) {
             next.set('sub', defaultSubPage);
           } else {
@@ -174,7 +287,7 @@ export const SettingsShell: React.FC = () => {
         return next;
       });
     },
-    [normalizedQuery, setSearchParams],
+    [activeScope, normalizedQuery, setSearchParams],
   );
 
   const handleSubPageChange = useCallback(
@@ -182,11 +295,13 @@ export const SettingsShell: React.FC = () => {
       shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
+        next.set('scope', activeScope);
+        next.set('tab', activeCategory);
         next.set('sub', subPageId);
         return next;
       });
     },
-    [setSearchParams],
+    [activeCategory, activeScope, setSearchParams],
   );
 
   const handleSearchChange = useCallback(
@@ -214,10 +329,11 @@ export const SettingsShell: React.FC = () => {
 
   const navigateToSetting = useCallback(
     (item: SettingsCommandItem) => {
-      const target = resolveSettingsNavigationTarget(item.categoryId, item.subPageId);
+      const target = resolveSettingsNavigationTarget(item.categoryId, item.subPageId, item.scopeId);
       shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
+        next.set('scope', target.scopeId);
         next.set('tab', target.categoryId);
         if (target.subPageId) {
           next.set('sub', target.subPageId);
@@ -245,11 +361,14 @@ export const SettingsShell: React.FC = () => {
     const subPageIds: string[] = [];
     let firstSubPageCategoryId: string | undefined;
 
-    for (const category of SETTINGS_CATEGORIES) {
+    for (const category of accessibleCategories) {
+      const scopeMeta = getSettingsScope(category.scopeId);
       const categoryMatches = category.label.toLowerCase().includes(normalizedQuery)
-        || category.keywords.some((keyword) => keyword.includes(normalizedQuery));
+        || category.keywords.some((keyword) => keyword.includes(normalizedQuery))
+        || scopeMeta?.label.toLowerCase().includes(normalizedQuery)
+        || scopeMeta?.keywords.some((keyword) => keyword.includes(normalizedQuery));
 
-      if (categoryMatches) {
+      if (categoryMatches && !categoryIds.includes(category.id)) {
         categoryIds.push(category.id);
       }
 
@@ -273,28 +392,53 @@ export const SettingsShell: React.FC = () => {
       firstMatchingSubPageCategoryId: firstSubPageCategoryId,
       isFiltering: true,
     };
-  }, [normalizedQuery]);
+  }, [accessibleCategories, normalizedQuery]);
+
+  const effectiveScope = useMemo(() => {
+    if (!isFiltering || !matchingCategoryIds || matchingCategoryIds.length === 0) {
+      return activeScope;
+    }
+    if (matchingCategoryIds.includes(activeCategory)) {
+      return getSettingsScopeForCategory(activeCategory);
+    }
+    if (firstMatchingSubPageCategoryId && matchingCategoryIds.includes(firstMatchingSubPageCategoryId)) {
+      return getSettingsScopeForCategory(firstMatchingSubPageCategoryId);
+    }
+    return getSettingsScopeForCategory(matchingCategoryIds[0]);
+  }, [activeCategory, activeScope, firstMatchingSubPageCategoryId, isFiltering, matchingCategoryIds]);
+
+  const scopeCategories = useMemo(
+    () => getSettingsCategoriesForScope(effectiveScope),
+    [effectiveScope],
+  );
 
   const effectiveCategory = useMemo(() => {
     if (!isFiltering || !matchingCategoryIds || matchingCategoryIds.length === 0) {
+      return scopeCategories.some((category) => category.id === activeCategory)
+        ? activeCategory
+        : getDefaultCategoryForScope(effectiveScope);
+    }
+
+    if (scopeCategories.some((category) => category.id === activeCategory) && matchingCategoryIds.includes(activeCategory)) {
       return activeCategory;
     }
-    if (matchingCategoryIds.includes(activeCategory)) {
-      return activeCategory;
-    }
-    if (firstMatchingSubPageCategoryId && matchingCategoryIds.includes(firstMatchingSubPageCategoryId)) {
-      return firstMatchingSubPageCategoryId;
-    }
-    return matchingCategoryIds[0];
-  }, [activeCategory, firstMatchingSubPageCategoryId, isFiltering, matchingCategoryIds]);
+
+    const firstMatchingCategory = scopeCategories.find((category) => matchingCategoryIds.includes(category.id));
+    return firstMatchingCategory?.id ?? scopeCategories[0]?.id ?? getDefaultCategoryForScope(effectiveScope);
+  }, [activeCategory, effectiveScope, isFiltering, matchingCategoryIds, scopeCategories]);
 
   const currentCategory = useMemo(
-    () => SETTINGS_CATEGORIES.find((category) => category.id === effectiveCategory) ?? SETTINGS_CATEGORIES[0],
-    [effectiveCategory],
+    () => scopeCategories.find((category) => category.id === effectiveCategory) ?? scopeCategories[0],
+    [effectiveCategory, scopeCategories],
+  );
+
+  const currentScopeMeta = useMemo(
+    () => getSettingsScope(effectiveScope) ?? availableScopes[0],
+    [availableScopes, effectiveScope],
   );
 
   const currentCategoryMatchesQuery = useMemo(() => {
-    if (!normalizedQuery) {
+    if (!normalizedQuery || !currentCategory) {
       return false;
     }
 
@@ -303,7 +447,7 @@ export const SettingsShell: React.FC = () => {
   }, [currentCategory, normalizedQuery]);
 
   const directMatchingCurrentSubPageIds = useMemo(() => {
-    if (!isFiltering || !matchingSubPageIds) {
+    if (!currentCategory || !isFiltering || !matchingSubPageIds) {
       return [];
     }
 
@@ -313,6 +457,10 @@ export const SettingsShell: React.FC = () => {
   }, [currentCategory, isFiltering, matchingSubPageIds]);
 
   const matchingCurrentSubPageIds = useMemo(() => {
+    if (!currentCategory) {
+      return [];
+    }
+
     if (directMatchingCurrentSubPageIds.length > 0) {
       return directMatchingCurrentSubPageIds;
     }
@@ -325,14 +473,19 @@ export const SettingsShell: React.FC = () => {
   }, [currentCategory, currentCategoryMatchesQuery, directMatchingCurrentSubPageIds]);
 
   const activeSubPage = useMemo(() => {
-    if (currentCategory.subPages.length === 0) {
+    if (!currentCategory || currentCategory.subPages.length === 0) {
       return '';
     }
 
-    const requestedSubPageIsValid = requestedSubPage && currentCategory.subPages.some((subPage) => subPage.id === requestedSubPage);
+    const requestedTargetSubPage = resolvedRequestedTarget.categoryId === currentCategory.id
+      ? resolvedRequestedTarget.subPageId
+      : undefined;
+    const requestedSubPageIsValid = requestedTargetSubPage
+      && currentCategory.subPages.some((subPage) => subPage.id === requestedTargetSubPage);
+
     if (requestedSubPageIsValid) {
-      if (!isFiltering || matchingCurrentSubPageIds.length === 0 || matchingCurrentSubPageIds.includes(requestedSubPage)) {
-        return requestedSubPage;
+      if (!isFiltering || matchingCurrentSubPageIds.length === 0 || matchingCurrentSubPageIds.includes(requestedTargetSubPage)) {
+        return requestedTargetSubPage;
       }
     }
 
@@ -341,7 +494,7 @@ export const SettingsShell: React.FC = () => {
     }
 
     return getDefaultSubPage(currentCategory.id);
-  }, [currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage]);
+  }, [currentCategory, isFiltering, matchingCurrentSubPageIds, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
 
   const hasSubTabs = currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
@@ -351,14 +504,15 @@ export const SettingsShell: React.FC = () => {
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const sectionAnnouncement = useMemo(() => {
+    const scopeLabel = currentScopeMeta?.label ?? 'Settings';
     if (!hasSubTabs) {
-      return `${currentCategory.label} settings selected`;
+      return `${scopeLabel}, ${currentCategory.label} selected`;
     }
 
     return activeSubPageLabel
-      ? `${currentCategory.label} settings, ${activeSubPageLabel} section selected`
-      : `${currentCategory.label} settings selected`;
-  }, [activeSubPageLabel, currentCategory.label, hasSubTabs]);
+      ? `${scopeLabel}, ${currentCategory.label}, ${activeSubPageLabel} section selected`
+      : `${scopeLabel}, ${currentCategory.label} selected`;
+  }, [activeSubPageLabel, currentCategory.label, currentScopeMeta, hasSubTabs]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -395,18 +549,23 @@ export const SettingsShell: React.FC = () => {
       return;
     }
 
-    const shouldSyncCategory = isFiltering || requestedCategory !== null;
+    const shouldSyncScope = isFiltering || requestedScope !== null || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
+    const shouldSyncCategory = isFiltering || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
     const shouldSyncSub = requestedSubPage !== null
-      || (activeSubPage !== '' && currentCategory.subPages.length > 0 && (requestedCategory !== null || isFiltering));
+      || (activeSubPage !== '' && currentCategory.subPages.length > 0 && (requestedCategory !== null || isFiltering || activeScope !== DEFAULT_SCOPE));
+    const scopeMismatch = shouldSyncScope && requestedScope !== activeScope;
     const categoryMismatch = shouldSyncCategory && requestedCategory !== effectiveCategory;
     const subMismatch = shouldSyncSub && (requestedSubPage ?? '') !== activeSubPage;
 
-    if (!categoryMismatch && !subMismatch) {
+    if (!scopeMismatch && !categoryMismatch && !subMismatch) {
       return;
     }
 
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
+      if (shouldSyncScope) {
+        next.set('scope', activeScope);
+      }
       if (shouldSyncCategory) {
         next.set('tab', effectiveCategory);
       }
@@ -420,12 +579,14 @@ export const SettingsShell: React.FC = () => {
       return next;
     }, { replace: true });
   }, [
+    activeScope,
     activeSubPage,
     currentCategory.subPages.length,
     effectiveCategory,
     isFiltering,
     matchingCategoryIds,
     requestedCategory,
+    requestedScope,
     requestedSubPage,
     setSearchParams,
   ]);
@@ -474,6 +635,7 @@ export const SettingsShell: React.FC = () => {
   }, [currentCategory, renderedContentKey]);
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
+  const shellTitle = effectiveScope === 'admin' ? 'Admin' : 'Settings';
 
   const toolbar = (
     <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
@@ -503,7 +665,7 @@ export const SettingsShell: React.FC = () => {
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
           isFiltering={isFiltering}
-          ariaLabel={`${currentCategory.label} settings`}
+          ariaLabel={`${currentCategory.label} ${effectiveScope === 'admin' ? 'admin' : 'settings'}`}
           searchQuery={query}
         />
       ) : null}
@@ -542,9 +704,12 @@ export const SettingsShell: React.FC = () => {
           ) : (
             <div className="flex h-full min-h-0 flex-col md:grid md:grid-cols-[18.5rem_minmax(0,1fr)]">
               <SettingsSidebar
-                categories={SETTINGS_CATEGORIES}
+                categories={scopeCategories}
+                activeScope={effectiveScope}
                 activeCategory={effectiveCategory}
+                availableScopes={availableScopes}
                 onCategoryChange={handleCategoryChange}
+                onScopeChange={handleScopeChange}
                 matchingCategoryIds={matchingCategoryIds}
                 isFiltering={isFiltering}
                 searchQuery={query}
@@ -561,8 +726,7 @@ export const SettingsShell: React.FC = () => {
                 <div className="pf-settings-scroll-pane h-full overflow-y-auto overscroll-contain">
                   {toolbar}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
-                    {/* Mobile-only h1 — desktop h1 lives in SettingsSidebar (hidden below md) */}
-                    <h1 className="mb-3 text-lg leading-none text-pf-text-primary md:hidden">Settings</h1>
+                    <h1 className="mb-3 text-lg leading-none text-pf-text-primary md:hidden">{shellTitle}</h1>
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}

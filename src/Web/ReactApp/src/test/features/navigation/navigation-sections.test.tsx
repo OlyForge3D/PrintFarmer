@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -12,13 +12,15 @@ const createTestQueryClient = () => new QueryClient({
   },
 });
 
+let mockUserRole = 'farm_admin';
+
 // Mock contexts and hooks
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
-    user: { id: '1', email: 'admin@test.com', role: 'farm_admin', isActive: true },
+    user: { id: '1', email: 'admin@test.com', role: mockUserRole, isActive: true },
     logout: vi.fn(),
     isAuthenticated: true,
-    hasRole: (role: string) => role === 'farm_admin',
+    hasRole: (role: string) => role === mockUserRole,
     hasPermission: () => true,
   }),
 }));
@@ -75,6 +77,10 @@ describe('Navigation Section Headers', () => {
     );
   };
 
+  beforeEach(() => {
+    mockUserRole = 'farm_admin';
+  });
+
   describe('Slicer profile browsing', () => {
     it('shows slice entry point in the nav (slicer profiles moved to settings)', () => {
       renderLayout();
@@ -87,17 +93,20 @@ describe('Navigation Section Headers', () => {
 
   describe('Nav cleanup for settings and analytics', () => {
     it('shows single-entry analytics, keeps hardware entry points, and removes folded items', () => {
-      renderLayout();
+      const { container } = renderLayout();
  
       const analyticsLink = screen.getByRole('link', { name: /analytics/i });
       const locationsLink = screen.getByRole('link', { name: /locations/i });
+      const settingsLink = container.querySelector('a[href="/settings"]');
+      const adminLink = container.querySelector('a[href="/settings?scope=admin"]');
  
       expect(analyticsLink).toBeInTheDocument();
       expect(analyticsLink).toHaveAttribute('href', '/analytics');
       expect(locationsLink).toBeInTheDocument();
       expect(locationsLink).toHaveAttribute('href', '/locations/dashboard');
+      expect(settingsLink).toBeInTheDocument();
+      expect(adminLink).toBeInTheDocument();
       expect(screen.getByRole('link', { name: /filament inventory/i })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /settings/i })).toBeInTheDocument();
  
       expect(screen.queryByRole('link', { name: /statistics/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /cost analytics/i })).not.toBeInTheDocument();
@@ -105,6 +114,14 @@ describe('Navigation Section Headers', () => {
       expect(screen.queryByRole('link', { name: /nfc bindings/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /printer groups/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: /workers/i })).not.toBeInTheDocument();
+    });
+
+    it('keeps Settings visible for authenticated non-admin users while hiding Admin', () => {
+      mockUserRole = 'operator';
+      const { container } = renderLayout();
+
+      expect(container.querySelector('a[href="/settings"]')).toBeInTheDocument();
+      expect(container.querySelector('a[href="/settings?scope=admin"]')).not.toBeInTheDocument();
     });
   });
 

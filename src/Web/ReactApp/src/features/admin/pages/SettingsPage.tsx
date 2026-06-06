@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { type ReactNode, useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -27,7 +27,17 @@ interface NavItem {
   order?: number;
 }
 
-export function SettingsPage() {
+interface SettingsPageProps {
+  allowedGroups?: string[];
+  introText?: string;
+  afterContent?: ReactNode;
+}
+
+export function SettingsPage({
+  allowedGroups,
+  introText = 'Configure system-wide defaults for your print farm.',
+  afterContent,
+}: SettingsPageProps = {}) {
   const { isSlicerAvailable } = useSlicer();
   const { startTour } = usePageTour({ tourId: 'settings', steps: settingsTour });
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
@@ -85,8 +95,18 @@ export function SettingsPage() {
     return () => { mounted = false; };
   }, [location, refetchSettingsValues]);
 
+  const allowedGroupSet = useMemo(
+    () => allowedGroups ? new Set(allowedGroups) : null,
+    [allowedGroups],
+  );
+
+  const visibleMetadata = useMemo(
+    () => metadata.filter((item) => !allowedGroupSet || allowedGroupSet.has(item.group || 'Other')),
+    [allowedGroupSet, metadata],
+  );
+
   // Build navigation items grouped and sorted
-  const navItems: NavItem[] = metadata.map(m => ({
+  const navItems: NavItem[] = visibleMetadata.map(m => ({
     key: m.key,
     displayName: m.displayName || m.className,
     icon: m.icon,
@@ -152,7 +172,7 @@ export function SettingsPage() {
     setSaveError(null);
     try {
       const allErrors: Record<string, Record<string, string>> = {};
-      for (const metaItem of metadata) {
+      for (const metaItem of visibleMetadata) {
         const sectionKey = metaItem.key;
         const vals = settingsValues[sectionKey] || {};
         const errs = validateSection(metaItem, vals);
@@ -166,7 +186,7 @@ export function SettingsPage() {
       }
 
       const payload: Record<string, unknown> = {};
-      for (const meta of metadata) {
+      for (const meta of visibleMetadata) {
         const sectionKey = meta.key;
         payload[sectionKey] = settingsValues[sectionKey];
       }
@@ -255,7 +275,7 @@ export function SettingsPage() {
       {/* Header with Help Button */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-pf-text-secondary">
-          Configure system-wide defaults for your print farm.
+          {introText}
         </p>
         <HelpButton onClick={startTour} />
       </div>
@@ -323,6 +343,8 @@ export function SettingsPage() {
           </div>
         </section>
       ))}
+
+      {afterContent}
 
       {/* Save button bar */}
       {saveError && (

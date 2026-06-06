@@ -61,8 +61,15 @@ function renderApiKeysRoute(path = '/profile/api-keys') {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          {/* Access-denied sentinel for routes that should be admin-only */}
-          <Route path="/settings" element={<div data-testid="settings-page">Settings (admin only)</div>} />
+          <Route path="/settings" element={<div data-testid="settings-page">Settings</div>} />
+          <Route
+            path="/settings/system"
+            element={
+              <ProtectedRoute requiredRole="farm_admin">
+                <div data-testid="system-settings-page">System Settings</div>
+              </ProtectedRoute>
+            }
+          />
           {/* The corrected route: no farm_admin gate */}
           <Route path="/profile/api-keys" element={<ApiKeysPage />} />
         </Routes>
@@ -98,25 +105,15 @@ describe('ApiKeysPage access control', () => {
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
   });
 
-  it('farm_admin ProtectedRoute still blocks non-admin from /settings', () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/settings']}>
-          <Routes>
-            <Route
-              path="/settings"
-              element={
-                <ProtectedRoute requiredRole="farm_admin">
-                  <div data-testid="settings-content">Settings</div>
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
-    );
-    // Non-admin user should see Access Denied, not the settings content
-    expect(screen.queryByTestId('settings-content')).not.toBeInTheDocument();
+  it('regular users can still access the canonical /settings route', () => {
+    renderApiKeysRoute('/settings');
+    expect(screen.getByTestId('settings-page')).toBeInTheDocument();
+    expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
+  });
+
+  it('farm_admin ProtectedRoute still blocks non-admin from /settings/system', () => {
+    renderApiKeysRoute('/settings/system');
+    expect(screen.queryByTestId('system-settings-page')).not.toBeInTheDocument();
     expect(screen.getByText('Access Denied')).toBeInTheDocument();
   });
 });

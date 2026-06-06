@@ -5,21 +5,23 @@ import type { SettingsCommandItem } from '@/features/settings/settings-navigatio
 
 const items: SettingsCommandItem[] = [
   {
-    id: 'hardware.cameras',
+    id: 'system.hardware.cameras',
+    scopeId: 'system',
     categoryId: 'hardware',
     subPageId: 'cameras',
     label: 'Cameras',
     description: 'Manage printer cameras.',
-    breadcrumb: 'Settings / Hardware / Cameras',
+    breadcrumb: 'Settings / System Settings / Hardware / Cameras',
     keywords: ['camera', 'hardware'],
   },
   {
-    id: 'notifications.email',
-    categoryId: 'notifications',
-    subPageId: 'email',
-    label: 'Email Notifications',
-    description: 'Configure alert emails.',
-    breadcrumb: 'Settings / Notifications / Email',
+    id: 'user.profile.notifications',
+    scopeId: 'user',
+    categoryId: 'profile',
+    subPageId: 'notifications',
+    label: 'Notifications',
+    description: 'Configure personal alerts.',
+    breadcrumb: 'Settings / User Settings / Profile / Notifications',
     keywords: ['email', 'alert', 'notification'],
   },
 ];
