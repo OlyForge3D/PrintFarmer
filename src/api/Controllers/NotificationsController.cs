@@ -182,7 +182,6 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>User notification preferences</returns>
     [HttpGet("preferences")]
     [ProducesResponseType(typeof(NotificationPreferencesDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<NotificationPreferencesDto>> GetPreferencesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -191,21 +190,20 @@ public class NotificationsController(INotificationService notificationService) :
             Guid userId = GetUserIdFromClaims();
 
             NotificationPreferences? preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
-            return preferences == null
-                ? NotFound(new { error = $"Preferences not found for user {userId}" })
-                : Ok(new NotificationPreferencesDto
-                {
-                    UserId = preferences.UserId,
-                    EnableEmailNotifications = preferences.EnableEmailNotifications,
-                    EnablePushNotifications = preferences.EnablePushNotifications,
-                    EnableInAppNotifications = preferences.EnableInAppNotifications,
-                    NotifyOnCompletion = preferences.NotifyOnCompletion,
-                    NotifyOnFailure = preferences.NotifyOnFailure,
-                    NotifyOnStart = preferences.NotifyOnStart,
-                    NotifyOnPause = preferences.NotifyOnPause,
-                    Frequency = preferences.Frequency,
-                    RetentionDays = preferences.RetentionDays
-                });
+            NotificationPreferences effective = preferences ?? new NotificationPreferences { UserId = userId };
+            return Ok(new NotificationPreferencesDto
+            {
+                UserId = effective.UserId,
+                EnableEmailNotifications = effective.EnableEmailNotifications,
+                EnablePushNotifications = effective.EnablePushNotifications,
+                EnableInAppNotifications = effective.EnableInAppNotifications,
+                NotifyOnCompletion = effective.NotifyOnCompletion,
+                NotifyOnFailure = effective.NotifyOnFailure,
+                NotifyOnStart = effective.NotifyOnStart,
+                NotifyOnPause = effective.NotifyOnPause,
+                Frequency = effective.Frequency,
+                RetentionDays = effective.RetentionDays
+            });
         }
         catch (InvalidOperationException)
         {
