@@ -1,5 +1,4 @@
 import { type ReactNode, useEffect, useState, useCallback, useMemo } from 'react';
-import { useLocation } from 'react-router';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '@/common/components/SettingsPagelet';
@@ -49,8 +48,6 @@ export function SettingsPage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [fieldErrorsBySection, setFieldErrorsBySection] = useState<Record<string, Record<string, string>>>({});
 
-  const location = useLocation();
-
   const refetchSettingsValues = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -93,7 +90,8 @@ export function SettingsPage({
         setLoading(false);
       });
     return () => { mounted = false; };
-  }, [location, refetchSettingsValues]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch only on mount; URL changes within the settings shell should not retrigger
+  }, []);
 
   const allowedGroupSet = useMemo(
     () => allowedGroups ? new Set(allowedGroups) : null,
