@@ -98,7 +98,7 @@ export function CriticalAlertsBanner() {
       id: 'service-errors',
       icon: <GearIcon className="h-4 w-4" />,
       message: `${servicesSummary.servicesWithErrors} background service${servicesSummary.servicesWithErrors !== 1 ? 's' : ''} with errors`,
-      link: '/admin/system?tab=services',
+      link: '/settings?scope=admin&tab=operations&sub=workers',
       severity: 'warning',
     });
   }

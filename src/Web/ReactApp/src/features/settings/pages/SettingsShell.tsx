@@ -248,6 +248,8 @@ export const SettingsShell: React.FC = () => {
         } else {
           next.delete('sub');
         }
+        next.delete('q');
+        next.delete('workerTab');
         return next;
       });
     },
@@ -263,6 +265,8 @@ export const SettingsShell: React.FC = () => {
         const next = new URLSearchParams(prev);
         next.set('scope', target.scopeId);
         next.set('tab', target.categoryId);
+        next.delete('q');
+        next.delete('workerTab');
 
         const matchingTargetSubPage = !normalizedQuery || !targetCategory
           ? undefined
@@ -273,15 +277,13 @@ export const SettingsShell: React.FC = () => {
 
         if (matchingTargetSubPage) {
           next.set('sub', matchingTargetSubPage.id);
-        } else if (!normalizedQuery) {
+        } else {
           const defaultSubPage = getDefaultSubPage(target.categoryId);
           if (defaultSubPage) {
             next.set('sub', defaultSubPage);
           } else {
             next.delete('sub');
           }
-        } else {
-          next.delete('sub');
         }
 
         return next;
@@ -298,6 +300,10 @@ export const SettingsShell: React.FC = () => {
         next.set('scope', activeScope);
         next.set('tab', activeCategory);
         next.set('sub', subPageId);
+        next.delete('q');
+        if (subPageId !== 'workers') {
+          next.delete('workerTab');
+        }
         return next;
       });
     },
@@ -340,6 +346,8 @@ export const SettingsShell: React.FC = () => {
         } else {
           next.delete('sub');
         }
+        next.delete('q');
+        next.delete('workerTab');
         return next;
       });
       setIsCommandPaletteOpen(false);
@@ -362,13 +370,10 @@ export const SettingsShell: React.FC = () => {
     let firstSubPageCategoryId: string | undefined;
 
     for (const category of accessibleCategories) {
-      const scopeMeta = getSettingsScope(category.scopeId);
-      const categoryMatches = category.label.toLowerCase().includes(normalizedQuery)
-        || category.keywords.some((keyword) => keyword.includes(normalizedQuery))
-        || scopeMeta?.label.toLowerCase().includes(normalizedQuery)
-        || scopeMeta?.keywords.some((keyword) => keyword.includes(normalizedQuery));
+      const categoryDirectlyMatches = category.label.toLowerCase().includes(normalizedQuery)
+        || category.keywords.some((keyword) => keyword.includes(normalizedQuery));
 
-      if (categoryMatches && !categoryIds.includes(category.id)) {
+      if (categoryDirectlyMatches && !categoryIds.includes(category.id)) {
         categoryIds.push(category.id);
       }
 
@@ -382,6 +387,18 @@ export const SettingsShell: React.FC = () => {
           if (!categoryIds.includes(category.id)) {
             categoryIds.push(category.id);
           }
+        }
+      }
+    }
+
+    // If no direct category/subPage match, fall back to scope-level keyword match
+    if (categoryIds.length === 0 && subPageIds.length === 0) {
+      for (const category of accessibleCategories) {
+        const scopeMeta = getSettingsScope(category.scopeId);
+        const scopeMatches = scopeMeta?.label.toLowerCase().includes(normalizedQuery)
+          || scopeMeta?.keywords.some((keyword) => keyword.includes(normalizedQuery));
+        if (scopeMatches && !categoryIds.includes(category.id)) {
+          categoryIds.push(category.id);
         }
       }
     }
