@@ -190,9 +190,10 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
 interface SettingsShellProps {
   /** Lock the shell to a specific route-level scope group.
    * - 'user': only user settings (no scope switcher)
-   * - 'admin': system + admin scopes (scope switcher between them)
+   * - 'admin': admin scope only (Operations, Users, Data)
+   * - 'system': system scope only (General, Slicing, Hardware, Integrations, Quotas)
    * If omitted, shows all scopes the user can access (legacy behavior). */
-  routeScope?: 'user' | 'admin';
+  routeScope?: 'user' | 'admin' | 'system';
 }
 
 export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
@@ -211,8 +212,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (routeScope === 'user') {
       return SETTINGS_SCOPES.filter((scope) => scope.id === 'user');
     }
+    if (routeScope === 'system') {
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'system' && isFarmAdmin);
+    }
     if (routeScope === 'admin') {
-      return SETTINGS_SCOPES.filter((scope) => scope.adminOnly && isFarmAdmin);
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'admin' && isFarmAdmin);
     }
     return SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin);
   }, [isFarmAdmin, routeScope]);

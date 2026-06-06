@@ -165,12 +165,13 @@ const navigation: NavigationElement[] = [
   },
   {
     name: 'Settings',
-    href: '/settings',
+    href: '/admin/settings',
     icon: GearIcon,
+    requiredRole: 'farm_admin'
   },
   {
     name: 'Admin',
-    href: '/admin/settings',
+    href: '/admin/manage',
     icon: SettingsIcon,
     requiredRole: 'farm_admin'
   },
@@ -501,7 +502,7 @@ export function Layout() {
                           className="w-full justify-start!"
                           iconLeft={<SettingsIcon className="h-4 w-4" />}
                         >
-                          Profile & Preferences
+                          Preferences
                         </Button>
                         <Button
                           type="button"
