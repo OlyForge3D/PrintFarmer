@@ -115,6 +115,21 @@ function LegacySettingsRedirect({
   return <Navigate to={nextLocation} replace />;
 }
 
+const LEGACY_SYSTEM_TAB_MAP: Record<string, string> = {
+  services: '/settings?scope=admin&tab=operations&sub=workers',
+  status: '/settings?scope=admin&tab=operations&sub=status',
+  logs: '/settings?scope=admin&tab=operations&sub=status',
+  connections: '/settings?scope=admin&tab=operations&sub=status',
+  monitoring: '/settings?scope=admin&tab=operations&sub=status',
+};
+
+function LegacySystemTabRedirect() {
+  const location = useLocation();
+  const tabParam = new URLSearchParams(location.search).get('tab');
+  const target = (tabParam && LEGACY_SYSTEM_TAB_MAP[tabParam]) || '/settings?scope=admin&tab=operations&sub=status';
+  return <Navigate to={target} replace />;
+}
+
 /**
  * Route-level gate that blocks access to a feature when platform
  * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
@@ -252,7 +267,7 @@ function AuthenticatedAppRoutes() {
           <Route path="quotas" element={<Navigate to="/settings?scope=system&tab=quotas" replace />} />
           <Route path="power-monitors" element={<PowerMonitorSettingsPage />} />
           <Route path="data" element={<Navigate to="/settings?scope=admin&tab=data&sub=management" replace />} />
-          <Route path="system" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
+          <Route path="system" element={<LegacySystemTabRedirect />} />
           <Route path="monitoring" element={<Navigate to="/settings?scope=admin&tab=operations&sub=status" replace />} />
           <Route path="cameras" element={<Navigate to="/settings?scope=system&tab=hardware&sub=cameras" replace />} />
           <Route path="security/login-audit" element={<Navigate to="/settings?scope=admin&tab=users&sub=audit" replace />} />

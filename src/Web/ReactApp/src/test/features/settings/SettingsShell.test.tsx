@@ -278,9 +278,9 @@ describe('SettingsShell', () => {
 
   it('keeps category-level searches scoped to system settings', () => {
     renderSettings('/settings?q=hardware');
-    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeInTheDocument();
+    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
   });
 
   it('normalizes stale or incomplete system sub-page params to the rendered destination', () => {
