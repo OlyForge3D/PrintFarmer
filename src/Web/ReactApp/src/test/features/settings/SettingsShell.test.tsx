@@ -1,7 +1,8 @@
 import { beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 
 vi.mock('@/common/components/ThemeSwitcher', () => ({
@@ -82,6 +83,12 @@ vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true }),
 }));
 
+vi.mock('sonner', () => ({
+  toast: {
+    info: vi.fn(),
+  },
+}));
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 });
@@ -124,6 +131,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   setAuthRoles(['farm_admin']);
+  vi.clearAllMocks();
 });
 
 describe('SettingsShell', () => {
@@ -131,7 +139,7 @@ describe('SettingsShell', () => {
     setAuthRoles(['farm_user']);
     renderSettings('/settings?scope=system&tab=hardware');
 
-    expect(screen.queryByRole('tab', { name: 'System' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'System' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Admin/i })).not.toBeInTheDocument();
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
@@ -148,8 +156,9 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
-    expect(screen.getAllByRole('tab', { name: 'User' })[0]).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getAllByRole('tab', { name: 'System' })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('radiogroup', { name: 'Settings scopes' })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('radio', { name: 'User' })[0]).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getAllByRole('radio', { name: 'System' })[0]).toHaveAttribute('aria-checked', 'false');
     expect(screen.getAllByRole('button', { name: /Admin/i })[0]).toBeInTheDocument();
     expect(getCategoryButton('Profile')).toBeInTheDocument();
   });
@@ -164,7 +173,7 @@ describe('SettingsShell', () => {
   it('switches to System Settings from the scope switcher', () => {
     renderSettings();
 
-    fireEvent.click(screen.getAllByRole('tab', { name: 'System' })[0]);
+    fireEvent.click(screen.getAllByRole('radio', { name: 'System' })[0]);
 
     expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
@@ -202,6 +211,39 @@ describe('SettingsShell', () => {
 
     expect(screen.getByRole('tab', { name: 'Passkeys' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('passkeys-page')).toHaveAttribute('data-embedded', 'true');
+  });
+
+  it('falls back to the User scope when the scope param is invalid', () => {
+    renderSettings('/settings?scope=not-a-real-scope');
+
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('scope=not-a-real-scope');
+  });
+
+  it('defaults an empty scope param back to User Settings', () => {
+    renderSettings('/settings?scope=');
+
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('scope=&');
+  });
+
+  it('redirects a non-admin away from admin deep links and explains the redirect', async () => {
+    setAuthRoles(['farm_user']);
+    renderSettings('/settings?scope=admin&tab=users&sub=audit');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    });
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('scope=admin');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=users');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=audit');
+    expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
   });
 
   it('renders search input', () => {
@@ -289,6 +331,18 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
+  });
+
+  it('shows a toast when a non-admin is redirected away from admin scope', async () => {
+    setAuthRoles(['farm_user']);
+    renderSettings('/settings?scope=admin');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+    });
+    expect(screen.getAllByRole('heading', { level: 1, name: 'Settings' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
+    expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
   });
 
   it('keeps API Keys reachable under User Settings through legacy links', () => {
