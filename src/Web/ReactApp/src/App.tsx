@@ -210,6 +210,7 @@ function AuthenticatedAppRoutes() {
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
+        <Route path="printers/:printerId" element={<PrintersPage />} />
         <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
         <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin"><PrinterGroupsPage /></ProtectedRoute>} />
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
@@ -251,7 +252,7 @@ function AuthenticatedAppRoutes() {
           <Route index element={<Navigate to="/admin/settings" replace />} />
           <Route path="settings" element={<SettingsShell routeScope="system" />} />
           <Route path="manage" element={<SettingsShell routeScope="admin" />} />
-          <Route path="printers" element={<PrintersPage />} />
+          <Route path="printers" element={<Navigate to="/printers" replace />} />
           <Route path="workers" element={<LegacySettingsRedirect to="/admin/manage?tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
           <Route path="file-health" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
           <Route path="slicer-profiles" element={<Navigate to="/admin/settings?tab=slicing&sub=profiles" replace />} />

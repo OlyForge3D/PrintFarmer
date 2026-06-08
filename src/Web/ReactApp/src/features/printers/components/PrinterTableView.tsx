@@ -1,4 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
+import { PanelRightOpen } from 'lucide-react';
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import styles from './PrinterTableView.module.css';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
@@ -19,6 +20,7 @@ interface PrinterTableViewProps {
   onEdit: (printer: Printer) => void;
   onDelete: (printers: Printer[]) => void;
   onBulkSetMaintenance: (printers: Printer[], inMaintenance: boolean) => void;
+  onOpenDetails?: (printer: Printer) => void;
   onOpenMaintenance: (printer: Printer) => void;
   showEnableColumn?: boolean;
   onToggleEnabled?: (printer: Printer) => void;
@@ -30,6 +32,7 @@ export function PrinterTableView({
   onEdit,
   onDelete,
   onBulkSetMaintenance,
+  onOpenDetails,
   onOpenMaintenance,
   showEnableColumn = false,
   onToggleEnabled,
@@ -401,6 +404,19 @@ export function PrinterTableView({
                   {/* Actions */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
+                      {onOpenDetails && (
+                        <Button
+                          type="button"
+                          onClick={() => onOpenDetails(printer)}
+                          variant="subtle"
+                          size="sm"
+                          className="p-2! h-auto!"
+                          title="Open details sidebar"
+                          aria-label={`Open details for ${printer.name}`}
+                          iconCenter={<PanelRightOpen className="w-4 h-4" />}
+                        ></Button>
+                      )}
+
                       <Button
                         type="button"
                         onClick={() => onOpenMaintenance(printer)}
