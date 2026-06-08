@@ -44,7 +44,8 @@ function renderRedirect(from: string) {
         <Route path="/profile/api-keys" element={<LocationEcho testId="api-keys-location" />} />
         <Route path="/nfc-bindings" element={<LocationEcho testId="nfc-bindings-location" />} />
         <Route path="/printer-groups" element={<LocationEcho testId="printer-groups-location" />} />
-        <Route path="/admin/printers" element={<LocationEcho testId="admin-printers-location" />} />
+        <Route path="/printers" element={<LocationEcho testId="printers-location" />} />
+        <Route path="/admin/printers" element={<Navigate to="/printers" replace />} />
         <Route path="/preferences" element={<Navigate to="/settings" replace />} />
         <Route path="/cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="/cameras/:tabId" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
@@ -128,7 +129,7 @@ describe('Settings nav migration redirects', () => {
     { from: '/profile/api-keys', testId: 'api-keys-location', expected: '/profile/api-keys', label: '/profile/api-keys stays live' },
     { from: '/nfc-bindings', testId: 'nfc-bindings-location', expected: '/nfc-bindings', label: '/nfc-bindings stays live' },
     { from: '/printer-groups', testId: 'printer-groups-location', expected: '/printer-groups', label: '/printer-groups stays live' },
-    { from: '/admin/printers', testId: 'admin-printers-location', expected: '/admin/printers', label: '/admin/printers stays live' },
+    { from: '/admin/printers', testId: 'printers-location', expected: '/printers', label: '/admin/printers → /printers' },
   ];
 
   survivingRouteCases.forEach(({ from, testId, expected, label }) => {
