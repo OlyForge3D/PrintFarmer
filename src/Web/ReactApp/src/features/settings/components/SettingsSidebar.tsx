@@ -236,7 +236,7 @@ interface ScopeSwitcherProps {
 
 function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeSwitcherProps) {
   return (
-    <div className={clsx('rounded-2xl border border-pf-border/80 bg-pf-bg-1/75 p-1', className)} role="tablist" aria-label="Settings scopes">
+    <div className={clsx('rounded-2xl border border-pf-border/80 bg-pf-bg-1/75 p-1', className)} role="radiogroup" aria-label="Settings scopes">
       <div className="grid grid-cols-2 gap-1">
         {scopes.map((scope) => {
           const isActive = scope.id === activeScope;
@@ -244,8 +244,8 @@ function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeS
             <button
               key={scope.id}
               type="button"
-              role="tab"
-              aria-selected={isActive}
+              role="radio"
+              aria-checked={isActive}
               onClick={() => onScopeChange(scope.id)}
               className={clsx(
                 'rounded-xl px-3 py-2 text-sm font-medium transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
