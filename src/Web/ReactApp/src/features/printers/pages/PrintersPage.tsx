@@ -365,7 +365,7 @@ export function PrintersPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
+      <div className="min-h-full bg-pf-bg-2 pt-4 pb-8 lg:pt-20">
         <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
           <div className="pf-skeleton pf-animate-skeleton h-8 w-48 rounded-sm mb-6" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
@@ -392,7 +392,7 @@ export function PrintersPage() {
       icon={PrinterIcon}
       titleActions={<HelpButton onClick={startTour} />}
     >
-      <div className={isSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
+      <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
           <div className="flex flex-col gap-4 mb-6">
@@ -606,14 +606,14 @@ export function PrintersPage() {
           </div>
         </div>
 
-        {/* Printer details sidebar on large screens: fixed overlay on the right */}
         {isSidebarOpen && (
-          <div className="hidden lg:block fixed right-0 top-12 bottom-0 w-96 z-40">
+          <div className="hidden lg:block lg:self-start lg:sticky lg:top-0">
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
               backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
               onClose={handleClosePrinterDetails}
+              layout="content"
             />
           </div>
         )}
