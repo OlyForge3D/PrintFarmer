@@ -40,6 +40,7 @@ import { NozzleTypeLabels, NozzleTypeStringLabels } from '@/types/api';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
+import { SliceProgressOverlay } from '@/features/slicer/components/SliceProgressOverlay';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
 import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
@@ -2366,7 +2367,7 @@ export const NewSliceJobPage: React.FC = () => {
 
         {/* RIGHT SIDE: 3D Workspace */}
         <div className="flex-1 flex flex-col min-h-0">
-          <div className="bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
+          <div className="relative bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
             {selectedPrinterId ? (
               <SlicerWorkspace
                 bedConfig={workspaceBedConfig}
@@ -2390,6 +2391,26 @@ export const NewSliceJobPage: React.FC = () => {
                   <p className="text-sm">Select a printer to open the slicer workspace</p>
                 </div>
               </div>
+            )}
+
+            {/* Slicing progress overlay — covers 3D workspace */}
+            {submittedJobId && (
+              <SliceProgressOverlay
+                jobId={submittedJobId}
+                progress={jobProgress}
+                onNewJob={() => {
+                  setSubmittedJobId(null);
+                  setMessage(null);
+                  setModelFileUrl('');
+                  setModelFileName('');
+                  setBedModels([]);
+                }}
+                onRetry={() => {
+                  setSubmittedJobId(null);
+                  setError(null);
+                  setMessage(null);
+                }}
+              />
             )}
           </div>
         </div>
