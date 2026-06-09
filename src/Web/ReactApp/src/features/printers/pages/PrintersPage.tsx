@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import React, { useCallback, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
@@ -120,7 +120,6 @@ export function PrintersPage() {
   });
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [expandedPrinterId, setExpandedPrinterId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     printers: Printer[];
@@ -177,11 +176,13 @@ export function PrintersPage() {
 
   // Tabs removed — admin controls are now inline and permission-gated
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const { printerId: routePrinterId } = useParams<{ printerId?: string }>();
   const printersById = useMemo(() => {
     const map: Record<string, Printer> = {};
     (printers || []).forEach(p => { map[p.id] = p; });
     return map;
   }, [printers]);
+  const expandedPrinterId = routePrinterId && printersById[routePrinterId] ? routePrinterId : null;
 
   // Hours value for availability filter — cutoff is derived dynamically so it never goes stale
   const [availabilityHours, setAvailabilityHours] = useState<number | null>(null);
@@ -319,6 +320,19 @@ export function PrintersPage() {
     navigate(`/printers/${printer.id}/maintenance`);
   };
 
+  const handleOpenPrinterDetails = useCallback((printerId: string) => {
+    navigate(`/printers/${printerId}`);
+  }, [navigate]);
+
+  const handleClosePrinterDetails = useCallback(() => {
+    navigate('/printers');
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!isLoading && routePrinterId && !printersById[routePrinterId]) {
+      navigate('/printers', { replace: true });
+    }
+  }, [isLoading, navigate, printersById, routePrinterId]);
 
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
@@ -369,7 +383,7 @@ export function PrintersPage() {
     );
   }
 
-  const isCollapsedSidebarOpen = viewMode === 'collapsed' && !!expandedPrinterId;
+  const isSidebarOpen = !!expandedPrinterId;
 
   return (
     <PageTemplate
@@ -378,7 +392,7 @@ export function PrintersPage() {
       icon={PrinterIcon}
       titleActions={<HelpButton onClick={startTour} />}
     >
-      <div className={isCollapsedSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
+      <div className={isSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
           <div className="flex flex-col gap-4 mb-6">
@@ -507,14 +521,14 @@ export function PrintersPage() {
             </div>
           </div>
 
-          {/* Sidebar (Collapsed View) - small screens: between toolbar and grid */}
-          {isCollapsedSidebarOpen && (
+          {/* Printer details sidebar on small screens: between toolbar and grid */}
+          {isSidebarOpen && (
             <div className="lg:hidden mb-6 min-w-0">
               <PrinterDetailsSidebar
                 printerId={expandedPrinterId}
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
                 backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
-                onClose={() => setExpandedPrinterId(null)}
+                onClose={handleClosePrinterDetails}
                 layout="content"
               />
             </div>
@@ -536,7 +550,7 @@ export function PrintersPage() {
                       <CompactPrinterCard
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                        onExpand={() => setExpandedPrinterId(printer.id)}
+                        onExpand={() => handleOpenPrinterDetails(printer.id)}
                         onEdit={() => handleEditPrinter(printer)}
                       />
                     </div>
@@ -550,6 +564,7 @@ export function PrintersPage() {
                       printer={printer}
                       backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                       onEdit={() => handleEditPrinter(printer)}
+                      onOpenDetails={() => handleOpenPrinterDetails(printer.id)}
                     />
                   ))}
                 </div>
@@ -569,6 +584,7 @@ export function PrintersPage() {
                     onEdit={handleEditPrinter}
                     onDelete={handleDeleteClick}
                     onBulkSetMaintenance={handleBulkSetMaintenance}
+                    onOpenDetails={(printer) => handleOpenPrinterDetails(printer.id)}
                     onOpenMaintenance={handleOpenMaintenance}
                     showEnableColumn={hasPermission('printers', 'admin')}
                     onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
@@ -590,14 +606,14 @@ export function PrintersPage() {
           </div>
         </div>
 
-        {/* Sidebar (Collapsed View) - large screens: fixed overlay on the right */}
-        {isCollapsedSidebarOpen && (
+        {/* Printer details sidebar on large screens: fixed overlay on the right */}
+        {isSidebarOpen && (
           <div className="hidden lg:block fixed right-0 top-12 bottom-0 w-96 z-40">
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
               backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
-              onClose={() => setExpandedPrinterId(null)}
+              onClose={handleClosePrinterDetails}
             />
           </div>
         )}

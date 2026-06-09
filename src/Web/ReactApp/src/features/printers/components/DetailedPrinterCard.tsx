@@ -69,10 +69,10 @@ interface DetailedPrinterCardProps {
   printer: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
-  onDismiss?: () => void;
+  onOpenDetails?: () => void;
 }
 
-export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onDismiss }: DetailedPrinterCardProps) {
+export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onOpenDetails }: DetailedPrinterCardProps) {
   // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
   const { data: allPrinters = [] } = usePrinters();
   const queryClient = useQueryClient();
@@ -542,15 +542,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               iconCenter={<EditIcon className="h-4 w-4" />}
             >
             </Button>
-            {onDismiss && (
+            {onOpenDetails && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={onDismiss}
+                onClick={onOpenDetails}
                 className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-                title="Close details sidebar"
-                aria-label="Close details sidebar"
+                title="Open details sidebar"
+                aria-label="Open details sidebar"
                 iconCenter={<PanelRightOpen className="h-4 w-4" />}
               >
               </Button>
