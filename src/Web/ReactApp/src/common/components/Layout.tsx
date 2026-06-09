@@ -828,7 +828,7 @@ export function Layout() {
 
       {userMenuOpen && (
         <div
-          className="fixed inset-0 z-30 pointer-events-auto"
+          className="fixed inset-0 z-10 pointer-events-auto lg:z-30"
           onClick={() => setUserMenuOpen(false)}
           aria-hidden="true"
         />
