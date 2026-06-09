@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import clsx from 'clsx';
 import {
   AccountCheckIcon,
@@ -45,6 +46,8 @@ export function FloatingControlBar({
   onOpenRegister,
   onLogout,
 }: FloatingControlBarProps) {
+  const accountMenuId = useId();
+
   const bar = (
     <div className={mobile ? MOBILE_BAR_CLASS_NAME : FLOATING_BAR_CLASS_NAME}>
       <SystemPulsePill onClick={onViewSystemStatus} />
@@ -57,6 +60,7 @@ export function FloatingControlBar({
           className={clsx(ACCOUNT_BUTTON_CLASS_NAME, userMenuOpen && 'bg-pf-bg-2/80')}
           aria-expanded={userMenuOpen}
           aria-haspopup="menu"
+          aria-controls={userMenuOpen ? accountMenuId : undefined}
           aria-label={isAuthenticated && userName ? `${userName} account menu` : 'Account menu'}
           title={isAuthenticated && userName ? `${userName} account menu` : 'Account menu'}
           onClick={onToggleUserMenu}
@@ -77,7 +81,7 @@ export function FloatingControlBar({
         </Button>
 
         {userMenuOpen && (
-          <div className={MENU_PANEL_CLASS_NAME} role="menu" aria-label="Account menu">
+          <div id={accountMenuId} className={MENU_PANEL_CLASS_NAME} role="menu" aria-label="Account menu">
             <div className="py-1">
               {isAuthenticated && userName ? (
                 <>
