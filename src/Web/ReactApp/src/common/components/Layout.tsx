@@ -141,6 +141,12 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'models', action: 'read' },
     matches: (pathname) => pathname.startsWith('/projects')
   },
+  {
+    name: 'Scheduling',
+    href: '/scheduling',
+    icon: CalendarIcon,
+    matches: (pathname) => pathname.startsWith('/scheduling')
+  },
 
   { name: 'Slicer', icon: BoxIcon, isSectionHeader: true },
   {
@@ -162,13 +168,6 @@ const navigation: NavigationElement[] = [
     icon: TrendingUpIcon,
     requiredRole: 'farm_admin',
     matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
-  },
-  {
-    name: 'Scheduling',
-    href: '/scheduling',
-    icon: CalendarIcon,
-    requiredRole: 'farm_admin',
-    matches: (pathname) => pathname.startsWith('/scheduling')
   },
   {
     name: 'Auto-Dispatch',
