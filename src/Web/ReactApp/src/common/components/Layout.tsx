@@ -642,7 +642,6 @@ export function Layout() {
                 <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
                 <div className="min-w-0">
                   <div className="truncate text-base font-semibold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
-                  <div className="text-xs text-pf-text-tertiary">Command rail</div>
                 </div>
               </div>
               <Button
@@ -708,7 +707,7 @@ export function Layout() {
         <aside
           ref={desktopRailRef}
           className="hidden h-screen min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex"
-          aria-label="Command rail"
+          aria-label="Main navigation"
         >
           <div className="flex h-full min-h-0 w-full flex-col">
             <div className={clsx('border-b border-pf-border', navbarCollapsed ? 'px-2 py-3' : 'px-4 py-4')}>
@@ -718,7 +717,6 @@ export function Layout() {
                   {!navbarCollapsed && (
                     <div className="min-w-0">
                       <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
-                      <div className="text-xs text-pf-text-tertiary">Command rail</div>
                     </div>
                   )}
                 </div>
