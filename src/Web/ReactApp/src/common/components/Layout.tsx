@@ -226,7 +226,39 @@ const MOBILE_TOP_BAR_HEIGHT_PX = 48;
 const EXPANDED_RAIL_WIDTH_PX = 248;
 const COLLAPSED_RAIL_WIDTH_PX = 64;
 const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
 
+function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) {
+    return [];
+  }
+
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+    if (element.hasAttribute('disabled') || element.getAttribute('aria-hidden') === 'true') {
+      return false;
+    }
+
+    return element.tabIndex >= 0;
+  });
+}
+
+function focusFirstElement(container: HTMLElement | null): boolean {
+  const firstFocusable = getFocusableElements(container)[0];
+
+  if (!firstFocusable) {
+    return false;
+  }
+
+  firstFocusable.focus();
+  return true;
+}
 
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
@@ -273,6 +305,14 @@ export function Layout() {
   });
   const [openCollapsedSection, setOpenCollapsedSection] = useState<string | null>(null);
   const desktopRailRef = useRef<HTMLDivElement | null>(null);
+  const mobileDrawerAnnouncementRef = useRef<HTMLDivElement | null>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement | null>(null);
+  const sidebarAnnouncementTimeoutRef = useRef<number | null>(null);
+  const previousSidebarOpenRef = useRef(false);
+  const previousDrawerFocusRef = useRef<HTMLElement | null>(null);
+  const collapsedSectionTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const collapsedSectionPopoverRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
@@ -344,6 +384,35 @@ export function Layout() {
     setUserMenuOpen(false);
   };
 
+  const closeCollapsedSection = useCallback((returnFocus = false) => {
+    setOpenCollapsedSection((current) => {
+      if (returnFocus && current) {
+        window.requestAnimationFrame(() => {
+          collapsedSectionTriggerRefs.current[current]?.focus();
+        });
+      }
+
+      return null;
+    });
+  }, []);
+
+  const announceMobileDrawer = useCallback((message: string) => {
+    if (sidebarAnnouncementTimeoutRef.current !== null) {
+      window.clearTimeout(sidebarAnnouncementTimeoutRef.current);
+    }
+
+    if (mobileDrawerAnnouncementRef.current) {
+      mobileDrawerAnnouncementRef.current.textContent = message;
+    }
+
+    sidebarAnnouncementTimeoutRef.current = window.setTimeout(() => {
+      if (mobileDrawerAnnouncementRef.current) {
+        mobileDrawerAnnouncementRef.current.textContent = '';
+      }
+      sidebarAnnouncementTimeoutRef.current = null;
+    }, 1_500);
+  }, []);
+
   useEffect(() => {
     if (!openCollapsedSection) {
       return;
@@ -354,12 +423,12 @@ export function Layout() {
         return;
       }
 
-      setOpenCollapsedSection(null);
+      closeCollapsedSection(true);
     };
 
     window.addEventListener('pointerdown', handlePointerDown);
     return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [openCollapsedSection]);
+  }, [closeCollapsedSection, openCollapsedSection]);
 
   useEffect(() => {
     if (!sidebarOpen && !userMenuOpen && !openCollapsedSection) {
@@ -370,13 +439,106 @@ export function Layout() {
       if (event.key === 'Escape') {
         setSidebarOpen(false);
         setUserMenuOpen(false);
-        setOpenCollapsedSection(null);
+        closeCollapsedSection(true);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sidebarOpen, userMenuOpen, openCollapsedSection]);
+  }, [closeCollapsedSection, sidebarOpen, userMenuOpen, openCollapsedSection]);
+
+  useEffect(() => {
+    if (!openCollapsedSection) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const popover = collapsedSectionPopoverRefs.current[openCollapsedSection];
+      if (!focusFirstElement(popover)) {
+        popover?.focus();
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [openCollapsedSection]);
+
+  useEffect(() => {
+    if (sidebarOpen) {
+      previousDrawerFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : mobileMenuButtonRef.current;
+
+      const frame = window.requestAnimationFrame(() => {
+        if (!focusFirstElement(mobileDrawerRef.current)) {
+          mobileDrawerRef.current?.focus();
+        }
+      });
+
+      previousSidebarOpenRef.current = true;
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    if (previousSidebarOpenRef.current) {
+      announceMobileDrawer('Navigation menu closed.');
+
+      window.requestAnimationFrame(() => {
+        previousDrawerFocusRef.current?.focus();
+      });
+    }
+
+    previousSidebarOpenRef.current = false;
+
+    return undefined;
+  }, [announceMobileDrawer, sidebarOpen]);
+
+  useEffect(() => {
+    if (!sidebarOpen) {
+      return;
+    }
+
+    announceMobileDrawer('Navigation menu opened.');
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const drawer = mobileDrawerRef.current;
+      const focusableElements = getFocusableElements(drawer);
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        drawer?.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const containsFocus = activeElement ? drawer?.contains(activeElement) : false;
+
+      if (event.shiftKey) {
+        if (!containsFocus || activeElement === firstElement) {
+          event.preventDefault();
+          lastElement.focus();
+        }
+        return;
+      }
+
+      if (!containsFocus || activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [announceMobileDrawer, sidebarOpen]);
+
+  useEffect(() => () => {
+    if (sidebarAnnouncementTimeoutRef.current !== null) {
+      window.clearTimeout(sidebarAnnouncementTimeoutRef.current);
+    }
+  }, []);
 
   const switchToRegister = () => {
     setShowLoginModal(false);
@@ -401,6 +563,7 @@ export function Layout() {
       >
         Skip to main content
       </a>
+      <div ref={mobileDrawerAnnouncementRef} className="sr-only" aria-live="polite" aria-atomic="true" />
 
       <div
         className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
@@ -409,6 +572,7 @@ export function Layout() {
         <header className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden">
           <div className="flex items-center gap-2">
             <Button
+              ref={mobileMenuButtonRef}
               type="button"
               aria-controls="mobile-navigation-drawer"
               aria-expanded={sidebarOpen}
@@ -472,6 +636,7 @@ export function Layout() {
           )}
           style={{ top: `${MOBILE_TOP_BAR_HEIGHT_PX}px` }}
           aria-hidden={!sidebarOpen}
+          inert={!sidebarOpen}
         >
           <div
             className={clsx(
@@ -482,10 +647,12 @@ export function Layout() {
           />
 
           <div
+            ref={mobileDrawerRef}
             id="mobile-navigation-drawer"
             role="dialog"
             aria-modal="true"
-            aria-label="Navigation menu"
+            aria-label="Mobile navigation drawer"
+            tabIndex={-1}
             className={clsx(
               'relative flex h-full w-[248px] max-w-[calc(100vw-1rem)] flex-col border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
               sidebarOpen ? 'translate-x-0' : '-translate-x-full'
@@ -510,7 +677,7 @@ export function Layout() {
               />
             </div>
 
-            <nav className="flex-1 min-h-0 space-y-3 overflow-y-auto px-3 py-3" aria-label="Primary">
+            <nav className="flex-1 min-h-0 space-y-3 overflow-y-auto px-3 py-3" aria-label="Main navigation">
               {navigationGroups.map((group) => {
                 const SectionIcon = group.header.icon;
                 const isSectionActive = group.items.some((item) => isNavItemActive(item));
@@ -570,7 +737,7 @@ export function Layout() {
         <aside
           ref={desktopRailRef}
           className="hidden h-screen min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex"
-          aria-label="Primary navigation rail"
+          aria-label="Command rail"
         >
           <div className="flex h-full min-h-0 w-full flex-col">
             <div className={clsx('border-b border-pf-border', navbarCollapsed ? 'px-2 py-3' : 'px-4 py-4')}>
@@ -595,7 +762,7 @@ export function Layout() {
 
             <nav
               className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-3' : 'px-3 py-4')}
-              aria-label="Primary navigation rail"
+              aria-label="Main navigation"
             >
               {navbarCollapsed ? (
                 <div className="space-y-2">
@@ -608,6 +775,9 @@ export function Layout() {
                     return (
                       <div key={group.header.name} className="relative">
                         <Button
+                          ref={(element) => {
+                            collapsedSectionTriggerRefs.current[group.header.name] = element;
+                          }}
                           type="button"
                           variant="subtle"
                           size="sm"
@@ -628,9 +798,13 @@ export function Layout() {
 
                         {isOpen && (
                           <div
+                            ref={(element) => {
+                              collapsedSectionPopoverRefs.current[group.header.name] = element;
+                            }}
                             id={popoverId}
                             role="dialog"
                             aria-label={`${group.header.name} navigation`}
+                            tabIndex={-1}
                             className="absolute left-full top-0 z-50 ml-3 w-64 rounded-2xl border border-pf-border bg-pf-bg-1 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]"
                           >
                             <div className="mb-1 flex items-center gap-3 rounded-xl px-2 py-2 text-sm font-semibold text-pf-text-primary">
@@ -648,7 +822,7 @@ export function Layout() {
                                   <NavLink
                                     key={item.href}
                                     to={item.href}
-                                    onClick={() => setOpenCollapsedSection(null)}
+                                    onClick={() => closeCollapsedSection()}
                                     className={clsx(
                                       'flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
                                       isActive
