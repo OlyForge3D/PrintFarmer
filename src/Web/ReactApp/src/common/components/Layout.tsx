@@ -943,7 +943,7 @@ export function Layout() {
           data-main-content
           inert={sidebarOpen || undefined}
           tabIndex={-1}
-          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen lg:scroll-pt-16"
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen"
         >
           <EmailConfirmationBanner />
           <PlatformBanner />

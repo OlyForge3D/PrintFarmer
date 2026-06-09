@@ -56,7 +56,7 @@ export function PageTemplate({
 }: PageTemplateProps) {
   return (
     <div
-      className={`min-h-full ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4 lg:pt-20' : 'pb-4'}`}
+      className={`min-h-full ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
       data-header-visible={showHeader ? 'true' : 'false'}
       aria-label={showHeader ? undefined : title}
     >
