@@ -121,12 +121,18 @@ describe('Navigation rail sections', () => {
     const { container } = renderLayout();
 
     const drawerWrapper = container.querySelector('#mobile-navigation-drawer')?.parentElement;
+    const mobileHeader = container.querySelector('header');
+    const mainContent = container.querySelector('#main-content');
     expect(drawerWrapper).toHaveAttribute('inert');
+    expect(mobileHeader).not.toHaveAttribute('inert');
+    expect(mainContent).not.toHaveAttribute('inert');
 
     const menuButton = screen.getByRole('button', { name: 'Open navigation menu' });
     fireEvent.click(menuButton);
 
     expect(drawerWrapper).not.toHaveAttribute('inert');
+    expect(mobileHeader).toHaveAttribute('inert');
+    expect(mainContent).toHaveAttribute('inert');
     const dialog = await screen.findByRole('dialog', { name: 'Mobile navigation drawer' });
     expect(screen.getByText('Navigation menu opened.')).toBeInTheDocument();
     await waitFor(() => {
@@ -137,6 +143,8 @@ describe('Navigation rail sections', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Mobile navigation drawer' })).not.toBeInTheDocument();
       expect(screen.getByText('Navigation menu closed.')).toBeInTheDocument();
+      expect(mobileHeader).not.toHaveAttribute('inert');
+      expect(mainContent).not.toHaveAttribute('inert');
     });
   });
 

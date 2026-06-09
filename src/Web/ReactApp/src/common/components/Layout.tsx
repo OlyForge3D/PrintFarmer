@@ -569,7 +569,10 @@ export function Layout() {
         className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
         style={desktopShellStyle}
       >
-        <header className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden">
+        <header
+          inert={sidebarOpen || undefined}
+          className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"
+        >
           <div className="flex items-center gap-2">
             <Button
               ref={mobileMenuButtonRef}
@@ -978,6 +981,7 @@ export function Layout() {
         <main
           id="main-content"
           data-main-content
+          inert={sidebarOpen || undefined}
           tabIndex={-1}
           className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen lg:scroll-pt-24"
         >
