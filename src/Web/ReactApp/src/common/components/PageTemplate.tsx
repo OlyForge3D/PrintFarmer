@@ -63,7 +63,7 @@ export function PageTemplate({
       <div className={`min-w-0 ${maxWidth} ${padding}`}>
         {/* Page Header */}
         {showHeader && (
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between lg:mr-72">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}

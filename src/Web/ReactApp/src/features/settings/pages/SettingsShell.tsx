@@ -683,7 +683,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const toolbar = (
     <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:mr-72">
         <SettingsSearch value={query} onChange={handleSearchChange} />
         <Button
           type="button"
