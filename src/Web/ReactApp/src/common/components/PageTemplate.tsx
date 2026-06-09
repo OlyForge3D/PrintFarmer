@@ -56,11 +56,11 @@ export function PageTemplate({
 }: PageTemplateProps) {
   return (
     <div
-      className={`min-h-screen ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
+      className={`min-h-full ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4 lg:pt-20' : 'pb-4'}`}
       data-header-visible={showHeader ? 'true' : 'false'}
       aria-label={showHeader ? undefined : title}
     >
-      <div className={`${maxWidth} ${padding}`}>
+      <div className={`min-w-0 ${maxWidth} ${padding}`}>
         {/* Page Header */}
         {showHeader && (
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -78,7 +78,7 @@ export function PageTemplate({
                 </p>
               )}
             </div>
-            {actions && <div className="shrink-0 self-start">{actions}</div>}
+            {actions && <div className="max-w-full self-start sm:shrink-0">{actions}</div>}
           </div>
         )}
 

@@ -167,21 +167,17 @@ function toUnifiedGcode(file: GcodeFile): UnifiedFileRecord {
 }
 
 function compareFiles(a: UnifiedFileRecord, b: UnifiedFileRecord, sortBy: SortOption, sortOrder: 'asc' | 'desc') {
-  let comparison = 0;
+  const comparison = sortBy === 'size'
+    ? (a.fileSize ?? 0) - (b.fileSize ?? 0)
+    : sortBy === 'date'
+      ? new Date(a.uploadedAt ?? 0).getTime() - new Date(b.uploadedAt ?? 0).getTime()
+      : (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' });
 
-  if (sortBy === 'size') {
-    comparison = (a.fileSize ?? 0) - (b.fileSize ?? 0);
-  } else if (sortBy === 'date') {
-    comparison = new Date(a.uploadedAt ?? 0).getTime() - new Date(b.uploadedAt ?? 0).getTime();
-  } else {
-    comparison = (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' });
-  }
+  const fallbackComparison = comparison === 0
+    ? (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' })
+    : comparison;
 
-  if (comparison === 0) {
-    comparison = (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' });
-  }
-
-  return sortOrder === 'asc' ? comparison : comparison * -1;
+  return sortOrder === 'asc' ? fallbackComparison : fallbackComparison * -1;
 }
 
 function getFilterValueFromSearchParams(searchParams: URLSearchParams): FileTypeFilter {
@@ -229,19 +225,6 @@ function toFileItem(file: UnifiedFileRecord): FileItem {
   };
 }
 
-function getFileCategory(file: FileItem): Exclude<FileTypeFilter, 'all'> {
-  if (file.meta?.gcode) {
-    return 'gcode';
-  }
-
-  const model = file.meta?.model3d as Model | undefined;
-  if (!model) {
-    return 'other';
-  }
-
-  return classifyModel(model);
-}
-
 function getFileExtension(file: FileItem): string {
   const model = file.meta?.model3d as Model | undefined;
   return getNormalizedExtension(file.fileName, model?.fileType).toUpperCase();
@@ -249,10 +232,6 @@ function getFileExtension(file: FileItem): string {
 
 function getSourceLabel(file: FileItem): string {
   return file.meta?.gcode ? 'G-Code' : '3D Model';
-}
-
-function getSourceBadgeVariant(file: FileItem): 'primary' | 'info' {
-  return file.meta?.gcode ? 'info' : 'primary';
 }
 
 function formatBytes(bytes?: number) {
@@ -514,9 +493,9 @@ export function FilesPage() {
 
     // Legacy /files/harvest → open harvest modal at /files
     if (LEGACY_ACTION_SEGMENTS.has(legacySegment)) {
-      setShowHarvestModal(true);
+      const frame = window.requestAnimationFrame(() => setShowHarvestModal(true));
       navigate('/files', { replace: true });
-      return;
+      return () => window.cancelAnimationFrame(frame);
     }
 
     const normalizedFilter = LEGACY_SEGMENT_TO_FILTER[legacySegment];
@@ -534,7 +513,11 @@ export function FilesPage() {
   }, [location.pathname, navigate, searchParams]);
 
   useEffect(() => {
-    setSelectedIds([]);
+    const frame = window.requestAnimationFrame(() => {
+      setSelectedIds((current) => (current.length === 0 ? current : []));
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [selectedFilter]);
 
   const selectedModelIds = useMemo(
@@ -1096,7 +1079,7 @@ export function FilesPage() {
             </div>
           )}
 
-          <div className="min-h-[65vh]">
+          <div className="min-h-[65vh] min-w-0 overflow-hidden">
             <FileBrowser
               ref={fileBrowserRef}
               config={config}

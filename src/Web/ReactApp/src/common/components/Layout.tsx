@@ -805,7 +805,7 @@ export function Layout() {
           id="main-content"
           data-main-content
           tabIndex={-1}
-          className="flex-1 min-h-0 overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen"
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen lg:scroll-pt-24"
         >
           <EmailConfirmationBanner />
           <PlatformBanner />
