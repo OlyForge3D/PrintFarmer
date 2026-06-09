@@ -108,6 +108,18 @@ describe('SystemPulsePill', () => {
     });
   });
 
+  it('uses the provided action instead of opening the status panel', () => {
+    const handleClick = vi.fn();
+
+    render(<SystemPulsePill onClick={handleClick} />);
+
+    const trigger = screen.getByRole('button', { name: /system/i });
+    fireEvent.click(trigger);
+
+    expect(handleClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: /system pulse/i })).not.toBeInTheDocument();
+  });
+
   it('stays hidden for non-admin users', () => {
     useAuthMock.mockReturnValue({
       hasRole: () => false,

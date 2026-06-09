@@ -1,10 +1,15 @@
 import { useState } from 'react';
+import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';
 import { useUnreadCount } from '@/common/hooks/useApi';
 import { NotificationDrawer } from './NotificationDrawer';
 
-export function NotificationBell() {
+interface NotificationBellProps {
+  buttonClassName?: string;
+}
+
+export function NotificationBell({ buttonClassName }: NotificationBellProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const { data: unreadCount = 0 } = useUnreadCount();
 
@@ -14,7 +19,10 @@ export function NotificationBell() {
         type="button"
         variant="unstyled"
         onClick={() => setIsDrawerOpen(true)}
-        className="relative flex items-center text-pf-text-secondary hover:text-pf-text-primary cursor-pointer p-0"
+        className={clsx(
+          'relative flex cursor-pointer items-center p-0 text-pf-text-secondary hover:text-pf-text-primary',
+          buttonClassName
+        )}
         title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}` : 'Notifications'}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
       >
