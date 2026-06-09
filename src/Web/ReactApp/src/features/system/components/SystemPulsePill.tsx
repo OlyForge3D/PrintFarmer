@@ -53,6 +53,11 @@ interface UsageMeterProps {
   icon: React.ReactNode;
 }
 
+interface SystemPulsePillProps {
+  onClick?: () => void;
+  className?: string;
+}
+
 function clampPercentage(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
@@ -194,7 +199,7 @@ function UsageMeter({ label, value, details, icon }: UsageMeterProps) {
   );
 }
 
-export function SystemPulsePill() {
+export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {}) {
   const { hasRole } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -202,6 +207,7 @@ export function SystemPulsePill() {
   const dialogTitleId = useId();
   const dialogId = useId();
   const isFarmAdmin = hasRole('farm_admin');
+  const usesExternalAction = typeof onClick === 'function';
 
   const { data, error } = useQuery({
     queryKey: SYSTEM_INFO_QUERY_KEY,
@@ -328,13 +334,15 @@ export function SystemPulsePill() {
           type="button"
           variant="subtle"
           size="sm"
-          disabled
-          title="System status degraded — unable to reach health endpoint"
+          disabled={!usesExternalAction}
+          onClick={onClick}
+          title={usesExternalAction ? 'View system status' : 'System status degraded — unable to reach health endpoint'}
           className={clsx(
             'h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em]',
             errorTone.buttonClassName,
+            className,
           )}
-          aria-label="System status degraded"
+          aria-label={usesExternalAction ? 'System status degraded, view system status' : 'System status degraded'}
         >
           <span className="flex items-center gap-2">
             <span className={clsx('h-2.5 w-2.5 rounded-full', errorTone.dotClassName)} aria-hidden="true" />
@@ -352,14 +360,22 @@ export function SystemPulsePill() {
         type="button"
         variant="subtle"
         size="sm"
-        onClick={() => setIsOpen((currentValue) => !currentValue)}
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        aria-controls={isOpen ? dialogId : undefined}
-        title={`System pulse — ${tone.label}`}
+        onClick={() => {
+          if (usesExternalAction) {
+            onClick();
+            return;
+          }
+
+          setIsOpen((currentValue) => !currentValue);
+        }}
+        aria-expanded={usesExternalAction ? undefined : isOpen}
+        aria-haspopup={usesExternalAction ? undefined : 'dialog'}
+        aria-controls={!usesExternalAction && isOpen ? dialogId : undefined}
+        title={usesExternalAction ? `View system status — ${tone.label}` : `System pulse — ${tone.label}`}
         className={clsx(
           'h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors',
           tone.buttonClassName,
+          className,
         )}
       >
         <span className="flex items-center gap-2">
@@ -372,7 +388,7 @@ export function SystemPulsePill() {
         </span>
       </Button>
 
-      {isOpen && (
+      {!usesExternalAction && isOpen && (
         <div
           ref={panelRef}
           id={dialogId}
