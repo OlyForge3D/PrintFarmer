@@ -44,7 +44,7 @@ jobs:
           echo "placeholder" > orca_assets/README.txt
 
       - name: Upload Orca assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orca-assets
           path: orca_assets/
@@ -57,7 +57,7 @@ jobs:
           echo "placeholder prusa" > prusa_preseed/README.txt
 
       - name: Upload Prusa preseed artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prusa-preseed
           path: prusa_preseed/
@@ -72,13 +72,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download Orca assets artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: orca-assets
           path: build_context/orca
 
       - name: Download Prusa preseed artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: prusa-preseed
           path: build_context/prusa

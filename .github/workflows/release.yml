@@ -69,14 +69,14 @@ jobs:
           config: cliff.toml
           args: --current-tag ${{ github.event.inputs.version }} ${{ steps.prev.outputs.prev_tag && format('--previous-tag {0}', steps.prev.outputs.prev_tag) || '' }}
       - name: Wait for image build
-        uses: lewagon/wait-on-check-action@v1.5.0
+        uses: lewagon/wait-on-check-action@v1.7.0
         with:
           ref: ${{ github.event.inputs.version }}
           check-name: 'Build & Push Images'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 30
       - name: Download artifacts (digests, SBOMs)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Gather release notes skeleton
@@ -136,7 +136,7 @@ jobs:
         run: echo "Signatures verified (non-fatal) where possible." >> RELEASE_NOTES.md
 
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@v2.3.1
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: scorecard.json
           results_format: json

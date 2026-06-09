@@ -19,7 +19,7 @@
 
   <!-- Embed assets as resources -->
   <ItemGroup>
-    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
     <EmbeddedResource Include="lib/Assets/**/*">
       <LogicalName>OrcaSlicer_v2_3_1_Assets_%(Filename)</LogicalName>
     </EmbeddedResource>
