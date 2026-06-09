@@ -721,10 +721,11 @@ export function Layout() {
                   )}
                 </div>
                 {!navbarCollapsed && (
-                  <div className="flex items-center gap-2 rounded-full border border-pf-border bg-pf-bg-2 px-2 py-1 text-xs text-pf-text-tertiary">
-                    <span className={clsx('h-2 w-2 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')} aria-hidden="true" />
-                    {isConnected ? 'Connected' : 'Disconnected'}
-                  </div>
+                  <span
+                    className={clsx('h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
+                    title={isConnected ? 'Connected' : 'Disconnected'}
+                    aria-label={isConnected ? 'Connected' : 'Disconnected'}
+                  />
                 )}
               </div>
             </div>
@@ -941,7 +942,7 @@ export function Layout() {
           data-main-content
           inert={sidebarOpen || undefined}
           tabIndex={-1}
-          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen lg:scroll-pt-24"
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen lg:scroll-pt-16"
         >
           <EmailConfirmationBanner />
           <PlatformBanner />
