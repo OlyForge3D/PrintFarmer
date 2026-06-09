@@ -130,7 +130,7 @@ describe('SystemPulsePill', () => {
     expect(screen.queryByRole('button', { name: /system/i })).not.toBeInTheDocument();
   });
 
-  it('stays hidden when system info fails to load', () => {
+  it('renders a disabled degraded pill when system info fails to load', () => {
     useQueryMock.mockReturnValue({
       data: undefined,
       error: new Error('boom'),
@@ -138,6 +138,6 @@ describe('SystemPulsePill', () => {
 
     render(<SystemPulsePill />);
 
-    expect(screen.queryByRole('button', { name: /system/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /system status degraded/i })).toBeDisabled();
   });
 });
