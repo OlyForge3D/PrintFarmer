@@ -607,7 +607,7 @@ export function PrintersPage() {
         </div>
 
         {isSidebarOpen && (
-          <div className="hidden lg:block lg:self-start lg:sticky lg:top-0">
+          <div className="hidden lg:block lg:self-start lg:sticky lg:top-0 lg:max-h-[calc(100dvh-5rem)]">
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
