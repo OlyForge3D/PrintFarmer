@@ -1029,42 +1029,33 @@ export function FilesPage() {
         actions={headerActions}
       >
         <div className="space-y-4">
-          <div className="rounded-xl border border-pf-border bg-pf-bg-1 p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-sm font-medium text-pf-text-primary">File type filter</p>
-                <p className="text-xs text-pf-text-secondary">One route, one library, no tab-hopping.</p>
-              </div>
-              <div className="flex flex-wrap gap-2" role="group" aria-label="Filter files by type">
-                {FILE_TYPE_OPTIONS.map((option) => {
-                  const isActive = selectedFilter === option.value;
-                  return (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      size="sm"
-                      variant={isActive ? 'primary' : 'secondary'}
-                      iconLeft={<FilterIcon className="h-4 w-4" />}
-                      aria-pressed={isActive}
-                      onClick={() => handleFilterChange(option.value)}
-                      title={option.hint}
-                    >
-                      {option.label}
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter files by type">
+            {FILE_TYPE_OPTIONS.map((option) => {
+              const isActive = selectedFilter === option.value;
+              return (
+                <Button
+                  key={option.value}
+                  type="button"
+                  size="sm"
+                  variant={isActive ? 'primary' : 'secondary'}
+                  iconLeft={<FilterIcon className="h-4 w-4" />}
+                  aria-pressed={isActive}
+                  onClick={() => handleFilterChange(option.value)}
+                  title={option.hint}
+                >
+                  {option.label}
+                </Button>
+              );
+            })}
           </div>
 
           {hasPermission('gcode_harvest', 'execute') && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-pf-border bg-pf-bg-1 px-4 py-3 shadow-sm">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-pf-text-primary">Harvest stays on the page</p>
                 <p className="text-xs text-pf-text-secondary">
                   {activeHarvestCount > 0
-                    ? `${activeHarvestCount} active harvest operation${activeHarvestCount === 1 ? '' : 's'} running right now.`
-                    : 'Launch a new harvest without leaving the unified file list.'}
+                    ? `${activeHarvestCount} active harvest${activeHarvestCount === 1 ? '' : 's'} running`
+                    : 'Harvest G-Code from connected printers'}
                 </p>
               </div>
               <Button
