@@ -107,13 +107,6 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname === '/printers' || /^\/printers\/[^/]+$/.test(pathname)
   },
   {
-    name: 'Maintenance',
-    href: '/maintenance',
-    icon: WrenchIcon,
-    requiredPermission: { resource: 'printers', action: 'read' },
-    matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
-  },
-  {
     name: 'Filament Inventory',
     href: '/spools',
     icon: SpoolIcon,
@@ -162,6 +155,13 @@ const navigation: NavigationElement[] = [
 
 
   { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
+  {
+    name: 'Maintenance',
+    href: '/maintenance',
+    icon: WrenchIcon,
+    requiredRole: 'farm_admin',
+    matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
+  },
   {
     name: 'Analytics',
     href: '/analytics',
