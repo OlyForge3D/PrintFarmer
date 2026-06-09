@@ -172,31 +172,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/slicer') || pathname.startsWith('/profiles/import')
   },
 
-  { name: 'Settings', icon: GearIcon, isSectionHeader: true },
-  {
-    name: 'Preferences',
-    href: '/settings',
-    icon: GearIcon,
-    matches: (pathname) => pathname === '/settings' || pathname.startsWith('/preferences')
-  },
-  {
-    name: 'API Keys',
-    href: '/profile/api-keys',
-    icon: KeyIcon,
-    matches: (pathname) => pathname.startsWith('/profile/api-keys')
-  },
-  {
-    name: 'Notifications',
-    href: '/profile/notifications',
-    icon: NetworkIcon,
-    matches: (pathname) => pathname.startsWith('/profile/notifications')
-  },
-  {
-    name: 'Passkeys',
-    href: '/profile/passkeys',
-    icon: ShieldIcon,
-    matches: (pathname) => pathname.startsWith('/profile/passkeys')
-  },
+
 
   { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
   {
@@ -688,24 +664,16 @@ export function Layout() {
                 return (
                   <section
                     key={group.header.name}
-                    className={clsx(
-                      'rounded-2xl border p-2 shadow-sm',
-                      isSectionActive
-                        ? 'border-pf-accent/35 bg-pf-accent/8'
-                        : 'border-pf-border bg-pf-bg-0/60'
-                    )}
+                    className="space-y-0.5"
                   >
-                    <div className={clsx('flex items-center gap-3 rounded-xl px-2 py-2', isSectionActive ? 'text-pf-accent' : 'text-pf-text-primary')}>
+                    <div className={clsx('flex items-center gap-2 px-3 py-1.5', isSectionActive ? 'text-pf-accent' : 'text-pf-text-tertiary')}>
                       <span aria-hidden="true">
-                        <SectionIcon className="h-5 w-5 shrink-0" />
+                        <SectionIcon className="h-4 w-4 shrink-0" />
                       </span>
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">{group.header.name}</div>
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-pf-text-tertiary">Navigation</div>
-                      </div>
+                      <span className="text-xs font-semibold uppercase tracking-wider">{group.header.name}</span>
                     </div>
 
-                    <div className="mt-1 space-y-1 px-1 pb-1">
+                    <div className="space-y-0.5">
                       {group.items.map((item) => {
                         const ItemIcon = item.icon;
                         const isActive = isNavItemActive(item);
@@ -856,24 +824,16 @@ export function Layout() {
                     return (
                       <section
                         key={group.header.name}
-                        className={clsx(
-                          'rounded-2xl border p-2 shadow-sm',
-                          isSectionActive
-                            ? 'border-pf-accent/35 bg-pf-accent/8'
-                            : 'border-pf-border bg-pf-bg-0/60'
-                        )}
+                        className="space-y-0.5"
                       >
-                        <div className={clsx('flex items-center gap-3 rounded-xl px-2 py-2', isSectionActive ? 'text-pf-accent' : 'text-pf-text-primary')}>
+                        <div className={clsx('flex items-center gap-2 px-3 py-1.5', isSectionActive ? 'text-pf-accent' : 'text-pf-text-tertiary')}>
                           <span aria-hidden="true">
-                            <SectionIcon className="h-5 w-5 shrink-0" />
+                            <SectionIcon className="h-4 w-4 shrink-0" />
                           </span>
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold">{group.header.name}</div>
-                            <div className="text-[11px] uppercase tracking-[0.22em] text-pf-text-tertiary">Rail section</div>
-                          </div>
+                          <span className="text-xs font-semibold uppercase tracking-wider">{group.header.name}</span>
                         </div>
 
-                        <div className="mt-1 space-y-1 px-1 pb-1">
+                        <div className="space-y-0.5">
                           {group.items.map((item) => {
                             const ItemIcon = item.icon;
                             const isActive = isNavItemActive(item);

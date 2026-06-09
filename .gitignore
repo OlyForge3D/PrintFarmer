@@ -131,3 +131,4 @@ snapshots/
 .squad/decisions/inbox/pr-*.diff
 .squad/decisions/inbox/pr-*-view.json
 .squad/decisions/inbox/review-*.txt
+.squad/.cache/
