@@ -132,3 +132,8 @@ snapshots/
 .squad/decisions/inbox/pr-*-view.json
 .squad/decisions/inbox/review-*.txt
 .squad/.cache/
+
+# Temp/debug artifacts
+.tmp-*
+.qa/
+layout_diff.txt
