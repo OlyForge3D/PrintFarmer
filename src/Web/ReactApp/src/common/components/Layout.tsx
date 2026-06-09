@@ -97,25 +97,6 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'printers', action: 'read' },
     matches: (pathname) => pathname.startsWith('/printQueue')
   },
-  {
-    name: 'Auto-Dispatch',
-    href: '/auto-dispatch',
-    icon: PlayIcon,
-    requiredPermission: { resource: 'printers', action: 'read' },
-    matches: (pathname) => pathname.startsWith('/auto-dispatch')
-  },
-  {
-    name: 'Analytics',
-    href: '/analytics',
-    icon: TrendingUpIcon,
-    matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
-  },
-  {
-    name: 'Scheduling',
-    href: '/scheduling',
-    icon: CalendarIcon,
-    matches: (pathname) => pathname.startsWith('/scheduling')
-  },
 
   { name: 'Printers', icon: PrinterIcon, isSectionHeader: true },
   {
@@ -175,6 +156,27 @@ const navigation: NavigationElement[] = [
 
 
   { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
+  {
+    name: 'Analytics',
+    href: '/analytics',
+    icon: TrendingUpIcon,
+    requiredRole: 'farm_admin',
+    matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
+  },
+  {
+    name: 'Scheduling',
+    href: '/scheduling',
+    icon: CalendarIcon,
+    requiredRole: 'farm_admin',
+    matches: (pathname) => pathname.startsWith('/scheduling')
+  },
+  {
+    name: 'Auto-Dispatch',
+    href: '/auto-dispatch',
+    icon: PlayIcon,
+    requiredRole: 'farm_admin',
+    matches: (pathname) => pathname.startsWith('/auto-dispatch')
+  },
   {
     name: 'Catalog',
     href: '/catalog',
