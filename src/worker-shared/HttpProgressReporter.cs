@@ -13,6 +13,7 @@ public class HttpProgressReporter : IProgressReporter
     private readonly ILogger<HttpProgressReporter> _logger;
     private readonly string _apiBaseUrl;
     private readonly string _workerId;
+    private readonly string? _workerApiKey;
 
     public HttpProgressReporter(HttpClient httpClient, ILogger<HttpProgressReporter> logger, IConfiguration configuration)
     {
@@ -23,6 +24,9 @@ public class HttpProgressReporter : IProgressReporter
                    ?? configuration["Worker:ApiBaseUrl"]
                    ?? "http://api:5245";
         _workerId = WorkerIdentity.Create();
+        _workerApiKey = configuration["WorkerAuth:SharedApiKey"]
+                     ?? configuration["WorkerAuth:SharedKey"]
+                     ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
     }
 
     private static StringContent ToJsonContent(object payload)
@@ -31,12 +35,27 @@ public class HttpProgressReporter : IProgressReporter
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
+    private HttpRequestMessage CreateRequest(HttpMethod method, string url, object? payload = null)
+    {
+        HttpRequestMessage request = new(method, url);
+        if (payload is not null)
+        {
+            request.Content = ToJsonContent(payload);
+        }
+        if (!string.IsNullOrWhiteSpace(_workerApiKey))
+        {
+            request.Headers.Add("X-Worker-Key", _workerApiKey);
+        }
+        return request;
+    }
+
     public async Task ReportProgressAsync(Guid jobId, int progress, string message, CancellationToken cancellationToken = default)
     {
         try
         {
-            var payload = new { JobId = jobId, WorkerId = _workerId, Progress = progress, Message = message, Timestamp = DateTime.UtcNow };
-            HttpResponseMessage response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", ToJsonContent(payload), cancellationToken);
+            var payload = new { ProgressPercent = progress, ProgressMessage = message };
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, $"{_apiBaseUrl}/api/slice/{jobId}/progress", payload);
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Progress report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
