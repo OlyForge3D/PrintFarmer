@@ -108,6 +108,18 @@ describe('SystemPulsePill', () => {
     });
   });
 
+  it('uses the provided action instead of opening the status panel', () => {
+    const handleClick = vi.fn();
+
+    render(<SystemPulsePill onClick={handleClick} />);
+
+    const trigger = screen.getByRole('button', { name: /system/i });
+    fireEvent.click(trigger);
+
+    expect(handleClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: /system pulse/i })).not.toBeInTheDocument();
+  });
+
   it('stays hidden for non-admin users', () => {
     useAuthMock.mockReturnValue({
       hasRole: () => false,
@@ -118,7 +130,7 @@ describe('SystemPulsePill', () => {
     expect(screen.queryByRole('button', { name: /system/i })).not.toBeInTheDocument();
   });
 
-  it('stays hidden when system info fails to load', () => {
+  it('renders a disabled degraded pill when system info fails to load', () => {
     useQueryMock.mockReturnValue({
       data: undefined,
       error: new Error('boom'),
@@ -126,6 +138,6 @@ describe('SystemPulsePill', () => {
 
     render(<SystemPulsePill />);
 
-    expect(screen.queryByRole('button', { name: /system/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /system status degraded/i })).toBeDisabled();
   });
 });
