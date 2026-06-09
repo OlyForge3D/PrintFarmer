@@ -343,7 +343,7 @@ function JobTableRow({
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
   const canDownload = job.status === SliceJobStatus.Completed;
-  const canRetry = job.status === SliceJobStatus.Failed;
+  const canRetry = job.status === SliceJobStatus.Failed || job.status === SliceJobStatus.Cancelled;
 
   return (
     <>
@@ -375,7 +375,7 @@ function JobTableRow({
                 size="sm"
                 onClick={onRetry}
                 aria-label="Retry job"
-                title="Retry failed job"
+                title="Retry job"
               >
                 <RefreshIcon className="w-3.5 h-3.5" />
               </Button>
@@ -493,7 +493,7 @@ function JobCard({
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
   const canDownload = job.status === SliceJobStatus.Completed;
-  const canRetry = job.status === SliceJobStatus.Failed;
+  const canRetry = job.status === SliceJobStatus.Failed || job.status === SliceJobStatus.Cancelled;
 
   return (
     <Card>

@@ -488,9 +488,9 @@ public class SliceJobController(
             return Forbid();
         }
 
-        if (job.Status is not SliceJobStatus.Failed)
+        if (job.Status is not SliceJobStatus.Failed and not SliceJobStatus.Cancelled)
         {
-            return BadRequest(new { error = $"Only failed jobs can be retried. Current status: {job.Status}" });
+            return BadRequest(new { error = $"Only failed or cancelled jobs can be retried. Current status: {job.Status}" });
         }
 
         await _jobRepository.RetryJobAsync(id, ct);

@@ -113,19 +113,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         aria-label={`${activeScopeMeta?.label ?? 'Settings'} categories`}
       >
         <div className="border-b border-pf-border/70 px-4 py-5">
-          <h1 className="text-lg leading-none text-pf-text-primary">
-            {activeScope === 'admin' ? 'Admin' : 'Settings'}
-          </h1>
-          <p className="mt-3 text-sm text-pf-text-secondary">
-            {activeScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.'}
-          </p>
-
           {primaryScopes.length > 1 ? (
             <ScopeSwitcher
               scopes={primaryScopes}
               activeScope={activeScope}
               onScopeChange={onScopeChange}
-              className="mt-4"
             />
           ) : null}
 

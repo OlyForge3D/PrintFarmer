@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
+import { PageTemplate } from '@/common/components/PageTemplate';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
@@ -678,6 +679,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     );
   }, [currentCategory, renderedContentKey]);
 
+  const pageTitle = effectiveScope === 'admin' ? 'Admin Console' : 'Settings';
+  const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
+
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
   const shellTitle = effectiveScope === 'admin' ? 'Admin' : 'Settings';
 
@@ -717,7 +721,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   return (
-    <>
+    <PageTemplate
+      title={pageTitle}
+      subtitle={pageDescription}
+      padding="px-0"
+      showHeader
+    >
       <div
         data-settings-shell
         className="pf-settings-surface relative isolate flex flex-1 min-h-0 flex-col pt-4"
@@ -803,6 +812,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         onClose={closeCommandPalette}
         onSelect={navigateToSetting}
       />
-    </>
+    </PageTemplate>
   );
 };
