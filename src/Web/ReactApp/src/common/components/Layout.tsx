@@ -112,12 +112,6 @@ const navigation: NavigationElement[] = [
     icon: SpoolIcon,
     matches: (pathname) => pathname.startsWith('/spools')
   },
-  {
-    name: 'Locations',
-    href: '/locations/dashboard',
-    icon: LocationIcon,
-    matches: (pathname) => pathname.startsWith('/locations')
-  },
 
   { name: 'Files', icon: FolderOpenIcon, isSectionHeader: true },
   {
@@ -161,6 +155,13 @@ const navigation: NavigationElement[] = [
     icon: WrenchIcon,
     requiredRole: 'farm_admin',
     matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
+  },
+  {
+    name: 'Locations',
+    href: '/locations/dashboard',
+    icon: LocationIcon,
+    requiredRole: 'farm_admin',
+    matches: (pathname) => pathname.startsWith('/locations')
   },
   {
     name: 'Analytics',
