@@ -406,7 +406,7 @@ export function Layout() {
         className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
         style={desktopShellStyle}
       >
-        <header className="z-20 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden">
+        <header className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden">
           <div className="flex items-center gap-2">
             <Button
               type="button"
