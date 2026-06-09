@@ -4,6 +4,7 @@ import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirm
 import { TasksBadge } from '@/features/tasks';
 import { NotificationBell } from '@/common/components/NotificationBell';
 import { InstallBanner } from '@/common/components/InstallBanner';
+import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { 
   HomeIcon,
@@ -16,6 +17,9 @@ import {
   LogoutIcon,
   LoginIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
   GearIcon,
   FolderOpenIcon,
   HistoryIcon,
@@ -33,7 +37,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
@@ -178,6 +182,13 @@ const navigation: NavigationElement[] = [
 
 ];
 
+const MOBILE_TOP_BAR_HEIGHT_PX = 48;
+const EXPANDED_RAIL_WIDTH_PX = 248;
+const COLLAPSED_RAIL_WIDTH_PX = 64;
+const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
+const NAV_EXPANDED_STORAGE_KEY = 'pf_nav_expanded_v1';
+
+
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
@@ -192,10 +203,6 @@ export function Layout() {
     [allAutoDispatchStatuses]
   );
   const location = useLocation();
-  // Debug: log current pathname to ensure re-render on navigation
-  useEffect(() => {
-    // location change effect (debug removed)
-  }, [location.pathname]);
 
   // Global debug subscription to printer SignalR events (for dev verification)
   useEffect(() => {
@@ -220,14 +227,14 @@ export function Layout() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [navbarCollapsed, setNavbarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('pf_navbar_collapsed');
+    const saved = localStorage.getItem(NAVBAR_COLLAPSED_STORAGE_KEY);
     return saved ? JSON.parse(saved) : false;
   });
   const [hoveredNavItem, setHoveredNavItem] = useState<string | null>(null);
 
   // Persist navbar collapsed state
   useEffect(() => {
-    localStorage.setItem('pf_navbar_collapsed', JSON.stringify(navbarCollapsed));
+    localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
   }, [navbarCollapsed]);
 
   // Filter navigation based on user permissions, slicer availability, and platform capabilities (stable memoization)
@@ -273,15 +280,12 @@ export function Layout() {
     setUserMenuOpen(false);
   };
 
-  // Key for persisting expanded nav groups
-  const LOCAL_STORAGE_KEY = 'pf_nav_expanded_v1';
-
   // Track which parent menus are expanded (with persistence)
   // Initialize from localStorage with auto-expand for active routes
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     const path = location.pathname;
     try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      const raw = localStorage.getItem(NAV_EXPANDED_STORAGE_KEY);
       let parsed: Record<string, boolean> = {};
       if (raw) {
         const storedData = JSON.parse(raw);
@@ -318,6 +322,30 @@ export function Layout() {
   });
   const [announcement, setAnnouncement] = useState('');
   const announcementTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (announcementTimer.current) {
+        clearTimeout(announcementTimer.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen && !userMenuOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSidebarOpen(false);
+        setUserMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen, userMenuOpen]);
 
   const toggleExpand = (name: string) => {
     setExpanded((prev: Record<string, boolean>) => {
@@ -387,108 +415,106 @@ export function Layout() {
   // Persist expanded changes to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(expanded));
+      localStorage.setItem(NAV_EXPANDED_STORAGE_KEY, JSON.stringify(expanded));
     } catch {
       // ignore
     }
   }, [expanded]);
 
+  const desktopRailWidth = navbarCollapsed ? COLLAPSED_RAIL_WIDTH_PX : EXPANDED_RAIL_WIDTH_PX;
+  const desktopShellStyle = useMemo(() => ({
+    '--pf-layout-rail-width': `${desktopRailWidth}px`,
+  }) as CSSProperties, [desktopRailWidth]);
+
   return (
-    <div className="flex flex-col h-screen bg-pf-bg-0">
-      {/* Live region for accessibility announcements */}
+    <div className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[80] focus:rounded-md focus:bg-pf-bg-1 focus:px-3 focus:py-2 focus:text-sm focus:text-pf-text-primary focus:shadow-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+      >
+        Skip to main content
+      </a>
       <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
-      {/* Top Header Bar */}
-      <header className="bg-pf-bg-1 border-b border-pf-border h-12 shrink-0 z-50">
-        <div className="flex items-center justify-between h-12 px-3">
-          {/* Left side - App branding */}
-          <div className="flex items-center space-x-4">
-            {/* Mobile menu button - toggles sidebar */}
+
+      <div
+        className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
+        style={desktopShellStyle}
+      >
+        <header className="z-20 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden">
+          <div className="flex items-center gap-2">
             <Button
               type="button"
-              aria-label={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
-              title={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-controls="mobile-navigation-drawer"
+              aria-expanded={sidebarOpen}
+              aria-label={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              title={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
               variant="subtle"
               size="sm"
-              className="lg:hidden"
-              onClick={() => setSidebarOpen(prev => !prev)}
-            >
-              <MenuIcon className="h-5 w-5" />
-            </Button>
-
-            {/* App logo and name */}
-            <div className="flex items-center space-x-2">
+              className="h-9 w-9 justify-center px-0"
+              onClick={() => {
+                setSidebarOpen(prev => !prev);
+                setUserMenuOpen(false);
+              }}
+              iconCenter={<MenuIcon className="h-5 w-5" />}
+            />
+            <div className="flex min-w-0 items-center gap-2">
               <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
-              <h1 className="text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
+              </div>
             </div>
           </div>
 
-          {/* Right side - Status and user */}
-          <div className="flex items-center space-x-3">
-            {/* Printer attention badge */}
+          <div className="flex items-center gap-2">
             {pendingAttentionCount > 0 && (
               <Button
                 type="button"
                 variant="unstyled"
                 onClick={() => navigate('/printers?view=collapsed')}
-                className="relative flex items-center text-pf-warning animate-pulse hover:animate-none cursor-pointer p-0 mr-6"
+                className="relative flex h-9 w-9 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-2 focus-visible:ring-2 focus-visible:ring-pf-accent"
                 title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
-                aria-label={`${pendingAttentionCount} printers need attention`}
+                aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
               >
                 <AlertIcon className="h-4 w-4" />
-                <span className="absolute -top-1.5 -right-1.5 bg-pf-warning text-black text-[9px] font-bold rounded-full min-w-3.5 h-3.5 flex items-center justify-center leading-none">
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
                   {pendingAttentionCount}
                 </span>
               </Button>
             )}
 
-            {/* Connection status */}
-            <div className="flex items-center space-x-2">
-              <div 
-                className={`h-2 w-2 rounded-full ${
-                  isConnected ? 'bg-pf-success' : 'bg-pf-error'
-                }`}
-              />
-              <span className="text-sm text-pf-text-tertiary">
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </span>
+            {isAuthenticated && <TasksBadge />}
+            {isAuthenticated && <NotificationBell />}
+            <div className="hidden sm:block">
+              <SystemPulsePill />
             </div>
 
-            <SystemPulsePill />
+            <div className="flex items-center gap-2 rounded-full border border-pf-border bg-pf-bg-2 px-2 py-1">
+              <span className={clsx('h-2 w-2 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')} aria-hidden="true" />
+              <span className="hidden text-xs text-pf-text-tertiary sm:inline">{isConnected ? 'Connected' : 'Disconnected'}</span>
+            </div>
 
-            {/* Pending Tasks Badge */}
-            {isAuthenticated && <TasksBadge />}
-
-            {/* Notification Bell */}
-            {isAuthenticated && <NotificationBell />}
-
-            {/* User menu */}
-            <div className="relative">
+            <div className="relative z-50">
               <Button
                 type="button"
                 variant="subtle"
                 size="sm"
-                className="flex items-center space-x-2"
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-              >
-                {isAuthenticated && user ? (
-                  <>
-                    <AccountCheckIcon className="h-5 w-5 text-pf-success" />
-                  </>
+                className="flex h-9 w-9 justify-center px-0"
+                aria-expanded={userMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setUserMenuOpen(prev => !prev)}
+                iconCenter={isAuthenticated && user ? (
+                  <AccountCheckIcon className="h-5 w-5 text-pf-success" />
                 ) : (
-                  <>
-                    <AccountIcon className="h-5 w-5 text-pf-text-muted" />
-                    <span className="hidden sm:block text-sm">Guest</span>
-                  </>
+                  <AccountIcon className="h-5 w-5 text-pf-text-muted" />
                 )}
-              </Button>
+              />
 
-              {/* User dropdown menu */}
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-10">
+                <div className="absolute right-0 mt-2 w-64 rounded-md border border-pf-border bg-pf-bg-1 shadow-lg">
                   <div className="py-1">
                     {isAuthenticated && user ? (
                       <>
-                          <div className="px-4 py-2 text-sm text-pf-text-secondary border-b border-pf-border">
+                        <div className="border-b border-pf-border px-4 py-2 text-sm text-pf-text-secondary">
                           Signed in as <strong>{user.username}</strong>
                         </div>
                         <Button
@@ -538,124 +564,65 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full justify-start!"
+                          className="flex w-full items-center justify-start!"
                         >
                           Register
                         </Button>
                       </>
                     )}
-
                   </div>
                 </div>
               )}
             </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Mobile sidebar overlay */}
-        {sidebarOpen && (
-          <div className="fixed inset-x-0 top-12 bottom-0 z-40 lg:hidden flex">
-            {/* Backdrop - starts below header so hamburger button remains clickable */}
-            <div className="fixed inset-x-0 top-12 bottom-0 bg-black/75" onClick={() => setSidebarOpen(false)} />
-            
-            {/* Sidebar panel - matches desktop sidebar exactly */}
-            <div className="relative flex flex-col w-56 bg-pf-bg-1 border-r border-pf-border z-10 h-full">
-              {/* Navigation - identical to desktop */}
-              <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
-                {filteredNavigation.map((item, index) => {
-                  // Handle dividers
-                  if (isDivider(item)) {
-                    return (
-                      <div key={`divider-${item.name || index}`} className="my-1.5">
-                        <div className="border-t border-pf-border"></div>
-                      </div>
-                    );
-                  }
+        <div
+          className={clsx(
+            'fixed inset-x-0 bottom-0 z-50 lg:hidden',
+            sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
+          )}
+          style={{ top: `${MOBILE_TOP_BAR_HEIGHT_PX}px` }}
+          aria-hidden={!sidebarOpen}
+        >
+          <div
+            className={clsx(
+              'absolute inset-0 bg-black/60 transition-opacity duration-200',
+              sidebarOpen ? 'opacity-100' : 'opacity-0'
+            )}
+            onClick={() => setSidebarOpen(false)}
+          />
 
-                  // Handle section headers
-                  if (isSectionHeader(item)) {
-                    return (
-                      <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
-                        <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
-                      </div>
-                    );
-                  }
-
-                  const navItem = item as NavigationItem;
-                  const Icon = navItem.icon;
-                  const isExpanded = !!computedExpanded[navItem.name];
-                  
-                  const hasChildren = !!navItem.children?.length;
-                  return (
-                    <div key={navItem.href} className="flex flex-col relative">
-                      {hasChildren ? (
-                        <details open={isExpanded} className="group">
-                          <summary
-                            className="flex items-center px-2 py-1.5 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2"
-                            onClick={e => {
-                              e.preventDefault();
-                              toggleExpand(navItem.name);
-                            }}
-                            tabIndex={0}
-                            role="button"
-                          >
-                            <Icon className="h-5 w-5 shrink-0" />
-                            <span className="flex-1 text-left ml-3">{navItem.name}</span>
-                            <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
-                          </summary>
-                          <div className="ml-6 space-y-0.5 mt-0.5">
-                            {navItem.children!.map((child: NavigationItem) => {
-                              const ChildIcon = child.icon;
-                              return (
-                                <NavLink
-                                  key={child.href}
-                                  to={child.href}
-                                  onClick={() => { setSidebarOpen(false); }}
-                                  className={({ isActive }: { isActive: boolean }) =>
-                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                      ? 'bg-pf-bg-2 text-pf-accent'
-                                      : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                    }`
-                                  }
-                                  end={child.href === '/harvest'}
-                                >
-                                  <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
-                                  {child.name}
-                                </NavLink>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      ) : (
-                        <NavLink
-                          to={navItem.href}
-                          end
-                          onClick={() => { setSidebarOpen(false); }}
-                          className={({ isActive }: { isActive: boolean }) =>
-                            `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                              ? 'bg-pf-bg-2 text-pf-accent font-semibold border-l-3 border-pf-accent'
-                              : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                            }`
-                          }
-                        >
-                          <Icon className="h-5 w-5 shrink-0" />
-                          <span className="flex-1 text-left ml-3">{navItem.name}</span>
-                        </NavLink>
-                      )}
-                    </div>
-                  );
-                })}
-              </nav>
+          <div
+            id="mobile-navigation-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+            className={clsx(
+              'relative flex h-full w-[248px] max-w-[calc(100vw-1rem)] flex-col border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
+              sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+            )}
+          >
+            <div className="flex items-center justify-between border-b border-pf-border px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
+                <div className="min-w-0">
+                  <div className="truncate text-base font-semibold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
+                  <div className="text-xs text-pf-text-tertiary">Shell scaffold</div>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                className="h-9 w-9 justify-center px-0"
+                aria-label="Close navigation menu"
+                onClick={() => setSidebarOpen(false)}
+                iconCenter={<CloseIcon className="h-5 w-5" />}
+              />
             </div>
-          </div>
-        )}
 
-        {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
-        <aside className={`hidden lg:flex lg:shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-14' : 'w-56'}`}>
-          <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
-            <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
+            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-2 py-3" aria-label="Primary">
               {filteredNavigation.map((item, index) => {
                 if (isDivider(item)) {
                   return (
@@ -665,7 +632,121 @@ export function Layout() {
                   );
                 }
 
-                // Section headers — hidden when collapsed, subtle uppercase label when expanded
+                if (isSectionHeader(item)) {
+                  return (
+                    <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-pf-text-tertiary">{item.name}</div>
+                    </div>
+                  );
+                }
+
+                const navItem = item as NavigationItem;
+                const Icon = navItem.icon;
+                const isExpanded = !!computedExpanded[navItem.name];
+                const hasChildren = !!navItem.children?.length;
+
+                return (
+                  <div key={navItem.href} className="relative flex flex-col">
+                    {hasChildren ? (
+                      <details open={isExpanded} className="group">
+                        <summary
+                          className="flex cursor-pointer list-none items-center rounded-md px-2 py-2 text-sm font-medium text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent hover:bg-pf-bg-2 hover:text-pf-text-light"
+                          onClick={event => {
+                            event.preventDefault();
+                            toggleExpand(navItem.name);
+                          }}
+                          tabIndex={0}
+                          role="button"
+                        >
+                          <Icon className="h-5 w-5 shrink-0" />
+                          <span className="ml-3 flex-1 text-left">{navItem.name}</span>
+                          <ChevronDownIcon className={clsx('ml-2 h-4 w-4 transition-transform duration-200', isExpanded && 'rotate-90')} aria-hidden="true" />
+                        </summary>
+                        <div className="mt-0.5 ml-6 space-y-0.5">
+                          {navItem.children!.map((child: NavigationItem) => {
+                            const ChildIcon = child.icon;
+                            return (
+                              <NavLink
+                                key={child.href}
+                                to={child.href}
+                                onClick={() => setSidebarOpen(false)}
+                                className={({ isActive }: { isActive: boolean }) =>
+                                  clsx(
+                                    'group flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                    isActive
+                                      ? 'bg-pf-bg-2 text-pf-accent'
+                                      : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                                  )
+                                }
+                                end={child.href === '/harvest'}
+                              >
+                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
+                                {child.name}
+                              </NavLink>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ) : (
+                      <NavLink
+                        to={navItem.href}
+                        end
+                        onClick={() => setSidebarOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          clsx(
+                            'group flex items-center rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                            isActive
+                              ? 'border-l-3 border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+                              : 'text-pf-text-primary hover:bg-pf-bg-2 hover:text-pf-text-light'
+                          )
+                        }
+                      >
+                        <Icon className="h-5 w-5 shrink-0" />
+                        <span className="ml-3 flex-1 text-left">{navItem.name}</span>
+                      </NavLink>
+                    )}
+                  </div>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+
+        <aside
+          className="hidden h-screen min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex"
+          aria-label="Primary navigation rail"
+        >
+          <div className="flex h-full min-h-0 w-full flex-col">
+            <div className={clsx('border-b border-pf-border', navbarCollapsed ? 'px-2 py-3' : 'px-4 py-4')}>
+              <div className={clsx('flex items-center', navbarCollapsed ? 'justify-center' : 'justify-between gap-3')}>
+                <div className={clsx('flex min-w-0 items-center', navbarCollapsed ? 'justify-center' : 'gap-3')}>
+                  <PrintFarmerLogoIcon decorative className="h-8 w-8 shrink-0 text-pf-accent" />
+                  {!navbarCollapsed && (
+                    <div className="min-w-0">
+                      <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
+                      <div className="text-xs text-pf-text-tertiary">Two-pane shell</div>
+                    </div>
+                  )}
+                </div>
+                {!navbarCollapsed && (
+                  <div className="flex items-center gap-2 rounded-full border border-pf-border bg-pf-bg-2 px-2 py-1 text-xs text-pf-text-tertiary">
+                    <span className={clsx('h-2 w-2 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')} aria-hidden="true" />
+                    {isConnected ? 'Connected' : 'Disconnected'}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-2 py-3" aria-label="Primary">
+              {filteredNavigation.map((item, index) => {
+                if (isDivider(item)) {
+                  return (
+                    <div key={`divider-${item.name || index}`} className="my-1.5">
+                      <div className="border-t border-pf-border"></div>
+                    </div>
+                  );
+                }
+
                 if (isSectionHeader(item)) {
                   if (navbarCollapsed) {
                     return (
@@ -674,9 +755,10 @@ export function Layout() {
                       </div>
                     );
                   }
+
                   return (
                     <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
-                      <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-pf-text-tertiary">{item.name}</div>
                     </div>
                   );
                 }
@@ -685,22 +767,25 @@ export function Layout() {
                 const Icon = navItem.icon;
                 const isExpanded = !!computedExpanded[navItem.name];
                 const isHovered = hoveredNavItem === navItem.name;
-
                 const hasChildren = !!navItem.children?.length;
+
                 return (
                   <div
                     key={navItem.href}
-                    className="flex flex-col relative"
+                    className="relative flex flex-col"
                     onMouseEnter={() => navbarCollapsed && hasChildren && setHoveredNavItem(navItem.name)}
                     onMouseLeave={() => setHoveredNavItem(null)}
                   >
                     {hasChildren ? (
                       <details open={isExpanded} className="group">
                         <summary
-                          className={`flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                          className={clsx(
+                            'flex cursor-pointer list-none items-center rounded-md text-sm font-medium text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent hover:bg-pf-bg-2 hover:text-pf-text-light',
+                            navbarCollapsed ? 'justify-center px-1.5 py-2' : 'px-2 py-2'
+                          )}
                           title={navbarCollapsed ? item.name : undefined}
-                          onClick={e => {
-                            e.preventDefault(); // Prevent native toggle
+                          onClick={event => {
+                            event.preventDefault();
                             toggleExpand(item.name);
                           }}
                           tabIndex={0}
@@ -709,33 +794,34 @@ export function Layout() {
                           <Icon className="h-5 w-5 shrink-0" />
                           {!navbarCollapsed && (
                             <>
-                              <span className="flex-1 text-left ml-3">{item.name}</span>
-                              <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+                              <span className="ml-3 flex-1 text-left">{item.name}</span>
+                              <ChevronDownIcon className={clsx('ml-2 h-4 w-4 transition-transform duration-200', isExpanded && 'rotate-90')} aria-hidden="true" />
                             </>
                           )}
                         </summary>
                         {!navbarCollapsed && (
-                          <div className="ml-6 space-y-0.5 mt-0.5">
-                          {item.children!.map(child => {
-                            const ChildIcon = child.icon;
-                            return (
-                              <NavLink
-                                key={child.href}
-                                to={child.href}
-                                onClick={() => { /* child nav */ }}
-                                className={({ isActive }: { isActive: boolean }) =>
-                                  `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                    ? 'bg-pf-bg-2 text-pf-accent'
-                                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                  }`
-                                }
-                                end={child.href === '/harvest'} // Exact match for parent routes
-                              >
-                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
-                                {child.name}
-                              </NavLink>
-                            );
-                          })}
+                          <div className="mt-0.5 ml-6 space-y-0.5">
+                            {item.children!.map(child => {
+                              const ChildIcon = child.icon;
+                              return (
+                                <NavLink
+                                  key={child.href}
+                                  to={child.href}
+                                  className={({ isActive }: { isActive: boolean }) =>
+                                    clsx(
+                                      'group flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                      isActive
+                                        ? 'bg-pf-bg-2 text-pf-accent'
+                                        : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                                    )
+                                  }
+                                  end={child.href === '/harvest'}
+                                >
+                                  <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
+                                  {child.name}
+                                </NavLink>
+                              );
+                            })}
                           </div>
                         )}
                       </details>
@@ -743,25 +829,26 @@ export function Layout() {
                       <NavLink
                         to={navItem.href}
                         end
-                        onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
-                          `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                            ? `bg-pf-bg-2 text-pf-accent font-semibold${navbarCollapsed ? '' : ' border-l-3 border-pf-accent'}`
-                            : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                          }`
+                          clsx(
+                            'group flex items-center rounded-md text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                            navbarCollapsed ? 'justify-center px-1.5 py-2' : 'px-2 py-2',
+                            isActive
+                              ? clsx('bg-pf-bg-2 font-semibold text-pf-accent', !navbarCollapsed && 'border-l-3 border-pf-accent')
+                              : 'text-pf-text-primary hover:bg-pf-bg-2 hover:text-pf-text-light'
+                          )
                         }
                         title={navbarCollapsed ? navItem.name : undefined}
                       >
                         <Icon className="h-5 w-5 shrink-0" />
-                        {!navbarCollapsed && <span className="flex-1 text-left ml-3">{navItem.name}</span>}
+                        {!navbarCollapsed && <span className="ml-3 flex-1 text-left">{navItem.name}</span>}
                       </NavLink>
                     )}
 
-                    {/* Flyout menu for collapsed nav items with children */}
                     {navbarCollapsed && hasChildren && isHovered && (
-                      <div className="absolute left-full top-0 ml-2 w-48 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-50">
+                      <div className="absolute top-0 left-full z-50 ml-2 w-48 rounded-md border border-pf-border bg-pf-bg-1 shadow-lg">
                         <div className="py-1">
-                          <div className="px-3 py-2 text-xs font-semibold text-pf-text-tertiary border-b border-pf-border">
+                          <div className="border-b border-pf-border px-3 py-2 text-xs font-semibold text-pf-text-tertiary">
                             {navItem.name}
                           </div>
                           {navItem.children!.map((child: NavigationItem) => {
@@ -771,10 +858,12 @@ export function Layout() {
                                 key={child.href}
                                 to={child.href}
                                 className={({ isActive }: { isActive: boolean }) =>
-                                  `flex items-center px-3 py-2 text-sm transition-colors ${isActive
-                                    ? 'bg-pf-bg-2 text-pf-accent'
-                                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                  }`
+                                  clsx(
+                                    'flex items-center px-3 py-2 text-sm transition-colors',
+                                    isActive
+                                      ? 'bg-pf-bg-2 text-pf-accent'
+                                      : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                                  )
                                 }
                                 end={child.href === '/harvest'}
                               >
@@ -791,35 +880,168 @@ export function Layout() {
               })}
             </nav>
 
-            {/* Navbar collapse toggle at bottom */}
-            <div className="border-t border-pf-border p-2 shrink-0">
-              <Button
-                type="button"
-                aria-label={navbarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                title={navbarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                variant="subtle"
-                size="sm"
-                className="w-full flex justify-center"
-                onClick={() => setNavbarCollapsed(!navbarCollapsed)}
-              >
-                <MenuIcon className="h-5 w-5" />
-              </Button>
+            <div className="shrink-0 border-t border-pf-border p-2">
+              {!navbarCollapsed && (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-pf-border bg-pf-bg-2 px-3 py-2">
+                  <SystemPulsePill />
+                  {pendingAttentionCount > 0 && (
+                    <Button
+                      type="button"
+                      variant="unstyled"
+                      onClick={() => navigate('/printers?view=collapsed')}
+                      className="relative flex h-8 w-8 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent"
+                      title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
+                      aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
+                    >
+                      <AlertIcon className="h-4 w-4" />
+                      <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                        {pendingAttentionCount}
+                      </span>
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              <div className={clsx('flex items-center gap-2', navbarCollapsed ? 'flex-col' : 'justify-between')}>
+                <div className={clsx('flex items-center gap-2', navbarCollapsed && 'flex-col')}>
+                  {isAuthenticated && <TasksBadge />}
+                  {isAuthenticated && <NotificationBell />}
+                </div>
+
+                <div className="relative z-50 flex items-center gap-2">
+                  {navbarCollapsed && pendingAttentionCount > 0 && (
+                    <Button
+                      type="button"
+                      variant="unstyled"
+                      onClick={() => navigate('/printers?view=collapsed')}
+                      className="relative flex h-9 w-9 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-2 focus-visible:ring-2 focus-visible:ring-pf-accent"
+                      aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
+                      iconCenter={<AlertIcon className="h-4 w-4" />}
+                    >
+                      <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                        {pendingAttentionCount}
+                      </span>
+                    </Button>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    className={clsx(navbarCollapsed ? 'h-9 w-9 justify-center px-0' : 'h-9 px-3')}
+                    aria-expanded={userMenuOpen}
+                    aria-haspopup="menu"
+                    onClick={() => setUserMenuOpen(prev => !prev)}
+                    iconLeft={isAuthenticated && user ? (
+                      <AccountCheckIcon className="h-5 w-5 text-pf-success" />
+                    ) : (
+                      <AccountIcon className="h-5 w-5 text-pf-text-muted" />
+                    )}
+                  >
+                    {!navbarCollapsed && <span>{isAuthenticated && user ? user.username : 'Guest'}</span>}
+                  </Button>
+
+                  {userMenuOpen && (
+                    <div className="absolute right-0 bottom-full mb-2 w-64 rounded-md border border-pf-border bg-pf-bg-1 shadow-lg">
+                      <div className="py-1">
+                        {isAuthenticated && user ? (
+                          <>
+                            <div className="border-b border-pf-border px-4 py-2 text-sm text-pf-text-secondary">
+                              Signed in as <strong>{user.username}</strong>
+                            </div>
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                navigate('/settings');
+                                setUserMenuOpen(false);
+                              }}
+                              variant="subtle"
+                              size="sm"
+                              className="w-full justify-start!"
+                              iconLeft={<SettingsIcon className="h-4 w-4" />}
+                            >
+                              Preferences
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={handleLogout}
+                              variant="subtle"
+                              size="sm"
+                              className="w-full justify-start!"
+                              iconLeft={<LogoutIcon className="h-4 w-4" />}
+                            >
+                              Sign out
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                setShowLoginModal(true);
+                                setUserMenuOpen(false);
+                              }}
+                              variant="subtle"
+                              size="sm"
+                              className="w-full justify-start!"
+                              iconLeft={<LoginIcon className="h-4 w-4" />}
+                            >
+                              Sign In
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                setShowRegisterModal(true);
+                                setUserMenuOpen(false);
+                              }}
+                              variant="subtle"
+                              size="sm"
+                              className="flex w-full items-center justify-start!"
+                            >
+                              Register
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  aria-label={navbarCollapsed ? 'Expand navigation rail' : 'Collapse navigation rail'}
+                  title={navbarCollapsed ? 'Expand navigation rail' : 'Collapse navigation rail'}
+                  variant="subtle"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => setNavbarCollapsed(prev => !prev)}
+                  iconCenter={navbarCollapsed ? <ChevronRightIcon className="h-5 w-5" /> : <ChevronLeftIcon className="h-5 w-5" />}
+                />
+              </div>
             </div>
           </div>
         </aside>
 
-        {/* Main content area */}
-        <main data-main-content className="flex-1 overflow-y-auto min-h-0">
+        <main
+          id="main-content"
+          data-main-content
+          tabIndex={-1}
+          className="flex-1 min-h-0 overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen"
+        >
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
-          <div className="pt-2 pr-2 pl-2">
+          <div className="px-2 pt-2 pb-4 lg:px-4 lg:pt-4 lg:pb-6">
             <RouteErrorBoundary>
-              <Suspense fallback={
-                <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading page">
-                  <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
-                </div>
-              }>
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="Loading page">
+                    <div className="h-8 w-8 rounded-full border-b-2 border-pf-accent pf-animate-spin"></div>
+                  </div>
+                }
+              >
                 <Outlet />
               </Suspense>
             </RouteErrorBoundary>
@@ -827,7 +1049,6 @@ export function Layout() {
         </main>
       </div>
 
-      {/* Click outside handler for user menu */}
       {userMenuOpen && (
         <div
           className="fixed inset-0 z-30 pointer-events-auto"
@@ -836,7 +1057,6 @@ export function Layout() {
         />
       )}
 
-      {/* Authentication Modals */}
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
