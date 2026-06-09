@@ -137,3 +137,4 @@ snapshots/
 .tmp-*
 .qa/
 layout_diff.txt
+/*.yaml
