@@ -1,0 +1,41 @@
+- generic [ref=e2]:
+  - main [ref=e67]:
+    - generic [ref=e70]:
+      - generic [ref=e72]:
+        - generic [ref=e73]:
+          - img [ref=e75]
+          - generic [ref=e86]:
+            - paragraph [ref=e87]: PrintFarmer Access
+            - heading "Sign In" [level=1] [ref=e88]
+        - button "Close sign in" [ref=e89] [cursor=pointer]:
+          - img "Close" [ref=e91]
+      - generic [ref=e95]:
+        - generic [ref=e96]: Login failed
+        - generic [ref=e97]:
+          - generic [ref=e98]: Username or Email
+          - textbox "Username or Email" [ref=e99]:
+            - /placeholder: Enter your username or email
+        - generic [ref=e100]:
+          - generic [ref=e101]: Password
+          - generic [ref=e102]:
+            - textbox "Password" [ref=e103]:
+              - /placeholder: Enter your password
+            - button "Show password" [ref=e104] [cursor=pointer]:
+              - img "Show" [ref=e106]
+        - generic [ref=e108]:
+          - generic [ref=e109] [cursor=pointer]:
+            - checkbox "Remember me" [ref=e110]
+            - generic [ref=e111]: Remember me
+          - link "Forgot password?" [ref=e112] [cursor=pointer]:
+            - /url: /forgot-password
+        - generic [ref=e113]:
+          - button "Register" [ref=e114] [cursor=pointer]:
+            - generic [ref=e115]: Register
+          - button "Sign In" [disabled] [ref=e116]:
+            - img [ref=e118]
+            - generic [ref=e120]: Sign In
+        - generic [ref=e123]: or
+        - button "Sign in with passkey" [disabled] [ref=e125]:
+          - img [ref=e127]
+          - generic [ref=e129]: Sign in with passkey
+  - region "Notifications alt+T"

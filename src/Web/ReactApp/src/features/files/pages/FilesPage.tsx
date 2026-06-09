@@ -37,10 +37,8 @@ import {
   DownloadIcon,
   EyeIcon,
   FileIcon,
-  FilterIcon,
   LayersTripleOutlineIcon,
   PlayIcon,
-  PlusIcon,
   TagIcon,
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -534,7 +532,6 @@ export function FilesPage() {
     }),
     [selectedIds]
   );
-  const activeHarvestCount = harvestOperations.filter((operation) => operation.status === 'Running').length;
 
   const handleFilterChange = useCallback((filter: FileTypeFilter) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -1020,6 +1017,27 @@ export function FilesPage() {
     </>
   );
 
+  const filterButtons = (
+    <>
+      {FILE_TYPE_OPTIONS.map((option) => {
+        const isActive = selectedFilter === option.value;
+        return (
+          <Button
+            key={option.value}
+            type="button"
+            size="sm"
+            variant={isActive ? 'primary' : 'secondary'}
+            aria-pressed={isActive}
+            onClick={() => handleFilterChange(option.value)}
+            title={option.hint}
+          >
+            {option.label}
+          </Button>
+        );
+      })}
+    </>
+  );
+
   return (
     <>
       <PageTemplate
@@ -1028,62 +1046,20 @@ export function FilesPage() {
         icon={FileIcon}
         actions={headerActions}
       >
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter files by type">
-            {FILE_TYPE_OPTIONS.map((option) => {
-              const isActive = selectedFilter === option.value;
-              return (
-                <Button
-                  key={option.value}
-                  type="button"
-                  size="sm"
-                  variant={isActive ? 'primary' : 'secondary'}
-                  iconLeft={<FilterIcon className="h-4 w-4" />}
-                  aria-pressed={isActive}
-                  onClick={() => handleFilterChange(option.value)}
-                  title={option.hint}
-                >
-                  {option.label}
-                </Button>
-              );
-            })}
-          </div>
-
-          {hasPermission('gcode_harvest', 'execute') && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-pf-border bg-pf-bg-1 px-4 py-3 shadow-sm">
-              <div className="min-w-0">
-                <p className="text-xs text-pf-text-secondary">
-                  {activeHarvestCount > 0
-                    ? `${activeHarvestCount} active harvest${activeHarvestCount === 1 ? '' : 's'} running`
-                    : 'Harvest G-Code from connected printers'}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                iconLeft={<PlusIcon className="h-4 w-4" />}
-                onClick={() => setShowHarvestModal(true)}
-              >
-                Harvest G-Code
-              </Button>
-            </div>
-          )}
-
-          <div className="min-h-[65vh] min-w-0 overflow-hidden">
-            <FileBrowser
-              ref={fileBrowserRef}
-              config={config}
-              sortOptions={FILE_BROWSER_SORT_OPTIONS}
-              columns={modelColumns}
-              renderItemActions={renderItemActions}
-              renderMetadata={renderMetadata}
-              renderCard={renderCard}
-              extraToolbarActions={toolbarActions}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-            />
-          </div>
+        <div className="min-h-[65vh] min-w-0 overflow-hidden">
+          <FileBrowser
+            ref={fileBrowserRef}
+            config={config}
+            sortOptions={FILE_BROWSER_SORT_OPTIONS}
+            columns={modelColumns}
+            renderItemActions={renderItemActions}
+            renderMetadata={renderMetadata}
+            renderCard={renderCard}
+            filterActions={filterButtons}
+            extraToolbarActions={toolbarActions}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
         </div>
       </PageTemplate>
 

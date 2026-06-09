@@ -12,6 +12,7 @@ interface FileBrowserProps<TDomain> {
   renderItemActions?: (file: FileItem) => ReactNode;
   renderMetadata?: (file: FileItem) => ReactNode;
   renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
+  filterActions?: ReactNode;
   extraToolbarActions?: ReactNode;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
@@ -33,6 +34,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
     renderItemActions,
     renderMetadata,
     renderCard,
+    filterActions,
     extraToolbarActions,
     viewMode,
     onViewModeChange,
@@ -62,6 +64,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
           onToggleSortOrder={() => browser.setSort(browser.sortBy)}
           viewMode={browser.viewMode}
           onViewModeChange={browser.setViewMode}
+          filterActions={filterActions}
           extraActions={extraToolbarActions}
         />
 

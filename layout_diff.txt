@@ -1,0 +1,1250 @@
+diff --git a/src/Web/ReactApp/src/common/components/Layout.tsx b/src/Web/ReactApp/src/common/components/Layout.tsx
+index 7666c1f0e..07c83d132 100644
+--- a/src/Web/ReactApp/src/common/components/Layout.tsx
++++ b/src/Web/ReactApp/src/common/components/Layout.tsx
+@@ -2,21 +2,15 @@ import { LoginModal } from '@/features/auth/components/LoginModal';
+ import { RegisterModal } from '@/features/auth/components/RegisterModal';
+ import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
+ import { TasksBadge } from '@/features/tasks';
+-import { NotificationBell } from '@/common/components/NotificationBell';
+ import { InstallBanner } from '@/common/components/InstallBanner';
+ import clsx from 'clsx';
+ import { Button } from '@/common/components/ui';
+-import { 
++import {
+   HomeIcon,
+   PrinterIcon,
+   LayersIcon,
+   SettingsIcon,
+   MenuIcon,
+-  AccountCheckIcon,
+-  AccountIcon,
+-  LogoutIcon,
+-  LoginIcon,
+-  ChevronDownIcon,
+   ChevronLeftIcon,
+   ChevronRightIcon,
+   CloseIcon,
+@@ -30,6 +24,9 @@ import {
+   PlayIcon,
+   CalendarIcon,
+   LocationIcon,
++  KeyIcon,
++  NetworkIcon,
++  ShieldIcon,
+ } from '@/common/components/icons/MdiIcons';
+ import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
+ import { useAuth } from '@/features/auth/hooks/useAuth';
+@@ -37,7 +34,7 @@ import { useSlicer } from '@/hooks/useSlicer';
+ import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+ import { PlatformBanner } from '@/common/components/PlatformBanner';
+ import { useSignalRConnection } from '@/common/hooks/useSignalR';
+-import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
++import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+ import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
+ import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
+ import type { AutoDispatchStatus } from '@/types/api';
+@@ -47,7 +44,7 @@ import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinte
+ import { printerSignalRService } from '@/services/printer-signalr';
+ import { NfcPairingModal } from '@/features/nfc/components/NfcPairingModal';
+ import { useNfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
+-import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
++import { FloatingControlBar } from '@/common/components/FloatingControlBar';
+ import { BoxIcon, SpoolIcon } from 'lucide-react';
+ // Layout now uses <Outlet /> for nested routes
+ 
+@@ -62,7 +59,7 @@ interface NavigationItem {
+   requiresSlicingCapability?: boolean;
+   /** Hide when platform-level model file support is disabled (ARM / Raspberry Pi) */
+   requiresModelFiles?: boolean;
+-  children?: NavigationItem[];
++  matches?: (pathname: string) => boolean;
+   isDivider?: false;
+   isSectionHeader?: false;
+ }
+@@ -74,10 +71,16 @@ interface NavigationDivider {
+ 
+ interface NavigationSectionHeader {
+   name: string;
++  icon: React.ComponentType<{ className?: string }>;
+   isSectionHeader: true;
+   requiredRole?: string;
+ }
+ 
++interface NavigationGroup {
++  header: NavigationSectionHeader;
++  items: NavigationItem[];
++}
++
+ type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionHeader;
+ 
+ const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
+@@ -85,114 +88,152 @@ const isSectionHeader = (item: NavigationElement): item is NavigationSectionHead
+ const isNavigationItem = (item: NavigationElement): item is NavigationItem => !isDivider(item) && !isSectionHeader(item);
+ 
+ const navigation: NavigationElement[] = [
+-  // ΓÇö Operations ΓÇö
+-  { name: 'Operations', isSectionHeader: true },
+-  { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
++  { name: 'Dashboard', icon: HomeIcon, isSectionHeader: true },
++  { name: 'Overview', href: '/dashboard', icon: HomeIcon, matches: (pathname) => pathname === '/' || pathname.startsWith('/dashboard') },
++  {
++    name: 'Print Queue',
++    href: '/printQueue',
++    icon: HistoryIcon,
++    requiredPermission: { resource: 'printers', action: 'read' },
++    matches: (pathname) => pathname.startsWith('/printQueue')
++  },
++  {
++    name: 'Auto-Dispatch',
++    href: '/auto-dispatch',
++    icon: PlayIcon,
++    requiredPermission: { resource: 'printers', action: 'read' },
++    matches: (pathname) => pathname.startsWith('/auto-dispatch')
++  },
++  {
++    name: 'Analytics',
++    href: '/analytics',
++    icon: TrendingUpIcon,
++    matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
++  },
++  {
++    name: 'Scheduling',
++    href: '/scheduling',
++    icon: CalendarIcon,
++    matches: (pathname) => pathname.startsWith('/scheduling')
++  },
++
++  { name: 'Printers', icon: PrinterIcon, isSectionHeader: true },
+   {
+     name: 'Printers',
+     href: '/printers',
+     icon: PrinterIcon,
+-    requiredPermission: { resource: 'printers', action: 'read' }
++    requiredPermission: { resource: 'printers', action: 'read' },
++    matches: (pathname) => pathname === '/printers' || /^\/printers\/[^/]+$/.test(pathname)
++  },
++  {
++    name: 'Maintenance',
++    href: '/maintenance',
++    icon: WrenchIcon,
++    requiredPermission: { resource: 'printers', action: 'read' },
++    matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
+   },
++  {
++    name: 'Filament Inventory',
++    href: '/spools',
++    icon: SpoolIcon,
++    matches: (pathname) => pathname.startsWith('/spools')
++  },
++  {
++    name: 'Locations',
++    href: '/locations/dashboard',
++    icon: LocationIcon,
++    matches: (pathname) => pathname.startsWith('/locations')
++  },
++
++  { name: 'Files', icon: FolderOpenIcon, isSectionHeader: true },
+   {
+     name: 'Files',
+     href: '/files',
+     icon: FolderOpenIcon,
+-    requiredPermission: { resource: 'models', action: 'read' }
++    requiredPermission: { resource: 'models', action: 'read' },
++    matches: (pathname) => pathname.startsWith('/files')
+   },
+   {
+     name: 'Projects',
+     href: '/projects',
+     icon: ClipboardListIcon,
+-    requiredPermission: { resource: 'models', action: 'read' }
++    requiredPermission: { resource: 'models', action: 'read' },
++    matches: (pathname) => pathname.startsWith('/projects')
+   },
++
++  { name: 'Slicer', icon: BoxIcon, isSectionHeader: true },
+   {
+-    name: 'Slice',
++    name: 'Slice Job',
+     href: '/slicer',
+     icon: BoxIcon,
+     requiredPermission: { resource: 'models', action: 'read' },
+     requiresSlicer: true,
+-    requiresSlicingCapability: true
+-  },
+-  {
+-    name: 'Print Queue',
+-    href: '/printQueue',
+-    icon: HistoryIcon,
+-    requiredPermission: { resource: 'printers', action: 'read' }
+-  },
+-  {
+-    name: 'Auto-Dispatch',
+-    href: '/auto-dispatch',
+-    icon: PlayIcon,
+-    requiredPermission: { resource: 'printers', action: 'read' }
++    requiresSlicingCapability: true,
++    matches: (pathname) => pathname.startsWith('/slicer') || pathname.startsWith('/profiles/import')
+   },
+ 
+-  // ΓÇö Hardware ΓÇö
+-  { name: 'Hardware', isSectionHeader: true },
++  { name: 'Settings', icon: GearIcon, isSectionHeader: true },
+   {
+-    name: 'Filament Inventory',
+-    href: '/spools',
+-    icon: SpoolIcon
+-  },
+-  {
+-    name: 'Locations',
+-    href: '/locations/dashboard',
+-    icon: LocationIcon
++    name: 'Preferences',
++    href: '/settings',
++    icon: GearIcon,
++    matches: (pathname) => pathname === '/settings' || pathname.startsWith('/preferences')
+   },
+- 
+-  // ΓÇö Management ΓÇö
+-  { name: 'Management', isSectionHeader: true },
+   {
+-    name: 'Maintenance',
+-    href: '/maintenance',
+-    icon: WrenchIcon,
+-    requiredPermission: { resource: 'printers', action: 'read' }
++    name: 'API Keys',
++    href: '/profile/api-keys',
++    icon: KeyIcon,
++    matches: (pathname) => pathname.startsWith('/profile/api-keys')
+   },
+   {
+-    name: 'Analytics',
+-    href: '/analytics',
+-    icon: TrendingUpIcon,
++    name: 'Notifications',
++    href: '/profile/notifications',
++    icon: NetworkIcon,
++    matches: (pathname) => pathname.startsWith('/profile/notifications')
+   },
+   {
+-    name: 'Scheduling',
+-    href: '/scheduling',
+-    icon: CalendarIcon,
++    name: 'Passkeys',
++    href: '/profile/passkeys',
++    icon: ShieldIcon,
++    matches: (pathname) => pathname.startsWith('/profile/passkeys')
+   },
+ 
+-  // ΓÇö Admin ΓÇö
+-  { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
++  { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
+   {
+     name: 'Catalog',
+     href: '/catalog',
+     icon: LayersIcon,
+-    requiredRole: 'farm_admin'
++    requiredRole: 'farm_admin',
++    matches: (pathname) => pathname.startsWith('/catalog')
+   },
+   {
+-    name: 'Settings',
++    name: 'System Settings',
+     href: '/admin/settings',
+     icon: GearIcon,
+-    requiredRole: 'farm_admin'
++    requiredRole: 'farm_admin',
++    matches: (pathname) => pathname.startsWith('/admin/settings')
+   },
+   {
+-    name: 'Admin',
++    name: 'Admin Console',
+     href: '/admin/manage',
+     icon: SettingsIcon,
+-    requiredRole: 'farm_admin'
++    requiredRole: 'farm_admin',
++    matches: (pathname) => pathname.startsWith('/admin/manage') || pathname.startsWith('/admin/system') || pathname.startsWith('/slice-jobs')
+   },
+-
+ ];
+ 
+ const MOBILE_TOP_BAR_HEIGHT_PX = 48;
+ const EXPANDED_RAIL_WIDTH_PX = 248;
+ const COLLAPSED_RAIL_WIDTH_PX = 64;
+ const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
+-const NAV_EXPANDED_STORAGE_KEY = 'pf_nav_expanded_v1';
+ 
+ 
+ export function Layout() {
+   const { isConnected } = useSignalRConnection('printer');
+   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+   const { isSlicerAvailable } = useSlicer();
++  const canRole = useCallback((role: string) => typeof hasRole === 'function' ? hasRole(role) : user?.role === role, [hasRole, user?.role]);
++  const canPermission = useCallback((resource: string, action: string) => typeof hasPermission === 'function' ? hasPermission(resource, action) : true, [hasPermission]);
+   const { data: capabilities } = useSystemCapabilities();
+ 
+   const navigate = useNavigate();
+@@ -230,17 +271,14 @@ export function Layout() {
+     const saved = localStorage.getItem(NAVBAR_COLLAPSED_STORAGE_KEY);
+     return saved ? JSON.parse(saved) : false;
+   });
+-  const [hoveredNavItem, setHoveredNavItem] = useState<string | null>(null);
++  const [openCollapsedSection, setOpenCollapsedSection] = useState<string | null>(null);
++  const desktopRailRef = useRef<HTMLDivElement | null>(null);
+ 
+-  // Persist navbar collapsed state
+   useEffect(() => {
+     localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
+   }, [navbarCollapsed]);
+ 
+-  // Filter navigation based on user permissions, slicer availability, and platform capabilities (stable memoization)
+   const filteredNavigation = useMemo(() => {
+-    // Helper: check whether a nav item is hidden by platform capabilities.
+-    // Uses `!== false` so items stay visible before the query resolves.
+     const isHiddenByCapabilities = (item: NavigationItem) => {
+       if (item.requiresSlicingCapability && capabilities?.slicingEnabled === false) return true;
+       if (item.requiresModelFiles && capabilities?.modelFilesEnabled === false) return true;
+@@ -248,91 +286,83 @@ export function Layout() {
+     };
+ 
+     if (!isAuthenticated) {
+-      // For non-authenticated users, show only public navigation (including section headers)
+-      return navigation.filter(item => {
++      return navigation.filter((item) => {
+         if (isDivider(item)) return true;
+         if (isSectionHeader(item)) {
+-          if (item.requiredRole) return false;
+-          return true;
++          return !item.requiredRole;
+         }
++
+         if (isHiddenByCapabilities(item)) return false;
+         if (item.requiresSlicer && !isSlicerAvailable) return false;
+         return !item.requiredRole && !item.requiredPermission;
+       });
+     }
+-    
+-    return navigation.filter(item => {
++
++    return navigation.filter((item) => {
+       if (isDivider(item)) return true;
+       if (isSectionHeader(item)) {
+-        if (item.requiredRole && !hasRole(item.requiredRole)) return false;
+-        return true;
++        return !item.requiredRole || canRole(item.requiredRole);
+       }
+-      if (item.requiredRole && !hasRole(item.requiredRole)) return false;
+-      if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
++
++      if (item.requiredRole && !canRole(item.requiredRole)) return false;
++      if (item.requiredPermission && !canPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+       if (isHiddenByCapabilities(item)) return false;
+       if (item.requiresSlicer && !isSlicerAvailable) return false;
+       return true;
+     });
+-  }, [isAuthenticated, hasRole, hasPermission, isSlicerAvailable, capabilities]); // Include all dependencies
++  }, [isAuthenticated, canRole, canPermission, isSlicerAvailable, capabilities]);
++
++  const navigationGroups = useMemo<NavigationGroup[]>(() => {
++    const groups: NavigationGroup[] = [];
++
++    filteredNavigation.forEach((item) => {
++      if (isSectionHeader(item)) {
++        groups.push({ header: item, items: [] });
++        return;
++      }
++
++      if (!isNavigationItem(item) || groups.length === 0) {
++        return;
++      }
++
++      groups[groups.length - 1].items.push(item);
++    });
++
++    return groups.filter((group) => group.items.length > 0);
++  }, [filteredNavigation]);
++
++  const isNavItemActive = (item: NavigationItem) => {
++    if (item.matches) {
++      return item.matches(location.pathname);
++    }
++
++    return location.pathname === item.href || location.pathname.startsWith(`${item.href}/`);
++  };
+ 
+   const handleLogout = async () => {
+     await logout();
+     setUserMenuOpen(false);
+   };
+ 
+-  // Track which parent menus are expanded (with persistence)
+-  // Initialize from localStorage with auto-expand for active routes
+-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+-    const path = location.pathname;
+-    try {
+-      const raw = localStorage.getItem(NAV_EXPANDED_STORAGE_KEY);
+-      let parsed: Record<string, boolean> = {};
+-      if (raw) {
+-        const storedData = JSON.parse(raw);
+-        if (storedData && typeof storedData === 'object') {
+-          parsed = storedData;
+-        }
+-      }
+-      
+-      // Auto-expand groups containing current route during initialization
+-      // Note: filteredNavigation not available yet, so use navigation directly
+-      for (const item of navigation) {
+-        if (isNavigationItem(item) && item.children) {
+-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+-          if (hasActiveChild && !(item.name in parsed)) {
+-            parsed[item.name] = true;
+-          }
+-        }
+-      }
+-      
+-      return parsed;
+-    } catch {
+-      // If parsing fails, at least auto-expand current route
+-      const autoExpanded: Record<string, boolean> = {};
+-      for (const item of navigation) {
+-        if (isNavigationItem(item) && item.children) {
+-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+-          if (hasActiveChild) {
+-            autoExpanded[item.name] = true;
+-          }
+-        }
+-      }
+-      return autoExpanded;
++  useEffect(() => {
++    if (!openCollapsedSection) {
++      return;
+     }
+-  });
+-  const [announcement, setAnnouncement] = useState('');
+-  const announcementTimer = useRef<number | null>(null);
+ 
+-  useEffect(() => {
+-    return () => {
+-      if (announcementTimer.current) {
+-        clearTimeout(announcementTimer.current);
++    const handlePointerDown = (event: PointerEvent) => {
++      if (desktopRailRef.current?.contains(event.target as Node)) {
++        return;
+       }
++
++      setOpenCollapsedSection(null);
+     };
+-  }, []);
++
++    window.addEventListener('pointerdown', handlePointerDown);
++    return () => window.removeEventListener('pointerdown', handlePointerDown);
++  }, [openCollapsedSection]);
+ 
+   useEffect(() => {
+-    if (!sidebarOpen && !userMenuOpen) {
++    if (!sidebarOpen && !userMenuOpen && !openCollapsedSection) {
+       return;
+     }
+ 
+@@ -340,46 +370,13 @@ export function Layout() {
+       if (event.key === 'Escape') {
+         setSidebarOpen(false);
+         setUserMenuOpen(false);
++        setOpenCollapsedSection(null);
+       }
+     };
+ 
+     window.addEventListener('keydown', handleKeyDown);
+     return () => window.removeEventListener('keydown', handleKeyDown);
+-  }, [sidebarOpen, userMenuOpen]);
+-
+-  const toggleExpand = (name: string) => {
+-    setExpanded((prev: Record<string, boolean>) => {
+-      const currentValue = prev[name];
+-      const nextValue = !currentValue;
+-      
+-      // Only update if value actually changes
+-      if (currentValue === nextValue) {
+-        return prev; // No change, return same object to prevent re-render
+-      }
+-      
+-      const next = { ...prev, [name]: nextValue };
+-      
+-      // Find item to get child count (from filtered list so it's permission-safe)
+-      const itemDef = filteredNavigation.find(i => i.name === name);
+-      const childCount = itemDef && isNavigationItem(itemDef) ? itemDef.children?.length ?? 0 : 0;
+-      const message = nextValue
+-        ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
+-        : `${name} section collapsed.`;
+-      
+-      setAnnouncement(message);
+-      
+-      // Clear previous timer
+-      if (announcementTimer.current) {
+-        clearTimeout(announcementTimer.current);
+-      }
+-      announcementTimer.current = window.setTimeout(() => {
+-        setAnnouncement('');
+-        announcementTimer.current = null;
+-      }, 2500);
+-      
+-      return next;
+-    });
+-  };
++  }, [sidebarOpen, userMenuOpen, openCollapsedSection]);
+ 
+   const switchToRegister = () => {
+     setShowLoginModal(false);
+@@ -391,36 +388,6 @@ export function Layout() {
+     setShowLoginModal(true);
+   };
+ 
+-  // (Removed unused prefersReducedMotion calculation to satisfy lint)
+-  
+-  // Compute merged expanded state: user selections + auto-expand for active route
+-  const computedExpanded = useMemo(() => {
+-    const path = location.pathname;
+-    const result = { ...expanded };
+-    
+-    // Auto-expand groups containing current route
+-    for (const item of filteredNavigation) {
+-      if (isNavigationItem(item) && item.children) {
+-        const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+-        // Only auto-expand if user hasn't explicitly set it
+-        if (hasActiveChild && expanded[item.name] === undefined) {
+-          result[item.name] = true;
+-        }
+-      }
+-    }
+-    
+-    return result;
+-  }, [location.pathname, expanded, filteredNavigation]);
+-
+-  // Persist expanded changes to localStorage
+-  useEffect(() => {
+-    try {
+-      localStorage.setItem(NAV_EXPANDED_STORAGE_KEY, JSON.stringify(expanded));
+-    } catch {
+-      // ignore
+-    }
+-  }, [expanded]);
+-
+   const desktopRailWidth = navbarCollapsed ? COLLAPSED_RAIL_WIDTH_PX : EXPANDED_RAIL_WIDTH_PX;
+   const desktopShellStyle = useMemo(() => ({
+     '--pf-layout-rail-width': `${desktopRailWidth}px`,
+@@ -434,7 +401,6 @@ export function Layout() {
+       >
+         Skip to main content
+       </a>
+-      <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
+ 
+       <div
+         className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
+@@ -483,97 +449,19 @@ export function Layout() {
+             )}
+ 
+             {isAuthenticated && <TasksBadge />}
+-            {isAuthenticated && <NotificationBell />}
+-            <div className="hidden sm:block">
+-              <SystemPulsePill />
+-            </div>
+-
+-            <div className="flex items-center gap-2 rounded-full border border-pf-border bg-pf-bg-2 px-2 py-1">
+-              <span className={clsx('h-2 w-2 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')} aria-hidden="true" />
+-              <span className="hidden text-xs text-pf-text-tertiary sm:inline">{isConnected ? 'Connected' : 'Disconnected'}</span>
+-            </div>
+-
+-            <div className="relative z-50">
+-              <Button
+-                type="button"
+-                variant="subtle"
+-                size="sm"
+-                className="flex h-9 w-9 justify-center px-0"
+-                aria-expanded={userMenuOpen}
+-                aria-haspopup="menu"
+-                onClick={() => setUserMenuOpen(prev => !prev)}
+-                iconCenter={isAuthenticated && user ? (
+-                  <AccountCheckIcon className="h-5 w-5 text-pf-success" />
+-                ) : (
+-                  <AccountIcon className="h-5 w-5 text-pf-text-muted" />
+-                )}
+-              />
+-
+-              {userMenuOpen && (
+-                <div className="absolute right-0 mt-2 w-64 rounded-md border border-pf-border bg-pf-bg-1 shadow-lg">
+-                  <div className="py-1">
+-                    {isAuthenticated && user ? (
+-                      <>
+-                        <div className="border-b border-pf-border px-4 py-2 text-sm text-pf-text-secondary">
+-                          Signed in as <strong>{user.username}</strong>
+-                        </div>
+-                        <Button
+-                          type="button"
+-                          onClick={() => {
+-                            navigate('/settings');
+-                            setUserMenuOpen(false);
+-                          }}
+-                          variant="subtle"
+-                          size="sm"
+-                          className="w-full justify-start!"
+-                          iconLeft={<SettingsIcon className="h-4 w-4" />}
+-                        >
+-                          Preferences
+-                        </Button>
+-                        <Button
+-                          type="button"
+-                          onClick={handleLogout}
+-                          variant="subtle"
+-                          size="sm"
+-                          className="w-full justify-start!"
+-                          iconLeft={<LogoutIcon className="h-4 w-4" />}
+-                        >
+-                          Sign out
+-                        </Button>
+-                      </>
+-                    ) : (
+-                      <>
+-                        <Button
+-                          type="button"
+-                          onClick={() => {
+-                            setShowLoginModal(true);
+-                            setUserMenuOpen(false);
+-                          }}
+-                          variant="subtle"
+-                          size="sm"
+-                          className="w-full justify-start!"
+-                          iconLeft={<LoginIcon className="h-4 w-4" />}
+-                        >
+-                          Sign In
+-                        </Button>
+-                        <Button
+-                          type="button"
+-                          onClick={() => {
+-                            setShowRegisterModal(true);
+-                            setUserMenuOpen(false);
+-                          }}
+-                          variant="subtle"
+-                          size="sm"
+-                          className="flex w-full items-center justify-start!"
+-                        >
+-                          Register
+-                        </Button>
+-                      </>
+-                    )}
+-                  </div>
+-                </div>
+-              )}
+-            </div>
++            <FloatingControlBar
++              mobile
++              isAuthenticated={isAuthenticated}
++              userName={user?.username}
++              userMenuOpen={userMenuOpen}
++              onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
++              onCloseUserMenu={() => setUserMenuOpen(false)}
++              onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
++              onOpenPreferences={() => navigate('/settings')}
++              onOpenLogin={() => setShowLoginModal(true)}
++              onOpenRegister={() => setShowRegisterModal(true)}
++              onLogout={handleLogout}
++            />
+           </div>
+         </header>
+ 
+@@ -608,7 +496,7 @@ export function Layout() {
+                 <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
+                 <div className="min-w-0">
+                   <div className="truncate text-base font-semibold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
+-                  <div className="text-xs text-pf-text-tertiary">Shell scaffold</div>
++                  <div className="text-xs text-pf-text-tertiary">Command rail</div>
+                 </div>
+               </div>
+               <Button
+@@ -622,90 +510,57 @@ export function Layout() {
+               />
+             </div>
+ 
+-            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-2 py-3" aria-label="Primary">
+-              {filteredNavigation.map((item, index) => {
+-                if (isDivider(item)) {
+-                  return (
+-                    <div key={`divider-${item.name || index}`} className="my-1.5">
+-                      <div className="border-t border-pf-border"></div>
+-                    </div>
+-                  );
+-                }
+-
+-                if (isSectionHeader(item)) {
+-                  return (
+-                    <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+-                      <div className="text-xs font-semibold uppercase tracking-wider text-pf-text-tertiary">{item.name}</div>
+-                    </div>
+-                  );
+-                }
+-
+-                const navItem = item as NavigationItem;
+-                const Icon = navItem.icon;
+-                const isExpanded = !!computedExpanded[navItem.name];
+-                const hasChildren = !!navItem.children?.length;
++            <nav className="flex-1 min-h-0 space-y-3 overflow-y-auto px-3 py-3" aria-label="Primary">
++              {navigationGroups.map((group) => {
++                const SectionIcon = group.header.icon;
++                const isSectionActive = group.items.some((item) => isNavItemActive(item));
+ 
+                 return (
+-                  <div key={navItem.href} className="relative flex flex-col">
+-                    {hasChildren ? (
+-                      <details open={isExpanded} className="group">
+-                        <summary
+-                          className="flex cursor-pointer list-none items-center rounded-md px-2 py-2 text-sm font-medium text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent hover:bg-pf-bg-2 hover:text-pf-text-light"
+-                          onClick={event => {
+-                            event.preventDefault();
+-                            toggleExpand(navItem.name);
+-                          }}
+-                          tabIndex={0}
+-                          role="button"
+-                        >
+-                          <Icon className="h-5 w-5 shrink-0" />
+-                          <span className="ml-3 flex-1 text-left">{navItem.name}</span>
+-                          <ChevronDownIcon className={clsx('ml-2 h-4 w-4 transition-transform duration-200', isExpanded && 'rotate-90')} aria-hidden="true" />
+-                        </summary>
+-                        <div className="mt-0.5 ml-6 space-y-0.5">
+-                          {navItem.children!.map((child: NavigationItem) => {
+-                            const ChildIcon = child.icon;
+-                            return (
+-                              <NavLink
+-                                key={child.href}
+-                                to={child.href}
+-                                onClick={() => setSidebarOpen(false)}
+-                                className={({ isActive }: { isActive: boolean }) =>
+-                                  clsx(
+-                                    'group flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+-                                    isActive
+-                                      ? 'bg-pf-bg-2 text-pf-accent'
+-                                      : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+-                                  )
+-                                }
+-                                end={child.href === '/harvest'}
+-                              >
+-                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
+-                                {child.name}
+-                              </NavLink>
+-                            );
+-                          })}
+-                        </div>
+-                      </details>
+-                    ) : (
+-                      <NavLink
+-                        to={navItem.href}
+-                        end
+-                        onClick={() => setSidebarOpen(false)}
+-                        className={({ isActive }: { isActive: boolean }) =>
+-                          clsx(
+-                            'group flex items-center rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+-                            isActive
+-                              ? 'border-l-3 border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+-                              : 'text-pf-text-primary hover:bg-pf-bg-2 hover:text-pf-text-light'
+-                          )
+-                        }
+-                      >
+-                        <Icon className="h-5 w-5 shrink-0" />
+-                        <span className="ml-3 flex-1 text-left">{navItem.name}</span>
+-                      </NavLink>
++                  <section
++                    key={group.header.name}
++                    className={clsx(
++                      'rounded-2xl border p-2 shadow-sm',
++                      isSectionActive
++                        ? 'border-pf-accent/35 bg-pf-accent/8'
++                        : 'border-pf-border bg-pf-bg-0/60'
+                     )}
+-                  </div>
++                  >
++                    <div className={clsx('flex items-center gap-3 rounded-xl px-2 py-2', isSectionActive ? 'text-pf-accent' : 'text-pf-text-primary')}>
++                      <span aria-hidden="true">
++                        <SectionIcon className="h-5 w-5 shrink-0" />
++                      </span>
++                      <div className="min-w-0">
++                        <div className="text-sm font-semibold">{group.header.name}</div>
++                        <div className="text-[11px] uppercase tracking-[0.22em] text-pf-text-tertiary">Navigation</div>
++                      </div>
++                    </div>
++
++                    <div className="mt-1 space-y-1 px-1 pb-1">
++                      {group.items.map((item) => {
++                        const ItemIcon = item.icon;
++                        const isActive = isNavItemActive(item);
++
++                        return (
++                          <NavLink
++                            key={item.href}
++                            to={item.href}
++                            onClick={() => setSidebarOpen(false)}
++                            className={clsx(
++                              'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
++                              isActive
++                                ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
++                                : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
++                            )}
++                          >
++                            <span aria-hidden="true">
++                              <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
++                            </span>
++                            <span className="flex-1 text-left">{item.name}</span>
++                          </NavLink>
++                        );
++                      })}
++                    </div>
++                  </section>
+                 );
+               })}
+             </nav>
+@@ -713,6 +568,7 @@ export function Layout() {
+         </div>
+ 
+         <aside
++          ref={desktopRailRef}
+           className="hidden h-screen min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex"
+           aria-label="Primary navigation rail"
+         >
+@@ -724,7 +580,7 @@ export function Layout() {
+                   {!navbarCollapsed && (
+                     <div className="min-w-0">
+                       <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
+-                      <div className="text-xs text-pf-text-tertiary">Two-pane shell</div>
++                      <div className="text-xs text-pf-text-tertiary">Command rail</div>
+                     </div>
+                   )}
+                 </div>
+@@ -737,178 +593,165 @@ export function Layout() {
+               </div>
+             </div>
+ 
+-            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-2 py-3" aria-label="Primary">
+-              {filteredNavigation.map((item, index) => {
+-                if (isDivider(item)) {
+-                  return (
+-                    <div key={`divider-${item.name || index}`} className="my-1.5">
+-                      <div className="border-t border-pf-border"></div>
+-                    </div>
+-                  );
+-                }
++            <nav
++              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-3' : 'px-3 py-4')}
++              aria-label="Primary navigation rail"
++            >
++              {navbarCollapsed ? (
++                <div className="space-y-2">
++                  {navigationGroups.map((group) => {
++                    const SectionIcon = group.header.icon;
++                    const isSectionActive = group.items.some((item) => isNavItemActive(item));
++                    const isOpen = openCollapsedSection === group.header.name;
++                    const popoverId = `rail-popover-${group.header.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+ 
+-                if (isSectionHeader(item)) {
+-                  if (navbarCollapsed) {
+                     return (
+-                      <div key={`section-${item.name}`} className="my-1.5">
+-                        <div className="border-t border-pf-border"></div>
+-                      </div>
+-                    );
+-                  }
+-
+-                  return (
+-                    <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+-                      <div className="text-xs font-semibold uppercase tracking-wider text-pf-text-tertiary">{item.name}</div>
+-                    </div>
+-                  );
+-                }
+-
+-                const navItem = item as NavigationItem;
+-                const Icon = navItem.icon;
+-                const isExpanded = !!computedExpanded[navItem.name];
+-                const isHovered = hoveredNavItem === navItem.name;
+-                const hasChildren = !!navItem.children?.length;
+-
+-                return (
+-                  <div
+-                    key={navItem.href}
+-                    className="relative flex flex-col"
+-                    onMouseEnter={() => navbarCollapsed && hasChildren && setHoveredNavItem(navItem.name)}
+-                    onMouseLeave={() => setHoveredNavItem(null)}
+-                  >
+-                    {hasChildren ? (
+-                      <details open={isExpanded} className="group">
+-                        <summary
++                      <div key={group.header.name} className="relative">
++                        <Button
++                          type="button"
++                          variant="subtle"
++                          size="sm"
+                           className={clsx(
+-                            'flex cursor-pointer list-none items-center rounded-md text-sm font-medium text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent hover:bg-pf-bg-2 hover:text-pf-text-light',
+-                            navbarCollapsed ? 'justify-center px-1.5 py-2' : 'px-2 py-2'
++                            'h-11 w-11 justify-center rounded-2xl border px-0',
++                            isSectionActive
++                              ? 'border-pf-accent bg-pf-accent/12 text-pf-accent'
++                              : 'border-pf-border text-pf-text-primary hover:bg-pf-bg-2'
+                           )}
+-                          title={navbarCollapsed ? item.name : undefined}
+-                          onClick={event => {
+-                            event.preventDefault();
+-                            toggleExpand(item.name);
+-                          }}
+-                          tabIndex={0}
+-                          role="button"
+-                        >
+-                          <Icon className="h-5 w-5 shrink-0" />
+-                          {!navbarCollapsed && (
+-                            <>
+-                              <span className="ml-3 flex-1 text-left">{item.name}</span>
+-                              <ChevronDownIcon className={clsx('ml-2 h-4 w-4 transition-transform duration-200', isExpanded && 'rotate-90')} aria-hidden="true" />
+-                            </>
+-                          )}
+-                        </summary>
+-                        {!navbarCollapsed && (
+-                          <div className="mt-0.5 ml-6 space-y-0.5">
+-                            {item.children!.map(child => {
+-                              const ChildIcon = child.icon;
+-                              return (
+-                                <NavLink
+-                                  key={child.href}
+-                                  to={child.href}
+-                                  className={({ isActive }: { isActive: boolean }) =>
+-                                    clsx(
+-                                      'group flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
++                          aria-label={group.header.name}
++                          title={group.header.name}
++                          aria-expanded={isOpen}
++                          aria-haspopup="dialog"
++                          aria-controls={isOpen ? popoverId : undefined}
++                          onClick={() => setOpenCollapsedSection((prev) => prev === group.header.name ? null : group.header.name)}
++                          iconCenter={<SectionIcon className="h-5 w-5" />}
++                        />
++
++                        {isOpen && (
++                          <div
++                            id={popoverId}
++                            role="dialog"
++                            aria-label={`${group.header.name} navigation`}
++                            className="absolute left-full top-0 z-50 ml-3 w-64 rounded-2xl border border-pf-border bg-pf-bg-1 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]"
++                          >
++                            <div className="mb-1 flex items-center gap-3 rounded-xl px-2 py-2 text-sm font-semibold text-pf-text-primary">
++                              <span aria-hidden="true">
++                                <SectionIcon className="h-5 w-5 text-pf-accent" />
++                              </span>
++                              <span>{group.header.name}</span>
++                            </div>
++                            <div className="space-y-1">
++                              {group.items.map((item) => {
++                                const ItemIcon = item.icon;
++                                const isActive = isNavItemActive(item);
++
++                                return (
++                                  <NavLink
++                                    key={item.href}
++                                    to={item.href}
++                                    onClick={() => setOpenCollapsedSection(null)}
++                                    className={clsx(
++                                      'flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                       isActive
+-                                        ? 'bg-pf-bg-2 text-pf-accent'
+-                                        : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+-                                    )
+-                                  }
+-                                  end={child.href === '/harvest'}
+-                                >
+-                                  <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
+-                                  {child.name}
+-                                </NavLink>
+-                              );
+-                            })}
++                                        ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
++                                        : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
++                                    )}
++                                  >
++                                    <span aria-hidden="true">
++                                      <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
++                                    </span>
++                                    <span className="flex-1 text-left">{item.name}</span>
++                                  </NavLink>
++                                );
++                              })}
++                            </div>
+                           </div>
+                         )}
+-                      </details>
+-                    ) : (
+-                      <NavLink
+-                        to={navItem.href}
+-                        end
+-                        className={({ isActive }: { isActive: boolean }) =>
+-                          clsx(
+-                            'group flex items-center rounded-md text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+-                            navbarCollapsed ? 'justify-center px-1.5 py-2' : 'px-2 py-2',
+-                            isActive
+-                              ? clsx('bg-pf-bg-2 font-semibold text-pf-accent', !navbarCollapsed && 'border-l-3 border-pf-accent')
+-                              : 'text-pf-text-primary hover:bg-pf-bg-2 hover:text-pf-text-light'
+-                          )
+-                        }
+-                        title={navbarCollapsed ? navItem.name : undefined}
+-                      >
+-                        <Icon className="h-5 w-5 shrink-0" />
+-                        {!navbarCollapsed && <span className="ml-3 flex-1 text-left">{navItem.name}</span>}
+-                      </NavLink>
+-                    )}
++                      </div>
++                    );
++                  })}
++                </div>
++              ) : (
++                <div className="space-y-3">
++                  {navigationGroups.map((group) => {
++                    const SectionIcon = group.header.icon;
++                    const isSectionActive = group.items.some((item) => isNavItemActive(item));
+ 
+-                    {navbarCollapsed && hasChildren && isHovered && (
+-                      <div className="absolute top-0 left-full z-50 ml-2 w-48 rounded-md border border-pf-border bg-pf-bg-1 shadow-lg">
+-                        <div className="py-1">
+-                          <div className="border-b border-pf-border px-3 py-2 text-xs font-semibold text-pf-text-tertiary">
+-                            {navItem.name}
++                    return (
++                      <section
++                        key={group.header.name}
++                        className={clsx(
++                          'rounded-2xl border p-2 shadow-sm',
++                          isSectionActive
++                            ? 'border-pf-accent/35 bg-pf-accent/8'
++                            : 'border-pf-border bg-pf-bg-0/60'
++                        )}
++                      >
++                        <div className={clsx('flex items-center gap-3 rounded-xl px-2 py-2', isSectionActive ? 'text-pf-accent' : 'text-pf-text-primary')}>
++                          <span aria-hidden="true">
++                            <SectionIcon className="h-5 w-5 shrink-0" />
++                          </span>
++                          <div className="min-w-0">
++                            <div className="text-sm font-semibold">{group.header.name}</div>
++                            <div className="text-[11px] uppercase tracking-[0.22em] text-pf-text-tertiary">Rail section</div>
+                           </div>
+-                          {navItem.children!.map((child: NavigationItem) => {
+-                            const ChildIcon = child.icon;
++                        </div>
++
++                        <div className="mt-1 space-y-1 px-1 pb-1">
++                          {group.items.map((item) => {
++                            const ItemIcon = item.icon;
++                            const isActive = isNavItemActive(item);
++
+                             return (
+                               <NavLink
+-                                key={child.href}
+-                                to={child.href}
+-                                className={({ isActive }: { isActive: boolean }) =>
+-                                  clsx(
+-                                    'flex items-center px-3 py-2 text-sm transition-colors',
+-                                    isActive
+-                                      ? 'bg-pf-bg-2 text-pf-accent'
+-                                      : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+-                                  )
+-                                }
+-                                end={child.href === '/harvest'}
++                                key={item.href}
++                                to={item.href}
++                                className={clsx(
++                                  'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
++                                  isActive
++                                    ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
++                                    : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
++                                )}
+                               >
+-                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
+-                                {child.name}
++                                <span aria-hidden="true">
++                                  <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
++                                </span>
++                                <span className="flex-1 text-left">{item.name}</span>
+                               </NavLink>
+                             );
+                           })}
+                         </div>
+-                      </div>
+-                    )}
+-                  </div>
+-                );
+-              })}
++                      </section>
++                    );
++                  })}
++                </div>
++              )}
+             </nav>
+ 
+             <div className="shrink-0 border-t border-pf-border p-2">
+-              {!navbarCollapsed && (
+-                <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-pf-border bg-pf-bg-2 px-3 py-2">
+-                  <SystemPulsePill />
+-                  {pendingAttentionCount > 0 && (
+-                    <Button
+-                      type="button"
+-                      variant="unstyled"
+-                      onClick={() => navigate('/printers?view=collapsed')}
+-                      className="relative flex h-8 w-8 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent"
+-                      title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention ΓÇö click to view`}
+-                      aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
+-                    >
+-                      <AlertIcon className="h-4 w-4" />
+-                      <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+-                        {pendingAttentionCount}
+-                      </span>
+-                    </Button>
+-                  )}
++              {!navbarCollapsed && pendingAttentionCount > 0 && (
++                <div className="mb-2 flex items-center justify-end rounded-lg border border-pf-border bg-pf-bg-2 px-3 py-2">
++                  <Button
++                    type="button"
++                    variant="unstyled"
++                    onClick={() => navigate('/printers?view=collapsed')}
++                    className="relative flex h-8 w-8 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent"
++                    title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention ΓÇö click to view`}
++                    aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
++                  >
++                    <AlertIcon className="h-4 w-4" />
++                    <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
++                      {pendingAttentionCount}
++                    </span>
++                  </Button>
+                 </div>
+               )}
+ 
+               <div className={clsx('flex items-center gap-2', navbarCollapsed ? 'flex-col' : 'justify-between')}>
+                 <div className={clsx('flex items-center gap-2', navbarCollapsed && 'flex-col')}>
+                   {isAuthenticated && <TasksBadge />}
+-                  {isAuthenticated && <NotificationBell />}
+                 </div>
+ 
+-                <div className="relative z-50 flex items-center gap-2">
++                <div className="flex items-center gap-2">
+                   {navbarCollapsed && pendingAttentionCount > 0 && (
+                     <Button
+                       type="button"
+@@ -923,88 +766,6 @@ export function Layout() {
+                       </span>
+                     </Button>
+                   )}
+-
+-                  <Button
+-                    type="button"
+-                    variant="subtle"
+-                    size="sm"
+-                    className={clsx(navbarCollapsed ? 'h-9 w-9 justify-center px-0' : 'h-9 px-3')}
+-                    aria-expanded={userMenuOpen}
+-                    aria-haspopup="menu"
+-                    onClick={() => setUserMenuOpen(prev => !prev)}
+-                    iconLeft={isAuthenticated && user ? (
+-                      <AccountCheckIcon className="h-5 w-5 text-pf-success" />
+-                    ) : (
+-                      <AccountIcon className="h-5 w-5 text-pf-text-muted" />
+-                    )}
+-                  >
+-                    {!navbarCollapsed && <span>{isAuthenticated && user ? user.username : 'Guest'}</span>}
+-                  </Button>
+-
+-                  {userMenuOpen && (
+-                    <div className="absolute right-0 bottom-full mb-2 w-64 rounded-md border border-pf-border bg-pf-bg-1 shadow-lg">
+-                      <div className="py-1">
+-                        {isAuthenticated && user ? (
+-                          <>
+-                            <div className="border-b border-pf-border px-4 py-2 text-sm text-pf-text-secondary">
+-                              Signed in as <strong>{user.username}</strong>
+-                            </div>
+-                            <Button
+-                              type="button"
+-                              onClick={() => {
+-                                navigate('/settings');
+-                                setUserMenuOpen(false);
+-                              }}
+-                              variant="subtle"
+-                              size="sm"
+-                              className="w-full justify-start!"
+-                              iconLeft={<SettingsIcon className="h-4 w-4" />}
+-                            >
+-                              Preferences
+-                            </Button>
+-                            <Button
+-                              type="button"
+-                              onClick={handleLogout}
+-                              variant="subtle"
+-                              size="sm"
+-                              className="w-full justify-start!"
+-                              iconLeft={<LogoutIcon className="h-4 w-4" />}
+-                            >
+-                              Sign out
+-                            </Button>
+-                          </>
+-                        ) : (
+-                          <>
+-                            <Button
+-                              type="button"
+-                              onClick={() => {
+-                                setShowLoginModal(true);
+-                                setUserMenuOpen(false);
+-                              }}
+-                              variant="subtle"
+-                              size="sm"
+-                              className="w-full justify-start!"
+-                              iconLeft={<LoginIcon className="h-4 w-4" />}
+-                            >
+-                              Sign In
+-                            </Button>
+-                            <Button
+-                              type="button"
+-                              onClick={() => {
+-                                setShowRegisterModal(true);
+-                                setUserMenuOpen(false);
+-                              }}
+-                              variant="subtle"
+-                              size="sm"
+-                              className="flex w-full items-center justify-start!"
+-                            >
+-                              Register
+-                            </Button>
+-                          </>
+-                        )}
+-                      </div>
+-                    </div>
+-                  )}
+                 </div>
+               </div>
+ 
+@@ -1016,7 +777,10 @@ export function Layout() {
+                   variant="subtle"
+                   size="sm"
+                   className="w-full justify-center"
+-                  onClick={() => setNavbarCollapsed(prev => !prev)}
++                  onClick={() => {
++                    setOpenCollapsedSection(null);
++                    setNavbarCollapsed((prev) => !prev);
++                  }}
+                   iconCenter={navbarCollapsed ? <ChevronRightIcon className="h-5 w-5" /> : <ChevronLeftIcon className="h-5 w-5" />}
+                 />
+               </div>
+@@ -1024,6 +788,19 @@ export function Layout() {
+           </div>
+         </aside>
+ 
++        <FloatingControlBar
++          isAuthenticated={isAuthenticated}
++          userName={user?.username}
++          userMenuOpen={userMenuOpen}
++          onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
++          onCloseUserMenu={() => setUserMenuOpen(false)}
++          onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
++          onOpenPreferences={() => navigate('/settings')}
++          onOpenLogin={() => setShowLoginModal(true)}
++          onOpenRegister={() => setShowRegisterModal(true)}
++          onLogout={handleLogout}
++        />
++
+         <main
+           id="main-content"
+           data-main-content
