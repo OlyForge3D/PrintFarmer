@@ -86,25 +86,20 @@ describe('Navigation rail sections', () => {
     expect(screen.getAllByText('Printers').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Files').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Slicer').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Settings').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Admin').length).toBeGreaterThan(0);
 
     expect(screen.getByRole('link', { name: /overview/i })).toHaveAttribute('href', '/dashboard');
     expect(screen.getByRole('link', { name: /print queue/i })).toHaveAttribute('href', '/printQueue');
     expect(container.querySelector('a[href="/files"]')).not.toBeNull();
     expect(container.querySelector('a[href="/projects"]')).not.toBeNull();
-    expect(screen.getByRole('link', { name: /preferences/i })).toHaveAttribute('href', '/settings');
-    expect(screen.getByRole('link', { name: /api keys/i })).toHaveAttribute('href', '/profile/api-keys');
     expect(container.querySelector('a[href="/admin/settings"]')).not.toBeNull();
     expect(container.querySelector('a[href="/admin/manage"]')).not.toBeNull();
   });
 
-  it('hides the admin section for authenticated non-admin users while keeping personal settings', () => {
+  it('hides the admin section for authenticated non-admin users', () => {
     mockUserRole = 'operator';
     const { container } = renderLayout();
 
-    expect(screen.getByRole('link', { name: /preferences/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /api keys/i })).toBeInTheDocument();
     expect(container.querySelector('a[href="/admin/settings"]')).toBeNull();
     expect(container.querySelector('a[href="/admin/manage"]')).toBeNull();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
