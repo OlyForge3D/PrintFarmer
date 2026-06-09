@@ -77,6 +77,11 @@ public interface IWorkerRepository
     /// <param name="id">The worker identifier.</param>
     Task EnableWorkerAsync(Guid id);
 
+    /// <summary>Resets a worker's active job count to zero and sets status to Online.</summary>
+    /// <param name="id">The worker identifier.</param>
+    /// <returns>True if the worker was found and reset; false if not found.</returns>
+    Task<bool> ResetAsync(Guid id);
+
     /// <summary>Deletes a worker.</summary>
     /// <param name="id">The worker identifier.</param>
     Task DeleteAsync(Guid id);

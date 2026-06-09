@@ -205,6 +205,46 @@ public class WorkersController(
     }
 
     /// <summary>
+    /// Resets a worker by clearing its active job count and releasing any stuck jobs
+    /// back to the queue. Use this when a worker has ghost jobs blocking its slots.
+    /// </summary>
+    /// <param name="id">The worker ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("{id}/reset")]
+    [Authorize(Roles = "farm_admin")]
+    public async Task<IActionResult> ResetAsync(Guid id, CancellationToken ct)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker is null)
+        {
+            return NotFound();
+        }
+
+        // Release any stuck Processing jobs assigned to this worker back to Queued
+        IReadOnlyList<SliceJob> stuckJobs = await _jobRepository.GetJobsByWorkerIdAsync(id, ct);
+        int releasedJobs = 0;
+        foreach (SliceJob job in stuckJobs)
+        {
+            job.Status = SliceJobStatus.Queued;
+            job.WorkerId = null;
+            job.ProgressPercent = 0;
+            job.ProgressMessage = null;
+            releasedJobs++;
+        }
+
+        // Reset the worker's active job counter
+        bool reset = await _workerRepository.ResetAsync(id);
+        if (!reset)
+        {
+            return NotFound();
+        }
+
+        _logger.LogWarning("Worker {WorkerId} reset by admin — released {ReleasedJobs} stuck job(s)", id, releasedJobs);
+
+        return Ok(new { releasedJobs, status = worker.Status });
+    }
+
+    /// <summary>
     /// Deletes a worker registration.
     /// </summary>
     /// <param name="id">The worker ID.</param>

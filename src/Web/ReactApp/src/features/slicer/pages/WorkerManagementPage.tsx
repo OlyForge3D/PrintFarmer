@@ -188,6 +188,18 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
     }
   };
 
+  const handleResetWorker = async (worker: WorkerResponse) => {
+    try {
+      const result = await workerService.resetWorker(worker.id);
+      if (result.releasedJobs > 0) {
+        setError(null);
+      }
+      loadWorkers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset worker');
+    }
+  };
+
   const handleDeleteWorker = (worker: WorkerResponse) => {
     setWorkerToDelete(worker);
   };
@@ -457,6 +469,16 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
                         }}
                       >
                         Disable
+                      </Button>
+                    )}
+                    {(worker.activeJobs > 0 || worker.status === 'Busy') && (
+                      <Button
+                        variant="warning"
+                        size="sm"
+                        onClick={() => handleResetWorker(worker)}
+                        title="Reset worker — clears ghost jobs and frees slots"
+                      >
+                        Reset
                       </Button>
                     )}
                     <Button

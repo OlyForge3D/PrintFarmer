@@ -249,6 +249,27 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
     }
 
     /// <inheritdoc/>
+    public async Task<bool> ResetAsync(Guid id)
+    {
+        Worker? worker = await _context.Workers.FindAsync(id);
+        if (worker is null)
+        {
+            return false;
+        }
+
+        worker.ActiveJobs = 0;
+        worker.UpdatedAt = DateTime.UtcNow;
+
+        if (!worker.IsDisabled && worker.Status != WorkerStatus.Draining)
+        {
+            worker.Status = WorkerStatus.Online;
+        }
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    /// <inheritdoc/>
     public async Task DeleteAsync(Guid id)
     {
         Worker? worker = await _context.Workers.FindAsync(id);
