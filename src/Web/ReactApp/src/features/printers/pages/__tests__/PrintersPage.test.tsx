@@ -91,8 +91,8 @@ vi.mock('@/common/components/ViewModeToggle', () => ({
 }));
 
 vi.mock('@/features/printers/components/CompactPrinterCard', () => ({
-  CompactPrinterCard: ({ printer, onExpand }: { printer: Printer; onExpand: () => void }) => (
-    <button type="button" onClick={onExpand}>
+  CompactPrinterCard: ({ printer, onExpand }: { printer: Printer; onExpand: (printerId: string) => void }) => (
+    <button type="button" onClick={() => onExpand(printer.id)}>
       Open {printer.name}
     </button>
   ),

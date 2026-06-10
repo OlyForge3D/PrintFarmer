@@ -42,7 +42,8 @@ import type { TagDto } from '@/services/tagService';
 interface CompactPrinterCardProps {
   printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
-  onExpand: () => void;
+  /** Receives the printer ID so parents can pass one stable callback for all cards */
+  onExpand: (printerId: string) => void;
   onEdit?: (printer: Printer) => void;
 }
 
@@ -86,7 +87,9 @@ function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: st
   );
 }
 
-export function CompactPrinterCard({
+// Memoized: with stable callbacks and structural sharing upstream, a card only
+// re-renders when its own printer's data actually changed.
+export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   printer: printerProp,
   backendCapabilities,
   onExpand,
@@ -329,7 +332,7 @@ export function CompactPrinterCard({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={onExpand}
+            onClick={() => onExpand(printer.id)}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             title="Open details sidebar"
             aria-label="Open details sidebar"
@@ -572,4 +575,4 @@ export function CompactPrinterCard({
       {/* end card body */}
     </div>
   );
-}
+});

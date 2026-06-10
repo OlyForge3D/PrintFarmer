@@ -18,6 +18,7 @@ public class PrinterHubTests
 {
     private readonly Mock<IDiscoveryProgressCache> _progressCacheMock;
     private readonly Mock<ILogger<PrinterHub>> _loggerMock;
+    private readonly Mock<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader> _statusCacheMock;
     private readonly Mock<IHubCallerClients> _clientsMock;
     private readonly Mock<ISingleClientProxy> _callerMock;
     private readonly Mock<IClientProxy> _groupMock;
@@ -29,6 +30,10 @@ public class PrinterHubTests
     {
         _progressCacheMock = new Mock<IDiscoveryProgressCache>();
         _loggerMock = new Mock<ILogger<PrinterHub>>();
+        _statusCacheMock = new Mock<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>();
+        _statusCacheMock
+            .Setup(c => c.GetAllStatuses())
+            .Returns(new Dictionary<Guid, PrinterStatusDto>());
         _clientsMock = new Mock<IHubCallerClients>();
         _callerMock = new Mock<ISingleClientProxy>();
         _groupMock = new Mock<IClientProxy>();
@@ -57,9 +62,12 @@ public class PrinterHubTests
             .Returns(Task.CompletedTask);
 
         _clientsMock.Setup(c => c.Caller).Returns(_callerMock.Object);
+        // IHubCallerClients hides Caller from IHubCallerClients<IClientProxy> with `new`;
+        // depending on which slot the hub's compilation binds to, both must be set up.
+        _clientsMock.As<IHubCallerClients<IClientProxy>>().Setup(c => c.Caller).Returns(_callerMock.Object);
         _clientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(_groupMock.Object);
 
-        _hub = new PrinterHub(_progressCacheMock.Object, _loggerMock.Object)
+        _hub = new PrinterHub(_progressCacheMock.Object, _loggerMock.Object, _statusCacheMock.Object)
         {
             Clients = _clientsMock.Object,
             Groups = _groupsMock.Object,
@@ -352,5 +360,99 @@ public class PrinterHubTests
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_ReplaysCachedStatusesToCaller()
+    {
+        // Arrange
+        Guid printerA = Guid.NewGuid();
+        Guid printerB = Guid.NewGuid();
+        _statusCacheMock
+            .Setup(c => c.GetAllStatuses())
+            .Returns(new Dictionary<Guid, PrinterStatusDto>
+            {
+                [printerA] = new PrinterStatusDto(Id: printerA, IsOnline: true, State: "Printing"),
+                [printerB] = new PrinterStatusDto(Id: printerB, IsOnline: false, State: "Offline"),
+            });
+
+        // Act
+        await _hub.OnConnectedAsync();
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                "printerupdated",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_WithEmptyCache_SendsNothing()
+    {
+        // Act
+        await _hub.OnConnectedAsync();
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestPrinterStatus_WithCachedStatus_SendsToCaller()
+    {
+        // Arrange
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(Id: printerId, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(c => c.GetStatus(printerId)).Returns(status);
+
+        // Act
+        await _hub.RequestPrinterStatusAsync(printerId.ToString());
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                "printerupdated",
+                It.Is<object?[]>(args => ReferenceEquals(args[0], status)),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RequestPrinterStatus_WithInvalidId_SendsNothing()
+    {
+        // Act
+        await _hub.RequestPrinterStatusAsync("not-a-guid");
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestPrinterStatus_WithUnknownPrinter_SendsNothing()
+    {
+        // Arrange
+        _statusCacheMock.Setup(c => c.GetStatus(It.IsAny<Guid>())).Returns((PrinterStatusDto?)null);
+
+        // Act
+        await _hub.RequestPrinterStatusAsync(Guid.NewGuid().ToString());
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

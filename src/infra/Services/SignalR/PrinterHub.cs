@@ -14,9 +14,47 @@ namespace Farm.Infrastructure.Services.SignalR;
 public class PrinterHub(
     IDiscoveryProgressCache progressCache,
     ILogger<PrinterHub> logger,
+    Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     IWebhookService? webhookService = null) : Hub
 {
     // Marker hub for broadcasting printer updates and discovery progress.
+
+    /// <summary>
+    /// Replays the cached printer statuses to a newly connected client so its UI is
+    /// immediately current instead of waiting for the next backend broadcast.
+    /// Also runs on automatic reconnects (each reconnect is a new connection),
+    /// covering any updates missed while disconnected.
+    /// </summary>
+    public override async Task OnConnectedAsync()
+    {
+        await base.OnConnectedAsync();
+
+        foreach (PrinterStatusDto status in statusCache.GetAllStatuses().Values)
+        {
+            await Clients.Caller.SendAsync("printerupdated", status, Context.ConnectionAborted);
+        }
+    }
+
+    /// <summary>
+    /// Sends the cached status of a single printer back to the calling client.
+    /// Wire name stays "RequestPrinterStatus" to match what the web client invokes.
+    /// </summary>
+    /// <param name="printerId">The printer ID to look up.</param>
+    [HubMethodName("RequestPrinterStatus")]
+    public async Task RequestPrinterStatusAsync(string printerId)
+    {
+        if (!Guid.TryParse(printerId, out Guid id))
+        {
+            logger.LogWarning("[PrinterHub] RequestPrinterStatus received invalid printer ID '{PrinterId}'", printerId);
+            return;
+        }
+
+        PrinterStatusDto? status = statusCache.GetStatus(id);
+        if (status != null)
+        {
+            await Clients.Caller.SendAsync("printerupdated", status, Context.ConnectionAborted);
+        }
+    }
 
     // Group management for discovery sessions
 

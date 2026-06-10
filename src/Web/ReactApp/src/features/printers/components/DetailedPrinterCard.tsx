@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import './DetailedPrinterCard.css';
 import { PanelRightOpen, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -33,8 +33,8 @@ import {
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
-import { usePrinters, usePrinterDetails } from '@/common/hooks/useApi';
-import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
+import { usePrinterDetails } from '@/common/hooks/useApi';
+import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
@@ -66,32 +66,29 @@ import {
 } from '@/features/printers/constants/temperaturePresets';
 
 interface DetailedPrinterCardProps {
-  printer: Printer;
+  /** Display-ready printer — parents should pass data already merged with SignalR (usePrinterDisplays) */
+  printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
-  onOpenDetails?: () => void;
+  /** Receives the printer ID so parents can pass one stable callback for all cards */
+  onOpenDetails?: (printerId: string) => void;
 }
 
-export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onOpenDetails }: DetailedPrinterCardProps) {
-  // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
-  const { data: allPrinters = [] } = usePrinters();
+// Memoized: with stable callbacks and structural sharing upstream, a card only
+// re-renders when its own printer's data actually changed.
+export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit, onOpenDetails }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
-  
+  const mmuStatus = (printer as PrinterDisplay).mmuStatus;
+
   // Fetch printer details to check for multi-toolhead configuration
   const { data: printerDetails } = usePrinterDetails(
-    initialPrinter.id,
+    printer.id,
     {
       enabled: spoolmanReady,
       staleTime: 60000,
     }
   );
-  const apiPrinter = useMemo(
-    () => allPrinters.find(p => p.id === initialPrinter.id) ?? initialPrinter,
-    [allPrinters, initialPrinter]
-  );
-  // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay(apiPrinter);
 
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -111,10 +108,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [step, setStep] = useState(1);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
-  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(initialPrinter.id);
+  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
   const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
-    initialPrinter.id,
-    !!apiPrinter.obicoEnabled
+    printer.id,
+    !!printer.obicoEnabled
   );
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
@@ -178,8 +175,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
   // Camera source handling
-  const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
-  const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
+  const cameraSnapshotUrl = printer.cameraSnapshotUrl ?? null;
+  const cameraStreamUrl = printer.cameraStreamUrl ?? null;
   const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
 
   const handleControlAction = async (action: string) => {
@@ -444,7 +441,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             </span>
           </div>
           <FailureDetectionMonitoringBadge
-            enabled={!!apiPrinter.obicoEnabled}
+            enabled={!!printer.obicoEnabled}
             status={failureDetectionStatus}
             isPrinting={isPrinting}
             printerId={printer.id}
@@ -547,7 +544,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={onOpenDetails}
+                onClick={() => onOpenDetails(printer.id)}
                 className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
                 title="Open details sidebar"
                 aria-label="Open details sidebar"
@@ -612,7 +609,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
       {(isPrinting || isPaused) && (
         <FailureDetectionMonitoringSummary
-          enabled={!!apiPrinter.obicoEnabled}
+          enabled={!!printer.obicoEnabled}
           status={failureDetectionStatus}
           recentEvents={recentEvents}
           printerName={printer.name}
@@ -709,8 +706,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       {(() => {
         const toolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
           ? printerDetails.toolheads
-          : printer.mmuStatus?.gates && printer.mmuStatus.gates.length > 0
-            ? mmuGatesToToolheads(printer.mmuStatus.gates)
+          : mmuStatus?.gates && mmuStatus.gates.length > 0
+            ? mmuGatesToToolheads(mmuStatus.gates)
             : undefined;
         if (!toolheads) return null;
         return (
@@ -725,15 +722,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       {(spoolmanReady || printer.spoolInfo) && (() => {
         const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
         const hasMmuGates = !hasMultipleToolheads
-          && printer.mmuStatus?.gates
-          && printer.mmuStatus.gates.length > 0;
+          && mmuStatus?.gates
+          && mmuStatus.gates.length > 0;
         const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
         const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
 
         const effectiveToolheads = hasMultipleToolheads
           ? printerDetails!.toolheads!
           : hasMmuGates
-            ? mmuGatesToToolheads(printer.mmuStatus!.gates)
+            ? mmuGatesToToolheads(mmuStatus!.gates)
             : undefined;
 
         return (
@@ -859,4 +856,4 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       />
     </div>
   );
-}
+});

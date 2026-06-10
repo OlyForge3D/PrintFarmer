@@ -48,6 +48,11 @@ public sealed class MoonrakerSubscriptionService(
     // Grace timers for delaying offline broadcasts (cancel if printer recovers quickly)
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _offlineGraceTimers = new();
 
+    // Spool info cache: keeps Spoolman HTTP round-trips out of the WebSocket hot path.
+    // Invalidated on print state transitions and post-dispatch refreshes.
+    private readonly ConcurrentDictionary<Guid, (PrinterSpoolInfoDto? Info, DateTime FetchedUtc)> _spoolInfoCache = new();
+    private static readonly TimeSpan SpoolInfoCacheTtl = TimeSpan.FromSeconds(30);
+
     private enum PollingMode
     {
         WebSocketRealTime,  // Use WebSocket for real-time updates (normal operation)
@@ -171,7 +176,9 @@ public sealed class MoonrakerSubscriptionService(
                 return;
             }
 
-            PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
+            // A dispatch likely changed the active spool — bypass the cache and store the fresh value
+            InvalidateSpoolInfoCache(printerId);
+            PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoCachedAsync(printerId, printer.BackendUrl, ct);
 
             PrinterStatusUpdate statusUpdate = new(
                 printerId,
@@ -990,7 +997,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <summary>
     /// Processes a status update from Moonraker containing incremental printer state changes.
     /// Dispatches to specific handlers for toolhead, extruder, bed, and state updates.
-    /// Sends individual focused events and a consolidated status update via SignalR.
+    /// Sends a single consolidated "printerupdated" status update via SignalR.
     /// </summary>
     /// <param name="statusObj">The status JSON element from Moonraker.</param>
     /// <param name="printerId">The ID of the printer being updated.</param>
@@ -1035,17 +1042,17 @@ public sealed class MoonrakerSubscriptionService(
         // contains only the objects that have changed
         if (statusObj.TryGetProperty("toolhead", out JsonElement th))
         {
-            await HandleToolheadUpdateAsync(printerId, state, th, ct);
+            HandleToolheadUpdate(state, th);
         }
 
         if (statusObj.TryGetProperty("extruder", out JsonElement ex))
         {
-            await HandleExtruderUpdateAsync(printerId, state, ex, ct);
+            HandleExtruderUpdate(state, ex);
         }
 
         if (statusObj.TryGetProperty("heater_bed", out JsonElement hb))
         {
-            await HandleHeaterBedUpdateAsync(printerId, state, hb, ct);
+            HandleHeaterBedUpdate(state, hb);
         }
 
         // MMU (Happy Hare) status updates
@@ -1070,8 +1077,8 @@ public sealed class MoonrakerSubscriptionService(
             await HandleStateUpdateAsync(printerId, state, statusObj, ct);
         }
 
-        // Get spool information for consolidated update
-        PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
+        // Get spool information for consolidated update (cached; refreshed at most once per TTL)
+        PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoCachedAsync(printerId, serverUrl, ct);
 
         // Send consolidated status update with persistent state for offline status and overall sync
         await EmitConsolidatedStatusAsync(printerId, state, spoolInfo, ct);
@@ -1082,13 +1089,12 @@ public sealed class MoonrakerSubscriptionService(
 
     /// <summary>
     /// Handles toolhead position and homed axes updates.
-    /// Extracts X, Y, Z coordinates and homed_axes state, updates persistent state, and emits a toolhead update event.
+    /// Extracts X, Y, Z coordinates and homed_axes state and updates persistent state;
+    /// the values reach clients via the consolidated "printerupdated" broadcast.
     /// </summary>
-    /// <param name="printerId">The ID of the printer.</param>
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="th">The toolhead JSON element from the status update.</param>
-    /// <param name="ct">Cancellation token.</param>
-    private async Task HandleToolheadUpdateAsync(Guid printerId, PrinterState state, JsonElement th, CancellationToken ct)
+    private static void HandleToolheadUpdate(PrinterState state, JsonElement th)
     {
         double? x = null, y = null, z = null;
         string? homedAxes = null;
@@ -1152,29 +1158,16 @@ public sealed class MoonrakerSubscriptionService(
         {
             state.HomedAxes = homedAxes;
         }
-
-        // Emit separate toolhead event
-        try
-        {
-            PrinterToolheadUpdate update = new PrinterToolheadUpdate(printerId, x, y, z, homedAxes);
-            _logger.LogDebug("Emitting toolhead update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HomedAxes={HomedAxes}", printerId, x, y, z, homedAxes);
-            await hub!.Clients.All.SendAsync("toolheadupdate", update, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to emit toolhead update for printer {PrinterId}", printerId);
-        }
     }
 
     /// <summary>
     /// Handles extruder temperature and target updates.
-    /// Extracts temperature and target values, updates persistent state, and emits an extruder update event.
+    /// Extracts temperature and target values and updates persistent state;
+    /// the values reach clients via the consolidated "printerupdated" broadcast.
     /// </summary>
-    /// <param name="printerId">The ID of the printer.</param>
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="ex">The extruder JSON element from the status update.</param>
-    /// <param name="ct">Cancellation token.</param>
-    private async Task HandleExtruderUpdateAsync(Guid printerId, PrinterState state, JsonElement ex, CancellationToken ct)
+    private static void HandleExtruderUpdate(PrinterState state, JsonElement ex)
     {
         double? temperature = null, target = null;
 
@@ -1210,29 +1203,16 @@ public sealed class MoonrakerSubscriptionService(
         {
             state.HotendTarget = target;
         }
-
-        // Emit separate extruder event
-        try
-        {
-            PrinterExtruderUpdate update = new PrinterExtruderUpdate(printerId, temperature, target);
-            _logger.LogDebug("Emitting extruder update for printer {PrinterId}: Temp={Temperature}, Target={Target}", printerId, temperature, target);
-            await hub!.Clients.All.SendAsync("extruderupdate", update, ct);
-        }
-        catch (Exception extruderEx)
-        {
-            _logger.LogError(extruderEx, "Failed to emit extruder update for printer {PrinterId}", printerId);
-        }
     }
 
     /// <summary>
     /// Handles heated bed temperature and target updates.
-    /// Extracts temperature and target values, updates persistent state, and emits a heater bed update event.
+    /// Extracts temperature and target values and updates persistent state;
+    /// the values reach clients via the consolidated "printerupdated" broadcast.
     /// </summary>
-    /// <param name="printerId">The ID of the printer.</param>
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="hb">The heater_bed JSON element from the status update.</param>
-    /// <param name="ct">Cancellation token.</param>
-    private async Task HandleHeaterBedUpdateAsync(Guid printerId, PrinterState state, JsonElement hb, CancellationToken ct)
+    private static void HandleHeaterBedUpdate(PrinterState state, JsonElement hb)
     {
         double? temperature = null, target = null;
 
@@ -1267,18 +1247,6 @@ public sealed class MoonrakerSubscriptionService(
         if (target.HasValue)
         {
             state.BedTarget = target;
-        }
-
-        // Emit separate heater bed event
-        try
-        {
-            PrinterHeaterBedUpdate update = new PrinterHeaterBedUpdate(printerId, temperature, target);
-            _logger.LogDebug("Emitting heater bed update for printer {PrinterId}: Temp={Temperature}, Target={Target}", printerId, temperature, target);
-            await hub!.Clients.All.SendAsync("heaterbedupdate", update, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to emit heater bed update for printer {PrinterId}", printerId);
         }
     }
 
@@ -2137,25 +2105,16 @@ public sealed class MoonrakerSubscriptionService(
             state.JobName = jobName;
         }
 
+        // Print state transitions are when the active spool most likely changed
+        if (stateChanged)
+        {
+            InvalidateSpoolInfoCache(printerId);
+        }
+
         // Check for print completion/failure transitions and sync job status
         if (stateChanged && previousState != null)
         {
             await CheckAndSyncJobCompletionAsync(printerId, previousState, stateValue!, ct);
-        }
-
-        // Emit state update event if any state/progress/jobName changed
-        if (stateValue != null || progress.HasValue || jobName != null)
-        {
-            try
-            {
-                PrinterStateUpdate update = new PrinterStateUpdate(printerId, stateValue, progress, jobName, PrinterStatusDto.ExtractFileName(jobName));
-                _logger.LogDebug("Emitting state update for printer {PrinterId}: State={StateValue}, Progress={Progress}, JobName={JobName}", printerId, stateValue, progress, jobName);
-                await hub!.Clients.All.SendAsync("stateupdate", update, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to emit state update for printer {PrinterId}", printerId);
-            }
         }
     }
 
@@ -2232,8 +2191,7 @@ public sealed class MoonrakerSubscriptionService(
                 PrintTimeLeftSeconds: printTimeLeftSeconds);
             _statusCacheWriter.UpdateStatus(cacheUpdate);
 
-            _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
-            _logger.LogDebug("[MoonrakerSubscriptionService] Hub is null: {Value0}", hub == null);
+            _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
             await hub!.Clients.All.SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
@@ -2525,6 +2483,38 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
+    /// Returns cached spool information for a printer, fetching from Moonraker only when the
+    /// cache entry is missing or older than <see cref="SpoolInfoCacheTtl"/>. Status updates can
+    /// arrive several times per second, so the fetch must not run per notification.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="serverUrl">The Moonraker server URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Printer spool information, or null if no active spool or on error.</returns>
+    private async Task<PrinterSpoolInfoDto?> GetSpoolInfoCachedAsync(Guid printerId, string serverUrl, CancellationToken ct)
+    {
+        if (_spoolInfoCache.TryGetValue(printerId, out (PrinterSpoolInfoDto? Info, DateTime FetchedUtc) cached) &&
+            DateTime.UtcNow - cached.FetchedUtc < SpoolInfoCacheTtl)
+        {
+            return cached.Info;
+        }
+
+        PrinterSpoolInfoDto? info = await GetSpoolInfoAsync(serverUrl, ct);
+        _spoolInfoCache[printerId] = (info, DateTime.UtcNow);
+        return info;
+    }
+
+    /// <summary>
+    /// Drops the cached spool info for a printer so the next status update fetches fresh data.
+    /// Called on print state transitions, where the active spool is most likely to change.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    private void InvalidateSpoolInfoCache(Guid printerId)
+    {
+        _ = _spoolInfoCache.TryRemove(printerId, out _);
+    }
+
+    /// <summary>
     /// Fetches active spool information from the Spoolman service for a Moonraker printer.
     /// Gets the active spool ID from Moonraker, then retrieves detailed spool information.
     /// </summary>
@@ -2649,7 +2639,7 @@ public sealed class MoonrakerSubscriptionService(
                 _logger.LogDebug("HTTP polling fallback retrieved status for printer {PrinterName}: State={CompositeStatusState}, IsOnline={CompositeStatusIsOnline}", printer.Name, compositeStatus.State, compositeStatus.IsOnline);
 
                 // Create a status update using the composite status data
-                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
+                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoCachedAsync(printer.Id, printer.BackendUrl, ct);
 
                 PrinterStatusUpdate statusUpdate = new(
                     printer.Id,

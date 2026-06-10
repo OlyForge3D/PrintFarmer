@@ -311,10 +311,11 @@ export function PrintersPage() {
 
   // Import/export handled by admin components (PrinterImportControls / PrinterExportControls)
 
-  const handleEditPrinter = (printer: Printer) => {
+  // Stable identity so memoized printer cards don't re-render when the page does
+  const handleEditPrinter = useCallback((printer: Printer) => {
     setEditPrinterId(printer.id);
     setShowEditModal(true);
-  };
+  }, []);
 
   const handleOpenMaintenance = (printer: Printer) => {
     navigate(`/printers/${printer.id}/maintenance`);
@@ -550,8 +551,8 @@ export function PrintersPage() {
                       <CompactPrinterCard
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                        onExpand={() => handleOpenPrinterDetails(printer.id)}
-                        onEdit={() => handleEditPrinter(printer)}
+                        onExpand={handleOpenPrinterDetails}
+                        onEdit={handleEditPrinter}
                       />
                     </div>
                   ))}
@@ -563,8 +564,8 @@ export function PrintersPage() {
                       key={printer.id}
                       printer={printer}
                       backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                      onEdit={() => handleEditPrinter(printer)}
-                      onOpenDetails={() => handleOpenPrinterDetails(printer.id)}
+                      onEdit={handleEditPrinter}
+                      onOpenDetails={handleOpenPrinterDetails}
                     />
                   ))}
                 </div>
