@@ -133,7 +133,7 @@ public sealed class TestEmulatorPollingService(
         double? hotendTarget = isHeating ? EmulatedPrinterState.TargetHotendTemp : null;
         double? bedTarget = isHeating ? EmulatedPrinterState.TargetBedTemp : null;
 
-        var update = new PrinterStatusDto(
+        var cacheUpdate = new PrinterStatusDto(
             Id: printerId,
             IsOnline: isOnline,
             State: PrinterStateNormalizer.NormalizeState(rawState),
@@ -150,9 +150,28 @@ public sealed class TestEmulatorPollingService(
             HotendTarget: hotendTarget,
             BedTarget: bedTarget,
             SpoolInfo: null);
+        statusCacheWriter.UpdateStatus(cacheUpdate);
 
-        statusCacheWriter.UpdateStatus(update);
-        await hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+        var signalRUpdate = new PrinterStatusUpdate(
+            Id: printerId,
+            IsOnline: isOnline,
+            State: PrinterStateNormalizer.NormalizeState(rawState),
+            Progress: progress,
+            JobName: jobName,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            X: null,
+            Y: null,
+            Z: null,
+            HotendTemp: Math.Round(state.GetHotendTemp(), 1),
+            BedTemp: Math.Round(state.GetBedTemp(), 1),
+            HotendTarget: hotendTarget,
+            BedTarget: bedTarget,
+            HomedAxes: null,
+            SpoolInfo: null,
+            FileName: PrinterStatusDto.ExtractFileName(jobName));
+
+        await hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
     }
 
     /// <summary>

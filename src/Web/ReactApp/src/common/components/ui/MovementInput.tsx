@@ -34,11 +34,11 @@ export function MovementInput({
   const positionLabel = currentPosition != null ? `[ ${(currentPosition ?? 0).toFixed(1)} ]` : '[ --- ]';
 
   return (
-    <div className="relative pt-2 inline-block">
-      <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] font-bold text-pf-text-secondary z-10">
+    <div className="relative pt-2 inline-flex w-full min-w-0">
+      <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] sm:text-[11px] font-bold text-pf-text-secondary z-10 whitespace-nowrap">
         {positionLabel}
       </span>
-      <span className="absolute left-2 bottom-1.5 text-pf-text-secondary text-xs pointer-events-none z-10">
+      <span className="absolute left-2 bottom-1.5 text-pf-text-secondary text-xs pointer-events-none z-10 whitespace-nowrap">
         {axis}
       </span>
       <Input
@@ -48,7 +48,7 @@ export function MovementInput({
         onChange={onChange}
         disabled={disabled}
         aria-label={`${axis} movement amount`}
-        className={`w-24 h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
+        className={`w-full min-w-[5.75rem] h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
         {...props}
       />
     </div>

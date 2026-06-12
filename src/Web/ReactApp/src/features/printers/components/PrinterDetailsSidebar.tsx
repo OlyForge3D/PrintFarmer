@@ -1025,7 +1025,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
-                className="w-16! min-w-0"
+                className="w-24! min-w-0"
               />
               <MovementInput
                 axis="Y"
@@ -1035,7 +1035,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
-                className="w-16! min-w-0"
+                className="w-24! min-w-0"
               />
               <MovementInput
                 axis="Z"
@@ -1045,7 +1045,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
-                className="w-16! min-w-0"
+                className="w-24! min-w-0"
               />
               <ControlPadButton
                 disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}

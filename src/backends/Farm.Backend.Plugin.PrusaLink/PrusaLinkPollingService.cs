@@ -244,8 +244,8 @@ public sealed class PrusaLinkPollingService(
                     // Resolve spool info from DB assignment
                     PrinterSpoolInfoDto? spoolInfo = await spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
 
-                    // Broadcast update via SignalR using PrinterStatusDto
-                    var update = new PrinterStatusDto(
+                    // Update cache before broadcasting to clients
+                    var cacheUpdate = new PrinterStatusDto(
                         Id: printerId,
                         IsOnline: status.IsOnline,
                         State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -264,11 +264,28 @@ public sealed class PrusaLinkPollingService(
                         SpoolInfo: spoolInfo,
                         PrintTimeLeftSeconds: status.TimeRemainingSeconds,
                         SpeedMultiplier: status.SpeedMultiplier);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate);
 
-                    // Update cache before broadcasting to clients
-                    _statusCacheWriter.UpdateStatus(update);
+                    var signalRUpdate = new PrinterStatusUpdate(
+                        Id: printerId,
+                        IsOnline: status.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(status.State),
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        X: status.AxisX,
+                        Y: status.AxisY,
+                        Z: status.AxisZ,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        HomedAxes: null,
+                        SpoolInfo: spoolInfo,
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+                    await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -282,7 +299,7 @@ public sealed class PrusaLinkPollingService(
                     {
                         _logger.LogWarning("PrusaLink printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
-                        var offlineUpdate = new PrinterStatusDto(
+                        var offlineCacheUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -298,12 +315,31 @@ public sealed class PrusaLinkPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null);
+                            SpoolInfo: null,
+                            PrintTimeLeftSeconds: null,
+                            SpeedMultiplier: null);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
 
-                        // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineUpdate);
+                        var offlineSignalRUpdate = new PrinterStatusUpdate(
+                            Id: printerId,
+                            IsOnline: false,
+                            State: null,
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            X: null,
+                            Y: null,
+                            Z: null,
+                            HotendTemp: null,
+                            BedTemp: null,
+                            HotendTarget: null,
+                            BedTarget: null,
+                            HomedAxes: null,
+                            SpoolInfo: null,
+                            FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 

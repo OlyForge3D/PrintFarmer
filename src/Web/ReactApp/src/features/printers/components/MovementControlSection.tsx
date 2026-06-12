@@ -276,7 +276,7 @@ export function MovementControlSection({
       </div>
 
       {/* Manual position inputs */}
-      <div className="grid grid-cols-4 gap-2 mt-3 w-72 pt-2">
+      <div className="grid grid-cols-4 gap-2 mt-3 w-full max-w-[24rem] pt-2">
         <MovementInput
           axis="X"
           currentPosition={printerX}
