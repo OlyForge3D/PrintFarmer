@@ -301,7 +301,7 @@ export function MovementControlSection({
           onChange={(e) => onMoveZChange(e.target.value === '' ? '' : Number(e.target.value))}
           className="w-full!"
         />
-        <div className="pt-2">
+        <div className="pt-2 h-full flex items-stretch">
           <ControlPadButton
             disabled={
               movementActionPending ||
@@ -314,7 +314,8 @@ export function MovementControlSection({
               if (moveZ !== '') await onMove('Z', Number(moveZ));
             }}
             title="Go to position"
-            padSize="small"
+            padSize="medium"
+            className="w-full h-11 text-xs font-semibold"
           >
             GO
           </ControlPadButton>

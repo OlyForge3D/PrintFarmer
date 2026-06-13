@@ -230,7 +230,14 @@ public class PrintersController(
 
         try
         {
-            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.BackendPort, ct);
+            TestConnectionResponse result = await TestBackendConnectionAsync(
+                serverUri,
+                request.Backend,
+                request.ApiKey,
+                request.Username,
+                request.Password,
+                request.BackendPort,
+                ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -248,16 +255,24 @@ public class PrintersController(
     /// Tests connection to a printer backend based on the backend type.
     /// </summary>
     private async Task<TestConnectionResponse> TestBackendConnectionAsync(
-        Uri serverUrl, PrinterBackend backend, string? apiKey, int? backendPort, CancellationToken ct)
+        Uri serverUrl,
+        PrinterBackend backend,
+        string? apiKey,
+        string? username,
+        string? password,
+        int? backendPort,
+        CancellationToken ct)
     {
         using HttpClient httpClient = _httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(10);
 
+        string? effectiveApiKey = apiKey ?? password;
+
         return backend switch
         {
             PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
-            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, ct),
-            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, username, password, ct),
+            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, effectiveApiKey, ct),
             PrinterBackend.SDCP => await TestSdcpConnectionAsync(serverUrl, backendPort, ct),
             PrinterBackend.FlashForge => await TestFlashForgeConnectionAsync(serverUrl, backendPort, ct),
             _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
@@ -383,15 +398,19 @@ public class PrintersController(
     /// Tests PrusaLink connection by hitting /api/v1/status endpoint with Digest Authentication.
     /// </summary>
     private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
-        Uri serverUrl, string? apiKey, CancellationToken ct)
+        Uri serverUrl, string? apiKey, string? username, string? password, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
+        string? credentialSecret = !string.IsNullOrWhiteSpace(password) ? password : apiKey;
+        if (string.IsNullOrWhiteSpace(credentialSecret))
         {
-            return new TestConnectionResponse { Success = false, Message = "API Key is required for PrusaLink printers. Get it from printer Settings → Network → Credentials" };
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = "PrusaLink credentials are required. Use the printer's Network → Credentials password/API key."
+            };
         }
 
-        // PrusaLink uses "maker" as the username with the API key as the password for digest auth
-        const string username = "maker";
+        string effectiveUsername = !string.IsNullOrWhiteSpace(username) ? username : "maker";
 
         var builder = new UriBuilder(serverUrl)
         {
@@ -399,7 +418,7 @@ public class PrintersController(
         };
 
         // Create a new HttpClient with Digest auth handler for this test
-        using var digestHandler = new DigestAuthHandler(username, apiKey);
+        using var digestHandler = new DigestAuthHandler(effectiveUsername, credentialSecret);
         using var digestClient = new HttpClient(digestHandler)
         {
             Timeout = TimeSpan.FromSeconds(10)
@@ -425,7 +444,7 @@ public class PrintersController(
                 return new TestConnectionResponse
                 {
                     Success = false,
-                    Message = "Invalid API key - authentication failed. Verify the API key from printer Settings → Network → Credentials."
+                    Message = "Invalid PrusaLink credentials - authentication failed. Verify the password/API key from printer Settings → Network → Credentials."
                 };
             }
 
