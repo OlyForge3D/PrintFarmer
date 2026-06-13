@@ -195,7 +195,10 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
   return (
-    <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
+    <article
+      className="group relative rounded-xl border border-white/10 bg-pf-card shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
+      style={{ transform: 'translateZ(0)' }}
+    >
       {/* Bed clear banner — overlay on top of card */}
       {autoDispatchStatus && isPendingReady && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/75">
@@ -573,6 +576,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         }}
       />
       {/* end card body */}
-    </div>
+    </article>
   );
 });

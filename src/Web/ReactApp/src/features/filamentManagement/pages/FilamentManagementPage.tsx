@@ -106,7 +106,7 @@ export function FilamentManagementPage() {
               key={tab.id}
               onClick={() => handleTabChange(tab.id)}
               variant="tab"
-              className={`
+              className={`transition-all duration-200 motion-reduce:transition-none
                 ${isActive
                   ? 'border-b-2 border-b-pf-accent text-pf-accent'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'
@@ -128,6 +128,7 @@ export function FilamentManagementPage() {
         role="tabpanel"
         id={`tabpanel-${activeTab}`}
         aria-labelledby={`tab-${activeTab}`}
+        className="transition-opacity duration-200 motion-reduce:transition-none"
       >
         {activeTab === 'filaments' && <FilamentsTab />}
         {activeTab === 'spools' && <SpoolsTab />}

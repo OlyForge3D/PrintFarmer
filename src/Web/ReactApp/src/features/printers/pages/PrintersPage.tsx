@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
+import React, { useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
@@ -247,6 +247,8 @@ export function PrintersPage() {
     });
     return filtered;
   }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
+
+  const deferredUserPrinters = useDeferredValue(userPrinters);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -538,7 +540,7 @@ export function PrintersPage() {
           {/* Content Area */}
           <div data-tour="printers-grid" className="space-y-6">
             {(
-              (userPrinters.length === 0) ? (
+              (deferredUserPrinters.length === 0) ? (
                 <div className="text-center py-12">
                   <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
@@ -546,7 +548,7 @@ export function PrintersPage() {
                 </div>
               ) : viewMode === 'collapsed' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0">
-                  {userPrinters.map((printer, index) => (
+                  {deferredUserPrinters.map((printer, index) => (
                     <div key={printer.id} {...(index === 0 ? { 'data-tour': 'printers-card' } : {})}>
                       <CompactPrinterCard
                         printer={printer}
@@ -559,7 +561,7 @@ export function PrintersPage() {
                 </div>
               ) : viewMode === 'detailed' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
-                  {userPrinters.map((printer) => (
+                  {deferredUserPrinters.map((printer) => (
                     <DetailedPrinterCard
                       key={printer.id}
                       printer={printer}
@@ -581,7 +583,7 @@ export function PrintersPage() {
                   </div>
 
                   <PrinterTableView
-                    printers={userPrinters}
+                    printers={deferredUserPrinters}
                     onEdit={handleEditPrinter}
                     onDelete={handleDeleteClick}
                     onBulkSetMaintenance={handleBulkSetMaintenance}

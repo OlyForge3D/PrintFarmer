@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useTransition, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useTransition, useCallback, useRef, useDeferredValue } from 'react';
 import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
   FilterIcon,
@@ -87,12 +87,23 @@ export function FilamentsTab() {
     page: { key: 'page', type: 'number', defaultValue: 1, filterable: false },
   });
 
+  const deferredSearch = useDeferredValue(urlSearch);
+  const deferredMaterial = useDeferredValue(urlMaterial);
+  const deferredVendor = useDeferredValue(urlVendor);
+  const deferredColor = useDeferredValue(urlColor);
+
   const filters: FilterState = {
     material: urlMaterial,
     vendor: urlVendor,
     color: urlColor,
     search: urlSearch,
   };
+  const deferredFilters = useMemo<FilterState>(() => ({
+    material: deferredMaterial,
+    vendor: deferredVendor,
+    color: deferredColor,
+    search: deferredSearch,
+  }), [deferredMaterial, deferredVendor, deferredColor, deferredSearch]);
   const sortField = urlSortField as SortField;
   const sortDir = urlSortDir as 'asc' | 'desc';
   const page = urlPage as number;
@@ -241,14 +252,19 @@ export function FilamentsTab() {
     loadFilaments();
   };
 
-  const toggleSelect = (id: number) => {
+  const toggleSelect = useCallback((id: number) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
+
+  const handleCardEdit = useCallback((f: SpoolmanFilament) => setEditingFilament(f), []);
+  const handleCardClone = useCallback((f: SpoolmanFilament) => setCloningFilament(f), []);
+  const handleCardDelete = useCallback((f: SpoolmanFilament) => setDeleteConfirm({ type: 'single', filament: f }), []);
+
 
   const materialOptions = useMemo(() =>
     [...new Set(filaments.map(f => f.material).filter((m): m is string => !!m))].sort(),
@@ -267,17 +283,17 @@ export function FilamentsTab() {
 
   const filteredFilaments = useMemo(() => {
     let result = filaments;
-    if (urlMaterial) {
-      result = result.filter(f => f.material?.toLowerCase() === urlMaterial.toLowerCase());
+    if (deferredFilters.material) {
+      result = result.filter(f => f.material?.toLowerCase() === deferredFilters.material.toLowerCase());
     }
-    if (urlVendor) {
-      result = result.filter(f => f.vendor?.toLowerCase() === urlVendor.toLowerCase());
+    if (deferredFilters.vendor) {
+      result = result.filter(f => f.vendor?.toLowerCase() === deferredFilters.vendor.toLowerCase());
     }
-    if (urlColor) {
-      result = result.filter(f => classifyColor(f.colorHex) === urlColor);
+    if (deferredFilters.color) {
+      result = result.filter(f => classifyColor(f.colorHex) === deferredFilters.color);
     }
-    if (urlSearch) {
-      const q = (urlSearch as string).toLowerCase();
+    if (deferredFilters.search) {
+      const q = deferredFilters.search.toLowerCase();
       result = result.filter(f =>
         (f.name || '').toLowerCase().includes(q) ||
         (f.vendor || '').toLowerCase().includes(q) ||
@@ -286,7 +302,7 @@ export function FilamentsTab() {
       );
     }
     return result;
-  }, [filaments, urlMaterial, urlVendor, urlColor, urlSearch]);
+  }, [filaments, deferredFilters]);
 
   const sortedFilaments = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -747,10 +763,10 @@ export function FilamentsTab() {
               key={f.id}
               filament={f}
               isSelected={selectedIds.has(f.id)}
-              onToggleSelect={() => toggleSelect(f.id)}
-              onEdit={() => setEditingFilament(f)}
-              onClone={() => setCloningFilament(f)}
-              onDelete={() => setDeleteConfirm({ type: 'single', filament: f })}
+              onToggleSelect={toggleSelect}
+              onEdit={handleCardEdit}
+              onClone={handleCardClone}
+              onDelete={handleCardDelete}
             />
           ))}
         </div>
