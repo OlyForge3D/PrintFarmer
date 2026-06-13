@@ -211,6 +211,8 @@ public class JobQueueService : IJobQueueService
             CompletedCopies = j.CompletedCopies,
             RemainingCopies = j.RemainingCopies,
             ProjectFileId = j.ProjectFileId,
+            PlateIndex = j.PlateIndex,
+            PlateName = j.PlateName,
             CreatedAt = j.CreatedAt,
             UpdatedAt = j.UpdatedAt,
             GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
@@ -313,6 +315,8 @@ public class JobQueueService : IJobQueueService
             FilamentColor = request.FilamentColor,
             Copies = request.Copies,
             ProjectFileId = request.ProjectFileId,
+            PlateIndex = request.PlateIndex,
+            PlateName = request.PlateName,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow
@@ -388,6 +392,8 @@ public class JobQueueService : IJobQueueService
             CompletedCopies = job.CompletedCopies,
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
+            PlateIndex = job.PlateIndex,
+            PlateName = job.PlateName,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
@@ -439,6 +445,8 @@ public class JobQueueService : IJobQueueService
                 CompletedCopies = job.CompletedCopies,
                 RemainingCopies = job.RemainingCopies,
                 ProjectFileId = job.ProjectFileId,
+                PlateIndex = job.PlateIndex,
+                PlateName = job.PlateName,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt,
                 ToolheadUsages = MapToolheadUsages(job)
@@ -516,6 +524,8 @@ public class JobQueueService : IJobQueueService
             CompletedCopies = job.CompletedCopies,
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
+            PlateIndex = job.PlateIndex,
+            PlateName = job.PlateName,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
@@ -649,6 +659,8 @@ public class JobQueueService : IJobQueueService
             CompletedCopies = job.CompletedCopies,
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
+            PlateIndex = job.PlateIndex,
+            PlateName = job.PlateName,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job!)

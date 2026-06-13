@@ -176,4 +176,66 @@ public class ThreeMfMetadataServiceTests
         result!.Designer.Should().Be("John Smith");
         result.AutoTags.Should().Contain("designer:John Smith");
     }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_WithSliceInfoPlates_ExtractsPlates()
+    {
+        var ms = new MemoryStream();
+        using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var modelEntry = archive.CreateEntry("3D/3dmodel.model");
+            using (var writer = new StreamWriter(modelEntry.Open()))
+            {
+                writer.Write("<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\" />");
+            }
+
+            var sliceInfoEntry = archive.CreateEntry("Metadata/slice_info.json");
+            using (var writer = new StreamWriter(sliceInfoEntry.Open()))
+            {
+                writer.Write("""
+                    {
+                      "plates": [
+                        { "plate_idx": 0, "name": "Base Plate" },
+                        { "plate_idx": 1, "name": "Accent Plate" }
+                      ]
+                    }
+                    """);
+            }
+        }
+        ms.Position = 0;
+
+        ThreeMfMetadataDto? result = await _sut.ExtractMetadataAsync(ms, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Plates.Should().HaveCount(2);
+        result.Plates[0].Index.Should().Be(0);
+        result.Plates[0].Name.Should().Be("Base Plate");
+        result.Plates[1].Index.Should().Be(1);
+        result.Plates[1].Name.Should().Be("Accent Plate");
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_WithXmlPlates_ExtractsPlates()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+              <plates>
+                <plate index="0" name="Plate Alpha" />
+                <plate index="1" name="Plate Beta" />
+              </plates>
+            </model>
+            """;
+
+        using MemoryStream stream = CreateThreeMfArchive(xml);
+
+        ThreeMfMetadataDto? result = await _sut.ExtractMetadataAsync(stream, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Plates.Should().HaveCount(2);
+        result.Plates[0].Index.Should().Be(0);
+        result.Plates[0].Name.Should().Be("Plate Alpha");
+        result.Plates[1].Index.Should().Be(1);
+        result.Plates[1].Name.Should().Be("Plate Beta");
+    }
 }

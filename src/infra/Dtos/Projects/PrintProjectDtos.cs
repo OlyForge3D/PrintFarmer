@@ -98,7 +98,11 @@ public record PrintProjectFileDto(
     string? ExtractedPrinterModelName = null,
 
     // Cost estimate per remaining copy
-    decimal? EstimatedCostPerCopy = null)
+    decimal? EstimatedCostPerCopy = null,
+
+    // Optional plate index and name for multi-plate 3MF models
+    int? PlateIndex = null,
+    string? PlateName = null)
 {
     /// <summary>
     /// Whether all required prints have been completed.
@@ -155,7 +159,9 @@ public record AddFileToProjectRequest(
     int? SpoolmanFilamentId = null,
     string? MaterialRequirement = null,
     int PrintCount = 1,
-    string? Notes = null);
+    string? Notes = null,
+    int? PlateIndex = null,
+    string? PlateName = null);
 
 /// <summary>
 /// Request to update a file within a project.
@@ -167,7 +173,9 @@ public record UpdateProjectFileRequest(
     int? PrintedCount = null,
     PrintProjectFileStatus? Status = null,
     int? SortOrder = null,
-    string? Notes = null);
+    string? Notes = null,
+    int? PlateIndex = null,
+    string? PlateName = null);
 
 /// <summary>
 /// Progress summary for a project.

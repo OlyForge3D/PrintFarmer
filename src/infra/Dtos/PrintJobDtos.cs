@@ -56,7 +56,9 @@ public record PrintJobDto(
     string[]? RequiredCapabilities = null,
     bool AutoAssign = true,
     Guid[]? PreferredPrinterIds = null,
-    Guid[]? ExcludedPrinterIds = null);
+    Guid[]? ExcludedPrinterIds = null,
+    int? PlateIndex = null,
+    string? PlateName = null);
 
 /// <summary>
 /// Request payload for creating and queueing a new print job.

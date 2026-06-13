@@ -1,4 +1,5 @@
 ﻿using System.IO.Compression;
+using System.Text.Json;
 using System.Xml.Linq;
 using Farm.Slicer.Module.Dtos;
 using Microsoft.Extensions.Logging;
@@ -148,9 +149,81 @@ public class ThreeMfMetadataService(ILogger<ThreeMfMetadataService> logger) : IT
                 autoTags.Add($"app:{application}");
             }
 
+            List<ThreeMfPlateDto> plates = [];
+
+            // 1. Try to read slice_info.json
+            ZipArchiveEntry? sliceInfoEntry = archive.Entries.FirstOrDefault(e =>
+                e.FullName.Equals("Metadata/slice_info.json", StringComparison.OrdinalIgnoreCase));
+
+            if (sliceInfoEntry is not null)
+            {
+                try
+                {
+                    using Stream sliceStream = sliceInfoEntry.Open();
+                    using JsonDocument jsonDoc = await JsonDocument.ParseAsync(sliceStream, cancellationToken: ct);
+                    if (jsonDoc.RootElement.TryGetProperty("plates", out JsonElement platesProp) && platesProp.ValueKind == JsonValueKind.Array)
+                    {
+                        int idx = 0;
+                        foreach (JsonElement plateElem in platesProp.EnumerateArray())
+                        {
+                            int plateIdx = idx;
+                            if (plateElem.TryGetProperty("plate_idx", out JsonElement idxProp) && idxProp.ValueKind == JsonValueKind.Number)
+                            {
+                                plateIdx = idxProp.GetInt32();
+                            }
+                            else if (plateElem.TryGetProperty("index", out JsonElement idxProp2) && idxProp2.ValueKind == JsonValueKind.Number)
+                            {
+                                plateIdx = idxProp2.GetInt32();
+                            }
+
+                            string plateName = $"Plate {plateIdx + 1}";
+                            if (plateElem.TryGetProperty("name", out JsonElement nameProp) && nameProp.ValueKind == JsonValueKind.String)
+                            {
+                                plateName = nameProp.GetString() ?? plateName;
+                            }
+
+                            plates.Add(new ThreeMfPlateDto { Index = plateIdx, Name = plateName });
+                            idx++;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to parse Metadata/slice_info.json for plate metadata");
+                }
+            }
+
+            // 2. Fallback to XML parsing of 3D/3dmodel.model for plates
+            if (plates.Count == 0 && root is not null)
+            {
+                var plateElements = root.Descendants().Where(e => e.Name.LocalName.Equals("plate", StringComparison.OrdinalIgnoreCase)).ToList();
+                if (plateElements.Count > 0)
+                {
+                    foreach (XElement plateEl in plateElements)
+                    {
+                        string? indexStr = plateEl.Attribute("index")?.Value ?? plateEl.Attribute("id")?.Value;
+                        int plateIdx = plates.Count;
+                        if (int.TryParse(indexStr, out int parsedIdx))
+                        {
+                            plateIdx = parsedIdx;
+                        }
+                        string? nameStr = plateEl.Attribute("name")?.Value?.Trim();
+                        string plateName = !string.IsNullOrEmpty(nameStr) ? nameStr : $"Plate {plateIdx + 1}";
+
+                        plates.Add(new ThreeMfPlateDto { Index = plateIdx, Name = plateName });
+                    }
+                }
+            }
+
+            // 3. Fallback: if no plate metadata is found but we successfully parsed a 3MF, default to 1 plate
+            if (plates.Count == 0)
+            {
+                plates.Add(new ThreeMfPlateDto { Index = 0, Name = "Plate 1" });
+            }
+
             _logger.LogDebug(
-                "Extracted 3MF metadata: Title={Title}, Designer={Designer}, Materials={MaterialCount}, AutoTags={TagCount}",
-                title, designer, materials.Count, autoTags.Count);
+                "Extracted 3MF metadata: Title={Title}, Designer={Designer}, Materials={MaterialCount}, AutoTags={TagCount}, Plates={PlateCount}",
+                title, designer, materials.Count, autoTags.Count, plates.Count);
 
             return new ThreeMfMetadataDto
             {
@@ -162,6 +235,7 @@ public class ThreeMfMetadataService(ILogger<ThreeMfMetadataService> logger) : IT
                 ModificationDate = modificationDate,
                 Materials = materials,
                 AutoTags = autoTags,
+                Plates = plates,
             };
         }
         catch (InvalidDataException ex)

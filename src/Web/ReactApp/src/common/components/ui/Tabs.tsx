@@ -58,14 +58,16 @@ export const Tabs: React.FC<TabsProps> & {
 export interface TabListProps {
   children: React.ReactNode;
   className?: string;
+  'aria-label'?: string;
 }
 
-const TabList: React.FC<TabListProps> = ({ children, className }) => {
+const TabList: React.FC<TabListProps> = ({ children, className, 'aria-label': ariaLabel }) => {
   return (
     <div
       className={clsx('flex items-center gap-2 bg-pf-bg-1 px-2 pt-2 pb-0', className)}
       role="tablist"
       aria-orientation="horizontal"
+      aria-label={ariaLabel}
     >
       {children}
     </div>

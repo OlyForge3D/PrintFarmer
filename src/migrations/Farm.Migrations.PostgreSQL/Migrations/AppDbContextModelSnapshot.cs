@@ -17,7 +17,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.7")
+                .HasAnnotation("ProductVersion", "10.0.3")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -3123,6 +3123,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<int?>("PlateIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PlateName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<int>("PrintCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -3169,9 +3176,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("PrintProjectId", "GcodeFileId")
+                    b.HasIndex("PrintProjectId", "GcodeFileId", "PlateIndex")
                         .IsUnique()
-                        .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId");
+                        .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId_PlateIndex");
 
                     b.ToTable("PrintProjectFiles");
                 });

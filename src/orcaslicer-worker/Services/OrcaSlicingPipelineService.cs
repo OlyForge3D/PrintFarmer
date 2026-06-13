@@ -328,7 +328,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             additionalModels = " " + string.Join(" ", effectiveModelPaths.Skip(1).Select(p => $"--load \"{p}\""));
         }
 
-        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
+        string plateFlag = job.PlateIndex.HasValue ? $" --plate {(job.PlateIndex.Value + 1)}" : string.Empty;
+
+        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag}{plateFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
@@ -389,21 +391,29 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 $"OrcaSlicer failed with exit code {process.ExitCode}: {detail}");
         }
 
-        // OrcaSlicer CLI always outputs plate_1.gcode (not {modelname}.gcode)
+        // OrcaSlicer CLI always outputs plate_X.gcode (not {modelname}.gcode)
         if (!File.Exists(gcodeFilePath))
         {
-            // Look for plate_1.gcode or any .gcode file in the output dir
-            string plate1Path = Path.Combine(gcodeOutputDir, "plate_1.gcode");
-            if (File.Exists(plate1Path))
+            string expectedPlateName = job.PlateIndex.HasValue ? $"plate_{job.PlateIndex.Value + 1}.gcode" : "plate_1.gcode";
+            string platePath = Path.Combine(gcodeOutputDir, expectedPlateName);
+            if (File.Exists(platePath))
             {
-                gcodeFilePath = plate1Path;
+                gcodeFilePath = platePath;
             }
             else
             {
-                string[] gcodeFiles = Directory.GetFiles(gcodeOutputDir, "*.gcode");
-                gcodeFilePath = gcodeFiles.Length > 0
-                    ? gcodeFiles[0]
-                    : throw new InvalidOperationException("OrcaSlicer completed but no G-code produced");
+                string plate1Path = Path.Combine(gcodeOutputDir, "plate_1.gcode");
+                if (File.Exists(plate1Path))
+                {
+                    gcodeFilePath = plate1Path;
+                }
+                else
+                {
+                    string[] gcodeFiles = Directory.GetFiles(gcodeOutputDir, "*.gcode");
+                    gcodeFilePath = gcodeFiles.Length > 0
+                        ? gcodeFiles[0]
+                        : throw new InvalidOperationException("OrcaSlicer completed but no G-code produced");
+                }
             }
         }
 

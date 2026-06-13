@@ -410,6 +410,12 @@ const FileRow: React.FC<FileRowProps> = ({
         <Badge variant={fileStatusVariantMap[file.status]} size="sm">
           {file.status}
         </Badge>
+        {/* Plate info */}
+        {(file.plateIndex != null || file.plateName) && (
+          <Badge variant="primary" size="sm">
+            {file.plateName ?? `Plate ${file.plateIndex! + 1}`}
+          </Badge>
+        )}
         {/* Material info */}
         {(file.requiredMaterial ?? file.materialRequirement) && (
           <Badge variant="default" size="sm">

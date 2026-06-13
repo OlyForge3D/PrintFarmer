@@ -57,6 +57,17 @@ public class PrintProjectFile
     public int SortOrder { get; set; }
 
     /// <summary>
+    /// Optional plate index from a multi-plate 3MF model.
+    /// </summary>
+    public int? PlateIndex { get; set; }
+
+    /// <summary>
+    /// Optional plate name from a multi-plate 3MF model.
+    /// </summary>
+    [MaxLength(255)]
+    public string? PlateName { get; set; }
+
+    /// <summary>
     /// Optional notes for this specific file within the project.
     /// </summary>
     [MaxLength(500)]

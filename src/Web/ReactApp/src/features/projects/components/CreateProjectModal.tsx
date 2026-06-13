@@ -85,6 +85,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           printCount: f.printCount,
           materialRequirement: f.materialRequirement || undefined,
           notes: f.notes || undefined,
+          plateIndex: f.plateIndex ?? undefined,
+          plateName: f.plateName ?? undefined,
         });
 
         if (f.spoolmanFilamentId) {
@@ -182,13 +184,17 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         const changed =
           file.printCount !== orig.printCount ||
           newFilamentId !== orig.spoolmanFilamentId ||
-          (file.materialRequirement || null) !== (orig.materialRequirement || null);
+          (file.materialRequirement || null) !== (orig.materialRequirement || null) ||
+          (file.plateIndex ?? null) !== (orig.plateIndex ?? null) ||
+          (file.plateName ?? null) !== (orig.plateName ?? null);
 
         if (changed) {
           await projectService.updateProjectFile(editProject.id, orig.id, {
             spoolmanFilamentId: newFilamentId,
             printCount: file.printCount,
             materialRequirement: file.materialRequirement,
+            plateIndex: file.plateIndex === null ? -1 : file.plateIndex,
+            plateName: file.plateName === undefined ? '' : file.plateName,
           });
         }
       }
@@ -471,6 +477,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                     <th className="px-3 py-2 text-left font-medium text-pf-text-primary">File</th>
                     <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Material</th>
                     <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Filament</th>
+                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Plate</th>
                     <th className="px-3 py-2 text-center font-medium text-pf-text-primary w-16">Qty</th>
                     <th className="px-3 py-2 text-right font-medium text-pf-text-primary w-24">Est. Cost</th>
                     <th className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
@@ -538,6 +545,34 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                               }
                             }}
                           />
+                        </td>
+
+                        {/* Plate Index & Name */}
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="Plate #"
+                              value={file.plateIndex != null ? file.plateIndex + 1 : ''}
+                              onChange={(e) => {
+                                const val = e.target.value ? parseInt(e.target.value, 10) - 1 : null;
+                                updateFileSettings(file.gcodeFileId, { plateIndex: val });
+                              }}
+                              className="w-16 px-1.5 py-1 text-xs bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
+                              title="Plate Number"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Name"
+                              value={file.plateName || ''}
+                              onChange={(e) => {
+                                updateFileSettings(file.gcodeFileId, { plateName: e.target.value || undefined });
+                              }}
+                              className="w-24 px-1.5 py-1 text-xs bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
+                              title="Plate Name"
+                            />
+                          </div>
                         </td>
 
                         {/* Print count */}

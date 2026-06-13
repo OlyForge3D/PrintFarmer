@@ -125,6 +125,8 @@ public class PrintProjectService(
                     Status = PrintProjectFileStatus.Pending,
                     SortOrder = sortOrder++,
                     Notes = fileRequest.Notes,
+                    PlateIndex = fileRequest.PlateIndex,
+                    PlateName = fileRequest.PlateName,
                     CreatedAt = now,
                     UpdatedAt = now
                 };
@@ -253,6 +255,8 @@ public class PrintProjectService(
                 Status = PrintProjectFileStatus.Pending,
                 SortOrder = ++maxSortOrder,
                 Notes = fileRequest.Notes,
+                PlateIndex = fileRequest.PlateIndex,
+                PlateName = fileRequest.PlateName,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -351,6 +355,16 @@ public class PrintProjectService(
         if (request.Notes is not null)
         {
             projectFile.Notes = request.Notes;
+        }
+
+        if (request.PlateIndex.HasValue)
+        {
+            projectFile.PlateIndex = request.PlateIndex.Value == -1 ? null : request.PlateIndex.Value;
+        }
+
+        if (request.PlateName is not null)
+        {
+            projectFile.PlateName = request.PlateName == string.Empty ? null : request.PlateName;
         }
 
         projectFile.UpdatedAt = now;
@@ -516,6 +530,8 @@ public class PrintProjectService(
                 FilamentColor = colorHex,
                 Copies = remainingPrints,
                 ProjectFileId = file.Id,
+                PlateIndex = file.PlateIndex,
+                PlateName = file.PlateName,
             };
 
             var job = await queueService.AddJobToQueueAsync(queueRequest, userId, ct);
@@ -725,6 +741,8 @@ public class PrintProjectService(
             file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial,
             file.GcodeFile?.RequiredNozzleDiameter,
             file.GcodeFile?.ExtractedPrinterModelName,
-            EstimatedCostPerCopy: null);
+            EstimatedCostPerCopy: null,
+            file.PlateIndex,
+            file.PlateName);
     }
 }

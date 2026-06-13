@@ -90,6 +90,9 @@ public class SlicingJobRequest
 
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
 
+    /// <summary>Optional: Plate index to slice from a multi-plate 3MF model.</summary>
+    public int? PlateIndex { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = [];
 
     /// <summary>
@@ -173,6 +176,9 @@ public class DistributedSlicingJob : SlicingJobDto
 
     public DateTime? ScheduledAt { get; set; } // Optional: when job becomes available for processing (for delayed retries)
 
+    /// <summary>Optional: Plate index to slice from a multi-plate 3MF model.</summary>
+    public int? PlateIndex { get; set; }
+
     /// <summary>
     /// JSON-serialized model transform (rotation/scale) from the UI workspace.
     /// </summary>
@@ -225,6 +231,7 @@ public class DistributedSlicingJob : SlicingJobDto
             SlicerEngine = request.SlicerEngine.ToString(),
             Profile = request.SlicerProfile,
             Priority = request.Priority,
+            PlateIndex = request.PlateIndex,
             Status = SlicingJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
             CorrelationId = envelope.CorrelationId,

@@ -224,6 +224,17 @@ public class PrintJob
     [MaxLength(32)]
     public string? FilamentColor { get; set; }
 
+    /// <summary>
+    /// Optional plate index from a multi-plate 3MF model.
+    /// </summary>
+    public int? PlateIndex { get; set; }
+
+    /// <summary>
+    /// Optional plate name from a multi-plate 3MF model.
+    /// </summary>
+    [MaxLength(255)]
+    public string? PlateName { get; set; }
+
     // Phase 3C: Timeline tracking
     public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();
 

@@ -30,6 +30,7 @@ import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCir
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
+import { Tabs } from '@/common/components/ui/Tabs';
 import { FormField } from '@/common/components/ui/FormField';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
@@ -1132,44 +1133,22 @@ export const SlicerProfilesPage: React.FC = () => {
             </div>
 
             {/* Profile Type Tabs */}
-            <div className="flex gap-2 mt-4 border-b border-pf-border">
-              <Button
-                type="button"
-                onClick={() => setActiveTab('machines')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'machines' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Machines ({filteredMachineProfiles.length})
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setActiveTab('processes')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'processes' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setActiveTab('filaments')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'filaments' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setActiveTab('custom')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'custom' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                My Profiles ({filteredCustomProfiles.length})
-              </Button>
-            </div>
+            <Tabs activeTab={activeTab} onTabChange={(tabId) => setActiveTab(tabId as 'machines' | 'filaments' | 'processes' | 'custom')}>
+              <Tabs.List className="border-b border-pf-border bg-transparent !p-0">
+                <Tabs.Tab id="machines">
+                  Machines ({filteredMachineProfiles.length})
+                </Tabs.Tab>
+                <Tabs.Tab id="processes">
+                  Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
+                </Tabs.Tab>
+                <Tabs.Tab id="filaments">
+                  Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
+                </Tabs.Tab>
+                <Tabs.Tab id="custom">
+                  My Profiles ({filteredCustomProfiles.length})
+                </Tabs.Tab>
+              </Tabs.List>
+            </Tabs>
           </div>
 
           {/* Profiles Table */}

@@ -1850,6 +1850,8 @@ export interface JobQueuePrintJob {
   completedCopies: number;
   remainingCopies: number;
   projectFileId?: string;
+  plateIndex?: number | null;
+  plateName?: string | null;
   createdAt: Date;
   updatedAt: Date;
   /** Per-toolhead filament usage tracking */
@@ -2694,6 +2696,8 @@ export interface PrintProjectFileDto {
   remainingPrintTimeMinutes?: number | null;
   estimatedCostPerCopy?: number | null;
   estimatedFileCost?: number | null;
+  plateIndex?: number | null;
+  plateName?: string | null;
 }
 
 /**
@@ -2729,6 +2733,8 @@ export interface AddFileToProjectRequest {
   materialRequirement?: string;
   printCount?: number;
   notes?: string;
+  plateIndex?: number | null;
+  plateName?: string | null;
 }
 
 /**
@@ -2742,6 +2748,8 @@ export interface UpdateProjectFileRequest {
   status?: PrintProjectFileStatus;
   sortOrder?: number;
   notes?: string;
+  plateIndex?: number | null;
+  plateName?: string | null;
 }
 
 /**
