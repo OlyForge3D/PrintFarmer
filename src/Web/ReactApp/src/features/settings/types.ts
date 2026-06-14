@@ -82,7 +82,11 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     label: 'General',
     description: 'Farm identity, timezone, appearance defaults, and core configuration.',
     keywords: ['general', 'farm', 'name', 'timezone', 'language', 'appearance', 'theme', 'system'],
-    subPages: [],
+    subPages: [
+      { id: 'farm', label: 'Farm Defaults', description: 'Configure farm identity, timezone, and defaults.', keywords: ['farm', 'defaults', 'name', 'timezone'] },
+      { id: 'system', label: 'System Config', description: 'Database, logging, networking, and files.', keywords: ['database', 'logging', 'networking', 'files', 'upload', 'discovery'] },
+      { id: 'automation', label: 'Automation & Costs', description: 'Cost tracking, failure detection, and auto-tagging.', keywords: ['automation', 'costs', 'tracking', 'failure', 'obico', 'tagging', 'alert'] },
+    ],
   },
   {
     id: 'slicing',
@@ -117,7 +121,10 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     label: 'Integrations',
     description: 'Webhooks, automation endpoints, and external connections.',
     keywords: ['integration', 'api', 'key', 'external', 'webhook', 'automation', 'endpoint'],
-    subPages: [],
+    subPages: [
+      { id: 'connections', label: 'External Services', description: 'Configure Spoolman, Home Assistant, and slicer auth.', keywords: ['spoolman', 'home assistant', 'slicer', 'octoprint'] },
+      { id: 'webhooks', label: 'Webhooks', description: 'Manage outgoing webhook endpoints.', keywords: ['webhook', 'api', 'endpoints'] },
+    ],
   },
   {
     id: 'quotas',

@@ -116,23 +116,6 @@ function UserPreferencesPanel() {
 }
 
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
-  general: (
-    <SettingsSection>
-      {/* ASSUMPTION: allowedGroups filtering relies on the backend returning ALL setting groups
-         in the metadata response. If the backend ever pre-filters groups server-side, this
-         client-side filter becomes a no-op and settings will silently disappear. */}
-      <SettingsPage
-        allowedGroups={['General']}
-        introText="Configure farm identity, timezone, and other farm-wide defaults."
-        afterContent={<FarmSettingsSection />}
-      />
-    </SettingsSection>
-  ),
-  integrations: (
-    <SettingsSection>
-      <WebhooksAdminPage />
-    </SettingsSection>
-  ),
   quotas: (
     <SettingsSection>
       <QuotaManagementPage />
@@ -141,6 +124,44 @@ const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
 };
 
 const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
+  'general.farm': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={['General']}
+        introText="Configure farm identity, timezone, and other farm-wide defaults."
+        afterContent={<FarmSettingsSection />}
+      />
+    </SettingsSection>
+  ),
+  'general.system': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={['System', 'Networking', 'Catalog', 'Files', 'Printers']}
+        introText="Configure database, logging, network discovery, and file parameters."
+      />
+    </SettingsSection>
+  ),
+  'general.automation': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={['Operations', 'Monitoring', 'Maintenance']}
+        introText="Configure cost tracking, Obico print failure detection, and automatic tag rules."
+      />
+    </SettingsSection>
+  ),
+  'integrations.connections': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={['Integrations']}
+        introText="Configure third-party services, Smart Plugs, and slicer API connections."
+      />
+    </SettingsSection>
+  ),
+  'integrations.webhooks': (
+    <SettingsSection>
+      <WebhooksAdminPage />
+    </SettingsSection>
+  ),
   'profile.preferences': <UserPreferencesPanel />,
   'profile.api-keys': (
     <SettingsSection>
