@@ -171,7 +171,6 @@ public class NotificationService(
     private const int MaxPushSubscriptionsPerUser = 5;
     private const int ChannelFanOutConcurrency = 8;
     private const int PushFanOutConcurrency = 8;
-    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SubscriptionLocks = new();
 
     public async Task SendJobStartedAsync(
         string jobId,
@@ -323,6 +322,7 @@ public class NotificationService(
                 }
             }
 
+            Task pushDispatchTask = Task.CompletedTask;
             if (pendingPushTargets.Count > 0)
             {
                 string payload = JsonSerializer.Serialize(new
@@ -332,13 +332,16 @@ public class NotificationService(
                     body,
                     jobId = parsedJobId
                 });
-                await DispatchPushTargetsAsync(pendingPushTargets, payload, cancellationToken);
+                pushDispatchTask = DispatchPushTargetsAsync(pendingPushTargets, payload, cancellationToken);
             }
 
+            Task emailDispatchTask = Task.CompletedTask;
             if (pendingEmailTargets.Count > 0)
             {
-                await DispatchEmailTargetsAsync(pendingEmailTargets, type, subject, body, cancellationToken);
+                emailDispatchTask = DispatchEmailTargetsAsync(pendingEmailTargets, type, subject, body, cancellationToken);
             }
+
+            await Task.WhenAll(pushDispatchTask, emailDispatchTask);
 
             logger.LogInformation(
                 "Job notification broadcast ({Type}) for job {JobId}: {Subject}",
@@ -586,51 +589,48 @@ public class NotificationService(
             return;
         }
 
-        using var semaphore = new SemaphoreSlim(PushFanOutConcurrency);
-        Task<PushDispatchOutcome>[] dispatchTasks = targets
-            .Select(async target =>
+        var outcomes = new ConcurrentBag<PushDispatchOutcome>();
+        await Parallel.ForEachAsync(
+            targets,
+            new ParallelOptions
             {
-                await semaphore.WaitAsync(cancellationToken);
-                try
+                MaxDegreeOfParallelism = PushFanOutConcurrency,
+                CancellationToken = cancellationToken
+            },
+            async (target, ct) =>
+            {
+                if (!await IsValidPushEndpointAsync(target.Endpoint, ct))
                 {
-                    if (!await IsValidPushEndpointAsync(target.Endpoint, cancellationToken))
-                    {
-                        return new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: true, Error: "Endpoint no longer routable/public");
-                    }
-
-                    var dispatchSubscription = new PushSubscription
-                    {
-                        Id = target.SubscriptionId,
-                        UserId = target.UserId,
-                        Endpoint = target.Endpoint,
-                        P256dh = target.P256dh,
-                        Auth = target.Auth
-                    };
-
-                    WebPushDispatchResult result = await webPushNotificationSender.SendAsync(dispatchSubscription, payload, cancellationToken);
-                    return new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, result.Success, result.SubscriptionExpired, result.Error);
+                    outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: true, Error: "Endpoint no longer routable/public"));
+                    return;
                 }
-                finally
+
+                var dispatchSubscription = new PushSubscription
                 {
-                    semaphore.Release();
-                }
-            })
-            .ToArray();
+                    Id = target.SubscriptionId,
+                    UserId = target.UserId,
+                    Endpoint = target.Endpoint,
+                    P256dh = target.P256dh,
+                    Auth = target.Auth
+                };
 
-        PushDispatchOutcome[] outcomes = await Task.WhenAll(dispatchTasks);
+                WebPushDispatchResult result = await webPushNotificationSender.SendAsync(dispatchSubscription, payload, ct);
+                outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, result.Success, result.SubscriptionExpired, result.Error));
+            });
 
-        var expiredIds = outcomes
+        var outcomeList = outcomes.ToList();
+        var expiredIds = outcomeList
             .Where(o => o.Expired)
             .Select(o => o.SubscriptionId)
             .Distinct()
             .ToList();
-        var successfulIds = outcomes
+        var successfulIds = outcomeList
             .Where(o => o.Success && !o.Expired)
             .Select(o => o.SubscriptionId)
             .Distinct()
             .ToList();
 
-        foreach (PushDispatchOutcome failed in outcomes.Where(o => !o.Success && !o.Expired))
+        foreach (PushDispatchOutcome failed in outcomeList.Where(o => !o.Success && !o.Expired))
         {
             logger.LogWarning(
                 "Web push delivery failed for user {UserId} endpoint {Endpoint}: {Error}",
@@ -684,21 +684,17 @@ public class NotificationService(
             return;
         }
 
-        using var semaphore = new SemaphoreSlim(ChannelFanOutConcurrency);
-        Task[] tasks = targets.Select(async target =>
-        {
-            await semaphore.WaitAsync(cancellationToken);
-            try
+        await Parallel.ForEachAsync(
+            targets,
+            new ParallelOptions
             {
-                await SendEmailNotificationAsync(target.User, type, subject, body, cancellationToken);
-            }
-            finally
+                MaxDegreeOfParallelism = ChannelFanOutConcurrency,
+                CancellationToken = cancellationToken
+            },
+            async (target, ct) =>
             {
-                semaphore.Release();
-            }
-        }).ToArray();
-
-        await Task.WhenAll(tasks);
+                await SendEmailNotificationAsync(target.User, type, subject, body, ct);
+            });
     }
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
@@ -713,16 +709,17 @@ public class NotificationService(
             throw new ArgumentException("Subscription keys p256dh/auth are invalid");
         }
 
-        SemaphoreSlim subscriptionLock = SubscriptionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
-        await subscriptionLock.WaitAsync(cancellationToken);
-        try
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        else
         {
             await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        finally
-        {
-            subscriptionLock.Release();
         }
 
         logger.LogInformation("Saved push subscription for user {UserId}", userId);
@@ -762,11 +759,6 @@ public class NotificationService(
         if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
         {
             return false;
-        }
-
-        if (IPAddress.TryParse(host, out IPAddress? ipAddress))
-        {
-            return IsPublicRoutableAddress(ipAddress);
         }
 
         if (!IsKnownPushServiceHost(host))
@@ -820,6 +812,23 @@ public class NotificationService(
             }
 
             byte[] v6 = ipAddress.GetAddressBytes();
+            bool isNat64WellKnownPrefix = v6[0] == 0x00
+                && v6[1] == 0x64
+                && v6[2] == 0xFF
+                && v6[3] == 0x9B
+                && v6[4] == 0x00
+                && v6[5] == 0x00
+                && v6[6] == 0x00
+                && v6[7] == 0x00
+                && v6[8] == 0x00
+                && v6[9] == 0x00
+                && v6[10] == 0x00
+                && v6[11] == 0x00;
+            if (isNat64WellKnownPrefix)
+            {
+                return false;
+            }
+
             return (v6[0] & 0xFE) != 0xFC;
         }
 
@@ -965,6 +974,7 @@ public class NotificationService(
     }
 
     private sealed record EmailDispatchTarget(UserDto User);
+
     private sealed record PushDispatchTarget(string SubscriptionId, Guid UserId, string Endpoint, string P256dh, string Auth);
 
     private sealed record PushDispatchOutcome(string SubscriptionId, Guid UserId, string Endpoint, bool Success, bool Expired, string? Error);

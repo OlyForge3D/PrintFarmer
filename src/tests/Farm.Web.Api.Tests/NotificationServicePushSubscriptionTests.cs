@@ -128,7 +128,7 @@ public class NotificationServicePushSubscriptionTests : IDisposable
 
         await _dbContext.SaveChangesAsync();
 
-        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://8.8.8.8/sub-overflow", ValidP256dh, ValidAuth);
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://fcm.googleapis.com/sub-overflow", ValidP256dh, ValidAuth);
 
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*Maximum of 5 push subscriptions per user exceeded*");
@@ -139,7 +139,7 @@ public class NotificationServicePushSubscriptionTests : IDisposable
     {
         var userId = Guid.NewGuid();
 
-        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://8.8.8.8/sub", "%%%%", "###");
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://fcm.googleapis.com/sub", "%%%%", "###");
 
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*p256dh/auth are invalid*");

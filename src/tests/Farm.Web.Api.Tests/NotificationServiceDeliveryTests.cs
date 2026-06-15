@@ -100,7 +100,7 @@ public class NotificationServiceDeliveryTests : IDisposable
         _dbContext.PushSubscriptions.Add(new PushSubscription
         {
             UserId = user.Id,
-            Endpoint = "https://8.8.8.8/sub1",
+            Endpoint = "https://fcm.googleapis.com/sub1",
             P256dh = "k1",
             Auth = "a1"
         });
@@ -136,7 +136,7 @@ public class NotificationServiceDeliveryTests : IDisposable
         _dbContext.PushSubscriptions.Add(new PushSubscription
         {
             UserId = user.Id,
-            Endpoint = "https://8.8.8.8/sub1",
+            Endpoint = "https://fcm.googleapis.com/sub1",
             P256dh = "k1",
             Auth = "a1"
         });

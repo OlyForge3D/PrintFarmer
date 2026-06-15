@@ -11,11 +11,17 @@ public interface IWebPushNotificationSender
     Task<WebPushDispatchResult> SendAsync(DomainPushSubscription subscription, string payload, CancellationToken cancellationToken = default);
 }
 
-public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender> logger) : IWebPushNotificationSender, IDisposable
+public sealed class WebPushNotificationSender : IWebPushNotificationSender, IDisposable
 {
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
-    private readonly ILogger<WebPushNotificationSender> _logger = logger;
-    private readonly WebPushClient _client = new();
+    private readonly ILogger<WebPushNotificationSender> _logger;
+    private readonly WebPushClient _client;
+
+    public WebPushNotificationSender(ILogger<WebPushNotificationSender> logger)
+    {
+        _logger = logger;
+        _client = new WebPushClient();
+    }
 
     public async Task<WebPushDispatchResult> SendAsync(DomainPushSubscription subscription, string payload, CancellationToken cancellationToken = default)
     {
