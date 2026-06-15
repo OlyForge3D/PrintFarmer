@@ -144,6 +144,15 @@ public class SettingsController(
             return BadRequest("printablesUsername must be 64 characters or fewer.");
         }
 
+        string? normalizedPrintablesUsername = string.IsNullOrWhiteSpace(body.PrintablesUsername)
+            ? null
+            : body.PrintablesUsername.Trim();
+
+        if (normalizedPrintablesUsername is not null && normalizedPrintablesUsername.StartsWith('@'))
+        {
+            return BadRequest("printablesUsername must not start with '@'.");
+        }
+
         Guid userId = GetUserId();
         UserSettings? entity = await _db.UserSettings.FirstOrDefaultAsync(u => u.UserId == userId, ct);
         byte[]? expectedRowVersionBytes = null;
@@ -194,9 +203,7 @@ public class SettingsController(
 
         if (body.PrintablesUsername is not null)
         {
-            entity.PrintablesUsername = string.IsNullOrWhiteSpace(body.PrintablesUsername)
-                ? null
-                : body.PrintablesUsername.Trim();
+            entity.PrintablesUsername = normalizedPrintablesUsername;
         }
 
         entity.UpdatedAt = DateTime.UtcNow;

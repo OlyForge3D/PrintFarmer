@@ -394,6 +394,41 @@ public class SettingsControllerConcurrencyTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task UpdateUserSettings_WithPrintablesUsernameStartingWithAt_Returns400()
+    {
+        Guid userId = Guid.NewGuid();
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var user = new User { Id = userId, Username = "printablesat", Email = "printablesat@test.com", PasswordHash = "x" };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+        }
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var controller = CreateController(db, userId);
+            var body = new UpdateUserSettingsBody(
+                Theme: "dark",
+                Locale: "en",
+                ItemsPerPage: 25,
+                DefaultSlicerPreset: null,
+                RowVersion: null,
+                PrintablesUsername: "@ripley-user");
+
+            IActionResult result = await controller.UpdateUserSettingsAsync(body, CancellationToken.None);
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.Equal("printablesUsername must not start with '@'.", badRequest.Value);
+        }
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            UserSettings? created = await db.UserSettings.FirstOrDefaultAsync(u => u.UserId == userId);
+            Assert.Null(created);
+        }
+    }
+
     private SettingsController CreateController(AppDbContext db, Guid userId)
     {
         var controller = new SettingsController(
