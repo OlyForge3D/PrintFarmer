@@ -3,11 +3,13 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.Notifications;
 
@@ -152,7 +154,9 @@ public class NotificationService(
     ILogger<NotificationService> logger,
     AppDbContext dbContext,
     IHubContext<PrinterHub>? hubContext = null,
-    IWebhookService? webhookService = null) : INotificationService
+    IWebhookService? webhookService = null,
+    IEmailService? emailService = null,
+    IWebPushNotificationSender? webPushNotificationSender = null) : INotificationService
 {
     public async Task SendJobStartedAsync(
         string jobId,
@@ -248,12 +252,23 @@ public class NotificationService(
 
             foreach (UserDto user in activeUsers)
             {
-                if (!await ShouldNotifyUserAsync(user.Id, type, cancellationToken))
+                NotificationPreferences? prefs = await GetPreferencesAsync(user.Id, cancellationToken);
+                NotificationPreferences effectivePrefs = prefs ?? BuildDefaultPreferences(user.Id);
+
+                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.InApp))
                 {
-                    continue;
+                    await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
                 }
 
-                await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
+                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Email))
+                {
+                    await SendEmailNotificationAsync(user, type, subject, body, cancellationToken);
+                }
+
+                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Push))
+                {
+                    await SendPushNotificationsAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
+                }
             }
 
             // Broadcast real-time event via SignalR so connected clients update immediately
@@ -374,6 +389,7 @@ public class NotificationService(
         {
             preferences.Id = Guid.NewGuid().ToString();
             preferences.UserId = userId;
+            preferences.InAppOnJobFailed = true;
             preferences.CreatedAt = DateTime.UtcNow;
             preferences.UpdatedAt = DateTime.UtcNow;
             dbContext.NotificationPreferences.Add(preferences);
@@ -387,6 +403,18 @@ public class NotificationService(
             existing.NotifyOnFailure = preferences.NotifyOnFailure;
             existing.NotifyOnStart = preferences.NotifyOnStart;
             existing.NotifyOnPause = preferences.NotifyOnPause;
+            existing.InAppOnJobStarted = preferences.InAppOnJobStarted;
+            existing.InAppOnJobCompleted = preferences.InAppOnJobCompleted;
+            existing.InAppOnJobFailed = true;
+            existing.InAppOnJobPaused = preferences.InAppOnJobPaused;
+            existing.EmailOnJobStarted = preferences.EmailOnJobStarted;
+            existing.EmailOnJobCompleted = preferences.EmailOnJobCompleted;
+            existing.EmailOnJobFailed = preferences.EmailOnJobFailed;
+            existing.EmailOnJobPaused = preferences.EmailOnJobPaused;
+            existing.PushOnJobStarted = preferences.PushOnJobStarted;
+            existing.PushOnJobCompleted = preferences.PushOnJobCompleted;
+            existing.PushOnJobFailed = preferences.PushOnJobFailed;
+            existing.PushOnJobPaused = preferences.PushOnJobPaused;
             existing.Frequency = preferences.Frequency;
             existing.RetentionDays = preferences.RetentionDays;
             existing.UpdatedAt = DateTime.UtcNow;
@@ -415,37 +443,141 @@ public class NotificationService(
         }
     }
 
-    /// <summary>
-    /// Checks if a user should receive a notification of the given type based on their preferences.
-    /// If no preferences are stored, the user receives all notifications (opt-out model).
-    /// </summary>
-    private async Task<bool> ShouldNotifyUserAsync(Guid userId, NotificationType type, CancellationToken cancellationToken)
+    private static NotificationPreferences BuildDefaultPreferences(Guid userId)
     {
-        var prefs = await dbContext.NotificationPreferences
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-
-        if (prefs is null)
+        return new NotificationPreferences
         {
-            return true; // no preferences set — default to all enabled
+            UserId = userId,
+            EnableEmailNotifications = true,
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
+            NotifyOnCompletion = true,
+            NotifyOnFailure = true,
+            NotifyOnStart = false,
+            NotifyOnPause = true,
+            InAppOnJobStarted = false,
+            InAppOnJobCompleted = true,
+            InAppOnJobFailed = true,
+            InAppOnJobPaused = true,
+            EmailOnJobStarted = false,
+            EmailOnJobCompleted = true,
+            EmailOnJobFailed = true,
+            EmailOnJobPaused = true,
+            PushOnJobStarted = false,
+            PushOnJobCompleted = true,
+            PushOnJobFailed = true,
+            PushOnJobPaused = true,
+            Frequency = NotificationFrequency.RealTime,
+            RetentionDays = 30
+        };
+    }
+
+    private static bool ShouldDeliverToChannel(NotificationPreferences preferences, NotificationType type, NotificationDeliveryChannel channel)
+    {
+        if (type == NotificationType.JobFailed && channel == NotificationDeliveryChannel.InApp)
+        {
+            return true;
         }
 
-        if (!prefs.EnableInAppNotifications)
+        bool channelGloballyEnabled = channel switch
+        {
+            NotificationDeliveryChannel.InApp => preferences.EnableInAppNotifications,
+            NotificationDeliveryChannel.Email => preferences.EnableEmailNotifications,
+            NotificationDeliveryChannel.Push => preferences.EnablePushNotifications,
+            _ => false
+        };
+
+        if (!channelGloballyEnabled)
         {
             return false;
         }
 
-        return type switch
+        if (!IsPrintEventType(type))
         {
-            NotificationType.JobStarted => prefs.NotifyOnStart,
-            NotificationType.JobCompleted => prefs.NotifyOnCompletion,
-            NotificationType.JobFailed => prefs.NotifyOnFailure,
-            NotificationType.JobPaused => prefs.NotifyOnPause,
-            NotificationType.JobResumed => prefs.NotifyOnPause, // resume follows pause preference
-            NotificationType.QueueAlert => true,                // always notify
-            NotificationType.SystemAlert => true,               // always notify
-            _ => true
+            return channel == NotificationDeliveryChannel.InApp;
+        }
+
+        return preferences.IsChannelEnabled(type, channel);
+    }
+
+    private static bool IsPrintEventType(NotificationType type)
+    {
+        return type is NotificationType.JobStarted
+            or NotificationType.JobCompleted
+            or NotificationType.JobFailed
+            or NotificationType.JobPaused
+            or NotificationType.JobResumed;
+    }
+
+    private async Task SendEmailNotificationAsync(UserDto user, NotificationType type, string subject, string body, CancellationToken cancellationToken)
+    {
+        if (emailService is null || string.IsNullOrWhiteSpace(user.Email))
+        {
+            return;
+        }
+
+        var metadata = new Dictionary<string, string>
+        {
+            ["notificationType"] = type.ToString()
         };
+
+        var message = new EmailMessage(user.Email, subject, PlainBody: body, HtmlBody: $"<p>{body}</p>", TemplateKey: "PrintEvent", Metadata: metadata);
+        EmailDispatchResult result = await emailService.SendAsync(message, cancellationToken);
+        if (!result.Success)
+        {
+            logger.LogWarning("Email delivery failed for user {UserId}: {Error}", user.Id, result.Error ?? result.ProviderMessage);
+        }
+    }
+
+    private async Task SendPushNotificationsAsync(Guid userId, NotificationType type, string subject, string body, Guid? jobId, CancellationToken cancellationToken)
+    {
+        if (webPushNotificationSender is null)
+        {
+            return;
+        }
+
+        List<PushSubscription> subscriptions = await dbContext.PushSubscriptions
+            .Where(s => s.UserId == userId)
+            .ToListAsync(cancellationToken);
+
+        if (subscriptions.Count == 0)
+        {
+            return;
+        }
+
+        string payload = JsonSerializer.Serialize(new
+        {
+            type = type.ToString(),
+            subject,
+            body,
+            jobId
+        });
+
+        var expiredSubscriptions = new List<PushSubscription>();
+
+        foreach (PushSubscription subscription in subscriptions)
+        {
+            WebPushDispatchResult result = await webPushNotificationSender.SendAsync(subscription, payload, cancellationToken);
+            if (result.SubscriptionExpired)
+            {
+                expiredSubscriptions.Add(subscription);
+            }
+            else if (!result.Success)
+            {
+                logger.LogWarning("Web push delivery failed for user {UserId} endpoint {Endpoint}: {Error}", userId, subscription.Endpoint, result.Error);
+            }
+            else
+            {
+                subscription.LastUsedAt = DateTime.UtcNow;
+            }
+        }
+
+        if (expiredSubscriptions.Count > 0)
+        {
+            dbContext.PushSubscriptions.RemoveRange(expiredSubscriptions);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)

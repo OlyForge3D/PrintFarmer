@@ -50,6 +50,67 @@ public class NotificationPreferences
     public bool NotifyOnPause { get; set; } = true;
 
     /// <summary>
+    /// Enable in-app notification delivery for job start events.
+    /// </summary>
+    public bool InAppOnJobStarted { get; set; } = false;
+
+    /// <summary>
+    /// Enable in-app notification delivery for job completion events.
+    /// </summary>
+    public bool InAppOnJobCompleted { get; set; } = true;
+
+    /// <summary>
+    /// Enable in-app notification delivery for job failure events.
+    /// Always enforced as enabled by service policy.
+    /// </summary>
+    public bool InAppOnJobFailed { get; set; } = true;
+
+    /// <summary>
+    /// Enable in-app notification delivery for job pause/resume events.
+    /// </summary>
+    public bool InAppOnJobPaused { get; set; } = true;
+
+    /// <summary>
+    /// Enable email delivery for job start events.
+    /// </summary>
+    public bool EmailOnJobStarted { get; set; } = false;
+
+    /// <summary>
+    /// Enable email delivery for job completion events.
+    /// </summary>
+    public bool EmailOnJobCompleted { get; set; } = true;
+
+    /// <summary>
+    /// Enable email delivery for job failure events.
+    /// </summary>
+    public bool EmailOnJobFailed { get; set; } = true;
+
+    /// <summary>
+    /// Enable email delivery for job pause/resume events.
+    /// </summary>
+    public bool EmailOnJobPaused { get; set; } = true;
+
+    /// <summary>
+    /// Enable push delivery for job start events.
+    /// </summary>
+    public bool PushOnJobStarted { get; set; } = false;
+
+    /// <summary>
+    /// Enable push delivery for job completion events.
+    /// </summary>
+    public bool PushOnJobCompleted { get; set; } = true;
+
+    /// <summary>
+    /// Enable push delivery for job failure events.
+    /// </summary>
+    public bool PushOnJobFailed { get; set; } = true;
+
+    /// <summary>
+    /// Enable push delivery for job pause/resume events.
+    /// </summary>
+    public bool PushOnJobPaused { get; set; } = true;
+
+    /// <summary>
     /// Notification frequency (real-time, hourly digest, daily digest)
     /// </summary>
     public NotificationFrequency Frequency { get; set; } = NotificationFrequency.RealTime;
@@ -68,6 +129,40 @@ public class NotificationPreferences
     /// When preferences were last updated
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsChannelEnabled(NotificationType type, NotificationDeliveryChannel channel)
+    {
+        NotificationType normalizedType = type == NotificationType.JobResumed ? NotificationType.JobPaused : type;
+
+        if (normalizedType == NotificationType.JobFailed && channel == NotificationDeliveryChannel.InApp)
+        {
+            return true;
+        }
+
+        return (normalizedType, channel) switch
+        {
+            (NotificationType.JobStarted, NotificationDeliveryChannel.InApp) => InAppOnJobStarted,
+            (NotificationType.JobCompleted, NotificationDeliveryChannel.InApp) => InAppOnJobCompleted,
+            (NotificationType.JobFailed, NotificationDeliveryChannel.InApp) => InAppOnJobFailed,
+            (NotificationType.JobPaused, NotificationDeliveryChannel.InApp) => InAppOnJobPaused,
+            (NotificationType.JobStarted, NotificationDeliveryChannel.Email) => EmailOnJobStarted,
+            (NotificationType.JobCompleted, NotificationDeliveryChannel.Email) => EmailOnJobCompleted,
+            (NotificationType.JobFailed, NotificationDeliveryChannel.Email) => EmailOnJobFailed,
+            (NotificationType.JobPaused, NotificationDeliveryChannel.Email) => EmailOnJobPaused,
+            (NotificationType.JobStarted, NotificationDeliveryChannel.Push) => PushOnJobStarted,
+            (NotificationType.JobCompleted, NotificationDeliveryChannel.Push) => PushOnJobCompleted,
+            (NotificationType.JobFailed, NotificationDeliveryChannel.Push) => PushOnJobFailed,
+            (NotificationType.JobPaused, NotificationDeliveryChannel.Push) => PushOnJobPaused,
+            _ => false
+        };
+    }
+}
+
+public enum NotificationDeliveryChannel
+{
+    InApp,
+    Email,
+    Push
 }
 
 public enum NotificationFrequency
