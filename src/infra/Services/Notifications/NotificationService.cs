@@ -1,3 +1,4 @@
+using System.Data;
 using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Contracts.Auth;
@@ -160,6 +161,7 @@ public class NotificationService(
     IWebPushNotificationSender? webPushNotificationSender = null) : INotificationService
 {
     private const int MaxPushSubscriptionsPerUser = 5;
+    private const int PushFanOutConcurrency = 8;
 
     public async Task SendJobStartedAsync(
         string jobId,
@@ -275,6 +277,7 @@ public class NotificationService(
 
             IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
             IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
+            var pendingPushTargets = new List<PushDispatchTarget>();
 
             foreach (UserDto user in activeUsers)
             {
@@ -293,8 +296,32 @@ public class NotificationService(
 
                 if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Push))
                 {
-                    await SendPushNotificationsAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
+                    List<PushSubscription> userSubscriptions = await dbContext.PushSubscriptions
+                        .AsNoTracking()
+                        .Where(s => s.UserId == user.Id)
+                        .ToListAsync(cancellationToken);
+                    foreach (PushSubscription subscription in userSubscriptions)
+                    {
+                        pendingPushTargets.Add(new PushDispatchTarget(
+                            subscription.Id,
+                            user.Id,
+                            subscription.Endpoint,
+                            subscription.P256dh,
+                            subscription.Auth));
+                    }
                 }
+            }
+
+            if (pendingPushTargets.Count > 0)
+            {
+                string payload = JsonSerializer.Serialize(new
+                {
+                    type = type.ToString(),
+                    subject,
+                    body,
+                    jobId = parsedJobId
+                });
+                await DispatchPushTargetsAsync(pendingPushTargets, payload, cancellationToken);
             }
 
             logger.LogInformation(
@@ -533,60 +560,89 @@ public class NotificationService(
         }
     }
 
-    private async Task SendPushNotificationsAsync(Guid userId, NotificationType type, string subject, string body, Guid? jobId, CancellationToken cancellationToken)
+    private async Task DispatchPushTargetsAsync(
+        IReadOnlyList<PushDispatchTarget> targets,
+        string payload,
+        CancellationToken cancellationToken)
     {
-        if (webPushNotificationSender is null)
+        if (webPushNotificationSender is null || targets.Count == 0)
         {
             return;
         }
 
-        List<PushSubscription> subscriptions = await dbContext.PushSubscriptions
-            .Where(s => s.UserId == userId)
-            .ToListAsync(cancellationToken);
+        using var semaphore = new SemaphoreSlim(PushFanOutConcurrency);
+        Task<PushDispatchOutcome>[] dispatchTasks = targets
+            .Select(async target =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    var dispatchSubscription = new PushSubscription
+                    {
+                        Id = target.SubscriptionId,
+                        UserId = target.UserId,
+                        Endpoint = target.Endpoint,
+                        P256dh = target.P256dh,
+                        Auth = target.Auth
+                    };
 
-        if (subscriptions.Count == 0)
+                    WebPushDispatchResult result = await webPushNotificationSender.SendAsync(dispatchSubscription, payload, cancellationToken);
+                    return new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, result.Success, result.SubscriptionExpired, result.Error);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            })
+            .ToArray();
+
+        PushDispatchOutcome[] outcomes = await Task.WhenAll(dispatchTasks);
+
+        var expiredIds = outcomes
+            .Where(o => o.Expired)
+            .Select(o => o.SubscriptionId)
+            .Distinct()
+            .ToList();
+        var successfulIds = outcomes
+            .Where(o => o.Success && !o.Expired)
+            .Select(o => o.SubscriptionId)
+            .Distinct()
+            .ToList();
+
+        foreach (PushDispatchOutcome failed in outcomes.Where(o => !o.Success && !o.Expired))
         {
-            return;
+            logger.LogWarning(
+                "Web push delivery failed for user {UserId} endpoint {Endpoint}: {Error}",
+                failed.UserId,
+                failed.Endpoint,
+                failed.Error);
         }
 
-        string payload = JsonSerializer.Serialize(new
+        bool hasUpdates = false;
+        if (successfulIds.Count > 0)
         {
-            type = type.ToString(),
-            subject,
-            body,
-            jobId
-        });
-
-        var expiredSubscriptions = new List<PushSubscription>();
-        bool hasSubscriptionUpdates = false;
-
-        WebPushDispatchResult[] results = await Task.WhenAll(
-            subscriptions.Select(subscription => webPushNotificationSender.SendAsync(subscription, payload, cancellationToken)));
-
-        for (int i = 0; i < subscriptions.Count; i++)
-        {
-            PushSubscription subscription = subscriptions[i];
-            WebPushDispatchResult result = results[i];
-            if (result.SubscriptionExpired)
+            DateTime now = DateTime.UtcNow;
+            List<PushSubscription> successfulSubscriptions = await dbContext.PushSubscriptions
+                .Where(s => successfulIds.Contains(s.Id))
+                .ToListAsync(cancellationToken);
+            foreach (PushSubscription subscription in successfulSubscriptions)
             {
-                expiredSubscriptions.Add(subscription);
+                subscription.LastUsedAt = now;
             }
-            else if (!result.Success)
-            {
-                logger.LogWarning("Web push delivery failed for user {UserId} endpoint {Endpoint}: {Error}", userId, subscription.Endpoint, result.Error);
-            }
-            else
-            {
-                subscription.LastUsedAt = DateTime.UtcNow;
-                hasSubscriptionUpdates = true;
-            }
+
+            hasUpdates = successfulSubscriptions.Count > 0;
         }
 
-        bool hasUpdates = hasSubscriptionUpdates;
-        if (expiredSubscriptions.Count > 0)
+        if (expiredIds.Count > 0)
         {
-            dbContext.PushSubscriptions.RemoveRange(expiredSubscriptions);
-            hasUpdates = true;
+            List<PushSubscription> expiredSubscriptions = await dbContext.PushSubscriptions
+                .Where(s => expiredIds.Contains(s.Id))
+                .ToListAsync(cancellationToken);
+            if (expiredSubscriptions.Count > 0)
+            {
+                dbContext.PushSubscriptions.RemoveRange(expiredSubscriptions);
+                hasUpdates = true;
+            }
         }
 
         if (hasUpdates)
@@ -597,39 +653,29 @@ public class NotificationService(
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
     {
-        if (!IsValidPushEndpoint(endpoint))
+        if (!await IsValidPushEndpointAsync(endpoint, cancellationToken))
         {
             throw new ArgumentException("Endpoint must be an absolute HTTPS URL and cannot target local/private hosts", nameof(endpoint));
         }
 
-        var existing = await dbContext.PushSubscriptions
-            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
-
-        if (existing is not null)
+        if (!IsValidPushKeys(p256dh, auth))
         {
-            existing.P256dh = p256dh;
-            existing.Auth = auth;
-            existing.LastUsedAt = DateTime.UtcNow;
+            throw new ArgumentException("Subscription keys p256dh/auth are invalid");
+        }
+
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         else
         {
-            int existingCount = await dbContext.PushSubscriptions.CountAsync(s => s.UserId == userId, cancellationToken);
-            if (existingCount >= MaxPushSubscriptionsPerUser)
-            {
-                throw new ArgumentException($"Maximum of {MaxPushSubscriptionsPerUser} push subscriptions per user exceeded");
-            }
-
-            dbContext.PushSubscriptions.Add(new PushSubscription
-            {
-                UserId = userId,
-                Endpoint = endpoint,
-                P256dh = p256dh,
-                Auth = auth,
-                CreatedAt = DateTime.UtcNow
-            });
+            await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Saved push subscription for user {UserId}", userId);
     }
 
@@ -646,7 +692,7 @@ public class NotificationService(
         }
     }
 
-    private static bool IsValidPushEndpoint(string endpoint)
+    private static async Task<bool> IsValidPushEndpointAsync(string endpoint, CancellationToken cancellationToken)
     {
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
         {
@@ -658,7 +704,7 @@ public class NotificationService(
             return false;
         }
 
-        string host = uri.Host;
+        string host = uri.IdnHost.Trim('[', ']');
         if (string.IsNullOrWhiteSpace(host))
         {
             return false;
@@ -669,9 +715,28 @@ public class NotificationService(
             return false;
         }
 
-        if (!IPAddress.TryParse(host, out IPAddress? ipAddress))
+        if (IPAddress.TryParse(host, out IPAddress? ipAddress))
         {
-            return true;
+            return IsPublicRoutableAddress(ipAddress);
+        }
+
+        try
+        {
+            IPAddress[] resolved = await Dns.GetHostAddressesAsync(host, cancellationToken);
+            return resolved.Length > 0 && resolved.All(IsPublicRoutableAddress);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPublicRoutableAddress(IPAddress address)
+    {
+        IPAddress ipAddress = address;
+        if (ipAddress.IsIPv4MappedToIPv6)
+        {
+            ipAddress = ipAddress.MapToIPv4();
         }
 
         if (IPAddress.IsLoopback(ipAddress))
@@ -681,21 +746,123 @@ public class NotificationService(
 
         if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
         {
-            if (ipAddress.IsIPv6LinkLocal || ipAddress.IsIPv6Multicast || ipAddress.IsIPv6SiteLocal)
+            if (ipAddress.Equals(IPAddress.IPv6None) || ipAddress.Equals(IPAddress.IPv6Any))
             {
                 return false;
             }
 
-            byte[] bytes = ipAddress.GetAddressBytes();
-            return (bytes[0] & 0xFE) != 0xFC;
+            if (ipAddress.IsIPv6LinkLocal || ipAddress.IsIPv6Multicast || ipAddress.IsIPv6SiteLocal || ipAddress.IsIPv6Teredo)
+            {
+                return false;
+            }
+
+            byte[] v6 = ipAddress.GetAddressBytes();
+            return (v6[0] & 0xFE) != 0xFC;
         }
 
         byte[] ipv4Bytes = ipAddress.GetAddressBytes();
-        return !(
-            ipv4Bytes[0] == 10 ||
-            (ipv4Bytes[0] == 172 && ipv4Bytes[1] >= 16 && ipv4Bytes[1] <= 31) ||
-            (ipv4Bytes[0] == 192 && ipv4Bytes[1] == 168) ||
-            (ipv4Bytes[0] == 169 && ipv4Bytes[1] == 254) ||
-            ipv4Bytes[0] == 127);
+        if (ipv4Bytes[0] == 0 || ipv4Bytes[0] == 10 || ipv4Bytes[0] == 127)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 100 && ipv4Bytes[1] >= 64 && ipv4Bytes[1] <= 127)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 169 && ipv4Bytes[1] == 254)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 172 && ipv4Bytes[1] >= 16 && ipv4Bytes[1] <= 31)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 192 && ipv4Bytes[1] == 168)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 198 && (ipv4Bytes[1] == 18 || ipv4Bytes[1] == 19))
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] >= 224)
+        {
+            return false;
+        }
+
+        return true;
     }
+
+    private static bool IsValidPushKeys(string p256dh, string auth)
+    {
+        if (string.IsNullOrWhiteSpace(p256dh) || string.IsNullOrWhiteSpace(auth))
+        {
+            return false;
+        }
+
+        return TryDecodeBase64Url(p256dh, out byte[]? p256dhBytes)
+            && p256dhBytes.Length is >= 32 and <= 200
+            && TryDecodeBase64Url(auth, out byte[]? authBytes)
+            && authBytes.Length is >= 8 and <= 64;
+    }
+
+    private static bool TryDecodeBase64Url(string input, out byte[] decoded)
+    {
+        decoded = Array.Empty<byte>();
+        try
+        {
+            string normalized = input.Replace('-', '+').Replace('_', '/');
+            int padding = normalized.Length % 4;
+            if (padding > 0)
+            {
+                normalized = normalized.PadRight(normalized.Length + (4 - padding), '=');
+            }
+
+            decoded = Convert.FromBase64String(normalized);
+            return decoded.Length > 0;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private async Task UpsertPushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken)
+    {
+        PushSubscription? existing = await dbContext.PushSubscriptions
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
+
+        if (existing is not null)
+        {
+            existing.P256dh = p256dh;
+            existing.Auth = auth;
+            existing.LastUsedAt = DateTime.UtcNow;
+            return;
+        }
+
+        int existingCount = await dbContext.PushSubscriptions.CountAsync(s => s.UserId == userId, cancellationToken);
+        if (existingCount >= MaxPushSubscriptionsPerUser)
+        {
+            throw new ArgumentException($"Maximum of {MaxPushSubscriptionsPerUser} push subscriptions per user exceeded");
+        }
+
+        dbContext.PushSubscriptions.Add(new PushSubscription
+        {
+            UserId = userId,
+            Endpoint = endpoint,
+            P256dh = p256dh,
+            Auth = auth,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    private sealed record PushDispatchTarget(string SubscriptionId, Guid UserId, string Endpoint, string P256dh, string Auth);
+
+    private sealed record PushDispatchOutcome(string SubscriptionId, Guid UserId, string Endpoint, bool Success, bool Expired, string? Error);
 }

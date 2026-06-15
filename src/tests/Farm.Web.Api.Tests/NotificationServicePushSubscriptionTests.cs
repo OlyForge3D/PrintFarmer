@@ -10,6 +10,9 @@ namespace Farm.Web.Api.Tests;
 
 public class NotificationServicePushSubscriptionTests : IDisposable
 {
+    private const string ValidP256dh = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=";
+    private const string ValidAuth = "AQIDBAUGBwgJCgsMDQ4PEA==";
+
     private readonly AppDbContext _dbContext;
     private readonly NotificationService _service;
 
@@ -103,7 +106,7 @@ public class NotificationServicePushSubscriptionTests : IDisposable
     {
         var userId = Guid.NewGuid();
 
-        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "http://localhost:8080/push", "k", "a");
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "http://localhost:8080/push", ValidP256dh, ValidAuth);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -125,10 +128,32 @@ public class NotificationServicePushSubscriptionTests : IDisposable
 
         await _dbContext.SaveChangesAsync();
 
-        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://push.example.com/sub-overflow", "k-overflow", "a-overflow");
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://8.8.8.8/sub-overflow", ValidP256dh, ValidAuth);
 
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*Maximum of 5 push subscriptions per user exceeded*");
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_InvalidKeyMaterial_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://8.8.8.8/sub", "%%%%", "###");
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*p256dh/auth are invalid*");
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_IPv4MappedPrivateIPv6Endpoint_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://[::ffff:10.0.0.1]/sub", ValidP256dh, ValidAuth);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*cannot target local/private hosts*");
     }
 
     public void Dispose()

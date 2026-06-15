@@ -1,7 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain.Notifications;
@@ -293,11 +292,6 @@ public class NotificationsController(INotificationService notificationService) :
                 return BadRequest(new { error = "Endpoint is required" });
             }
 
-            if (!IsValidPushEndpoint(request.Endpoint))
-            {
-                return BadRequest(new { error = "Endpoint must be an absolute HTTPS URL and cannot target local/private hosts" });
-            }
-
             if (string.IsNullOrWhiteSpace(request.Keys?.P256dh) || string.IsNullOrWhiteSpace(request.Keys?.Auth))
             {
                 return BadRequest(new { error = "Subscription keys p256dh and auth are required" });
@@ -498,59 +492,6 @@ public class NotificationsController(INotificationService notificationService) :
         preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted;
         preferences.NotifyOnFailure = true;
         preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused;
-    }
-
-    private static bool IsValidPushEndpoint(string endpoint)
-    {
-        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
-        {
-            return false;
-        }
-
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        string host = uri.Host;
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            return false;
-        }
-
-        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!IPAddress.TryParse(host, out IPAddress? ipAddress))
-        {
-            return true;
-        }
-
-        if (IPAddress.IsLoopback(ipAddress))
-        {
-            return false;
-        }
-
-        if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
-        {
-            if (ipAddress.IsIPv6LinkLocal || ipAddress.IsIPv6Multicast || ipAddress.IsIPv6SiteLocal)
-            {
-                return false;
-            }
-
-            byte[] bytes = ipAddress.GetAddressBytes();
-            return (bytes[0] & 0xFE) != 0xFC;
-        }
-
-        byte[] ipv4Bytes = ipAddress.GetAddressBytes();
-        return !(
-            ipv4Bytes[0] == 10 ||
-            (ipv4Bytes[0] == 172 && ipv4Bytes[1] >= 16 && ipv4Bytes[1] <= 31) ||
-            (ipv4Bytes[0] == 192 && ipv4Bytes[1] == 168) ||
-            (ipv4Bytes[0] == 169 && ipv4Bytes[1] == 254) ||
-            ipv4Bytes[0] == 127);
     }
 
     /// <summary>
