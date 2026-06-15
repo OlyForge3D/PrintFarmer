@@ -742,16 +742,17 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   return (
-    <PageTemplate
-      title={pageTitle}
-      subtitle={pageDescription}
-      padding="px-0"
-      showHeader
+    <div
+      data-settings-shell
+      className="flex min-h-0 flex-1 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col [&>div>div]:flex [&>div>div]:min-h-0 [&>div>div]:flex-1 [&>div>div]:flex-col"
     >
-      <div
-        data-settings-shell
-        className="pf-settings-surface relative isolate flex flex-1 min-h-0 flex-col pt-4"
+      <PageTemplate
+        title={pageTitle}
+        subtitle={pageDescription}
+        padding="px-0"
+        showHeader
       >
+        <div className="pf-settings-surface relative isolate flex flex-1 min-h-0 flex-col overflow-hidden pt-4">
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
           <div className="absolute inset-0 rounded-[1.5rem] bg-pf-bg-0/95" />
           <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.08]" style={{ backgroundImage: SETTINGS_FRAME_GRID, backgroundSize: '24px 24px' }} />
@@ -825,14 +826,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             </div>
           )}
         </div>
-      </div>
+        </div>
 
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        items={commandPaletteItems}
-        onClose={closeCommandPalette}
-        onSelect={navigateToSetting}
-      />
-    </PageTemplate>
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          items={commandPaletteItems}
+          onClose={closeCommandPalette}
+          onSelect={navigateToSetting}
+        />
+      </PageTemplate>
+    </div>
   );
 };
