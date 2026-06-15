@@ -5,6 +5,7 @@ import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { Alert, Button, Card, FormField, Input, Select } from '@/common/components/ui';
 import { useUserSettings, useUpdateUserSettings } from '@/features/settings/hooks/useUserSettings';
 import type { UserSettingsResponse } from '@/features/settings/types';
+import type { ApiError } from '@/types/api';
 
 const LOCALE_OPTIONS = [
   { value: 'en', label: 'English' },
@@ -12,6 +13,8 @@ const LOCALE_OPTIONS = [
   { value: 'fr', label: 'Français' },
   { value: 'es', label: 'Español' },
 ];
+
+const PRINTABLES_USERNAME_AT_PREFIX_ERROR = "Printables username must not begin with '@'.";
 
 export function UserSettingsSection() {
   const { data, isLoading, error, refetch, isFetching } = useUserSettings();
@@ -93,6 +96,10 @@ function UserSettingsForm({
       toast.error('Printables username must be 64 characters or fewer.');
       return;
     }
+    if (normalizedPrintablesUsername.startsWith('@')) {
+      toast.error(PRINTABLES_USERNAME_AT_PREFIX_ERROR);
+      return;
+    }
 
     mutation.mutate(
       {
@@ -105,6 +112,27 @@ function UserSettingsForm({
       },
       {
         onSuccess: () => toast.success('Preferences saved.'),
+        onError: (error) => {
+          const apiError = error as Partial<ApiError>;
+          if (apiError.statusCode === 409) {
+            return;
+          }
+
+          const combinedMessage = `${apiError.message ?? ''} ${apiError.details ?? ''}`.toLowerCase();
+          if (
+            combinedMessage.includes('printables')
+            && combinedMessage.includes('username')
+            && combinedMessage.includes('must not begin')
+          ) {
+            toast.error(PRINTABLES_USERNAME_AT_PREFIX_ERROR);
+            return;
+          }
+
+          const fallbackMessage = apiError.message ?? apiError.details;
+          if (fallbackMessage) {
+            toast.error(fallbackMessage);
+          }
+        },
       },
     );
   };

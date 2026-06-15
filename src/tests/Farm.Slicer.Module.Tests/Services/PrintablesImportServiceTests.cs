@@ -4,6 +4,7 @@ using System.Net;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -338,6 +339,102 @@ public class PrintablesImportServiceTests
     }
 
     [Fact]
+    public async Task ResolveUserProfileAsync_AtPrefixedUsername_NormalizesAndResolves()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "16", "handle": "maker_jane", "publicUsername": "Maker Jane", "avatarFilePath": "avatars/u1.png" }
+                  ]
+                }
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        PrintablesUserProfileDto result = await client.ResolveUserProfileAsync("@maker_jane", CancellationToken.None);
+
+        _ = result.Id.Should().Be("16");
+        _ = result.Handle.Should().Be("maker_jane");
+    }
+
+    [Fact]
+    public async Task GetUserCollectionsAsync_AtPrefixedUsername_ResolvesAndReturnsCollections()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "573746", "handle": "JeffRho", "publicUsername": "JeffRho" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userCollections": [
+                  {
+                    "id": "col-77",
+                    "name": "Public",
+                    "printsCount": 4
+                  }
+                ]
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("@JeffRho", CancellationToken.None);
+
+        _ = result.Should().HaveCount(1);
+        _ = result[0].Id.Should().Be("col-77");
+        _ = result[0].Name.Should().Be("Public");
+    }
+
+    [Fact]
+    public async Task GetUserCollectionsAsync_UrlEncodedAtUsername_ResolvesAndReturnsCollections()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "573746", "handle": "JeffRho", "publicUsername": "JeffRho" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userCollections": [
+                  {
+                    "id": "col-88",
+                    "name": "Encoded",
+                    "printsCount": 2
+                  }
+                ]
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("%40JeffRho", CancellationToken.None);
+
+        _ = result.Should().HaveCount(1);
+        _ = result[0].Id.Should().Be("col-88");
+    }
+
+    [Fact]
     public async Task GetUserModelsAsync_WithCursor_ReturnsHasNextPage()
     {
         QueueingHttpMessageHandler handler = new(
@@ -615,13 +712,70 @@ public class PrintablesImportServiceTests
         modelServiceMock.Verify(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task BrowseCollectionsAsync_AtPrefixedUsername_UsesResolvedHandleForCollections()
+    {
+        Mock<IPrintablesGraphQLClient> graphQlMock = new(MockBehavior.Strict);
+        Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
+        PrintablesUserProfileDto user = new(
+            Id: "573746",
+            Handle: "JeffRho",
+            PublicUsername: "JeffRho",
+            AvatarUrl: null);
+
+        _ = graphQlMock
+            .Setup(x => x.ResolveUserProfileAsync("@JeffRho", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _ = graphQlMock
+            .Setup(x => x.GetUserCollectionsAsync("JeffRho", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new PrintablesCollectionDto(
+                    Id: "col-1",
+                    Name: "Public",
+                    Slug: null,
+                    Description: null,
+                    ModelCount: 1,
+                    ThumbnailUrl: null),
+            ]);
+
+        PrintablesImportService service = new(graphQlMock.Object, modelServiceMock.Object, Mock.Of<ILogger<PrintablesImportService>>());
+        PrintablesCollectionsBrowseDto result = await service.BrowseCollectionsAsync("@JeffRho", CancellationToken.None);
+
+        _ = result.User.Handle.Should().Be("JeffRho");
+        _ = result.Collections.Should().HaveCount(1);
+        graphQlMock.Verify(x => x.GetUserCollectionsAsync("JeffRho", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ── Controller: preview endpoint ──────────────────────────────────────────
 
     private static PrintablesImportController BuildController(Mock<IPrintablesImportService> mockSvc)
     {
         Mock<ILogger<PrintablesImportController>> logger = new();
         Mock<IPrintablesOAuthService> oauthSvc = new();
-        return new PrintablesImportController(mockSvc.Object, oauthSvc.Object, logger.Object);
+        return BuildController(mockSvc, oauthSvc);
+    }
+
+    private static PrintablesImportController BuildController(
+        Mock<IPrintablesImportService> importService,
+        Mock<IPrintablesOAuthService> oauthService,
+        Guid? userId = null)
+    {
+        Mock<ILogger<PrintablesImportController>> logger = new();
+        PrintablesImportController controller = new(importService.Object, oauthService.Object, logger.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim("sub", (userId ?? Guid.Parse("71AE89EB-EAE9-41EA-8146-17F6C689E5F7")).ToString()),
+                    ], "TestAuth")),
+                },
+            },
+        };
+
+        return controller;
     }
 
     [Fact]
@@ -860,6 +1014,317 @@ public class PrintablesImportServiceTests
         IActionResult result = await controller.SearchModelsAsync("", 0, 24, null, CancellationToken.None);
 
         _ = Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task OAuthStatusAsync_Linked_ReturnsStatusPayload()
+    {
+        Guid userId = Guid.Parse("D17FC7AD-2DB7-4A6D-8996-05935EDAA8D8");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        PrintablesOAuthStatusDto status = new(
+            IsLinked: true,
+            AccessTokenExpiresAtUtc: DateTime.UtcNow.AddHours(1),
+            LinkedAtUtc: DateTime.UtcNow.AddMinutes(-10),
+            HasRefreshToken: true,
+            Scope: "read");
+
+        _ = oauthSvcMock
+            .Setup(s => s.GetStatusAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(status);
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthStatusAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        PrintablesOAuthStatusDto payload = Assert.IsType<PrintablesOAuthStatusDto>(ok.Value);
+        _ = payload.IsLinked.Should().BeTrue();
+        _ = payload.HasRefreshToken.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task OAuthStatusAsync_Unlinked_ReturnsStatusPayload()
+    {
+        Guid userId = Guid.Parse("635AB186-8FAA-45AF-B423-B754E6EF2E56");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        PrintablesOAuthStatusDto status = new(
+            IsLinked: false,
+            AccessTokenExpiresAtUtc: null,
+            LinkedAtUtc: null,
+            HasRefreshToken: false,
+            Scope: null);
+
+        _ = oauthSvcMock
+            .Setup(s => s.GetStatusAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(status);
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthStatusAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        PrintablesOAuthStatusDto payload = Assert.IsType<PrintablesOAuthStatusDto>(ok.Value);
+        _ = payload.IsLinked.Should().BeFalse();
+        _ = payload.AccessTokenExpiresAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task OAuthCallbackAsync_ExpiredState_Returns400()
+    {
+        Guid userId = Guid.Parse("459B9D82-0249-4E0F-A75B-9D2D5A674D6A");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.HandleCallbackAsync(userId, "oauth-code", "expired-state", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("OAuth state is invalid or expired.", "state"));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthCallbackAsync("oauth-code", "expired-state", CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        _ = badRequest.Value.Should().BeOfType<string>().Which.Should().Contain("OAuth state is invalid or expired.");
+    }
+
+    [Fact]
+    public async Task OAuthCallbackAsync_TokenExchangeError_Returns502()
+    {
+        Guid userId = Guid.Parse("DBE2D9D5-A2BF-43B7-810C-4BC41E12BC35");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.HandleCallbackAsync(userId, "oauth-code", "state-ok", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesApiException("Printables OAuth token exchange failed with HTTP 503."));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthCallbackAsync("oauth-code", "state-ok", CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status502BadGateway);
+    }
+
+    [Fact]
+    public async Task OAuthCallbackAsync_NotLinkedConflict_Returns409()
+    {
+        Guid userId = Guid.Parse("E7736E84-78CF-4D66-B783-73008780A6D2");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.HandleCallbackAsync(userId, "oauth-code", "state-ok", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthNotLinkedException("Printables account is not linked."));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthCallbackAsync("oauth-code", "state-ok", CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        _ = conflict.Value.Should().Be("Printables account is not linked.");
+    }
+
+    [Fact]
+    public async Task OAuthCallbackAsync_TransientUnavailable_Returns503()
+    {
+        Guid userId = Guid.Parse("A11F7B78-CC84-4A37-8861-33B964624B1A");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.HandleCallbackAsync(userId, "oauth-code", "state-ok", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthTemporarilyUnavailableException("temporary outage"));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthCallbackAsync("oauth-code", "state-ok", CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task OAuthDisconnectAsync_TransientUnavailable_Returns503()
+    {
+        Guid userId = Guid.Parse("F0D6179B-E8DF-4F9A-88FB-10CC4CA3B5C9");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.DisconnectAsync(userId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthTemporarilyUnavailableException("temporary outage"));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.OAuthDisconnectAsync(CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_ReturnsPageForLinkedUser()
+    {
+        Guid userId = Guid.Parse("0359F793-4A27-46CC-B711-89C61A76A2CF");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        PrintablesAuthenticatedCursorPageDto page = new(
+            Items:
+            [
+                new PrintablesModelSummaryDto(
+                    Id: "liked-1",
+                    Name: "Voron Clip",
+                    Slug: "voron-clip",
+                    AuthorHandle: "ripley",
+                    AuthorName: null,
+                    ThumbnailUrl: null,
+                    LikesCount: 9,
+                    DownloadCount: 14,
+                    SourceUrl: "https://www.printables.com/model/liked-1-voron-clip"),
+            ],
+            NextCursor: "cursor-2",
+            HasMore: true);
+
+        _ = oauthSvcMock
+            .Setup(s => s.GetLikedModelsAsync(userId, 24, "cursor-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(page);
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetLikedModelsAsync(24, "cursor-1", CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        PrintablesAuthenticatedCursorPageDto payload = Assert.IsType<PrintablesAuthenticatedCursorPageDto>(ok.Value);
+        _ = payload.Items.Should().HaveCount(1);
+        _ = payload.NextCursor.Should().Be("cursor-2");
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_UnlinkedUser_Returns409()
+    {
+        Guid userId = Guid.Parse("93B2BF50-1D90-4FCF-BD70-8437D8B5E73B");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.GetLikedModelsAsync(userId, 24, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthNotLinkedException("Printables account is not linked."));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetLikedModelsAsync(24, null, CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        _ = conflict.Value.Should().Be("Printables account is not linked.");
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_ServiceError_Returns501()
+    {
+        Guid userId = Guid.Parse("5D44C478-E6C3-4A67-B25B-F856B49AD687");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.GetLikedModelsAsync(userId, 24, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new NotSupportedException("TODO: Implement Printables liked models query mapping against authenticated API."));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetLikedModelsAsync(24, null, CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status501NotImplemented);
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_TransientUpstream_Returns503()
+    {
+        Guid userId = Guid.Parse("A8D76A58-8CC4-4D00-9502-1C2A4E4B5F3F");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.GetLikedModelsAsync(userId, 24, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthTemporarilyUnavailableException("temporary outage"));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetLikedModelsAsync(24, null, CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task GetDownloadHistoryAsync_ReturnsPageForLinkedUser()
+    {
+        Guid userId = Guid.Parse("7E109FCE-2A98-43C1-8BEE-490F62B1B3DC");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        PrintablesAuthenticatedCursorPageDto page = new(
+            Items:
+            [
+                new PrintablesModelSummaryDto(
+                    Id: "history-1",
+                    Name: "History Model",
+                    Slug: "history-model",
+                    AuthorHandle: "ripley",
+                    AuthorName: null,
+                    ThumbnailUrl: null,
+                    LikesCount: 2,
+                    DownloadCount: 8,
+                    SourceUrl: "https://www.printables.com/model/history-1-history-model"),
+            ],
+            NextCursor: null,
+            HasMore: false);
+
+        _ = oauthSvcMock
+            .Setup(s => s.GetDownloadHistoryAsync(userId, 12, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(page);
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetDownloadHistoryAsync(12, null, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        PrintablesAuthenticatedCursorPageDto payload = Assert.IsType<PrintablesAuthenticatedCursorPageDto>(ok.Value);
+        _ = payload.HasMore.Should().BeFalse();
+        _ = payload.Items.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetDownloadHistoryAsync_UnlinkedUser_Returns409()
+    {
+        Guid userId = Guid.Parse("65AA8992-03B2-49E0-A326-1028D7F247A8");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.GetDownloadHistoryAsync(userId, 24, "cursor-1", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthNotLinkedException("Printables account is not linked."));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetDownloadHistoryAsync(24, "cursor-1", CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        _ = conflict.Value.Should().Be("Printables account is not linked.");
+    }
+
+    [Fact]
+    public async Task GetDownloadHistoryAsync_ServiceError_Returns501()
+    {
+        Guid userId = Guid.Parse("1CC10B8E-C0CA-4D83-87B4-6F4A8FDE0185");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.GetDownloadHistoryAsync(userId, 24, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new NotSupportedException("TODO: Implement Printables download history query mapping against authenticated API."));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetDownloadHistoryAsync(24, null, CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status501NotImplemented);
+    }
+
+    [Fact]
+    public async Task GetDownloadHistoryAsync_TransientUpstream_Returns503()
+    {
+        Guid userId = Guid.Parse("1D6D79C8-A18A-4A35-A724-7B121B93F55C");
+        Mock<IPrintablesImportService> importSvcMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthSvcMock = new(MockBehavior.Strict);
+        _ = oauthSvcMock
+            .Setup(s => s.GetDownloadHistoryAsync(userId, 24, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthTemporarilyUnavailableException("temporary outage"));
+
+        PrintablesImportController controller = BuildController(importSvcMock, oauthSvcMock, userId);
+        IActionResult result = await controller.GetDownloadHistoryAsync(24, null, CancellationToken.None);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
     }
 
     private sealed class PrintablesImportTestHttpMessageHandler : HttpMessageHandler

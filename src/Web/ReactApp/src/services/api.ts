@@ -173,6 +173,36 @@ export interface PfRequestConfig extends AxiosRequestConfig {
 
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
+interface PrintablesModelSummaryApiDto {
+  id: string;
+  name?: string;
+  title?: string;
+  slug?: string | null;
+  authorHandle?: string | null;
+  authorName?: string | null;
+  author?: string | null;
+  thumbnailUrl?: string | null;
+  likesCount?: number;
+  likeCount?: number;
+  downloadCount?: number;
+  downloadsCount?: number;
+  fileCount?: number;
+  sourceUrl?: string;
+}
+
+interface PrintablesCursorApiResponse<T> {
+  items?: T[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}
+
+interface PrintablesSearchApiResponse<T> {
+  items?: T[];
+  hasMore?: boolean;
+  offset?: number;
+  limit?: number;
+}
+
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
   private static generateCorrelationId(): string {
@@ -189,6 +219,81 @@ export class ApiClient {
         return v.toString(16);
       }
     );
+  }
+
+  private static normalizePrintablesUsername(username: string): string {
+    return username.trim().replace(/^@+/, "");
+  }
+
+  private static mapPrintablesModelSummary(model: PrintablesModelSummaryApiDto): PrintablesModelSummary {
+    return {
+      id: model.id,
+      title: model.title ?? model.name ?? "",
+      slug: model.slug ?? null,
+      author: model.author ?? model.authorHandle ?? model.authorName ?? "Unknown",
+      thumbnailUrl: model.thumbnailUrl ?? null,
+      likesCount: model.likesCount ?? model.likeCount,
+      downloadsCount: model.downloadsCount ?? model.downloadCount,
+      fileCount: model.fileCount,
+      sourceUrl: model.sourceUrl,
+    };
+  }
+
+  private static normalizePrintablesCursorPage(
+    page: PrintablesCursorApiResponse<PrintablesModelSummaryApiDto> | PrintablesPagedResponse<PrintablesModelSummary> | null | undefined,
+  ): PrintablesPagedResponse<PrintablesModelSummary> {
+    if (!page) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const items = (page.items ?? []).map((item) => ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto));
+    return {
+      items,
+      nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+      hasMore: Boolean(page.hasMore),
+    };
+  }
+
+  private static normalizePrintablesHistoryPage(
+    page:
+      | PrintablesCursorApiResponse<PrintablesModelSummaryApiDto & { downloadedAt?: string | null }>
+      | PrintablesPagedResponse<PrintablesDownloadHistoryItem>
+      | null
+      | undefined,
+  ): PrintablesPagedResponse<PrintablesDownloadHistoryItem> {
+    if (!page) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const items = (page.items ?? []).map((item) => {
+      const mappedModel = ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto);
+      return {
+        ...mappedModel,
+        downloadedAt: (item as { downloadedAt?: string | null }).downloadedAt ?? null,
+      };
+    });
+
+    return {
+      items,
+      nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+      hasMore: Boolean(page.hasMore),
+    };
+  }
+
+  private static normalizePrintablesSearchPage(
+    page: PrintablesSearchApiResponse<PrintablesModelSummaryApiDto> | PrintablesPagedResponse<PrintablesModelSummary> | null | undefined,
+  ): PrintablesPagedResponse<PrintablesModelSummary> {
+    if (!page) {
+      return { items: [], hasMore: false, offset: 0, limit: 0 };
+    }
+
+    const items = (page.items ?? []).map((item) => ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto));
+    return {
+      items,
+      hasMore: Boolean(page.hasMore),
+      offset: typeof page.offset === "number" ? page.offset : 0,
+      limit: typeof page.limit === "number" ? page.limit : items.length,
+    };
   }
   // ============ Generic Settings API methods ============
   /**
@@ -1978,8 +2083,13 @@ export class ApiClient {
     username: string,
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesCollectionSummary>> {
-    const response = await this.client.get<PrintablesPagedResponse<PrintablesCollectionSummary>>(
-      `/3d-models/printables/users/${encodeURIComponent(username)}/collections`,
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesCollectionSummary> & { collections?: PrintablesCollectionSummary[] }>(
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/collections`,
       {
         params: {
           cursor: options?.cursor,
@@ -1987,15 +2097,47 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    const items = Array.isArray(response.data.items)
+      ? response.data.items
+      : Array.isArray(response.data.collections)
+        ? response.data.collections
+        : [];
+
+    return {
+      items,
+      nextCursor: typeof response.data.nextCursor === "string" ? response.data.nextCursor : null,
+    };
+  }
+
+  async getPrintablesCollectionModels(
+    collectionId: string,
+    options?: { cursor?: string; limit?: number; query?: string; ordering?: string }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/collections/${encodeURIComponent(collectionId)}/models`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+          query: options?.query,
+          ordering: options?.ordering,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
   }
 
   async getPrintablesUserModels(
     username: string,
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
-    const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
-      `/3d-models/printables/users/${encodeURIComponent(username)}/models`,
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/models`,
       {
         params: {
           cursor: options?.cursor,
@@ -2003,24 +2145,24 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    return ApiClient.normalizePrintablesCursorPage(response.data);
   }
 
   async searchPrintablesModels(
     query: string,
-    options?: { cursor?: string; limit?: number }
+    options?: { offset?: number; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
-    const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
+    const response = await this.client.get<PrintablesSearchApiResponse<PrintablesModelSummaryApiDto>>(
       `/3d-models/printables/search`,
       {
         params: {
           query,
-          cursor: options?.cursor,
+          offset: options?.offset ?? 0,
           limit: options?.limit,
         },
       }
     );
-    return response.data;
+    return ApiClient.normalizePrintablesSearchPage(response.data);
   }
 
   async getPrintablesOAuthStatus(): Promise<PrintablesOAuthStatus> {
@@ -2030,23 +2172,32 @@ export class ApiClient {
     return response.data;
   }
 
-  async getPrintablesOAuthAuthorizeUrl(returnUrl: string): Promise<{ authorizationUrl: string }> {
+  async getPrintablesOAuthAuthorizeUrl(): Promise<{ authorizationUrl: string }> {
     const response = await this.client.post<{ authorizationUrl: string }>(
-      "/3d-models/printables/oauth/authorize-url",
-      { returnUrl }
+      "/3d-models/printables/oauth/connect"
+    );
+    return response.data;
+  }
+
+  async completePrintablesOAuthCallback(code: string, state: string): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/callback",
+      {
+        params: { code, state },
+      }
     );
     return response.data;
   }
 
   async disconnectPrintablesOAuth(): Promise<void> {
-    await this.client.delete("/3d-models/printables/oauth/connection");
+    await this.client.post("/3d-models/printables/oauth/disconnect");
   }
 
   async getPrintablesLikedModels(
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
-    const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
-      "/3d-models/printables/me/liked-models",
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      "/3d-models/printables/liked",
       {
         params: {
           cursor: options?.cursor,
@@ -2054,14 +2205,14 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    return ApiClient.normalizePrintablesCursorPage(response.data);
   }
 
   async getPrintablesDownloadHistory(
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesDownloadHistoryItem>> {
-    const response = await this.client.get<PrintablesPagedResponse<PrintablesDownloadHistoryItem>>(
-      "/3d-models/printables/me/download-history",
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto & { downloadedAt?: string | null }>>(
+      "/3d-models/printables/history",
       {
         params: {
           cursor: options?.cursor,
@@ -2069,7 +2220,7 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    return ApiClient.normalizePrintablesHistoryPage(response.data);
   }
 
   async deleteGcodeFiles(fileIds: string[]): Promise<void> {

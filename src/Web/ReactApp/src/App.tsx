@@ -52,6 +52,7 @@ import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
+import { PrintablesOAuthCallbackPage } from '@/features/models3d/pages/PrintablesOAuthCallbackPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -205,6 +206,7 @@ function AuthenticatedAppRoutes() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/confirm-email" element={<ConfirmEmailPage />} />
+      <Route path="/oauth/printables/callback" element={<PrintablesOAuthCallbackPage />} />
       <Route path="/registration-pending" element={<RegistrationPendingPage />} />
       <Route path="/*" element={<Layout />}>
         <Route index element={<PrinterDashboard />} />
