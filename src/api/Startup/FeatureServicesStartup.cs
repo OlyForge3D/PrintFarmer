@@ -50,7 +50,7 @@ public static class FeatureServicesStartup
 
         // Notification Module (job event notifications broadcast to all users)
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.INotificationRepository, Farm.Infrastructure.Repositories.Notifications.EfNotificationRepository>();
-        services.AddScoped<Farm.Infrastructure.Services.Notifications.IWebPushNotificationSender, Farm.Infrastructure.Services.Notifications.WebPushNotificationSender>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.IWebPushNotificationSender, Farm.Infrastructure.Services.Notifications.WebPushNotificationSender>();
         services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationService, Farm.Infrastructure.Services.Notifications.NotificationService>();
 
         // Webhooks (event delivery via HTTP POST to external consumers)

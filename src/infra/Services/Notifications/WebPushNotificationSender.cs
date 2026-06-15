@@ -13,6 +13,7 @@ public interface IWebPushNotificationSender
 
 public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender> logger) : IWebPushNotificationSender, IDisposable
 {
+    private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
     private readonly ILogger<WebPushNotificationSender> _logger = logger;
     private readonly WebPushClient _client = new();
 
@@ -36,7 +37,9 @@ public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender>
         try
         {
             var webPushSubscription = new WebPush.PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
-            await _client.SendNotificationAsync(webPushSubscription, payload, vapidDetails, cancellationToken: cancellationToken);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(SendTimeout);
+            await _client.SendNotificationAsync(webPushSubscription, payload, vapidDetails, cancellationToken: timeoutCts.Token);
             return new WebPushDispatchResult(Success: true);
         }
         catch (WebPushException ex) when (ex.StatusCode is HttpStatusCode.Gone or HttpStatusCode.NotFound)

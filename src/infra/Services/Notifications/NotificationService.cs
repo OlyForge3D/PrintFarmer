@@ -159,6 +159,8 @@ public class NotificationService(
     IEmailService? emailService = null,
     IWebPushNotificationSender? webPushNotificationSender = null) : INotificationService
 {
+    private const int MaxPushSubscriptionsPerUser = 5;
+
     public async Task SendJobStartedAsync(
         string jobId,
         string jobName,
@@ -558,9 +560,13 @@ public class NotificationService(
         var expiredSubscriptions = new List<PushSubscription>();
         bool hasSubscriptionUpdates = false;
 
-        foreach (PushSubscription subscription in subscriptions)
+        WebPushDispatchResult[] results = await Task.WhenAll(
+            subscriptions.Select(subscription => webPushNotificationSender.SendAsync(subscription, payload, cancellationToken)));
+
+        for (int i = 0; i < subscriptions.Count; i++)
         {
-            WebPushDispatchResult result = await webPushNotificationSender.SendAsync(subscription, payload, cancellationToken);
+            PushSubscription subscription = subscriptions[i];
+            WebPushDispatchResult result = results[i];
             if (result.SubscriptionExpired)
             {
                 expiredSubscriptions.Add(subscription);
@@ -591,6 +597,11 @@ public class NotificationService(
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
     {
+        if (!IsValidPushEndpoint(endpoint))
+        {
+            throw new ArgumentException("Endpoint must be an absolute HTTPS URL and cannot target local/private hosts", nameof(endpoint));
+        }
+
         var existing = await dbContext.PushSubscriptions
             .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
 
@@ -602,6 +613,12 @@ public class NotificationService(
         }
         else
         {
+            int existingCount = await dbContext.PushSubscriptions.CountAsync(s => s.UserId == userId, cancellationToken);
+            if (existingCount >= MaxPushSubscriptionsPerUser)
+            {
+                throw new ArgumentException($"Maximum of {MaxPushSubscriptionsPerUser} push subscriptions per user exceeded");
+            }
+
             dbContext.PushSubscriptions.Add(new PushSubscription
             {
                 UserId = userId,
@@ -627,5 +644,58 @@ public class NotificationService(
             await dbContext.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Deleted push subscription for user {UserId} endpoint {Endpoint}", userId, endpoint);
         }
+    }
+
+    private static bool IsValidPushEndpoint(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string host = uri.Host;
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!IPAddress.TryParse(host, out IPAddress? ipAddress))
+        {
+            return true;
+        }
+
+        if (IPAddress.IsLoopback(ipAddress))
+        {
+            return false;
+        }
+
+        if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            if (ipAddress.IsIPv6LinkLocal || ipAddress.IsIPv6Multicast || ipAddress.IsIPv6SiteLocal)
+            {
+                return false;
+            }
+
+            byte[] bytes = ipAddress.GetAddressBytes();
+            return (bytes[0] & 0xFE) != 0xFC;
+        }
+
+        byte[] ipv4Bytes = ipAddress.GetAddressBytes();
+        return !(
+            ipv4Bytes[0] == 10 ||
+            (ipv4Bytes[0] == 172 && ipv4Bytes[1] >= 16 && ipv4Bytes[1] <= 31) ||
+            (ipv4Bytes[0] == 192 && ipv4Bytes[1] == 168) ||
+            (ipv4Bytes[0] == 169 && ipv4Bytes[1] == 254) ||
+            ipv4Bytes[0] == 127);
     }
 }

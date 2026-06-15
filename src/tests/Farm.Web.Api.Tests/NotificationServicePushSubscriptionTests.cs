@@ -98,6 +98,39 @@ public class NotificationServicePushSubscriptionTests : IDisposable
         remaining.Should().HaveCount(1);
     }
 
+    [Fact]
+    public async Task SavePushSubscriptionAsync_InvalidEndpoint_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "http://localhost:8080/push", "k", "a");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_ExceedingMaxSubscriptions_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+        for (int i = 0; i < 5; i++)
+        {
+            _dbContext.PushSubscriptions.Add(new PushSubscription
+            {
+                UserId = userId,
+                Endpoint = $"https://push.example.com/sub{i}",
+                P256dh = $"k{i}",
+                Auth = $"a{i}"
+            });
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://push.example.com/sub-overflow", "k-overflow", "a-overflow");
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Maximum of 5 push subscriptions per user exceeded*");
+    }
+
     public void Dispose()
     {
         _dbContext.Dispose();
