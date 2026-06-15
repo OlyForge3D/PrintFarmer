@@ -256,6 +256,143 @@ public class PrintablesImportServiceTests
     }
 
     [Fact]
+    public async Task SearchModelsAsync_EmptyQuery_ThrowsArgumentException()
+    {
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, "{}"));
+        Func<Task> act = () => client.SearchModelsAsync("   ", 20, null, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ArgumentException>()
+            .WithParameterName("query");
+    }
+
+    [Fact]
+    public async Task SearchModelsAsync_ModelsPathFallback_ReturnsMappedPagedResult()
+    {
+        const string json = """
+            {
+              "data": {
+                "search": {
+                  "models": {
+                    "edges": [
+                      {
+                        "node": {
+                          "id": "88",
+                          "name": "Fallback Model",
+                          "description": "Legacy path",
+                          "likesCount": 8,
+                          "downloadsCount": 16,
+                          "user": { "handle": "fallback_user" }
+                        }
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": null
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        PrintablesPagedResultDto<PrintablesModelCardDto> result = await client.SearchModelsAsync("fallback", 20, null, CancellationToken.None);
+
+        _ = result.Items.Should().HaveCount(1);
+        _ = result.Items[0].Id.Should().Be("88");
+        _ = result.Items[0].Creator.Should().Be("fallback_user");
+        _ = result.Items[0].LikeCount.Should().Be(8);
+        _ = result.HasNextPage.Should().BeFalse();
+        _ = result.NextCursor.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetUserCollectionsAsync_ProfileFallbackPath_ReturnsMappedCollections()
+    {
+        const string json = """
+            {
+              "data": {
+                "profile": {
+                  "publicCollections": [
+                    {
+                      "id": "col-1",
+                      "name": "Mechanical Parts",
+                      "description": "Useful prints",
+                      "printsCount": 3,
+                      "image": { "filePath": "https://media.printables.com/col1.jpg" }
+                    }
+                  ]
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
+
+        _ = result.Should().HaveCount(1);
+        _ = result[0].Id.Should().Be("col-1");
+        _ = result[0].Name.Should().Be("Mechanical Parts");
+        _ = result[0].ModelCount.Should().Be(3);
+        _ = result[0].ThumbnailUrl.Should().Be("https://media.printables.com/col1.jpg");
+    }
+
+    [Fact]
+    public async Task GetUserModelsAsync_HasNextPageWithoutCursor_ThrowsPrintablesApiException()
+    {
+        const string json = """
+            {
+              "data": {
+                "user": {
+                  "prints": {
+                    "edges": [],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        Func<Task> act = () => client.GetUserModelsAsync("maker_jane", 25, null, "LATEST", CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<PrintablesApiException>()
+            .WithMessage("*hasNextPage=true without endCursor*");
+    }
+
+    [Fact]
+    public async Task GetUserModelsAsync_LimitCursorAndOrdering_AreNormalizedInRequestPayload()
+    {
+        RequestRecordingHttpMessageHandler handler = new("""
+            {
+              "data": {
+                "user": {
+                  "prints": {
+                    "edges": [],
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": null
+                    }
+                  }
+                }
+              }
+            }
+            """);
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+
+        _ = await client.GetUserModelsAsync(" maker_jane ", 250, "  CURSOR-1  ", "  TOP  ", CancellationToken.None);
+
+        using JsonDocument payload = JsonDocument.Parse(handler.LastRequestBody);
+        JsonElement variables = payload.RootElement.GetProperty("variables");
+        _ = variables.GetProperty("userId").GetString().Should().Be("maker_jane");
+        _ = variables.GetProperty("first").GetInt32().Should().Be(100);
+        _ = variables.GetProperty("after").GetString().Should().Be("CURSOR-1");
+        _ = variables.GetProperty("ordering").GetString().Should().Be("TOP");
+    }
+
+    [Fact]
     public async Task GetPrintProfileAsync_TransientFailure_RetriesAndSucceeds()
     {
         TransientThenSuccessHandler handler = new(
@@ -705,6 +842,23 @@ public class PrintablesImportServiceTests
             {
                 Content = new StringContent(successJson, Encoding.UTF8, "application/json"),
             });
+        }
+    }
+
+    private sealed class RequestRecordingHttpMessageHandler(string responseJson) : HttpMessageHandler
+    {
+        public string LastRequestBody { get; private set; } = string.Empty;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequestBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseJson, Encoding.UTF8, "application/json"),
+            };
         }
     }
 }
