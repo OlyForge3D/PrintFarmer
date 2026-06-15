@@ -9,6 +9,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Security;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services.Configuration;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -147,6 +148,21 @@ public sealed class PrintablesOAuthService(
         catch (DbUpdateConcurrencyException ex)
         {
             _logger.LogWarning(ex, "Concurrent Printables OAuth callback write conflict for user {UserId}", userId);
+            _db.ChangeTracker.Clear();
+
+            UserSettings? latest = await _db.UserSettings.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == userId, ct);
+            if (!HasLinkedOAuthTokens(latest))
+            {
+                throw new PrintablesOAuthNotLinkedException(
+                    "Printables account is no longer linked due to a concurrent update. Reconnect and try again.",
+                    ex);
+            }
+
+            return MapStatus(latest!);
+        }
+        catch (DbUpdateException ex) when (IsUserSettingsUserIdUniqueViolation(ex))
+        {
+            _logger.LogWarning(ex, "Concurrent Printables OAuth callback first-link race for user {UserId}", userId);
             _db.ChangeTracker.Clear();
 
             UserSettings? latest = await _db.UserSettings.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == userId, ct);
@@ -868,6 +884,41 @@ public sealed class PrintablesOAuthService(
         settings.PrintablesOAuthScope = null;
         settings.PrintablesOAuthTokenExpiresAtUtc = null;
         settings.PrintablesOAuthLinkedAtUtc = null;
+    }
+
+    private static bool IsUserSettingsUserIdUniqueViolation(DbUpdateException ex)
+    {
+        if (ex.InnerException is SqliteException sqliteEx &&
+            sqliteEx.SqliteErrorCode == 19 &&
+            sqliteEx.Message.Contains("UNIQUE constraint failed: UserSettings.UserId", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (ex.InnerException is System.Data.Common.DbException dbException)
+        {
+            string fullName = dbException.GetType().FullName ?? string.Empty;
+            if (fullName.Contains("SqlException", StringComparison.OrdinalIgnoreCase) &&
+                dbException.ErrorCode is 2601 or 2627 &&
+                dbException.Message.Contains("IX_UserSettings_UserId", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        if (ex.InnerException?.GetType().FullName?.Contains("PostgresException", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            string? sqlState = ex.InnerException.GetType().GetProperty("SqlState")?.GetValue(ex.InnerException)?.ToString();
+            string? constraintName = ex.InnerException.GetType().GetProperty("ConstraintName")?.GetValue(ex.InnerException)?.ToString();
+            if (sqlState == "23505" &&
+                string.Equals(constraintName, "IX_UserSettings_UserId", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        string message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("IX_UserSettings_UserId", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsTransientStatusCode(HttpStatusCode statusCode)

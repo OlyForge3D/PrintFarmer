@@ -401,6 +401,80 @@ public class PrintablesOAuthServiceTests
             .WithMessage("*no longer linked*");
     }
 
+    [Fact]
+    public async Task HandleCallbackAsync_FirstLinkUniqueRace_ReturnsLinkedStatusWithoutUnhandledFailure()
+    {
+        Guid userId = Guid.NewGuid();
+        await using SqliteConnection connection = new("Data Source=file:printables-oauth-callback-first-link-race?mode=memory&cache=shared");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (AppDbContext seedDb = new(options))
+        {
+            await seedDb.Database.EnsureCreatedAsync();
+            _ = seedDb.Users.Add(new User
+            {
+                Id = userId,
+                Username = "printables-callback-race-user",
+                Email = "printables-callback-race@example.com",
+                PasswordHash = "hash",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext db = new(options);
+        HttpClient client = new(new SequenceHttpHandler(_ => Json(HttpStatusCode.OK, """
+            {
+              "access_token": "callback-access",
+              "refresh_token": "callback-refresh",
+              "token_type": "Bearer",
+              "scope": "likes history",
+              "expires_in": 3600
+            }
+            """)));
+
+        PrintablesOAuthService sut = CreateService(db, client);
+        PrintablesOAuthConnectResponseDto connect = await sut.BuildConnectUrlAsync(userId, CancellationToken.None);
+        string state = GetRequiredQueryParam(connect.AuthorizationUrl, "state");
+
+        bool insertedConcurrentRow = false;
+        db.SavingChanges += (_, _) =>
+        {
+            if (insertedConcurrentRow)
+            {
+                return;
+            }
+
+            insertedConcurrentRow = true;
+            using AppDbContext concurrentDb = new(options);
+            _ = concurrentDb.UserSettings.Add(new UserSettings
+            {
+                UserId = userId,
+                PrintablesOAuthAccessToken = "enc:other-access",
+                PrintablesOAuthRefreshToken = "enc:other-refresh",
+                PrintablesOAuthTokenType = "Bearer",
+                PrintablesOAuthScope = "likes history",
+                PrintablesOAuthLinkedAtUtc = DateTime.UtcNow,
+                PrintablesOAuthTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(30),
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = concurrentDb.SaveChanges();
+        };
+
+        PrintablesOAuthStatusDto status = await sut.HandleCallbackAsync(userId, "oauth-code", state, CancellationToken.None);
+
+        status.IsLinked.Should().BeTrue();
+
+        await using AppDbContext assertDb = new(options);
+        (await assertDb.UserSettings.CountAsync(x => x.UserId == userId)).Should().Be(1);
+    }
+
     private static ControllerContext BuildControllerContext(Guid userId)
     {
         ClaimsPrincipal principal = new(new ClaimsIdentity(
@@ -464,6 +538,27 @@ public class PrintablesOAuthServiceTests
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
+    }
+
+    private static string GetRequiredQueryParam(string url, string key)
+    {
+        Uri uri = new(url);
+        string query = uri.Query.TrimStart('?');
+        foreach (string segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] parts = segment.Split('=', 2);
+            if (parts.Length != 2)
+            {
+                continue;
+            }
+
+            if (string.Equals(Uri.UnescapeDataString(parts[0]), key, StringComparison.Ordinal))
+            {
+                return Uri.UnescapeDataString(parts[1]);
+            }
+        }
+
+        throw new InvalidOperationException($"Missing required query parameter '{key}'.");
     }
 
     private sealed class SequenceHttpHandler(params Func<HttpRequestMessage, HttpResponseMessage>[] responders) : HttpMessageHandler
