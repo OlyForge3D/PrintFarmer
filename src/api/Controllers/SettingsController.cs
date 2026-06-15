@@ -139,6 +139,11 @@ public class SettingsController(
             return BadRequest("itemsPerPage must be between 1 and 200.");
         }
 
+        if (body.PrintablesUsername is { Length: > 64 })
+        {
+            return BadRequest("printablesUsername must be 64 characters or fewer.");
+        }
+
         Guid userId = GetUserId();
         UserSettings? entity = await _db.UserSettings.FirstOrDefaultAsync(u => u.UserId == userId, ct);
         byte[]? expectedRowVersionBytes = null;
@@ -187,6 +192,13 @@ public class SettingsController(
             entity.DefaultSlicerPreset = body.DefaultSlicerPreset;
         }
 
+        if (body.PrintablesUsername is not null)
+        {
+            entity.PrintablesUsername = string.IsNullOrWhiteSpace(body.PrintablesUsername)
+                ? null
+                : body.PrintablesUsername.Trim();
+        }
+
         entity.UpdatedAt = DateTime.UtcNow;
 
         try
@@ -221,7 +233,8 @@ public class SettingsController(
             Locale: entity?.Locale ?? "en",
             ItemsPerPage: entity?.ItemsPerPage ?? 25,
             DefaultSlicerPreset: entity?.DefaultSlicerPreset,
-            RowVersion: entity?.RowVersion is { Length: > 0 } rv ? Convert.ToBase64String(rv) : null);
+            RowVersion: entity?.RowVersion is { Length: > 0 } rv ? Convert.ToBase64String(rv) : null,
+            PrintablesUsername: entity?.PrintablesUsername);
 
     private IActionResult? TryGetValidatedConcurrencyToken(
         string? bodyRowVersion,
@@ -278,7 +291,8 @@ public record UserSettingsResponse(
     string Locale,
     int ItemsPerPage,
     string? DefaultSlicerPreset,
-    string? RowVersion);
+    string? RowVersion,
+    string? PrintablesUsername = null);
 
 /// <summary>Request body for PUT /api/settings/user. All fields optional (partial update).</summary>
 public record UpdateUserSettingsBody(
@@ -286,4 +300,5 @@ public record UpdateUserSettingsBody(
     string? Locale,
     int? ItemsPerPage,
     string? DefaultSlicerPreset,
-    string? RowVersion = null);
+    string? RowVersion = null,
+    string? PrintablesUsername = null);

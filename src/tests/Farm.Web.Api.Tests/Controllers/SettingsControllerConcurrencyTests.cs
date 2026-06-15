@@ -346,6 +346,54 @@ public class SettingsControllerConcurrencyTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task UpdateUserSettings_WithPrintablesUsername_PersistsTrimmedValue()
+    {
+        Guid userId = Guid.NewGuid();
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var user = new User { Id = userId, Username = "printables", Email = "printables@test.com", PasswordHash = "x" };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+        }
+
+        string createdRowVersion;
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var controller = CreateController(db, userId);
+            var createBody = new UpdateUserSettingsBody(
+                Theme: "dark",
+                Locale: "en",
+                ItemsPerPage: 25,
+                DefaultSlicerPreset: null,
+                RowVersion: null,
+                PrintablesUsername: "  ripley-user  ");
+
+            IActionResult createResult = await controller.UpdateUserSettingsAsync(createBody, CancellationToken.None);
+            var okCreate = Assert.IsType<OkObjectResult>(createResult);
+            var createResponse = Assert.IsType<UserSettingsResponse>(okCreate.Value);
+            Assert.Equal("ripley-user", createResponse.PrintablesUsername);
+            createdRowVersion = createResponse.RowVersion!;
+        }
+
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            var controller = CreateController(db, userId);
+            var clearBody = new UpdateUserSettingsBody(
+                Theme: null,
+                Locale: null,
+                ItemsPerPage: null,
+                DefaultSlicerPreset: null,
+                RowVersion: createdRowVersion,
+                PrintablesUsername: string.Empty);
+
+            IActionResult clearResult = await controller.UpdateUserSettingsAsync(clearBody, CancellationToken.None);
+            var okClear = Assert.IsType<OkObjectResult>(clearResult);
+            var clearResponse = Assert.IsType<UserSettingsResponse>(okClear.Value);
+            Assert.Null(clearResponse.PrintablesUsername);
+        }
+    }
+
     private SettingsController CreateController(AppDbContext db, Guid userId)
     {
         var controller = new SettingsController(

@@ -28,6 +28,9 @@ public class UserSettings
     [MaxLength(256)]
     public string? DefaultSlicerPreset { get; set; }
 
+    [MaxLength(64)]
+    public string? PrintablesUsername { get; set; }
+
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>

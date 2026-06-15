@@ -22,6 +22,7 @@ export interface UserSettingsResponse {
   locale: string;
   itemsPerPage: number;
   defaultSlicerPreset: string | null;
+  printablesUsername: string | null;
   rowVersion: string | null;
 }
 
@@ -31,5 +32,6 @@ export interface UpdateUserSettingsRequest {
   locale?: string;
   itemsPerPage?: number;
   defaultSlicerPreset?: string | null;
+  printablesUsername?: string | null;
   rowVersion?: string | null;
 }

@@ -79,11 +79,18 @@ function UserSettingsForm({
 }) {
   const [locale, setLocale] = useState(data.locale);
   const [itemsPerPage, setItemsPerPage] = useState(String(data.itemsPerPage));
+  const [printablesUsername, setPrintablesUsername] = useState(data.printablesUsername ?? '');
 
   const handleSave = () => {
     const items = Number(itemsPerPage);
     if (items < 1 || items > 200) {
       toast.error('Items per page must be between 1 and 200.');
+      return;
+    }
+
+    const normalizedPrintablesUsername = printablesUsername.trim();
+    if (normalizedPrintablesUsername.length > 64) {
+      toast.error('Printables username must be 64 characters or fewer.');
       return;
     }
 
@@ -93,6 +100,7 @@ function UserSettingsForm({
         locale,
         itemsPerPage: items,
         defaultSlicerPreset: data.defaultSlicerPreset ?? null,
+        printablesUsername: normalizedPrintablesUsername === '' ? '' : normalizedPrintablesUsername,
         rowVersion: data.rowVersion,
       },
       {
@@ -128,6 +136,16 @@ function UserSettingsForm({
               value={itemsPerPage}
               onChange={(e) => setItemsPerPage(e.target.value)}
               aria-label="Items per page"
+            />
+          </FormField>
+          <FormField label="Printables Username">
+            <Input
+              type="text"
+              maxLength={64}
+              value={printablesUsername}
+              onChange={(e) => setPrintablesUsername(e.target.value)}
+              placeholder="Optional"
+              aria-label="Printables username"
             />
           </FormField>
         </div>

@@ -113,6 +113,7 @@ describe('Settings rowVersion concurrency', () => {
           locale: 'en',
           itemsPerPage: 25,
           defaultSlicerPreset: null,
+          printablesUsername: 'alice',
           rowVersion: 'BBBBBBBB',
         },
       });
@@ -133,6 +134,7 @@ describe('Settings rowVersion concurrency', () => {
           locale: 'en',
           itemsPerPage: 25,
           defaultSlicerPreset: null,
+          printablesUsername: 'alice',
           rowVersion: 'BBBBBBBC',
         },
       });
@@ -142,6 +144,7 @@ describe('Settings rowVersion concurrency', () => {
       act(() => {
         result.current.mutate({
           theme: 'light',
+          printablesUsername: 'alice',
           rowVersion: 'BBBBBBBB',
         });
       });
@@ -149,6 +152,7 @@ describe('Settings rowVersion concurrency', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(mockPut).toHaveBeenCalledWith('/settings/user', {
         theme: 'light',
+        printablesUsername: 'alice',
         rowVersion: 'BBBBBBBB',
       });
     });
