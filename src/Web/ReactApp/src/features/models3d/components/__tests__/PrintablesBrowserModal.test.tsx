@@ -265,10 +265,10 @@ describe('PrintablesBrowserModal', () => {
     expect(await screen.findByText('History model')).toBeInTheDocument();
   });
 
-  it('shows not-supported messaging when authenticated endpoints return 501', () => {
-    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
-    mockUsePrintablesOAuthStatus.mockReturnValue({
-      data: { isLinked: true, hasRefreshToken: true, scope: 'public', linkedAtUtc: null },
+it('shows not-supported messaging when authenticated endpoints return 501', () => {
+  mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+  mockUsePrintablesOAuthStatus.mockReturnValue({
+    data: { isLinked: true, hasRefreshToken: true, scope: 'public', linkedAtUtc: null },
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -291,7 +291,7 @@ describe('PrintablesBrowserModal', () => {
     expect(screen.getByText('Download history is not supported on this backend yet.')).toBeInTheDocument();
   });
 
-  it('shows unavailable messaging when oauth status cannot be loaded', () => {
+  it('shows oauth availability warning when status query fails', () => {
     mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
     mockUsePrintablesOAuthStatus.mockReturnValue({
       data: undefined,
@@ -304,6 +304,57 @@ describe('PrintablesBrowserModal', () => {
 
     expect(screen.getByText('Could not load Printables OAuth state')).toBeInTheDocument();
     expect(screen.getByText(/OAuth is currently unavailable on this server/i)).toBeInTheDocument();
+  });
+
+  it('shows oauth action error when connect fails', async () => {
+    const connectError = new Error('OAuth connect failed');
+    const mutateAsync = vi.fn().mockRejectedValue(connectError);
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthAuthorize.mockReturnValue({
+      mutateAsync,
+      isPending: false,
+    });
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Prusa Account' }));
+
+    expect(await screen.findByText('Printables OAuth action failed')).toBeInTheDocument();
+    expect(screen.getByText('OAuth connect failed')).toBeInTheDocument();
+  });
+
+  it('requests next pages for liked models and download history', async () => {
+    const fetchNextLiked = vi.fn();
+    const fetchNextHistory = vi.fn();
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: { isLinked: true, hasRefreshToken: true, scope: 'public', linkedAtUtc: null },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUsePrintablesLikedModels.mockReturnValue({
+      ...createInfiniteQueryResult([
+        { id: 'liked-1', title: 'Liked model', slug: 'liked-model', author: 'maker' },
+      ]),
+      hasNextPage: true,
+      fetchNextPage: fetchNextLiked,
+    });
+    mockUsePrintablesDownloadHistory.mockReturnValue({
+      ...createInfiniteQueryResult([
+        { id: 'history-1', title: 'History model', slug: 'history-model', author: 'maker' },
+      ]),
+      hasNextPage: true,
+      fetchNextPage: fetchNextHistory,
+    });
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more liked models' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more history' }));
+
+    await waitFor(() => {
+      expect(fetchNextLiked).toHaveBeenCalledTimes(1);
+      expect(fetchNextHistory).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows reconnect messaging when private endpoints report not-linked (409)', () => {
