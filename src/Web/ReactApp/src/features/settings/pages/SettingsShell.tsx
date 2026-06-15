@@ -758,12 +758,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.05]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} />
         </div>
 
-        <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-pf-border/70 shadow-[0_24px_80px_-46px_rgba(0,0,0,0.82)] backdrop-blur-sm">
+        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-pf-border/70 shadow-[0_24px_80px_-46px_rgba(0,0,0,0.82)] backdrop-blur-sm">
           {hasNoMatches ? (
-            <div className="relative flex h-full min-h-0 flex-col">
+            <div className="relative flex flex-1 min-h-0 flex-col">
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-              <div className="h-full overflow-y-auto overscroll-contain">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {toolbar}
                 <div className="flex min-h-[60%] items-center justify-center px-4 py-10 md:px-6">
                   <div className="mx-auto max-w-md rounded-3xl border border-dashed border-pf-border bg-pf-bg-0/80 px-6 py-10 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
@@ -776,7 +776,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
               </div>
             </div>
           ) : (
-            <div className="flex h-full min-h-0 flex-col md:grid md:grid-cols-[18.5rem_minmax(0,1fr)]">
+            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[18.5rem_minmax(0,1fr)]">
               <SettingsSidebar
                 categories={scopeCategories}
                 activeScope={effectiveScope}
@@ -789,7 +789,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 searchQuery={query}
               />
 
-              <div className="relative flex-1 min-h-0 border-t border-pf-border/70 md:border-t-0 md:border-l md:border-pf-border/70">
+              <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border/70 md:border-t-0 md:border-l md:border-pf-border/70">
                 <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
 
@@ -797,7 +797,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                   {sectionAnnouncement}
                 </p>
 
-                <div className="pf-settings-scroll-pane h-full overflow-y-auto overscroll-contain">
+                <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {toolbar}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
                     <h1 className="mb-3 text-lg leading-none text-pf-text-primary md:hidden">{shellTitle}</h1>
