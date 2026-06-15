@@ -222,18 +222,13 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
 
     public async Task<bool> UpdatePasswordAsync(Guid userId, string currentPassword, string newPasswordHash, CancellationToken ct = default)
     {
-        Console.WriteLine($"[EfUsersRepository] UpdatePasswordAsync called for UserId={userId}");
         User? user = await _db.Users.FindAsync(new object[] { userId }, cancellationToken: ct);
-        Console.WriteLine($"[EfUsersRepository] User found={user != null}");
         if (user == null)
         {
             return false;
         }
 
         // Current password check is done in service; repository only updates if hash differs
-        string existingPreview = user.PasswordHash is not null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : (user.PasswordHash ?? "(null)");
-        string newPreview = newPasswordHash is not null && newPasswordHash.Length > 10 ? newPasswordHash.Substring(0, 10) : (newPasswordHash ?? "(null)");
-        Console.WriteLine($"[EfUsersRepository] ExistingHashPreview={existingPreview} NewHashPreview={newPreview}");
         if (user.PasswordHash == newPasswordHash)
         {
             return true; // no change needed
@@ -242,7 +237,6 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         user.PasswordHash = newPasswordHash ?? string.Empty;
         user.UpdatedAt = DateTime.UtcNow;
         _ = await _db.SaveChangesAsync(ct);
-        Console.WriteLine($"[EfUsersRepository] Password updated for UserId={userId}");
         return true;
     }
 
