@@ -991,13 +991,14 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
             return null;
         }
 
+        string comparableTarget = NormalizeComparableUsername(normalizedUsername);
         List<PrintablesUserProfileDto> candidates = [];
         foreach (JsonElement userElement in usersElement.EnumerateArray())
         {
             string? id = ReadOptionalString(userElement, "id");
             string? handle = ReadOptionalString(userElement, "handle");
             string? publicUsername = ReadOptionalString(userElement, "publicUsername");
-            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(handle) || string.IsNullOrWhiteSpace(publicUsername))
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(handle))
             {
                 continue;
             }
@@ -1005,13 +1006,18 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
             candidates.Add(new PrintablesUserProfileDto(
                 Id: id,
                 Handle: handle,
-                PublicUsername: publicUsername,
+                PublicUsername: string.IsNullOrWhiteSpace(publicUsername) ? handle : publicUsername,
                 AvatarUrl: BuildMediaUrl(ReadOptionalString(userElement, "avatarFilePath"))));
         }
 
         return candidates.FirstOrDefault(c =>
-            string.Equals(c.Handle, normalizedUsername, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(c.PublicUsername, normalizedUsername, StringComparison.OrdinalIgnoreCase));
+            string.Equals(NormalizeComparableUsername(c.Handle), comparableTarget, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(NormalizeComparableUsername(c.PublicUsername), comparableTarget, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeComparableUsername(string value)
+    {
+        return WebUtility.UrlDecode(value).Trim().TrimStart('@');
     }
 
     private static string? BuildMediaUrl(string? path)

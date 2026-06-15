@@ -339,6 +339,83 @@ public class PrintablesImportServiceTests
     }
 
     [Fact]
+    public async Task GetUserCollectionsAsync_AtPrefixedUsername_ResolvesAndReturnsCollections()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "573746", "handle": "@JeffRho", "publicUsername": "" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userCollections": [
+                  {
+                    "id": "col-77",
+                    "name": "Public",
+                    "printsCount": 4
+                  }
+                ]
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("@JeffRho", CancellationToken.None);
+
+        _ = result.Should().HaveCount(1);
+        _ = result[0].Id.Should().Be("col-77");
+        _ = result[0].Name.Should().Be("Public");
+
+        using JsonDocument firstRequest = JsonDocument.Parse(handler.RequestBodies[0]);
+        string? searchQuery = firstRequest.RootElement.GetProperty("variables").GetProperty("query").GetString();
+        _ = searchQuery.Should().Be("@JeffRho");
+    }
+
+    [Fact]
+    public async Task GetUserCollectionsAsync_UrlEncodedAtUsername_ResolvesAndReturnsCollections()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "573746", "handle": "JeffRho", "publicUsername": "JeffRho" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userCollections": [
+                  {
+                    "id": "col-88",
+                    "name": "Encoded",
+                    "printsCount": 2
+                  }
+                ]
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("%40JeffRho", CancellationToken.None);
+
+        _ = result.Should().HaveCount(1);
+        _ = result[0].Id.Should().Be("col-88");
+    }
+
+    [Fact]
     public async Task GetUserModelsAsync_WithCursor_ReturnsHasNextPage()
     {
         QueueingHttpMessageHandler handler = new(
@@ -614,6 +691,40 @@ public class PrintablesImportServiceTests
         _ = await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*missing-file*");
         modelServiceMock.Verify(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BrowseCollectionsAsync_AtPrefixedUsername_UsesResolvedHandleForCollections()
+    {
+        Mock<IPrintablesGraphQLClient> graphQlMock = new(MockBehavior.Strict);
+        Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
+        PrintablesUserProfileDto user = new(
+            Id: "573746",
+            Handle: "JeffRho",
+            PublicUsername: "JeffRho",
+            AvatarUrl: null);
+
+        _ = graphQlMock
+            .Setup(x => x.ResolveUserProfileAsync("@JeffRho", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _ = graphQlMock
+            .Setup(x => x.GetUserCollectionsAsync("JeffRho", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new PrintablesCollectionDto(
+                    Id: "col-1",
+                    Name: "Public",
+                    Slug: null,
+                    Description: null,
+                    ModelCount: 1,
+                    ThumbnailUrl: null),
+            ]);
+
+        PrintablesImportService service = new(graphQlMock.Object, modelServiceMock.Object, Mock.Of<ILogger<PrintablesImportService>>());
+        PrintablesCollectionsBrowseDto result = await service.BrowseCollectionsAsync("@JeffRho", CancellationToken.None);
+
+        _ = result.User.Handle.Should().Be("JeffRho");
+        _ = result.Collections.Should().HaveCount(1);
+        graphQlMock.Verify(x => x.GetUserCollectionsAsync("JeffRho", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Controller: preview endpoint ──────────────────────────────────────────

@@ -172,7 +172,7 @@ public sealed class PrintablesImportService(
     public async Task<PrintablesCollectionsBrowseDto> BrowseCollectionsAsync(string username, CancellationToken ct)
     {
         PrintablesUserProfileDto user = await _graphQlClient.ResolveUserProfileAsync(username, ct);
-        IReadOnlyList<PrintablesCollectionDto> collections = await _graphQlClient.GetUserCollectionsAsync(username, ct);
+        IReadOnlyList<PrintablesCollectionDto> collections = await _graphQlClient.GetUserCollectionsAsync(user.Handle, ct);
 
         return new PrintablesCollectionsBrowseDto(
             User: user,
