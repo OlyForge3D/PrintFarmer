@@ -398,7 +398,7 @@ jobs:
           } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ needs.validate-and-tag.outputs.version }}
           tag_name: ${{ needs.validate-and-tag.outputs.version }}

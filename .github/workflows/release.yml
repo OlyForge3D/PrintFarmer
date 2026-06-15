@@ -152,7 +152,7 @@ jobs:
             jq -r '.checks[] | select(.name=="Code-Review" or .name=="Vulnerabilities" or .name=="Dependency-Update-Tool" or .name=="Branch-Protection") | "- " + .name + ": " + (.score|tostring)' scorecard.json >> RELEASE_NOTES.md || true
           fi
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.event.inputs.version }}
           tag_name: ${{ github.event.inputs.version }}
