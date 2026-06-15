@@ -2842,6 +2842,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<int?>("PlateIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PlateName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<string>("PreferredPrinterIds")
                         .HasColumnType("text");
 
