@@ -49,10 +49,32 @@ public sealed class PrintablesImportService(
     public async Task<IReadOnlyList<Model3DUploadResultDto>> ImportAsync(string printablesUrl, IReadOnlyCollection<string>? fileIds, CancellationToken ct)
     {
         string modelId = ParseModelId(printablesUrl);
+        return await ImportByModelIdAsync(modelId, printablesUrl, fileIds, ct);
+    }
 
-        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", modelId, printablesUrl);
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Model3DUploadResultDto>> ImportOneClickAsync(PrintablesOneClickImportRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string modelId = NormalizeModelId(request.ModelId);
+        string sourceUrl = ResolveOneClickSourceUrl(modelId, request.Slug, request.SourceUrl);
+        return await ImportByModelIdAsync(modelId, sourceUrl, fileIds: null, ct);
+    }
 
-        PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, printablesUrl, ct);
+    private async Task<IReadOnlyList<Model3DUploadResultDto>> ImportByModelIdAsync(
+        string modelId,
+        string sourceUrl,
+        IReadOnlyCollection<string>? fileIds,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            throw new ArgumentException("Source URL must not be empty.", nameof(sourceUrl));
+        }
+
+        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", modelId, sourceUrl);
+
+        PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, sourceUrl, ct);
         List<PrintablesFileEntryDto> selectedFiles = SelectFilesForImport(preview, fileIds);
         List<Model3DUploadResultDto> importedModels = new(selectedFiles.Count);
 
@@ -71,7 +93,7 @@ public sealed class PrintablesImportService(
             Model3DUploadResultDto uploadedModel = await _model3DFileService.UploadModelAsync(formFile, ct);
             await _model3DFileService.SetAttributionAsync(
                 uploadedModel.Id,
-                sourceUrl: printablesUrl,
+                sourceUrl: sourceUrl,
                 sourceCreator: preview.Creator,
                 sourceLicense: preview.License,
                 importedAt: DateTime.UtcNow,
@@ -86,6 +108,40 @@ public sealed class PrintablesImportService(
             modelId);
 
         return importedModels;
+    }
+
+    private static string ResolveOneClickSourceUrl(string modelId, string? slug, string? sourceUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            string parsedId = ParseModelId(sourceUrl.Trim());
+            if (!string.Equals(parsedId, modelId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    $"sourceUrl model ID '{parsedId}' does not match requested modelId '{modelId}'.",
+                    nameof(sourceUrl));
+            }
+
+            return sourceUrl.Trim();
+        }
+
+        string normalizedSlug = string.IsNullOrWhiteSpace(slug)
+            ? string.Empty
+            : slug.Trim().TrimStart('-');
+        return string.IsNullOrWhiteSpace(normalizedSlug)
+            ? $"https://www.printables.com/model/{modelId}"
+            : $"https://www.printables.com/model/{modelId}-{normalizedSlug}";
+    }
+
+    private static string NormalizeModelId(string modelId)
+    {
+        string normalized = modelId?.Trim() ?? string.Empty;
+        if (normalized.Length == 0 || normalized.Any(c => !char.IsDigit(c)))
+        {
+            throw new ArgumentException("modelId must be a non-empty numeric string.", nameof(modelId));
+        }
+
+        return normalized;
     }
 
     /// <inheritdoc />

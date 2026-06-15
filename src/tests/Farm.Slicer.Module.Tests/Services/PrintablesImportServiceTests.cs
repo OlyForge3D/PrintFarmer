@@ -620,7 +620,8 @@ public class PrintablesImportServiceTests
     private static PrintablesImportController BuildController(Mock<IPrintablesImportService> mockSvc)
     {
         Mock<ILogger<PrintablesImportController>> logger = new();
-        return new PrintablesImportController(mockSvc.Object, logger.Object);
+        Mock<IPrintablesOAuthService> oauthSvc = new();
+        return new PrintablesImportController(mockSvc.Object, oauthSvc.Object, logger.Object);
     }
 
     [Fact]
@@ -745,6 +746,60 @@ public class PrintablesImportServiceTests
 
         IActionResult result = await controller.ImportAsync(
             new PrintablesImportRequest { Url = "https://thingiverse.com/thing:1" },
+            CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ImportOneClickAsync_HappyPath_Returns200WithUploadedModels()
+    {
+        IReadOnlyList<Model3DUploadResultDto> dto =
+        [
+            new Model3DUploadResultDto
+            {
+                Id = Guid.Parse("00000000-0000-0000-0000-000000000099"),
+                Name = "One Click",
+                FileName = "one-click.stl",
+                FileSize = 2048,
+                FileType = "stl",
+                UploadedAt = DateTime.UtcNow,
+                Url = "/api/3d-models/file/99",
+            },
+        ];
+
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        _ = svcMock
+            .Setup(s => s.ImportOneClickAsync(It.IsAny<PrintablesOneClickImportRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        Mock<IPrintablesOAuthService> oauthSvcMock = new();
+        Mock<ILogger<PrintablesImportController>> logger = new();
+        PrintablesImportController controller = new(svcMock.Object, oauthSvcMock.Object, logger.Object);
+
+        IActionResult result = await controller.ImportOneClickAsync(
+            new PrintablesOneClickImportRequest { ModelId = "99", Slug = "one-click" },
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        IReadOnlyList<Model3DUploadResultDto> returned = Assert.IsAssignableFrom<IReadOnlyList<Model3DUploadResultDto>>(ok.Value);
+        _ = returned.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ImportOneClickAsync_InvalidModelId_Returns400()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        _ = svcMock
+            .Setup(s => s.ImportOneClickAsync(It.IsAny<PrintablesOneClickImportRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("modelId must be numeric."));
+
+        Mock<IPrintablesOAuthService> oauthSvcMock = new();
+        Mock<ILogger<PrintablesImportController>> logger = new();
+        PrintablesImportController controller = new(svcMock.Object, oauthSvcMock.Object, logger.Object);
+
+        IActionResult result = await controller.ImportOneClickAsync(
+            new PrintablesOneClickImportRequest { ModelId = "abc" },
             CancellationToken.None);
 
         _ = Assert.IsType<BadRequestObjectResult>(result);

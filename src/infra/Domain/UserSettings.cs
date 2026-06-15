@@ -31,6 +31,22 @@ public class UserSettings
     [MaxLength(64)]
     public string? PrintablesUsername { get; set; }
 
+    [MaxLength(4096)]
+    public string? PrintablesOAuthAccessToken { get; set; }
+
+    [MaxLength(4096)]
+    public string? PrintablesOAuthRefreshToken { get; set; }
+
+    [MaxLength(32)]
+    public string? PrintablesOAuthTokenType { get; set; }
+
+    [MaxLength(512)]
+    public string? PrintablesOAuthScope { get; set; }
+
+    public DateTime? PrintablesOAuthTokenExpiresAtUtc { get; set; }
+
+    public DateTime? PrintablesOAuthLinkedAtUtc { get; set; }
+
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>

@@ -83,12 +83,18 @@ public static class SlicerApiExtensions
 
         // Printables import (preview, #349)
         _ = services.Configure<PrintablesGraphQlOptions>(configuration.GetSection(PrintablesGraphQlOptions.SectionName));
+        _ = services.Configure<PrintablesOAuthOptions>(configuration.GetSection(PrintablesOAuthOptions.SectionName));
         _ = services.AddHttpClient<IPrintablesGraphQLClient, PrintablesGraphQLClient>((sp, client) =>
         {
             PrintablesGraphQlOptions options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<PrintablesGraphQlOptions>>().Value;
             client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer/1.0");
             client.DefaultRequestHeaders.Add("Origin", "https://www.printables.com");
             client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
+        });
+        _ = services.AddHttpClient<IPrintablesOAuthService, PrintablesOAuthService>((_, client) =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer/1.0");
+            client.Timeout = TimeSpan.FromSeconds(30);
         });
         _ = services.AddScoped<IPrintablesImportService, PrintablesImportService>();
 

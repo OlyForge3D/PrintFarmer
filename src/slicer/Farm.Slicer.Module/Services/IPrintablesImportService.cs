@@ -46,6 +46,14 @@ public interface IPrintablesImportService
     Task<IReadOnlyList<Model3DUploadResultDto>> ImportAsync(string printablesUrl, IReadOnlyCollection<string>? fileIds, CancellationToken ct);
 
     /// <summary>
+    /// Performs a one-click import from a browse/search card without requiring a URL-preview step.
+    /// </summary>
+    /// <param name="request">Card metadata for resolving the model and source URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The uploaded model records created by the import.</returns>
+    Task<IReadOnlyList<Model3DUploadResultDto>> ImportOneClickAsync(PrintablesOneClickImportRequest request, CancellationToken ct);
+
+    /// <summary>
     /// Sets attribution metadata on an existing <see cref="Farm.Slicer.Module.Domain.Model3D"/> record
     /// that was uploaded via <see cref="IModel3DFileService.UploadModelAsync"/>.
     /// Call this after upload to associate the model with its Printables source.

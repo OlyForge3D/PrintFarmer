@@ -15,6 +15,10 @@ public class UserSettingsConfiguration : IEntityTypeConfiguration<UserSettings>
         _ = builder.Property(u => u.ItemsPerPage).IsRequired();
         _ = builder.Property(u => u.DefaultSlicerPreset).HasMaxLength(256);
         _ = builder.Property(u => u.PrintablesUsername).HasMaxLength(64);
+        _ = builder.Property(u => u.PrintablesOAuthAccessToken).HasMaxLength(4096);
+        _ = builder.Property(u => u.PrintablesOAuthRefreshToken).HasMaxLength(4096);
+        _ = builder.Property(u => u.PrintablesOAuthTokenType).HasMaxLength(32);
+        _ = builder.Property(u => u.PrintablesOAuthScope).HasMaxLength(512);
         _ = builder.Property(u => u.UpdatedAt).IsRequired();
         _ = builder.Property(u => u.RowVersion).IsConcurrencyToken();
 

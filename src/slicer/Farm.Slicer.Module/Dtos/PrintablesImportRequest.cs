@@ -14,3 +14,20 @@ public sealed class PrintablesImportRequest
     /// </summary>
     public string[]? FileIds { get; set; }
 }
+
+/// <summary>
+/// Request body for one-click imports from browse/search model cards.
+/// </summary>
+public sealed class PrintablesOneClickImportRequest
+{
+    /// <summary>Gets or sets the Printables model ID from the selected card.</summary>
+    public string ModelId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the optional model slug from the selected card.</summary>
+    public string? Slug { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional source URL. If supplied, it must resolve to the same model ID.
+    /// </summary>
+    public string? SourceUrl { get; set; }
+}

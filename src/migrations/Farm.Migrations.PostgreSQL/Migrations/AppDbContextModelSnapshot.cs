@@ -4749,6 +4749,28 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<string>("PrintablesOAuthAccessToken")
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
+                    b.Property<DateTime?>("PrintablesOAuthLinkedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PrintablesOAuthRefreshToken")
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
+                    b.Property<string>("PrintablesOAuthScope")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("PrintablesOAuthTokenExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PrintablesOAuthTokenType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("PrintablesUsername")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
