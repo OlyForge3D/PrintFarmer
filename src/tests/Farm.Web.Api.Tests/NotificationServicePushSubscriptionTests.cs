@@ -156,6 +156,17 @@ public class NotificationServicePushSubscriptionTests : IDisposable
             .WithMessage("*cannot target local/private hosts*");
     }
 
+    [Fact]
+    public async Task SavePushSubscriptionAsync_IPv4CompatibleLoopbackIPv6Endpoint_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://[::127.0.0.1]/sub", ValidP256dh, ValidAuth);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*cannot target local/private hosts*");
+    }
+
     public void Dispose()
     {
         _dbContext.Dispose();

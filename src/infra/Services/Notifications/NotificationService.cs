@@ -1,4 +1,4 @@
-using System.Data;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Contracts.Auth;
@@ -160,8 +160,18 @@ public class NotificationService(
     IEmailService? emailService = null,
     IWebPushNotificationSender? webPushNotificationSender = null) : INotificationService
 {
+    private static readonly string[] KnownPushServiceHosts =
+    {
+        "fcm.googleapis.com",
+        "updates.push.services.mozilla.com",
+        "web.push.apple.com",
+        "notify.windows.com",
+    };
+
     private const int MaxPushSubscriptionsPerUser = 5;
+    private const int ChannelFanOutConcurrency = 8;
     private const int PushFanOutConcurrency = 8;
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SubscriptionLocks = new();
 
     public async Task SendJobStartedAsync(
         string jobId,
@@ -277,6 +287,7 @@ public class NotificationService(
 
             IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
             IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
+            var pendingEmailTargets = new List<EmailDispatchTarget>();
             var pendingPushTargets = new List<PushDispatchTarget>();
 
             foreach (UserDto user in activeUsers)
@@ -291,7 +302,7 @@ public class NotificationService(
 
                 if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Email))
                 {
-                    await SendEmailNotificationAsync(user, type, subject, body, cancellationToken);
+                    pendingEmailTargets.Add(new EmailDispatchTarget(user));
                 }
 
                 if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Push))
@@ -322,6 +333,11 @@ public class NotificationService(
                     jobId = parsedJobId
                 });
                 await DispatchPushTargetsAsync(pendingPushTargets, payload, cancellationToken);
+            }
+
+            if (pendingEmailTargets.Count > 0)
+            {
+                await DispatchEmailTargetsAsync(pendingEmailTargets, type, subject, body, cancellationToken);
             }
 
             logger.LogInformation(
@@ -577,6 +593,11 @@ public class NotificationService(
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
+                    if (!await IsValidPushEndpointAsync(target.Endpoint, cancellationToken))
+                    {
+                        return new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: true, Error: "Endpoint no longer routable/public");
+                    }
+
                     var dispatchSubscription = new PushSubscription
                     {
                         Id = target.SubscriptionId,
@@ -651,6 +672,35 @@ public class NotificationService(
         }
     }
 
+    private async Task DispatchEmailTargetsAsync(
+        IReadOnlyList<EmailDispatchTarget> targets,
+        NotificationType type,
+        string subject,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        using var semaphore = new SemaphoreSlim(ChannelFanOutConcurrency);
+        Task[] tasks = targets.Select(async target =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                await SendEmailNotificationAsync(target.User, type, subject, body, cancellationToken);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        }).ToArray();
+
+        await Task.WhenAll(tasks);
+    }
+
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
     {
         if (!await IsValidPushEndpointAsync(endpoint, cancellationToken))
@@ -663,17 +713,16 @@ public class NotificationService(
             throw new ArgumentException("Subscription keys p256dh/auth are invalid");
         }
 
-        if (dbContext.Database.IsRelational())
+        SemaphoreSlim subscriptionLock = SubscriptionLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+        await subscriptionLock.WaitAsync(cancellationToken);
+        try
         {
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
         }
-        else
+        finally
         {
-            await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            subscriptionLock.Release();
         }
 
         logger.LogInformation("Saved push subscription for user {UserId}", userId);
@@ -720,6 +769,11 @@ public class NotificationService(
             return IsPublicRoutableAddress(ipAddress);
         }
 
+        if (!IsKnownPushServiceHost(host))
+        {
+            return false;
+        }
+
         try
         {
             IPAddress[] resolved = await Dns.GetHostAddressesAsync(host, cancellationToken);
@@ -737,6 +791,15 @@ public class NotificationService(
         if (ipAddress.IsIPv4MappedToIPv6)
         {
             ipAddress = ipAddress.MapToIPv4();
+        }
+        else if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            byte[] v6Bytes = ipAddress.GetAddressBytes();
+            bool isIpv4Compatible = v6Bytes.Take(12).All(b => b == 0);
+            if (isIpv4Compatible)
+            {
+                ipAddress = new IPAddress(v6Bytes.Skip(12).ToArray());
+            }
         }
 
         if (IPAddress.IsLoopback(ipAddress))
@@ -799,9 +862,28 @@ public class NotificationService(
         return true;
     }
 
+    private static bool IsKnownPushServiceHost(string host)
+    {
+        foreach (string knownHost in KnownPushServiceHosts)
+        {
+            if (string.Equals(host, knownHost, StringComparison.OrdinalIgnoreCase) ||
+                host.EndsWith($".{knownHost}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsValidPushKeys(string p256dh, string auth)
     {
         if (string.IsNullOrWhiteSpace(p256dh) || string.IsNullOrWhiteSpace(auth))
+        {
+            return false;
+        }
+
+        if (p256dh.Length > 512 || auth.Length > 256)
         {
             return false;
         }
@@ -817,7 +899,27 @@ public class NotificationService(
         decoded = Array.Empty<byte>();
         try
         {
+            foreach (char ch in input)
+            {
+                if (char.IsWhiteSpace(ch))
+                {
+                    return false;
+                }
+
+                if (!(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '='))
+                {
+                    return false;
+                }
+            }
+
             string normalized = input.Replace('-', '+').Replace('_', '/');
+            int firstPadding = normalized.IndexOf('=');
+            if (firstPadding >= 0 && normalized[firstPadding..].Any(c => c != '='))
+            {
+                return false;
+            }
+
+            normalized = normalized.TrimEnd('=');
             int padding = normalized.Length % 4;
             if (padding > 0)
             {
@@ -862,6 +964,7 @@ public class NotificationService(
         });
     }
 
+    private sealed record EmailDispatchTarget(UserDto User);
     private sealed record PushDispatchTarget(string SubscriptionId, Guid UserId, string Endpoint, string P256dh, string Auth);
 
     private sealed record PushDispatchOutcome(string SubscriptionId, Guid UserId, string Endpoint, bool Success, bool Expired, string? Error);
