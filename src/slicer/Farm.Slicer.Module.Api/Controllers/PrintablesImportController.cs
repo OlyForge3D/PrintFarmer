@@ -19,6 +19,9 @@ public sealed class PrintablesImportController(
     IPrintablesImportService importService,
     ILogger<PrintablesImportController> logger) : ControllerBase
 {
+    private const int DefaultPageSize = 24;
+    private const int MaxPageSize = 50;
+
     private readonly IPrintablesImportService _importService = importService;
     private readonly ILogger<PrintablesImportController> _logger = logger;
 
@@ -148,5 +151,185 @@ public sealed class PrintablesImportController(
             _logger.LogError(ex, "Unexpected error persisting attribution for model {ModelId}", request.ModelId);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to persist attribution.");
         }
+    }
+
+    /// <summary>
+    /// Resolves a Printables user and returns their public collections.
+    /// </summary>
+    [HttpGet("users/{username}/collections")]
+    [ProducesResponseType(typeof(PrintablesCollectionsBrowseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> BrowseCollectionsAsync([FromRoute] string username, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return BadRequest("username is required.");
+        }
+
+        try
+        {
+            PrintablesCollectionsBrowseDto response = await _importService.BrowseCollectionsAsync(username, ct);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (PrintablesApiException ex)
+        {
+            _logger.LogWarning(ex, "Printables API error while browsing collections for {Username}", username);
+            return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Returns cursor-paginated models uploaded by the specified Printables user.
+    /// </summary>
+    [HttpGet("users/{username}/models")]
+    [ProducesResponseType(typeof(PrintablesCursorPageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> BrowseUserModelsAsync(
+        [FromRoute] string username,
+        [FromQuery] int limit = DefaultPageSize,
+        [FromQuery] string? cursor = null,
+        CancellationToken ct = default)
+    {
+        if (!TryNormalizeLimit(limit, out int normalizedLimit, out string? limitError))
+        {
+            return BadRequest(limitError);
+        }
+
+        try
+        {
+            PrintablesCursorPageDto response = await _importService.BrowseUserModelsAsync(username, normalizedLimit, cursor, ct);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (PrintablesApiException ex)
+        {
+            _logger.LogWarning(ex, "Printables API error while browsing user models for {Username}", username);
+            return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Returns cursor-paginated models inside a Printables collection.
+    /// </summary>
+    [HttpGet("collections/{collectionId}/models")]
+    [ProducesResponseType(typeof(PrintablesCursorPageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> BrowseCollectionModelsAsync(
+        [FromRoute] string collectionId,
+        [FromQuery] int limit = DefaultPageSize,
+        [FromQuery] string? cursor = null,
+        [FromQuery] string? query = null,
+        [FromQuery] string? ordering = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(collectionId))
+        {
+            return BadRequest("collectionId is required.");
+        }
+
+        if (!TryNormalizeLimit(limit, out int normalizedLimit, out string? limitError))
+        {
+            return BadRequest(limitError);
+        }
+
+        try
+        {
+            PrintablesCursorPageDto response = await _importService.BrowseCollectionModelsAsync(collectionId, normalizedLimit, cursor, query, ordering, ct);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (PrintablesApiException ex)
+        {
+            _logger.LogWarning(ex, "Printables API error while browsing collection {CollectionId}", collectionId);
+            return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Searches Printables models by keyword using backend proxying.
+    /// </summary>
+    [HttpGet("search")]
+    [ProducesResponseType(typeof(PrintablesSearchResultsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> SearchModelsAsync(
+        [FromQuery] string query,
+        [FromQuery] int offset = 0,
+        [FromQuery] int limit = DefaultPageSize,
+        [FromQuery] string? ordering = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return BadRequest("query is required.");
+        }
+
+        if (offset < 0)
+        {
+            return BadRequest("offset must be greater than or equal to zero.");
+        }
+
+        if (!TryNormalizeLimit(limit, out int normalizedLimit, out string? limitError))
+        {
+            return BadRequest(limitError);
+        }
+
+        try
+        {
+            PrintablesSearchResultsDto response = await _importService.SearchModelsAsync(query, offset, normalizedLimit, ordering, ct);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (PrintablesApiException ex)
+        {
+            _logger.LogWarning(ex, "Printables API error during search for query {Query}", query);
+            return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
+        }
+    }
+
+    private static bool TryNormalizeLimit(int requestedLimit, out int normalizedLimit, out string? error)
+    {
+        normalizedLimit = requestedLimit;
+        error = null;
+
+        if (requestedLimit <= 0)
+        {
+            error = "limit must be greater than zero.";
+            return false;
+        }
+
+        if (requestedLimit > MaxPageSize)
+        {
+            error = $"limit must be less than or equal to {MaxPageSize}.";
+            return false;
+        }
+
+        return true;
     }
 }

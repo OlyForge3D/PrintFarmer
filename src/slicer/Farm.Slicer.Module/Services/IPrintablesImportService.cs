@@ -54,4 +54,41 @@ public interface IPrintablesImportService
     /// <param name="printablesUrl">The canonical Printables model page URL.</param>
     /// <param name="ct">Cancellation token.</param>
     Task PersistAttributionAsync(Guid modelId, string printablesUrl, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a Printables username and returns the user's public collections.
+    /// </summary>
+    /// <param name="username">Printables handle or public username.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<PrintablesCollectionsBrowseDto> BrowseCollectionsAsync(string username, CancellationToken ct);
+
+    /// <summary>
+    /// Returns cursor-paginated models uploaded by a Printables user.
+    /// </summary>
+    /// <param name="username">Printables handle or public username.</param>
+    /// <param name="limit">Page size (1-50).</param>
+    /// <param name="cursor">Optional cursor from a previous page.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<PrintablesCursorPageDto> BrowseUserModelsAsync(string username, int limit, string? cursor, CancellationToken ct);
+
+    /// <summary>
+    /// Returns cursor-paginated models within a Printables collection.
+    /// </summary>
+    /// <param name="collectionId">Printables collection ID.</param>
+    /// <param name="limit">Page size (1-50).</param>
+    /// <param name="cursor">Optional cursor from a previous page.</param>
+    /// <param name="query">Optional search filter scoped to this collection.</param>
+    /// <param name="ordering">Optional collection sort key.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<PrintablesCursorPageDto> BrowseCollectionModelsAsync(string collectionId, int limit, string? cursor, string? query, string? ordering, CancellationToken ct);
+
+    /// <summary>
+    /// Searches Printables models by keyword.
+    /// </summary>
+    /// <param name="query">Search text.</param>
+    /// <param name="offset">Zero-based page offset.</param>
+    /// <param name="limit">Page size (1-50).</param>
+    /// <param name="ordering">Optional search ordering key.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<PrintablesSearchResultsDto> SearchModelsAsync(string query, int offset, int limit, string? ordering, CancellationToken ct);
 }

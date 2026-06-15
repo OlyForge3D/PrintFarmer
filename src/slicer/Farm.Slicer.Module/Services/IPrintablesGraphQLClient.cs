@@ -7,19 +7,30 @@ namespace Farm.Slicer.Module.Services;
 /// </summary>
 public interface IPrintablesGraphQLClient
 {
-    Task<IReadOnlyList<PrintablesCollectionDto>> GetUserCollectionsAsync(string userId, CancellationToken ct);
+    Task<PrintablesUserProfileDto> ResolveUserProfileAsync(string username, CancellationToken ct);
+
+    Task<IReadOnlyList<PrintablesCollectionDto>> GetUserCollectionsAsync(string username, CancellationToken ct);
 
     Task<PrintablesPagedResultDto<PrintablesModelCardDto>> GetUserModelsAsync(
-        string userId,
+        string username,
         int limit,
         string? cursor,
         string? ordering,
         CancellationToken ct);
 
-    Task<PrintablesPagedResultDto<PrintablesModelCardDto>> SearchModelsAsync(
-        string query,
+    Task<PrintablesPagedResultDto<PrintablesModelCardDto>> GetCollectionModelsAsync(
+        string collectionId,
         int limit,
         string? cursor,
+        string? query,
+        string? ordering,
+        CancellationToken ct);
+
+    Task<PrintablesSearchResultsDto> SearchModelsAsync(
+        string query,
+        int offset,
+        int limit,
+        string? ordering,
         CancellationToken ct);
 
     Task<PrintablesPrintProfileDto> GetPrintProfileAsync(string printId, CancellationToken ct);

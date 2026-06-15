@@ -32,6 +32,64 @@ public sealed record PrintablesFileEntryDto(
     long FileSize);
 
 /// <summary>
+/// Public profile details resolved from a Printables username.
+/// </summary>
+public sealed record PrintablesUserProfileDto(
+    string Id,
+    string Handle,
+    string PublicUsername,
+    string? AvatarUrl);
+
+/// <summary>
+/// Summary metadata for a Printables collection.
+/// </summary>
+public sealed record PrintablesCollectionSummaryDto(
+    string Id,
+    string Name,
+    int ModelCount,
+    int LikesCount,
+    IReadOnlyList<string> ThumbnailUrls);
+
+/// <summary>
+/// Response payload for browsing a user's collections.
+/// </summary>
+public sealed record PrintablesCollectionsBrowseDto(
+    PrintablesUserProfileDto User,
+    IReadOnlyList<PrintablesCollectionSummaryDto> Collections);
+
+/// <summary>
+/// Lightweight model card metadata used by collection browsing and search.
+/// </summary>
+public sealed record PrintablesModelSummaryDto(
+    string Id,
+    string Name,
+    string Slug,
+    string? AuthorHandle,
+    string? AuthorName,
+    string? ThumbnailUrl,
+    int LikesCount,
+    int DownloadCount,
+    string SourceUrl);
+
+/// <summary>
+/// Cursor-based page for user models and collection models.
+/// </summary>
+public sealed record PrintablesCursorPageDto(
+    IReadOnlyList<PrintablesModelSummaryDto> Items,
+    string? NextCursor,
+    bool HasMore);
+
+/// <summary>
+/// Offset-based page for Printables search results.
+/// </summary>
+public sealed record PrintablesSearchResultsDto(
+    IReadOnlyList<PrintablesModelSummaryDto> Items,
+    int TotalCount,
+    int Offset,
+    int Limit,
+    bool HasMore);
+
+/// <summary>
 /// Public collection summary for a Printables user.
 /// </summary>
 public sealed record PrintablesCollectionDto(

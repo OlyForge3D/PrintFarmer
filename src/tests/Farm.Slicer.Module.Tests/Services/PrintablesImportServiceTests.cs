@@ -180,24 +180,31 @@ public class PrintablesImportServiceTests
     [Fact]
     public async Task GetUserCollectionsAsync_WhenCalledTwice_UsesCache()
     {
-        CountingHttpMessageHandler handler = new("""
+        QueueingHttpMessageHandler handler = new(
+            """
             {
               "data": {
-                "user": {
-                  "collections": {
-                    "edges": [
-                      {
-                        "node": {
-                          "id": "c1",
-                          "name": "Favorites",
-                          "slug": "favorites",
-                          "printsCount": 12,
-                          "image": { "filePath": "https://media.printables.com/c1.jpg" }
-                        }
-                      }
+                "searchUsers2": {
+                  "items": [
+                    { "id": "16", "handle": "maker_jane", "publicUsername": "Maker Jane", "avatarFilePath": "avatars/u1.png" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userCollections": [
+                  {
+                    "id": "c1",
+                    "name": "Favorites",
+                    "printsCount": 12,
+                    "thumbnails": [
+                      { "image": { "filePath": "media/c1.jpg" } }
                     ]
                   }
-                }
+                ]
               }
             }
             """);
@@ -209,7 +216,7 @@ public class PrintablesImportServiceTests
 
         _ = first.Should().HaveCount(1);
         _ = second.Should().HaveCount(1);
-        _ = handler.PostCount.Should().Be(1);
+        _ = handler.PostCount.Should().Be(2);
     }
 
     [Fact]
@@ -218,48 +225,38 @@ public class PrintablesImportServiceTests
         const string json = """
             {
               "data": {
-                "search": {
-                  "prints": {
-                    "edges": [
-                      {
-                        "cursor": "abc",
-                        "node": {
-                          "id": "42",
-                          "name": "Awesome Bracket",
-                          "slug": "awesome-bracket",
-                          "summary": "A sturdy part",
-                          "likesCount": 55,
-                          "downloadsCount": 1000,
-                          "user": { "handle": "maker_jane" },
-                          "image": { "filePath": "https://media.printables.com/thumb.jpg" }
-                        }
-                      }
-                    ],
-                    "pageInfo": {
-                      "hasNextPage": true,
-                      "endCursor": "abc"
+                "searchPrints2": {
+                  "totalCount": 1,
+                  "items": [
+                    {
+                      "id": "42",
+                      "name": "Awesome Bracket",
+                      "slug": "awesome-bracket",
+                      "summary": "A sturdy part",
+                      "likesCount": 55,
+                      "downloadCount": 1000,
+                      "user": { "handle": "maker_jane" },
+                      "image": { "filePath": "https://media.printables.com/thumb.jpg" }
                     }
-                  }
+                  ]
                 }
               }
             }
             """;
 
         PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
-        PrintablesPagedResultDto<PrintablesModelCardDto> result = await client.SearchModelsAsync("bracket", 20, null, CancellationToken.None);
+        PrintablesSearchResultsDto result = await client.SearchModelsAsync("bracket", 0, 20, null, CancellationToken.None);
 
         _ = result.Items.Should().HaveCount(1);
         _ = result.Items[0].Id.Should().Be("42");
-        _ = result.Items[0].Creator.Should().Be("maker_jane");
-        _ = result.HasNextPage.Should().BeTrue();
-        _ = result.NextCursor.Should().Be("abc");
+        _ = result.Items[0].AuthorHandle.Should().Be("maker_jane");
     }
 
     [Fact]
     public async Task SearchModelsAsync_EmptyQuery_ThrowsArgumentException()
     {
         PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, "{}"));
-        Func<Task> act = () => client.SearchModelsAsync("   ", 20, null, CancellationToken.None);
+        Func<Task> act = () => client.SearchModelsAsync("   ", 0, 20, null, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ArgumentException>()
             .WithParameterName("query");
@@ -271,55 +268,16 @@ public class PrintablesImportServiceTests
         const string json = """
             {
               "data": {
-                "search": {
-                  "models": {
-                    "edges": [
-                      {
-                        "node": {
-                          "id": "88",
-                          "name": "Fallback Model",
-                          "description": "Legacy path",
-                          "likesCount": 8,
-                          "downloadsCount": 16,
-                          "user": { "handle": "fallback_user" }
-                        }
-                      }
-                    ],
-                    "pageInfo": {
-                      "hasNextPage": false,
-                      "endCursor": null
-                    }
-                  }
-                }
-              }
-            }
-            """;
-
-        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
-        PrintablesPagedResultDto<PrintablesModelCardDto> result = await client.SearchModelsAsync("fallback", 20, null, CancellationToken.None);
-
-        _ = result.Items.Should().HaveCount(1);
-        _ = result.Items[0].Id.Should().Be("88");
-        _ = result.Items[0].Creator.Should().Be("fallback_user");
-        _ = result.Items[0].LikeCount.Should().Be(8);
-        _ = result.HasNextPage.Should().BeFalse();
-        _ = result.NextCursor.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task GetUserCollectionsAsync_ProfileFallbackPath_ReturnsMappedCollections()
-    {
-        const string json = """
-            {
-              "data": {
-                "profile": {
-                  "publicCollections": [
+                "searchPrints2": {
+                  "totalCount": 1,
+                  "items": [
                     {
-                      "id": "col-1",
-                      "name": "Mechanical Parts",
-                      "description": "Useful prints",
-                      "printsCount": 3,
-                      "image": { "filePath": "https://media.printables.com/col1.jpg" }
+                      "id": "88",
+                      "name": "Fallback Model",
+                      "description": "Legacy path",
+                      "likesCount": 8,
+                      "downloadCount": 16,
+                      "user": { "handle": "fallback_user" }
                     }
                   ]
                 }
@@ -328,68 +286,125 @@ public class PrintablesImportServiceTests
             """;
 
         PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        PrintablesSearchResultsDto result = await client.SearchModelsAsync("fallback", 0, 20, null, CancellationToken.None);
+
+        _ = result.Items.Should().HaveCount(1);
+        _ = result.Items[0].Id.Should().Be("88");
+        _ = result.Items[0].AuthorHandle.Should().Be("fallback_user");
+        _ = result.Items[0].LikesCount.Should().Be(8);
+        _ = result.HasMore.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetUserCollectionsAsync_ReturnsMappedCollections()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "16", "handle": "maker_jane", "publicUsername": "Maker Jane", "avatarFilePath": "avatars/u1.png" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userCollections": [
+                  {
+                    "id": "col-1",
+                    "name": "Mechanical Parts",
+                    "printsCount": 3,
+                    "thumbnails": [
+                      { "image": { "filePath": "media/col1.jpg" } }
+                    ]
+                  }
+                ]
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
         IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
 
         _ = result.Should().HaveCount(1);
         _ = result[0].Id.Should().Be("col-1");
         _ = result[0].Name.Should().Be("Mechanical Parts");
         _ = result[0].ModelCount.Should().Be(3);
-        _ = result[0].ThumbnailUrl.Should().Be("https://media.printables.com/col1.jpg");
+        _ = result[0].ThumbnailUrl.Should().Be("https://media.printables.com/media/col1.jpg");
     }
 
     [Fact]
-    public async Task GetUserModelsAsync_HasNextPageWithoutCursor_ThrowsPrintablesApiException()
+    public async Task GetUserModelsAsync_WithCursor_ReturnsHasNextPage()
     {
-        const string json = """
+        QueueingHttpMessageHandler handler = new(
+            """
             {
               "data": {
-                "user": {
-                  "prints": {
-                    "edges": [],
-                    "pageInfo": {
-                      "hasNextPage": true
-                    }
-                  }
+                "searchUsers2": {
+                  "items": [
+                    { "id": "16", "handle": "maker_jane", "publicUsername": "Maker Jane" }
+                  ]
                 }
               }
             }
-            """;
+            """,
+            """
+            {
+              "data": {
+                "userModels": {
+                  "cursor": "CURSOR-2",
+                  "items": []
+                }
+              }
+            }
+            """);
 
-        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
-        Func<Task> act = () => client.GetUserModelsAsync("maker_jane", 25, null, "LATEST", CancellationToken.None);
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        PrintablesPagedResultDto<PrintablesModelCardDto> result = await client.GetUserModelsAsync("maker_jane", 25, null, "new_uploads", CancellationToken.None);
 
-        _ = await act.Should().ThrowAsync<PrintablesApiException>()
-            .WithMessage("*hasNextPage=true without endCursor*");
+        _ = result.HasNextPage.Should().BeTrue();
+        _ = result.NextCursor.Should().Be("CURSOR-2");
     }
 
     [Fact]
     public async Task GetUserModelsAsync_LimitCursorAndOrdering_AreNormalizedInRequestPayload()
     {
-        RequestRecordingHttpMessageHandler handler = new("""
+        QueueingHttpMessageHandler handler = new(
+            """
             {
               "data": {
-                "user": {
-                  "prints": {
-                    "edges": [],
-                    "pageInfo": {
-                      "hasNextPage": false,
-                      "endCursor": null
-                    }
-                  }
+                "searchUsers2": {
+                  "items": [
+                    { "id": "16", "handle": "maker_jane", "publicUsername": "Maker Jane" }
+                  ]
+                }
+              }
+            }
+            """,
+            """
+            {
+              "data": {
+                "userModels": {
+                  "cursor": null,
+                  "items": []
                 }
               }
             }
             """);
         PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
 
-        _ = await client.GetUserModelsAsync(" maker_jane ", 250, "  CURSOR-1  ", "  TOP  ", CancellationToken.None);
+        _ = await client.GetUserModelsAsync(" maker_jane ", 250, "  CURSOR-1  ", "  downloads  ", CancellationToken.None);
 
-        using JsonDocument payload = JsonDocument.Parse(handler.LastRequestBody);
+        using JsonDocument payload = JsonDocument.Parse(handler.RequestBodies.Last());
         JsonElement variables = payload.RootElement.GetProperty("variables");
-        _ = variables.GetProperty("userId").GetString().Should().Be("maker_jane");
-        _ = variables.GetProperty("first").GetInt32().Should().Be(100);
-        _ = variables.GetProperty("after").GetString().Should().Be("CURSOR-1");
-        _ = variables.GetProperty("ordering").GetString().Should().Be("TOP");
+        _ = variables.GetProperty("userId").GetString().Should().Be("16");
+        _ = variables.GetProperty("limit").GetInt32().Should().Be(100);
+        _ = variables.GetProperty("cursor").GetString().Should().Be("CURSOR-1");
+        _ = variables.GetProperty("ordering").GetProperty("orderBy").GetString().Should().Be("downloads");
     }
 
     [Fact]
@@ -735,6 +750,63 @@ public class PrintablesImportServiceTests
         _ = Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    [Fact]
+    public async Task BrowseCollectionsAsync_UserNotFound_Returns404()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        _ = svcMock
+            .Setup(s => s.BrowseCollectionsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("not found"));
+
+        PrintablesImportController controller = BuildController(svcMock);
+        IActionResult result = await controller.BrowseCollectionsAsync("missing-user", CancellationToken.None);
+
+        _ = Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task BrowseUserModelsAsync_InvalidLimit_Returns400()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        PrintablesImportController controller = BuildController(svcMock);
+
+        IActionResult result = await controller.BrowseUserModelsAsync("maker_jane", 0, null, CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task SearchModelsAsync_HappyPath_Returns200()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        _ = svcMock
+            .Setup(s => s.SearchModelsAsync("benchy", 0, 24, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrintablesSearchResultsDto(
+                Items: [new PrintablesModelSummaryDto("1", "Model", "model", "maker", null, null, 1, 2, "https://www.printables.com/model/1-model")],
+                TotalCount: 1,
+                Offset: 0,
+                Limit: 24,
+                HasMore: false));
+
+        PrintablesImportController controller = BuildController(svcMock);
+        IActionResult result = await controller.SearchModelsAsync("benchy", 0, 24, null, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        PrintablesSearchResultsDto payload = Assert.IsType<PrintablesSearchResultsDto>(ok.Value);
+        _ = payload.Items.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task SearchModelsAsync_EmptyQuery_Returns400()
+    {
+        Mock<IPrintablesImportService> svcMock = new(MockBehavior.Strict);
+        PrintablesImportController controller = BuildController(svcMock);
+
+        IActionResult result = await controller.SearchModelsAsync("", 0, 24, null, CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+    }
+
     private sealed class PrintablesImportTestHttpMessageHandler : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -803,6 +875,31 @@ public class PrintablesImportServiceTests
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
             };
+    }
+
+    private sealed class QueueingHttpMessageHandler(params string[] responses) : HttpMessageHandler
+    {
+        private readonly Queue<string> _responses = new(responses);
+
+        public int PostCount { get; private set; }
+
+        public List<string> RequestBodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                PostCount++;
+                string requestBody = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+                RequestBodies.Add(requestBody);
+            }
+
+            string json = _responses.Count > 0 ? _responses.Dequeue() : "{}";
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
+        }
     }
 
     private sealed class CountingHttpMessageHandler(string responseJson) : HttpMessageHandler

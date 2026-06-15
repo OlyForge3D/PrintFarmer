@@ -19,6 +19,7 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
     private const string StlDownloadFileType = "stl";
     private const string DefaultUserAgent = "PrintFarmer/1.0";
     private const string DefaultOrigin = "https://www.printables.com";
+    private const string MediaBaseUrl = "https://media.printables.com/";
 
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -57,106 +58,100 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         }
     }
 
-    public Task<IReadOnlyList<PrintablesCollectionDto>> GetUserCollectionsAsync(string userId, CancellationToken ct)
+    public Task<PrintablesUserProfileDto> ResolveUserProfileAsync(string username, CancellationToken ct)
     {
-        string normalizedUser = NormalizeRequired(userId, nameof(userId));
-        string cacheKey = $"printables:collections:{normalizedUser}";
+        string normalizedUsername = NormalizeUsername(username, nameof(username));
+        string cacheKey = $"printables:user-profile:{normalizedUsername}";
+
+        return GetOrCreateCachedAsync(
+            cacheKey,
+            async token => await ResolveUserInternalAsync(normalizedUsername, token),
+            ct);
+    }
+
+    public Task<IReadOnlyList<PrintablesCollectionDto>> GetUserCollectionsAsync(string username, CancellationToken ct)
+    {
+        string normalizedUsername = NormalizeUsername(username, nameof(username));
+        string cacheKey = $"printables:collections:{normalizedUsername}";
 
         return GetOrCreateCachedAsync<IReadOnlyList<PrintablesCollectionDto>>(
             cacheKey,
             async token =>
             {
+                PrintablesUserProfileDto user = await ResolveUserInternalAsync(normalizedUsername, token);
                 using JsonDocument doc = await SendGraphQlWithRetryAsync(
                     operationName: "UserCollections",
                     payload: new
                     {
                         operationName = "UserCollections",
                         query = """
-                            query UserCollections($userId: String!) {
-                              user(username: $userId) {
-                                collections {
-                                  edges {
-                                    node {
-                                      id
-                                      name
-                                      slug
-                                      description
-                                      printsCount
-                                      image {
-                                        filePath
-                                      }
-                                    }
+                            query UserCollections($userId: ID!) {
+                              userCollections(userId: $userId) {
+                                id
+                                name
+                                printsCount
+                                likesCount
+                                thumbnails {
+                                  image {
+                                    filePath
                                   }
                                 }
                               }
                             }
                             """,
-                        variables = new { userId = normalizedUser },
+                        variables = new { userId = user.Id },
                     },
                     token);
 
-                JsonElement userElement = GetRequiredByPaths(
+                JsonElement collectionsElement = GetRequiredByPaths(
                     doc.RootElement,
                     "UserCollections",
-                    ["data", "user"],
-                    ["data", "profile"]);
+                    ["data", "userCollections"]);
 
-                JsonElement collectionsNode = GetRequiredByPaths(
-                    userElement,
-                    "UserCollections",
-                    ["collections"],
-                    ["publicCollections"]);
-
-                return [.. EnumerateConnectionNodes(collectionsNode).Select(MapCollection)];
+                return [.. EnumerateConnectionNodes(collectionsElement).Select(MapCollection)];
             },
             ct);
     }
 
     public Task<PrintablesPagedResultDto<PrintablesModelCardDto>> GetUserModelsAsync(
-        string userId,
+        string username,
         int limit,
         string? cursor,
         string? ordering,
         CancellationToken ct)
     {
-        string normalizedUser = NormalizeRequired(userId, nameof(userId));
+        string normalizedUsername = NormalizeUsername(username, nameof(username));
         int normalizedLimit = NormalizeLimit(limit);
-        string normalizedOrdering = string.IsNullOrWhiteSpace(ordering) ? "LATEST" : ordering.Trim();
-        string cacheKey = $"printables:user-models:{normalizedUser}:{normalizedLimit}:{cursor}:{normalizedOrdering}";
+        string? normalizedCursor = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim();
+        string? normalizedOrdering = NormalizeOptionalOrdering(ordering);
+        string cacheKey = $"printables:user-models:{normalizedUsername}:{normalizedLimit}:{normalizedCursor}:{normalizedOrdering}";
 
         return GetOrCreateCachedAsync(
             cacheKey,
             async token =>
             {
+                PrintablesUserProfileDto user = await ResolveUserInternalAsync(normalizedUsername, token);
                 using JsonDocument doc = await SendGraphQlWithRetryAsync(
                     operationName: "UserModels",
                     payload: new
                     {
                         operationName = "UserModels",
                         query = """
-                            query UserModels($userId: String!, $first: Int!, $after: String, $ordering: String) {
-                              user(username: $userId) {
-                                prints(first: $first, after: $after, ordering: $ordering) {
-                                  edges {
-                                    cursor
-                                    node {
-                                      id
-                                      name
-                                      slug
-                                      summary
-                                      likesCount
-                                      downloadsCount
-                                      image {
-                                        filePath
-                                      }
-                                      user {
-                                        handle
-                                      }
-                                    }
+                            query UserModels($userId: ID!, $limit: Int, $cursor: String, $ordering: UserModelsOrderingObject) {
+                              userModels(userId: $userId, limit: $limit, cursor: $cursor, ordering2: $ordering) {
+                                cursor
+                                items {
+                                  id
+                                  name
+                                  slug
+                                  summary
+                                  likesCount
+                                  downloadCount
+                                  image {
+                                    filePath
                                   }
-                                  pageInfo {
-                                    hasNextPage
-                                    endCursor
+                                  user {
+                                    handle
                                   }
                                 }
                               }
@@ -164,40 +159,128 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
                             """,
                         variables = new
                         {
-                            userId = normalizedUser,
-                            first = normalizedLimit,
-                            after = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim(),
+                            userId = user.Id,
+                            limit = normalizedLimit,
+                            cursor = normalizedCursor,
+                            ordering = normalizedOrdering is null
+                                ? null
+                                : new { orderBy = normalizedOrdering, sortOrder = "DESC" },
+                        },
+                    },
+                    token);
+
+                JsonElement modelsConnection = GetRequiredByPaths(
+                    doc.RootElement,
+                    "UserModels",
+                    ["data", "userModels"]);
+
+                return MapCursorPagedModelCards(modelsConnection);
+            },
+            ct);
+    }
+
+    public Task<PrintablesPagedResultDto<PrintablesModelCardDto>> GetCollectionModelsAsync(
+        string collectionId,
+        int limit,
+        string? cursor,
+        string? query,
+        string? ordering,
+        CancellationToken ct)
+    {
+        string normalizedCollectionId = NormalizeRequired(collectionId, nameof(collectionId));
+        int normalizedLimit = NormalizeLimit(limit);
+        string? normalizedCursor = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim();
+        string? normalizedQuery = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
+        string? normalizedOrdering = NormalizeOptionalOrdering(ordering);
+        string cacheKey = $"printables:collection-models:{normalizedCollectionId}:{normalizedLimit}:{normalizedCursor}:{normalizedQuery}:{normalizedOrdering}";
+
+        return GetOrCreateCachedAsync(
+            cacheKey,
+            async token =>
+            {
+                using JsonDocument doc = await SendGraphQlWithRetryAsync(
+                    operationName: "CollectionModels",
+                    payload: new
+                    {
+                        operationName = "CollectionModels",
+                        query = """
+                            query CollectionModels(
+                              $collectionId: ID!,
+                              $limit: Int,
+                              $cursor: String,
+                              $query: String,
+                              $ordering: CollectionPrintsOrderingEnum
+                            ) {
+                              moreCollectionModels(
+                                collectionId: $collectionId,
+                                limit: $limit,
+                                cursor: $cursor,
+                                query: $query,
+                                ordering: $ordering
+                              ) {
+                                cursor
+                                items {
+                                  print {
+                                    id
+                                    name
+                                    slug
+                                    summary
+                                    likesCount
+                                    downloadCount
+                                    image {
+                                      filePath
+                                    }
+                                    user {
+                                      handle
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            """,
+                        variables = new
+                        {
+                            collectionId = normalizedCollectionId,
+                            limit = normalizedLimit,
+                            cursor = normalizedCursor,
+                            query = normalizedQuery,
                             ordering = normalizedOrdering,
                         },
                     },
                     token);
 
-                JsonElement userElement = GetRequiredByPaths(
-                    doc.RootElement,
-                    "UserModels",
-                    ["data", "user"],
-                    ["data", "profile"]);
-
                 JsonElement modelsConnection = GetRequiredByPaths(
-                    userElement,
-                    "UserModels",
-                    ["prints"],
-                    ["models"]);
+                    doc.RootElement,
+                    "CollectionModels",
+                    ["data", "moreCollectionModels"]);
 
-                return MapPagedModelCards(modelsConnection, "UserModels");
+                return MapCursorPagedModelCards(
+                    modelsConnection,
+                    itemTransform: static item =>
+                    {
+                        if (!TryGetElement(item, out JsonElement printEl, "print") || printEl.ValueKind == JsonValueKind.Null)
+                        {
+                            return null;
+                        }
+
+                        return MapModelCard(printEl);
+                    });
             },
             ct);
     }
 
-    public Task<PrintablesPagedResultDto<PrintablesModelCardDto>> SearchModelsAsync(
+    public Task<PrintablesSearchResultsDto> SearchModelsAsync(
         string query,
+        int offset,
         int limit,
-        string? cursor,
+        string? ordering,
         CancellationToken ct)
     {
         string normalizedQuery = NormalizeRequired(query, nameof(query));
+        int normalizedOffset = Math.Max(0, offset);
         int normalizedLimit = NormalizeLimit(limit);
-        string cacheKey = $"printables:search:{normalizedQuery}:{normalizedLimit}:{cursor}";
+        string? normalizedOrdering = NormalizeOptionalSearchOrdering(ordering);
+        string cacheKey = $"printables:search:{normalizedQuery}:{normalizedOffset}:{normalizedLimit}:{normalizedOrdering}";
 
         return GetOrCreateCachedAsync(
             cacheKey,
@@ -209,29 +292,21 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
                     {
                         operationName = "SearchModels",
                         query = """
-                            query SearchModels($query: String!, $first: Int!, $after: String) {
-                              search(query: $query, first: $first, after: $after) {
-                                prints {
-                                  edges {
-                                    cursor
-                                    node {
-                                      id
-                                      name
-                                      slug
-                                      summary
-                                      likesCount
-                                      downloadsCount
-                                      image {
-                                        filePath
-                                      }
-                                      user {
-                                        handle
-                                      }
-                                    }
+                            query SearchModels($query: String!, $offset: Int, $limit: Int, $ordering: SearchChoicesEnum) {
+                              searchPrints2(query: $query, offset: $offset, limit: $limit, ordering: $ordering) {
+                                totalCount
+                                items {
+                                  id
+                                  name
+                                  slug
+                                  summary
+                                  likesCount
+                                  downloadCount
+                                  image {
+                                    filePath
                                   }
-                                  pageInfo {
-                                    hasNextPage
-                                    endCursor
+                                  user {
+                                    handle
                                   }
                                 }
                               }
@@ -240,8 +315,9 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
                         variables = new
                         {
                             query = normalizedQuery,
-                            first = normalizedLimit,
-                            after = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim(),
+                            offset = normalizedOffset,
+                            limit = normalizedLimit,
+                            ordering = normalizedOrdering,
                         },
                     },
                     token);
@@ -249,15 +325,9 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
                 JsonElement searchElement = GetRequiredByPaths(
                     doc.RootElement,
                     "SearchModels",
-                    ["data", "search"]);
+                    ["data", "searchPrints2"]);
 
-                JsonElement modelsConnection = GetRequiredByPaths(
-                    searchElement,
-                    "SearchModels",
-                    ["prints"],
-                    ["models"]);
-
-                return MapPagedModelCards(modelsConnection, "SearchModels");
+                return MapSearchResults(searchElement, normalizedOffset, normalizedLimit);
             },
             ct);
     }
@@ -402,6 +472,74 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         }
     }
 
+    private async Task<PrintablesUserProfileDto> ResolveUserInternalAsync(string normalizedUsername, CancellationToken ct)
+    {
+        using JsonDocument doc = await SendGraphQlWithRetryAsync(
+            operationName: "ResolveUser",
+            payload: new
+            {
+                operationName = "ResolveUser",
+                query = """
+                    query ResolveUser($query: String!) {
+                      searchUsers2(query: $query, limit: 10) {
+                        items {
+                          id
+                          handle
+                          publicUsername
+                          avatarFilePath
+                          verified
+                        }
+                      }
+                    }
+                    """,
+                variables = new { query = $"@{normalizedUsername}" },
+            },
+            ct);
+
+        JsonElement usersElement = GetRequiredByPaths(
+            doc.RootElement,
+            "ResolveUser",
+            ["data", "searchUsers2", "items"]);
+
+        PrintablesUserProfileDto? resolved = SelectUserCandidate(usersElement, normalizedUsername);
+        if (resolved is null)
+        {
+            using JsonDocument fallbackDoc = await SendGraphQlWithRetryAsync(
+                operationName: "ResolveUserFallback",
+                payload: new
+                {
+                    operationName = "ResolveUserFallback",
+                    query = """
+                        query ResolveUserFallback($query: String!) {
+                          searchUsers2(query: $query, limit: 10) {
+                            items {
+                              id
+                              handle
+                              publicUsername
+                              avatarFilePath
+                            }
+                          }
+                        }
+                        """,
+                    variables = new { query = normalizedUsername },
+                },
+                ct);
+
+            JsonElement fallbackUsersElement = GetRequiredByPaths(
+                fallbackDoc.RootElement,
+                "ResolveUserFallback",
+                ["data", "searchUsers2", "items"]);
+            resolved = SelectUserCandidate(fallbackUsersElement, normalizedUsername);
+        }
+
+        if (resolved is null)
+        {
+            throw new KeyNotFoundException($"Printables user '{normalizedUsername}' was not found.");
+        }
+
+        return resolved;
+    }
+
     private async Task<JsonDocument> SendGraphQlWithRetryAsync(string operationName, object payload, CancellationToken ct)
     {
         int maxAttempts = Math.Max(1, _options.MaxAttempts);
@@ -508,32 +646,50 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
             })!;
     }
 
-    private static PrintablesPagedResultDto<PrintablesModelCardDto> MapPagedModelCards(JsonElement connectionElement, string operationName)
+    private static PrintablesPagedResultDto<PrintablesModelCardDto> MapCursorPagedModelCards(
+        JsonElement connectionElement,
+        Func<JsonElement, PrintablesModelCardDto?>? itemTransform = null)
     {
-        List<PrintablesModelCardDto> items = [.. EnumerateConnectionNodes(connectionElement).Select(MapModelCard)];
-
-        bool hasNextPage = false;
-        string? endCursor = null;
-
-        if (TryGetElement(connectionElement, out JsonElement pageInfo, "pageInfo"))
+        itemTransform ??= MapModelCard;
+        List<PrintablesModelCardDto> items = [];
+        foreach (JsonElement item in EnumerateConnectionNodes(connectionElement))
         {
-            hasNextPage = pageInfo.TryGetProperty("hasNextPage", out JsonElement hasNextEl) &&
-                          hasNextEl.ValueKind is JsonValueKind.True or JsonValueKind.False &&
-                          hasNextEl.GetBoolean();
-
-            if (pageInfo.TryGetProperty("endCursor", out JsonElement cursorEl) && cursorEl.ValueKind == JsonValueKind.String)
+            PrintablesModelCardDto? transformed = itemTransform(item);
+            if (transformed is not null)
             {
-                endCursor = cursorEl.GetString();
+                items.Add(transformed);
             }
         }
 
-        if (hasNextPage && string.IsNullOrWhiteSpace(endCursor))
-        {
-            throw new PrintablesApiException(
-                $"Printables '{operationName}' returned hasNextPage=true without endCursor. Schema may have changed.");
-        }
-
+        string? endCursor = ReadOptionalString(connectionElement, "cursor");
+        bool hasNextPage = !string.IsNullOrWhiteSpace(endCursor);
         return new PrintablesPagedResultDto<PrintablesModelCardDto>(items, endCursor, hasNextPage);
+    }
+
+    private static PrintablesSearchResultsDto MapSearchResults(JsonElement searchElement, int offset, int limit)
+    {
+        int totalCount = ReadOptionalInt(searchElement, "totalCount");
+        List<PrintablesModelCardDto> items = [.. EnumerateConnectionNodes(searchElement).Select(MapModelCard)];
+        bool hasMore = offset + items.Count < totalCount;
+
+        List<PrintablesModelSummaryDto> summaries = [.. items.Select(item =>
+            new PrintablesModelSummaryDto(
+                Id: item.Id,
+                Name: item.Name,
+                Slug: item.Slug ?? string.Empty,
+                AuthorHandle: item.Creator,
+                AuthorName: null,
+                ThumbnailUrl: item.ThumbnailUrl,
+                LikesCount: item.LikeCount,
+                DownloadCount: item.DownloadCount,
+                SourceUrl: BuildModelUrl(item.Id, item.Slug)))];
+
+        return new PrintablesSearchResultsDto(
+            Items: summaries,
+            TotalCount: totalCount,
+            Offset: offset,
+            Limit: limit,
+            HasMore: hasMore);
     }
 
     private static IEnumerable<JsonElement> EnumerateConnectionNodes(JsonElement element)
@@ -590,13 +746,27 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
 
     private static PrintablesCollectionDto MapCollection(JsonElement collectionElement)
     {
+        string? thumbnail = null;
+        if (TryGetElement(collectionElement, out JsonElement thumbnails, "thumbnails") && thumbnails.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement thumb in thumbnails.EnumerateArray())
+            {
+                string? path = ReadOptionalString(thumb, "image", "filePath");
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    thumbnail = BuildMediaUrl(path);
+                    break;
+                }
+            }
+        }
+
         return new PrintablesCollectionDto(
             Id: ReadRequiredString(collectionElement, "collection id", "id"),
             Name: ReadRequiredString(collectionElement, "collection name", "name"),
             Slug: ReadOptionalString(collectionElement, "slug"),
             Description: ReadOptionalString(collectionElement, "description", "summary"),
-            ModelCount: ReadOptionalInt(collectionElement, "printsCount", "modelCount"),
-            ThumbnailUrl: ReadOptionalString(collectionElement, "image", "filePath"));
+            ModelCount: ReadOptionalIntAny(collectionElement, "printsCount", "modelCount"),
+            ThumbnailUrl: thumbnail ?? BuildMediaUrl(ReadOptionalString(collectionElement, "image", "filePath")));
     }
 
     private static PrintablesModelCardDto MapModelCard(JsonElement modelElement)
@@ -607,9 +777,9 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
             Slug: ReadOptionalString(modelElement, "slug"),
             Description: ReadOptionalString(modelElement, "summary", "description"),
             Creator: ReadOptionalString(modelElement, "user", "handle"),
-            ThumbnailUrl: ReadOptionalString(modelElement, "image", "filePath"),
-            LikeCount: ReadOptionalInt(modelElement, "likesCount", "likeCount"),
-            DownloadCount: ReadOptionalInt(modelElement, "downloadsCount", "downloadCount"));
+            ThumbnailUrl: BuildMediaUrl(ReadOptionalString(modelElement, "image", "filePath")),
+            LikeCount: ReadOptionalIntAny(modelElement, "likesCount", "likeCount"),
+            DownloadCount: ReadOptionalIntAny(modelElement, "downloadCount", "downloadsCount"));
     }
 
     private static PrintablesPrintProfileDto MapPrintProfile(JsonElement printElement)
@@ -634,7 +804,7 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
             Description: ReadOptionalString(printElement, "description", "summary"),
             Creator: ReadOptionalString(printElement, "user", "handle") ?? string.Empty,
             License: ReadOptionalString(printElement, "license", "name"),
-            ThumbnailUrl: ReadOptionalString(printElement, "image", "filePath"),
+            ThumbnailUrl: BuildMediaUrl(ReadOptionalString(printElement, "image", "filePath")),
             Files: files);
     }
 
@@ -710,6 +880,24 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         };
     }
 
+    private static int ReadOptionalIntAny(JsonElement element, params string[] propertyNames)
+    {
+        foreach (string propertyName in propertyNames)
+        {
+            if (element.TryGetProperty(propertyName, out JsonElement target))
+            {
+                return target.ValueKind switch
+                {
+                    JsonValueKind.Number when target.TryGetInt32(out int value) => value,
+                    JsonValueKind.Number when target.TryGetInt64(out long value) && value <= int.MaxValue => (int)value,
+                    _ => 0,
+                };
+            }
+        }
+
+        return 0;
+    }
+
     private static long ReadOptionalLong(JsonElement element, params string[] path)
     {
         if (!TryGetElement(element, out JsonElement target, path))
@@ -736,6 +924,56 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         return value.Trim();
     }
 
+    private static string NormalizeUsername(string value, string paramName)
+    {
+        string normalized = NormalizeRequired(value, paramName);
+        normalized = WebUtility.UrlDecode(normalized).Trim().TrimStart('@');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new ArgumentException("Value must not be empty.", paramName);
+        }
+
+        return normalized;
+    }
+
+    private static string? NormalizeOptionalOrdering(string? ordering)
+    {
+        if (string.IsNullOrWhiteSpace(ordering))
+        {
+            return null;
+        }
+
+        return ordering.Trim().ToLowerInvariant() switch
+        {
+            "added_to_collection" => "added_to_collection",
+            "new_uploads" => "new_uploads",
+            "downloads" => "downloads",
+            "makes" => "makes",
+            "likes" => "likes",
+            "views" => "views",
+            "rating" => "rating",
+            _ => throw new ArgumentException($"Unsupported ordering value '{ordering}'.", nameof(ordering)),
+        };
+    }
+
+    private static string? NormalizeOptionalSearchOrdering(string? ordering)
+    {
+        if (string.IsNullOrWhiteSpace(ordering))
+        {
+            return null;
+        }
+
+        return ordering.Trim().ToLowerInvariant() switch
+        {
+            "latest" => "latest",
+            "popular" => "popular",
+            "best_match" => "best_match",
+            "rating" => "rating",
+            "makes_count" => "makes_count",
+            _ => throw new ArgumentException($"Unsupported search ordering value '{ordering}'.", nameof(ordering)),
+        };
+    }
+
     private static int NormalizeLimit(int limit)
     {
         if (limit <= 0)
@@ -744,6 +982,61 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         }
 
         return Math.Min(limit, 100);
+    }
+
+    private static PrintablesUserProfileDto? SelectUserCandidate(JsonElement usersElement, string normalizedUsername)
+    {
+        if (usersElement.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        List<PrintablesUserProfileDto> candidates = [];
+        foreach (JsonElement userElement in usersElement.EnumerateArray())
+        {
+            string? id = ReadOptionalString(userElement, "id");
+            string? handle = ReadOptionalString(userElement, "handle");
+            string? publicUsername = ReadOptionalString(userElement, "publicUsername");
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(handle) || string.IsNullOrWhiteSpace(publicUsername))
+            {
+                continue;
+            }
+
+            candidates.Add(new PrintablesUserProfileDto(
+                Id: id,
+                Handle: handle,
+                PublicUsername: publicUsername,
+                AvatarUrl: BuildMediaUrl(ReadOptionalString(userElement, "avatarFilePath"))));
+        }
+
+        return candidates.FirstOrDefault(c =>
+            string.Equals(c.Handle, normalizedUsername, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.PublicUsername, normalizedUsername, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? BuildMediaUrl(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        if (Uri.TryCreate(path, UriKind.Absolute, out Uri? absolute))
+        {
+            return absolute.ToString();
+        }
+
+        return $"{MediaBaseUrl}{path.TrimStart('/')}";
+    }
+
+    private static string BuildModelUrl(string id, string? slug)
+    {
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            return $"{DefaultOrigin}/model/{id}";
+        }
+
+        return $"{DefaultOrigin}/model/{id}-{slug}";
     }
 
     private static string? TryGetDownloadErrorMessage(JsonElement downloadEl)

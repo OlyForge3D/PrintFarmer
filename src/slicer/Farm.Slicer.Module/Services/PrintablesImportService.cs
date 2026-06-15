@@ -112,6 +112,42 @@ public sealed class PrintablesImportService(
             modelId, preview.Creator, preview.License);
     }
 
+    /// <inheritdoc />
+    public async Task<PrintablesCollectionsBrowseDto> BrowseCollectionsAsync(string username, CancellationToken ct)
+    {
+        PrintablesUserProfileDto user = await _graphQlClient.ResolveUserProfileAsync(username, ct);
+        IReadOnlyList<PrintablesCollectionDto> collections = await _graphQlClient.GetUserCollectionsAsync(username, ct);
+
+        return new PrintablesCollectionsBrowseDto(
+            User: user,
+            Collections: [.. collections.Select(collection => new PrintablesCollectionSummaryDto(
+                Id: collection.Id,
+                Name: collection.Name,
+                ModelCount: collection.ModelCount,
+                LikesCount: 0,
+                ThumbnailUrls: string.IsNullOrWhiteSpace(collection.ThumbnailUrl) ? [] : [collection.ThumbnailUrl]))]);
+    }
+
+    /// <inheritdoc />
+    public async Task<PrintablesCursorPageDto> BrowseUserModelsAsync(string username, int limit, string? cursor, CancellationToken ct)
+    {
+        PrintablesPagedResultDto<PrintablesModelCardDto> page = await _graphQlClient.GetUserModelsAsync(username, limit, cursor, ordering: null, ct);
+        return MapCursorPage(page);
+    }
+
+    /// <inheritdoc />
+    public async Task<PrintablesCursorPageDto> BrowseCollectionModelsAsync(string collectionId, int limit, string? cursor, string? query, string? ordering, CancellationToken ct)
+    {
+        PrintablesPagedResultDto<PrintablesModelCardDto> page = await _graphQlClient.GetCollectionModelsAsync(collectionId, limit, cursor, query, ordering, ct);
+        return MapCursorPage(page);
+    }
+
+    /// <inheritdoc />
+    public Task<PrintablesSearchResultsDto> SearchModelsAsync(string query, int offset, int limit, string? ordering, CancellationToken ct)
+    {
+        return _graphQlClient.SearchModelsAsync(query, offset, limit, ordering, ct);
+    }
+
     private static List<PrintablesFileEntryDto> SelectFilesForImport(PrintablesPreviewDto preview, IReadOnlyCollection<string>? fileIds)
     {
         if (preview.Files.Count == 0)
@@ -142,6 +178,33 @@ public sealed class PrintablesImportService(
         }
 
         return [.. preview.Files.Where(file => selectedIdSet.Contains(file.Id))];
+    }
+
+    private static PrintablesCursorPageDto MapCursorPage(PrintablesPagedResultDto<PrintablesModelCardDto> page)
+    {
+        return new PrintablesCursorPageDto(
+            Items: [.. page.Items.Select(item => new PrintablesModelSummaryDto(
+                Id: item.Id,
+                Name: item.Name,
+                Slug: item.Slug ?? string.Empty,
+                AuthorHandle: item.Creator,
+                AuthorName: null,
+                ThumbnailUrl: item.ThumbnailUrl,
+                LikesCount: item.LikeCount,
+                DownloadCount: item.DownloadCount,
+                SourceUrl: BuildModelUrl(item.Id, item.Slug)))],
+            NextCursor: page.NextCursor,
+            HasMore: page.HasNextPage);
+    }
+
+    private static string BuildModelUrl(string id, string? slug)
+    {
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            return $"https://www.printables.com/model/{id}";
+        }
+
+        return $"https://www.printables.com/model/{id}-{slug}";
     }
 
     /// <summary>
