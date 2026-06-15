@@ -143,7 +143,13 @@ import {
   CreateCustomFieldDefinitionRequest,
   UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
-import type { GeometryUploadResultDto, ThreeMfMetadata } from "@/types/models";
+import type {
+  GeometryUploadResultDto,
+  PrintablesCollectionSummary,
+  PrintablesModelSummary,
+  PrintablesPagedResponse,
+  ThreeMfMetadata
+} from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
@@ -1962,6 +1968,55 @@ export class ApiClient {
     const response = await this.client.post(
       "/3d-models/query",
       apiRequest
+    );
+    return response.data;
+  }
+
+  async getPrintablesUserCollections(
+    username: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesCollectionSummary>> {
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesCollectionSummary>>(
+      `/3d-models/printables/users/${encodeURIComponent(username)}/collections`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async getPrintablesUserModels(
+    username: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
+      `/3d-models/printables/users/${encodeURIComponent(username)}/models`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async searchPrintablesModels(
+    query: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
+      `/3d-models/printables/search`,
+      {
+        params: {
+          query,
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
     );
     return response.data;
   }

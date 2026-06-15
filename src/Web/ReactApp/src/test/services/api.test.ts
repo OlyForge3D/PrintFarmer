@@ -238,5 +238,67 @@ describe("ApiClient", () => {
 
       expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/enabled", { enabled: false });
     });
+
+    describe("printables endpoints", () => {
+      it("should fetch user collections from the printables collections endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "collection-1", name: "Favorites", modelCount: 12 }],
+            nextCursor: "cursor-2",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesUserCollections("ripley", { cursor: "cursor-1", limit: 8 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/collections", {
+          params: { cursor: "cursor-1", limit: 8 },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should fetch user models from the printables models endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "model-1", title: "Voron clip", author: "ripley" }],
+            nextCursor: null,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesUserModels("ripley", { limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/models", {
+          params: { cursor: undefined, limit: 24 },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should query printables search endpoint with keyword and cursor", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "result-1", title: "tool holder", author: "maker" }],
+            nextCursor: "cursor-2",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.searchPrintablesModels("tool holder", {
+          cursor: "cursor-1",
+          limit: 24,
+        });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/search", {
+          params: { query: "tool holder", cursor: "cursor-1", limit: 24 },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+    });
   });
 });

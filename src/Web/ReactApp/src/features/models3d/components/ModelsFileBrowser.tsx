@@ -8,6 +8,7 @@ import {
 } from '@/features/fileBrowser/types';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { PrintablesBrowserModal } from '@/features/models3d/components/PrintablesBrowserModal';
 import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
 import { Button } from '@/common/components/ui';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
@@ -127,7 +128,9 @@ export const ModelsFileBrowser = ({
 }: ModelsFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showPrintablesModal, setShowPrintablesModal] = useState(false);
+  const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
+  const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
+  const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
@@ -328,7 +331,7 @@ export const ModelsFileBrowser = ({
       {hasPermission('3d_models', 'create') && (
         <Button
           type="button"
-          onClick={() => setShowPrintablesModal(true)}
+          onClick={() => setShowPrintablesBrowserModal(true)}
           variant="secondary"
           size="sm"
           title="Import from Printables"
@@ -380,9 +383,24 @@ export const ModelsFileBrowser = ({
         onClose={() => setShowUploadModal(false)}
         onUploadSuccess={() => fileBrowserRef.current?.refetch() ?? Promise.resolve()}
       />
+      {showPrintablesBrowserModal && (
+        <PrintablesBrowserModal
+          isOpen={showPrintablesBrowserModal}
+          onClose={() => setShowPrintablesBrowserModal(false)}
+          onImportUrl={(url) => {
+            setSelectedPrintablesUrl(url);
+            setShowPrintablesBrowserModal(false);
+            setShowPrintablesImportModal(true);
+          }}
+        />
+      )}
       <PrintablesImportModal
-        isOpen={showPrintablesModal}
-        onClose={() => setShowPrintablesModal(false)}
+        isOpen={showPrintablesImportModal}
+        initialUrl={selectedPrintablesUrl}
+        onClose={() => {
+          setShowPrintablesImportModal(false);
+          setSelectedPrintablesUrl(null);
+        }}
       />
       <ConfirmationModal
         isOpen={deleteConfirm.isOpen}

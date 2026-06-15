@@ -85,3 +85,28 @@ export interface GeometryUploadResultDto {
   fileSize: number;
   fileUrl: string;
 }
+
+export interface PrintablesModelSummary {
+  id: string;
+  title: string;
+  slug?: string | null;
+  author: string;
+  thumbnailUrl?: string | null;
+  likesCount?: number;
+  downloadsCount?: number;
+  fileCount?: number;
+  sourceUrl?: string;
+}
+
+export interface PrintablesCollectionSummary {
+  id: string;
+  name: string;
+  modelCount: number;
+  thumbnailUrls?: string[];
+  models?: PrintablesModelSummary[];
+}
+
+export interface PrintablesPagedResponse<T> {
+  items: T[];
+  nextCursor?: string | null;
+}

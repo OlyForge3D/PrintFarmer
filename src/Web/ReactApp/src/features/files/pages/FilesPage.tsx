@@ -18,6 +18,7 @@ import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
+import { PrintablesBrowserModal } from '@/features/models3d/components/PrintablesBrowserModal';
 import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import { HarvestWizardModal } from '@/features/gcode/components/harvest/HarvestWizardModal';
 import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
@@ -468,7 +469,9 @@ export function FilesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showModelUploadModal, setShowModelUploadModal] = useState(false);
   const [showGcodeUploadModal, setShowGcodeUploadModal] = useState(false);
-  const [showPrintablesModal, setShowPrintablesModal] = useState(false);
+  const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
+  const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
+  const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
   const [showHarvestModal, setShowHarvestModal] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
@@ -931,7 +934,7 @@ export function FilesPage() {
           variant="secondary"
           size="sm"
           iconLeft={<PrintablesIcon />}
-          onClick={() => setShowPrintablesModal(true)}
+          onClick={() => setShowPrintablesBrowserModal(true)}
         >
           Printables
         </Button>
@@ -1084,10 +1087,23 @@ export function FilesPage() {
           await handleRefresh();
         }}
       />
+      {showPrintablesBrowserModal && (
+        <PrintablesBrowserModal
+          isOpen={showPrintablesBrowserModal}
+          onClose={() => setShowPrintablesBrowserModal(false)}
+          onImportUrl={(url) => {
+            setSelectedPrintablesUrl(url);
+            setShowPrintablesBrowserModal(false);
+            setShowPrintablesImportModal(true);
+          }}
+        />
+      )}
       <PrintablesImportModal
-        isOpen={showPrintablesModal}
+        isOpen={showPrintablesImportModal}
+        initialUrl={selectedPrintablesUrl}
         onClose={() => {
-          setShowPrintablesModal(false);
+          setShowPrintablesImportModal(false);
+          setSelectedPrintablesUrl(null);
           void handleRefresh();
         }}
       />

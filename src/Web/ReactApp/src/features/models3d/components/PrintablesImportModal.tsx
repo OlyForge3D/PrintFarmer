@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
@@ -29,6 +29,7 @@ interface PrintablesPreview {
 interface PrintablesImportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialUrl?: string | null;
 }
 
 function formatFileSize(bytes: number): string {
@@ -41,13 +42,14 @@ function formatFileSize(bytes: number): string {
 
 const multiSelectThreshold = 2;
 
-export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModalProps) {
+export function PrintablesImportModal({ isOpen, onClose, initialUrl }: PrintablesImportModalProps) {
   const queryClient = useQueryClient();
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<PrintablesPreview | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [imageError, setImageError] = useState(false);
   const [step, setStep] = useState<'url' | 'confirm'>('url');
+  const lastAutoPreviewUrl = useRef<string | null>(null);
 
   const previewMutation = useMutation({
     mutationFn: async (printablesUrl: string) => {
@@ -101,10 +103,25 @@ export function PrintablesImportModal({ isOpen, onClose }: PrintablesImportModal
     setSelectedFileIds([]);
     setImageError(false);
     setStep('url');
+    lastAutoPreviewUrl.current = null;
     previewMutation.reset();
     importMutation.reset();
     onClose();
   };
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const normalizedUrl = initialUrl?.trim();
+    if (!normalizedUrl || normalizedUrl === lastAutoPreviewUrl.current) {
+      return;
+    }
+
+    lastAutoPreviewUrl.current = normalizedUrl;
+    previewMutation.mutate(normalizedUrl);
+  }, [initialUrl, isOpen, previewMutation]);
 
   const handlePreview = () => {
     if (!url.trim()) return;
