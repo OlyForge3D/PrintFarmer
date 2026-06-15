@@ -11,10 +11,13 @@ using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
 using Xunit;
@@ -80,6 +83,29 @@ public class PrintablesImportServiceTests
         return new HttpClient(handler.Object);
     }
 
+    private static PrintablesGraphQLClient BuildClient(HttpClient httpClient, PrintablesGraphQlOptions? options = null)
+    {
+        return new PrintablesGraphQLClient(
+            httpClient,
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(options ?? new PrintablesGraphQlOptions()),
+            Mock.Of<ILogger<PrintablesGraphQLClient>>());
+    }
+
+    private static HttpClient BuildThrowingHttpClient(HttpRequestException exception)
+    {
+        Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
+        _ = handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(exception);
+
+        return new HttpClient(handler.Object);
+    }
+
     [Fact]
     public async Task FetchPreviewAsync_HappyPath_ReturnsPreviewDto()
     {
@@ -100,7 +126,7 @@ public class PrintablesImportServiceTests
             }
             """;
 
-        PrintablesGraphQLClient client = new(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
         PrintablesPreviewDto result = await client.FetchPreviewAsync("42", "https://www.printables.com/model/42", default);
 
         _ = result.ModelId.Should().Be("42");
@@ -122,7 +148,7 @@ public class PrintablesImportServiceTests
             }
             """;
 
-        PrintablesGraphQLClient client = new(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
         Func<Task> act = () => client.FetchPreviewAsync("1", "https://www.printables.com/model/1", default);
 
         _ = await act.Should().ThrowAsync<PrintablesApiException>()
@@ -134,21 +160,211 @@ public class PrintablesImportServiceTests
     {
         const string json = """{ "data": { "print": null } }""";
 
-        PrintablesGraphQLClient client = new(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
         Func<Task> act = () => client.FetchPreviewAsync("9", "https://www.printables.com/model/9", default);
 
         _ = await act.Should().ThrowAsync<PrintablesApiException>()
-            .WithMessage("*not found*");
+            .WithMessage("*missing required path*");
     }
 
     [Fact]
     public async Task FetchPreviewAsync_HttpError_ThrowsPrintablesApiException()
     {
-        PrintablesGraphQLClient client = new(BuildMockedHttpClient(HttpStatusCode.InternalServerError, "{}"));
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.InternalServerError, "{}"));
         Func<Task> act = () => client.FetchPreviewAsync("1", "https://www.printables.com/model/1", default);
 
         _ = await act.Should().ThrowAsync<PrintablesApiException>()
             .WithMessage("*HTTP 500*");
+    }
+
+    [Fact]
+    public async Task GetUserCollectionsAsync_WhenCalledTwice_UsesCache()
+    {
+        CountingHttpMessageHandler handler = new("""
+            {
+              "data": {
+                "user": {
+                  "collections": {
+                    "edges": [
+                      {
+                        "node": {
+                          "id": "c1",
+                          "name": "Favorites",
+                          "slug": "favorites",
+                          "printsCount": 12,
+                          "image": { "filePath": "https://media.printables.com/c1.jpg" }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler), new PrintablesGraphQlOptions { CacheTtlSeconds = 300 });
+
+        IReadOnlyList<PrintablesCollectionDto> first = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
+        IReadOnlyList<PrintablesCollectionDto> second = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
+
+        _ = first.Should().HaveCount(1);
+        _ = second.Should().HaveCount(1);
+        _ = handler.PostCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SearchModelsAsync_HappyPath_ReturnsMappedPagedResult()
+    {
+        const string json = """
+            {
+              "data": {
+                "search": {
+                  "prints": {
+                    "edges": [
+                      {
+                        "cursor": "abc",
+                        "node": {
+                          "id": "42",
+                          "name": "Awesome Bracket",
+                          "slug": "awesome-bracket",
+                          "summary": "A sturdy part",
+                          "likesCount": 55,
+                          "downloadsCount": 1000,
+                          "user": { "handle": "maker_jane" },
+                          "image": { "filePath": "https://media.printables.com/thumb.jpg" }
+                        }
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true,
+                      "endCursor": "abc"
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        PrintablesPagedResultDto<PrintablesModelCardDto> result = await client.SearchModelsAsync("bracket", 20, null, CancellationToken.None);
+
+        _ = result.Items.Should().HaveCount(1);
+        _ = result.Items[0].Id.Should().Be("42");
+        _ = result.Items[0].Creator.Should().Be("maker_jane");
+        _ = result.HasNextPage.Should().BeTrue();
+        _ = result.NextCursor.Should().Be("abc");
+    }
+
+    [Fact]
+    public async Task GetPrintProfileAsync_TransientFailure_RetriesAndSucceeds()
+    {
+        TransientThenSuccessHandler handler = new(
+            failCount: 1,
+            successJson: """
+                {
+                  "data": {
+                    "print": {
+                      "id": "42",
+                      "name": "Awesome Bracket",
+                      "user": { "handle": "maker_jane" },
+                      "license": { "name": "CC BY 4.0" },
+                      "image": { "filePath": "https://media.printables.com/thumb.jpg" },
+                      "stls": []
+                    }
+                  }
+                }
+                """);
+
+        PrintablesGraphQLClient client = BuildClient(
+            new HttpClient(handler),
+            new PrintablesGraphQlOptions { MaxAttempts = 3, RetryBaseDelayMs = 1, CacheTtlSeconds = 0 });
+
+        PrintablesPrintProfileDto result = await client.GetPrintProfileAsync("42", CancellationToken.None);
+
+        _ = result.Id.Should().Be("42");
+        _ = handler.CallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task FetchPreviewAsync_HttpRequestFailure_ThrowsPrintablesApiException()
+    {
+        PrintablesGraphQLClient client = BuildClient(BuildThrowingHttpClient(new HttpRequestException("network down")));
+        Func<Task> act = () => client.FetchPreviewAsync("1", "https://www.printables.com/model/1", default);
+
+        _ = await act.Should().ThrowAsync<PrintablesApiException>()
+            .WithMessage("*Failed to reach Printables*");
+    }
+
+    [Fact]
+    public async Task GetStlDownloadUrlAsync_HappyPath_ReturnsDownloadLink()
+    {
+        const string json = """
+            {
+              "data": {
+                "getDownloadLink": {
+                  "ok": true,
+                  "errors": [],
+                  "output": {
+                    "link": "https://downloads.printables.com/files/example.stl"
+                  }
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        string link = await client.GetStlDownloadUrlAsync("42", "s1", default);
+
+        _ = link.Should().Be("https://downloads.printables.com/files/example.stl");
+    }
+
+    [Fact]
+    public async Task GetStlDownloadUrlAsync_DownloadRejected_ThrowsPrintablesApiException()
+    {
+        const string json = """
+            {
+              "data": {
+                "getDownloadLink": {
+                  "ok": false,
+                  "errors": [
+                    {
+                      "field": "id",
+                      "messages": ["File not available"]
+                    }
+                  ],
+                  "output": null
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        Func<Task> act = () => client.GetStlDownloadUrlAsync("42", "missing", default);
+
+        _ = await act.Should().ThrowAsync<PrintablesApiException>()
+            .WithMessage("*File not available*");
+    }
+
+    [Fact]
+    public async Task GetStlDownloadUrlAsync_MissingOutputLink_ThrowsPrintablesApiException()
+    {
+        const string json = """
+            {
+              "data": {
+                "getDownloadLink": {
+                  "ok": true,
+                  "errors": [],
+                  "output": {}
+                }
+              }
+            }
+            """;
+
+        PrintablesGraphQLClient client = BuildClient(BuildMockedHttpClient(HttpStatusCode.OK, json));
+        Func<Task> act = () => client.GetStlDownloadUrlAsync("42", "s1", default);
+
+        _ = await act.Should().ThrowAsync<PrintablesApiException>()
+            .WithMessage("*did not return a usable download link*");
     }
 
     // ── PrintablesImportService.ImportAsync ───────────────────────────────────
@@ -156,7 +372,7 @@ public class PrintablesImportServiceTests
     [Fact]
     public async Task ImportAsync_NullFileIds_ImportsAllFiles()
     {
-        PrintablesGraphQLClient client = new(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
         Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
         List<string> uploadedFileNames = [];
         int uploadIndex = 0;
@@ -194,7 +410,7 @@ public class PrintablesImportServiceTests
     [Fact]
     public async Task ImportAsync_SelectedFileIds_ImportsOnlyMatchingFiles()
     {
-        PrintablesGraphQLClient client = new(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
         Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
         List<string> uploadedFileNames = [];
 
@@ -233,7 +449,7 @@ public class PrintablesImportServiceTests
     [Fact]
     public async Task ImportAsync_UnknownFileIds_ThrowsArgumentException()
     {
-        PrintablesGraphQLClient client = new(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(new PrintablesImportTestHttpMessageHandler()));
         Mock<IModel3DFileService> modelServiceMock = new(MockBehavior.Strict);
         PrintablesImportService service = new(client, modelServiceMock.Object, Mock.Of<ILogger<PrintablesImportService>>());
 
@@ -450,5 +666,45 @@ public class PrintablesImportServiceTests
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
             };
+    }
+
+    private sealed class CountingHttpMessageHandler(string responseJson) : HttpMessageHandler
+    {
+        public int PostCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                PostCount++;
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseJson, Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    private sealed class TransientThenSuccessHandler(int failCount, string successJson) : HttpMessageHandler
+    {
+        public int CallCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (CallCount <= failCount)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                {
+                    Content = new StringContent("{}", Encoding.UTF8, "application/json"),
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(successJson, Encoding.UTF8, "application/json"),
+            });
+        }
     }
 }

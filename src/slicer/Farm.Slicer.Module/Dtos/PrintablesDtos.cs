@@ -32,6 +32,51 @@ public sealed record PrintablesFileEntryDto(
     long FileSize);
 
 /// <summary>
+/// Public collection summary for a Printables user.
+/// </summary>
+public sealed record PrintablesCollectionDto(
+    string Id,
+    string Name,
+    string? Slug,
+    string? Description,
+    int ModelCount,
+    string? ThumbnailUrl);
+
+/// <summary>
+/// Lightweight model card used for list/search surfaces.
+/// </summary>
+public sealed record PrintablesModelCardDto(
+    string Id,
+    string Name,
+    string? Slug,
+    string? Description,
+    string? Creator,
+    string? ThumbnailUrl,
+    int LikeCount,
+    int DownloadCount);
+
+/// <summary>
+/// Cursor-based paged response returned by Printables listing/search queries.
+/// </summary>
+public sealed record PrintablesPagedResultDto<T>(
+    IReadOnlyList<T> Items,
+    string? NextCursor,
+    bool HasNextPage);
+
+/// <summary>
+/// Full profile details for a single Printables model.
+/// </summary>
+public sealed record PrintablesPrintProfileDto(
+    string Id,
+    string Name,
+    string? Slug,
+    string? Description,
+    string Creator,
+    string? License,
+    string? ThumbnailUrl,
+    IReadOnlyList<PrintablesFileEntryDto> Files);
+
+/// <summary>
 /// Request body for <c>POST api/3d-models/printables/attribution</c>.
 /// Associates an already-uploaded model record with its Printables source.
 /// </summary>

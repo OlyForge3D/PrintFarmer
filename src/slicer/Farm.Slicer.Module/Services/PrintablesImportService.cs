@@ -15,13 +15,13 @@ namespace Farm.Slicer.Module.Services;
 /// onto an existing <see cref="Farm.Slicer.Module.Domain.Model3D"/> record.
 /// </remarks>
 public sealed class PrintablesImportService(
-    PrintablesGraphQLClient graphQlClient,
+    IPrintablesGraphQLClient graphQlClient,
     IModel3DFileService model3DFileService,
     ILogger<PrintablesImportService> logger) : IPrintablesImportService
 {
     private static readonly string[] AllowedHosts = ["printables.com", "www.printables.com"];
 
-    private readonly PrintablesGraphQLClient _graphQlClient = graphQlClient;
+    private readonly IPrintablesGraphQLClient _graphQlClient = graphQlClient;
     private readonly IModel3DFileService _model3DFileService = model3DFileService;
     private readonly ILogger<PrintablesImportService> _logger = logger;
 
