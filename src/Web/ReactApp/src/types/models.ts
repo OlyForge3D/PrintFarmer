@@ -110,3 +110,14 @@ export interface PrintablesPagedResponse<T> {
   items: T[];
   nextCursor?: string | null;
 }
+
+export interface PrintablesOAuthStatus {
+  isConnected: boolean;
+  provider: string;
+  statusMessage?: string | null;
+  connectedAt?: string | null;
+}
+
+export interface PrintablesDownloadHistoryItem extends PrintablesModelSummary {
+  downloadedAt?: string | null;
+}

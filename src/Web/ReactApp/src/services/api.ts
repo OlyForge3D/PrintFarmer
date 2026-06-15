@@ -144,9 +144,11 @@ import {
   UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
 import type {
+  PrintablesDownloadHistoryItem,
   GeometryUploadResultDto,
   PrintablesCollectionSummary,
   PrintablesModelSummary,
+  PrintablesOAuthStatus,
   PrintablesPagedResponse,
   ThreeMfMetadata
 } from "@/types/models";
@@ -2013,6 +2015,55 @@ export class ApiClient {
       {
         params: {
           query,
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async getPrintablesOAuthStatus(): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/status"
+    );
+    return response.data;
+  }
+
+  async getPrintablesOAuthAuthorizeUrl(returnUrl: string): Promise<{ authorizationUrl: string }> {
+    const response = await this.client.post<{ authorizationUrl: string }>(
+      "/3d-models/printables/oauth/authorize-url",
+      { returnUrl }
+    );
+    return response.data;
+  }
+
+  async disconnectPrintablesOAuth(): Promise<void> {
+    await this.client.delete("/3d-models/printables/oauth/connection");
+  }
+
+  async getPrintablesLikedModels(
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
+      "/3d-models/printables/me/liked-models",
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async getPrintablesDownloadHistory(
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesDownloadHistoryItem>> {
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesDownloadHistoryItem>>(
+      "/3d-models/printables/me/download-history",
+      {
+        params: {
           cursor: options?.cursor,
           limit: options?.limit,
         },

@@ -7,6 +7,11 @@ import type { PrintablesModelSummary } from '@/types/models';
 import {
   SEARCH_DEBOUNCE_MS,
   flattenInfiniteItems,
+  usePrintablesDownloadHistory,
+  usePrintablesLikedModels,
+  usePrintablesOAuthAuthorize,
+  usePrintablesOAuthDisconnect,
+  usePrintablesOAuthStatus,
   usePrintablesCollections,
   usePrintablesSearch,
   usePrintablesUserModels,
@@ -91,14 +96,22 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
   const [activeTab, setActiveTab] = useState<'browse' | 'search' | 'url'>('browse');
   const [manualUrl, setManualUrl] = useState('');
   const [expandedCollectionIds, setExpandedCollectionIds] = useState<Record<string, boolean>>({});
+  const [oauthActionError, setOauthActionError] = useState<string | null>(null);
 
   const collectionsQuery = usePrintablesCollections(username);
   const userModelsQuery = usePrintablesUserModels(username);
   const searchQuery = usePrintablesSearch(debouncedSearchInput);
+  const oauthStatusQuery = usePrintablesOAuthStatus();
+  const oauthAuthorizeMutation = usePrintablesOAuthAuthorize();
+  const oauthDisconnectMutation = usePrintablesOAuthDisconnect();
+  const likedModelsQuery = usePrintablesLikedModels(oauthStatusQuery.data?.isConnected ?? false);
+  const downloadHistoryQuery = usePrintablesDownloadHistory(oauthStatusQuery.data?.isConnected ?? false);
 
   const collections = useMemo(() => flattenInfiniteItems(collectionsQuery.data), [collectionsQuery.data]);
   const userModels = useMemo(() => flattenInfiniteItems(userModelsQuery.data), [userModelsQuery.data]);
   const searchResults = useMemo(() => flattenInfiniteItems(searchQuery.data), [searchQuery.data]);
+  const likedModels = useMemo(() => flattenInfiniteItems(likedModelsQuery.data), [likedModelsQuery.data]);
+  const downloadHistoryItems = useMemo(() => flattenInfiniteItems(downloadHistoryQuery.data), [downloadHistoryQuery.data]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -117,6 +130,7 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
     setDebouncedSearchInput('');
     setManualUrl('');
     setExpandedCollectionIds({});
+    setOauthActionError(null);
     setActiveTab('browse');
     onClose();
   };
@@ -130,6 +144,33 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
   };
 
   const hasUsername = username.length > 0;
+  const isConnectedToPrusaAccount = oauthStatusQuery.data?.isConnected ?? false;
+
+  const handleConnectPrusaAccount = async () => {
+    setOauthActionError(null);
+    try {
+      const result = await oauthAuthorizeMutation.mutateAsync(window.location.href);
+      window.location.assign(result.authorizationUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start OAuth flow.';
+      setOauthActionError(message);
+    }
+  };
+
+  const handleDisconnectPrusaAccount = async () => {
+    setOauthActionError(null);
+    try {
+      await oauthDisconnectMutation.mutateAsync();
+      await Promise.all([
+        oauthStatusQuery.refetch(),
+        likedModelsQuery.refetch(),
+        downloadHistoryQuery.refetch(),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to disconnect account.';
+      setOauthActionError(message);
+    }
+  };
 
   return (
     <Modal
@@ -173,6 +214,64 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
 
             {hasUsername && (
               <div className="space-y-5">
+                <section className="space-y-3 rounded-xl border border-pf-border bg-pf-bg-1 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-pf-text-primary">Prusa Account</h3>
+                        <Badge size="sm">Experimental</Badge>
+                      </div>
+                      <p className="text-xs text-pf-text-secondary">
+                        Connect OAuth2 to browse your liked models and download history.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isConnectedToPrusaAccount ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void handleDisconnectPrusaAccount()}
+                          loading={oauthDisconnectMutation.isPending}
+                        >
+                          Disconnect
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void handleConnectPrusaAccount()}
+                          loading={oauthAuthorizeMutation.isPending}
+                        >
+                          Connect Prusa Account
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {!isConnectedToPrusaAccount && !oauthStatusQuery.isLoading && (
+                    <Alert variant="warning" title="Private Printables data unavailable">
+                      Connect your account to enable liked models and download history.
+                    </Alert>
+                  )}
+
+                  {oauthStatusQuery.isError && (
+                    <Alert variant="warning" title="Could not load Printables OAuth state">
+                      Authentication looks unavailable right now. Public collections and search still work.
+                    </Alert>
+                  )}
+
+                  {oauthActionError && (
+                    <Alert variant="error" title="Printables OAuth action failed">
+                      {oauthActionError}
+                    </Alert>
+                  )}
+
+                  {isConnectedToPrusaAccount && oauthStatusQuery.data?.statusMessage && (
+                    <p className="text-xs text-pf-text-secondary">{oauthStatusQuery.data.statusMessage}</p>
+                  )}
+                </section>
+
                 <section className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-pf-text-primary">Collections</h3>
@@ -263,6 +362,64 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                     </Button>
                   )}
                 </section>
+
+                {isConnectedToPrusaAccount && (
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-pf-text-primary">Liked models</h3>
+                      {likedModelsQuery.isFetching && <Spinner size="sm" />}
+                    </div>
+                    {likedModels.length === 0 && !likedModelsQuery.isLoading ? (
+                      <p className="text-sm text-pf-text-secondary">No liked models returned from your account yet.</p>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {likedModels.map((model) => (
+                          <PrintablesModelCard key={`liked-model-${model.id}`} model={model} onImport={handleImport} />
+                        ))}
+                      </div>
+                    )}
+                    {likedModelsQuery.hasNextPage && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void likedModelsQuery.fetchNextPage()}
+                        loading={likedModelsQuery.isFetchingNextPage}
+                      >
+                        Load more liked models
+                      </Button>
+                    )}
+                  </section>
+                )}
+
+                {isConnectedToPrusaAccount && (
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-pf-text-primary">Download history</h3>
+                      {downloadHistoryQuery.isFetching && <Spinner size="sm" />}
+                    </div>
+                    {downloadHistoryItems.length === 0 && !downloadHistoryQuery.isLoading ? (
+                      <p className="text-sm text-pf-text-secondary">No download history returned from your account yet.</p>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {downloadHistoryItems.map((model) => (
+                          <PrintablesModelCard key={`download-history-${model.id}`} model={model} onImport={handleImport} />
+                        ))}
+                      </div>
+                    )}
+                    {downloadHistoryQuery.hasNextPage && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void downloadHistoryQuery.fetchNextPage()}
+                        loading={downloadHistoryQuery.isFetchingNextPage}
+                      >
+                        Load more history
+                      </Button>
+                    )}
+                  </section>
+                )}
               </div>
             )}
           </Tabs.Panel>

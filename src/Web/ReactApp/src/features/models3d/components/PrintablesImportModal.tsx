@@ -50,6 +50,8 @@ export function PrintablesImportModal({ isOpen, onClose, initialUrl }: Printable
   const [imageError, setImageError] = useState(false);
   const [step, setStep] = useState<'url' | 'confirm'>('url');
   const lastAutoPreviewUrl = useRef<string | null>(null);
+  const normalizedInitialUrl = initialUrl?.trim() ?? '';
+  const resolvedUrlInput = url || normalizedInitialUrl;
 
   const previewMutation = useMutation({
     mutationFn: async (printablesUrl: string) => {
@@ -124,8 +126,8 @@ export function PrintablesImportModal({ isOpen, onClose, initialUrl }: Printable
   }, [initialUrl, isOpen, previewMutation]);
 
   const handlePreview = () => {
-    if (!url.trim()) return;
-    previewMutation.mutate(url.trim());
+    if (!resolvedUrlInput.trim()) return;
+    previewMutation.mutate(resolvedUrlInput.trim());
   };
 
   const handleBack = () => {
@@ -163,7 +165,7 @@ export function PrintablesImportModal({ isOpen, onClose, initialUrl }: Printable
       <Button
         variant="primary"
         onClick={handlePreview}
-        disabled={!url.trim() || previewMutation.isPending}
+        disabled={!resolvedUrlInput.trim() || previewMutation.isPending}
         loading={previewMutation.isPending}
       >
         Preview
@@ -205,7 +207,7 @@ export function PrintablesImportModal({ isOpen, onClose, initialUrl }: Printable
             Paste a Printables.com model URL to preview its files before importing.
           </p>
           <Input
-            value={url}
+            value={resolvedUrlInput}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://www.printables.com/model/123456-model-name"
             onKeyDown={(e) => { if (e.key === 'Enter') handlePreview(); }}

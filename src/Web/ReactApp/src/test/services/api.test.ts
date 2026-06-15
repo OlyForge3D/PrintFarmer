@@ -299,6 +299,89 @@ describe("ApiClient", () => {
         });
         expect(result).toEqual(mockResponse.data);
       });
+
+      it("should fetch printables oauth status", async () => {
+        const mockResponse = {
+          data: {
+            isConnected: true,
+            provider: "Prusa Account",
+            statusMessage: "Connected",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesOAuthStatus();
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/oauth/status");
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should request printables oauth authorize url", async () => {
+        const mockResponse = {
+          data: {
+            authorizationUrl: "https://account.prusa3d.com/o/authorize/?foo=bar",
+          },
+        };
+
+        const mockPost = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+        const result = await apiClient.getPrintablesOAuthAuthorizeUrl("https://app.local/files");
+
+        expect(mockPost).toHaveBeenCalledWith("/3d-models/printables/oauth/authorize-url", {
+          returnUrl: "https://app.local/files",
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should disconnect printables oauth connection", async () => {
+        const mockDelete = vi.fn().mockResolvedValue({ data: undefined });
+        (apiClient as unknown as { client: { delete: typeof mockDelete } }).client.delete = mockDelete;
+
+        await apiClient.disconnectPrintablesOAuth();
+
+        expect(mockDelete).toHaveBeenCalledWith("/3d-models/printables/oauth/connection");
+      });
+
+      it("should fetch liked models from private printables endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "liked-1", title: "Liked model", author: "maker" }],
+            nextCursor: "cursor-2",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesLikedModels({ cursor: "cursor-1", limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/me/liked-models", {
+          params: { cursor: "cursor-1", limit: 24 },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should fetch printables download history from private endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "history-1", title: "History model", author: "maker" }],
+            nextCursor: null,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesDownloadHistory({ limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/me/download-history", {
+          params: { cursor: undefined, limit: 24 },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
     });
   });
 });

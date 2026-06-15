@@ -12,12 +12,22 @@ const {
   mockUsePrintablesCollections,
   mockUsePrintablesUserModels,
   mockUsePrintablesSearch,
+  mockUsePrintablesOAuthStatus,
+  mockUsePrintablesOAuthAuthorize,
+  mockUsePrintablesOAuthDisconnect,
+  mockUsePrintablesLikedModels,
+  mockUsePrintablesDownloadHistory,
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockUsePrintablesUsername: vi.fn(),
   mockUsePrintablesCollections: vi.fn(),
   mockUsePrintablesUserModels: vi.fn(),
   mockUsePrintablesSearch: vi.fn(),
+  mockUsePrintablesOAuthStatus: vi.fn(),
+  mockUsePrintablesOAuthAuthorize: vi.fn(),
+  mockUsePrintablesOAuthDisconnect: vi.fn(),
+  mockUsePrintablesLikedModels: vi.fn(),
+  mockUsePrintablesDownloadHistory: vi.fn(),
 }));
 
 vi.mock('react-router', async () => {
@@ -36,6 +46,11 @@ vi.mock('@/features/models3d/hooks/usePrintablesBrowser', () => ({
   usePrintablesCollections: (username: string) => mockUsePrintablesCollections(username),
   usePrintablesUserModels: (username: string) => mockUsePrintablesUserModels(username),
   usePrintablesSearch: (query: string) => mockUsePrintablesSearch(query),
+  usePrintablesOAuthStatus: () => mockUsePrintablesOAuthStatus(),
+  usePrintablesOAuthAuthorize: () => mockUsePrintablesOAuthAuthorize(),
+  usePrintablesOAuthDisconnect: () => mockUsePrintablesOAuthDisconnect(),
+  usePrintablesLikedModels: (enabled: boolean) => mockUsePrintablesLikedModels(enabled),
+  usePrintablesDownloadHistory: (enabled: boolean) => mockUsePrintablesDownloadHistory(enabled),
 }));
 
 function createInfiniteData<T>(items: T[]) {
@@ -74,6 +89,22 @@ describe('PrintablesBrowserModal', () => {
     mockUsePrintablesCollections.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesUserModels.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesSearch.mockReturnValue(createInfiniteQueryResult([]));
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: { isConnected: false, provider: 'Prusa Account' },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUsePrintablesOAuthAuthorize.mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    });
+    mockUsePrintablesOAuthDisconnect.mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    });
+    mockUsePrintablesLikedModels.mockReturnValue(createInfiniteQueryResult([]));
+    mockUsePrintablesDownloadHistory.mockReturnValue(createInfiniteQueryResult([]));
   });
 
   it('shows settings callout when Printables username is not configured', async () => {
@@ -194,5 +225,40 @@ describe('PrintablesBrowserModal', () => {
     await waitFor(() => {
       expect(onImportUrl).toHaveBeenCalledWith('https://www.printables.com/model/999-trimmed');
     });
+  });
+
+  it('shows experimental oauth section with connect action when private data is not connected', () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    renderModal();
+
+    expect(screen.getByText('Prusa Account')).toBeInTheDocument();
+    expect(screen.getByText('Experimental')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect Prusa Account' })).toBeInTheDocument();
+    expect(screen.getByText('Private Printables data unavailable')).toBeInTheDocument();
+  });
+
+  it('renders liked models and download history sections when oauth is connected', async () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: { isConnected: true, provider: 'Prusa Account', statusMessage: 'Connected as ripley' },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUsePrintablesLikedModels.mockReturnValue(createInfiniteQueryResult([
+      { id: 'liked-1', title: 'Liked model', slug: 'liked-model', author: 'maker' },
+    ]));
+    mockUsePrintablesDownloadHistory.mockReturnValue(createInfiniteQueryResult([
+      { id: 'history-1', title: 'History model', slug: 'history-model', author: 'maker' },
+    ]));
+
+    renderModal();
+
+    expect(screen.getByText('Liked models')).toBeInTheDocument();
+    expect(screen.getByText('Download history')).toBeInTheDocument();
+    expect(screen.getByText('Connected as ripley')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
+    expect(await screen.findByText('Liked model')).toBeInTheDocument();
+    expect(await screen.findByText('History model')).toBeInTheDocument();
   });
 });
