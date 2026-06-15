@@ -33,7 +33,7 @@ describe('usePrintablesBrowser', () => {
     vi.clearAllMocks();
   });
 
-  it('preserves @handle when reading username from user settings', () => {
+  it('normalizes @handle when reading username from user settings', () => {
     vi.mocked(useUserSettings).mockReturnValue({
       data: { printablesUsername: '  @maker_jane  ' },
       isLoading: false,
@@ -42,10 +42,10 @@ describe('usePrintablesBrowser', () => {
 
     const { result } = renderHook(() => usePrintablesUsername(), { wrapper });
 
-    expect(result.current.username).toBe('@maker_jane');
+    expect(result.current.username).toBe('maker_jane');
   });
 
-  it('passes @handle username as-is when requesting public collections', async () => {
+  it('passes @handle username through when requesting public collections', async () => {
     vi.mocked(apiClient.getPrintablesUserCollections).mockResolvedValue({
       items: [
         {
