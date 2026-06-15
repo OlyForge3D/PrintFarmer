@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Contracts.Auth;
+using System.Net;
+using System.Text.Json;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
@@ -9,8 +11,6 @@ using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using System.Net;
-using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.Notifications;
 
@@ -248,6 +248,29 @@ public class NotificationService(
 
         try
         {
+            // Broadcast realtime/webhook first so UI and integrations are not delayed by channel fan-out work.
+            if (hubContext != null)
+            {
+                await hubContext.Clients.All.SendAsync(
+                    "notificationreceived",
+                    new { type = type.ToString(), subject, body, jobId = parsedJobId },
+                    cancellationToken);
+            }
+
+            string? webhookEventType = type switch
+            {
+                NotificationType.JobStarted => "job.started",
+                NotificationType.JobCompleted => "job.completed",
+                NotificationType.JobFailed => "job.failed",
+                NotificationType.JobPaused => "job.paused",
+                NotificationType.JobResumed => "job.resumed",
+                _ => null
+            };
+            if (webhookEventType != null)
+            {
+                webhookService?.Enqueue(webhookEventType, new { jobId = parsedJobId, subject, body });
+            }
+
             IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
             IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
 
@@ -270,30 +293,6 @@ public class NotificationService(
                 {
                     await SendPushNotificationsAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
                 }
-            }
-
-            // Broadcast real-time event via SignalR so connected clients update immediately
-            if (hubContext != null)
-            {
-                await hubContext.Clients.All.SendAsync(
-                    "notificationreceived",
-                    new { type = type.ToString(), subject, body, jobId = parsedJobId },
-                    cancellationToken);
-            }
-
-            // Dispatch webhook for job events
-            var webhookEventType = type switch
-            {
-                NotificationType.JobStarted => "job.started",
-                NotificationType.JobCompleted => "job.completed",
-                NotificationType.JobFailed => "job.failed",
-                NotificationType.JobPaused => "job.paused",
-                NotificationType.JobResumed => "job.resumed",
-                _ => null
-            };
-            if (webhookEventType != null)
-            {
-                webhookService?.Enqueue(webhookEventType, new { jobId = parsedJobId, subject, body });
             }
 
             logger.LogInformation(

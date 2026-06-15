@@ -33,10 +33,9 @@ public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender>
             publicKey: publicKey,
             privateKey: privateKey);
 
-        var webPushSubscription = new WebPush.PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
-
         try
         {
+            var webPushSubscription = new WebPush.PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
             await _client.SendNotificationAsync(webPushSubscription, payload, vapidDetails, cancellationToken: cancellationToken);
             return new WebPushDispatchResult(Success: true);
         }
@@ -48,6 +47,11 @@ public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender>
         catch (WebPushException ex)
         {
             _logger.LogWarning(ex, "Web push delivery failed for endpoint {Endpoint}", subscription.Endpoint);
+            return new WebPushDispatchResult(Success: false, SubscriptionExpired: false, Error: ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unexpected web push delivery failure for endpoint {Endpoint}", subscription.Endpoint);
             return new WebPushDispatchResult(Success: false, SubscriptionExpired: false, Error: ex.Message);
         }
     }

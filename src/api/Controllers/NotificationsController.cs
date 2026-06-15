@@ -292,7 +292,12 @@ public class NotificationsController(INotificationService notificationService) :
                 return BadRequest(new { error = "Endpoint is required" });
             }
 
-            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys?.P256dh ?? string.Empty, request.Keys?.Auth ?? string.Empty, cancellationToken);
+            if (string.IsNullOrWhiteSpace(request.Keys?.P256dh) || string.IsNullOrWhiteSpace(request.Keys?.Auth))
+            {
+                return BadRequest(new { error = "Subscription keys p256dh and auth are required" });
+            }
+
+            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys.P256dh, request.Keys.Auth, cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException)
