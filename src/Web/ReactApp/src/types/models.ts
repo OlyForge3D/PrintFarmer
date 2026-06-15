@@ -112,10 +112,11 @@ export interface PrintablesPagedResponse<T> {
 }
 
 export interface PrintablesOAuthStatus {
-  isConnected: boolean;
-  provider: string;
-  statusMessage?: string | null;
-  connectedAt?: string | null;
+  isLinked: boolean;
+  accessTokenExpiresAtUtc?: string | null;
+  linkedAtUtc?: string | null;
+  hasRefreshToken: boolean;
+  scope?: string | null;
 }
 
 export interface PrintablesDownloadHistoryItem extends PrintablesModelSummary {

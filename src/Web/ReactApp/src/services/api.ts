@@ -2030,23 +2030,22 @@ export class ApiClient {
     return response.data;
   }
 
-  async getPrintablesOAuthAuthorizeUrl(returnUrl: string): Promise<{ authorizationUrl: string }> {
+  async getPrintablesOAuthAuthorizeUrl(): Promise<{ authorizationUrl: string }> {
     const response = await this.client.post<{ authorizationUrl: string }>(
-      "/3d-models/printables/oauth/authorize-url",
-      { returnUrl }
+      "/3d-models/printables/oauth/connect"
     );
     return response.data;
   }
 
   async disconnectPrintablesOAuth(): Promise<void> {
-    await this.client.delete("/3d-models/printables/oauth/connection");
+    await this.client.post("/3d-models/printables/oauth/disconnect");
   }
 
   async getPrintablesLikedModels(
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
     const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
-      "/3d-models/printables/me/liked-models",
+      "/3d-models/printables/liked",
       {
         params: {
           cursor: options?.cursor,
@@ -2061,7 +2060,7 @@ export class ApiClient {
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesDownloadHistoryItem>> {
     const response = await this.client.get<PrintablesPagedResponse<PrintablesDownloadHistoryItem>>(
-      "/3d-models/printables/me/download-history",
+      "/3d-models/printables/history",
       {
         params: {
           cursor: options?.cursor,

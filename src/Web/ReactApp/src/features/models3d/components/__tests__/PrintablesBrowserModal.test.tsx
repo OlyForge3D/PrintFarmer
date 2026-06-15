@@ -64,10 +64,13 @@ function createInfiniteQueryResult<T>(items: T[]) {
   return {
     data: createInfiniteData(items),
     isLoading: false,
+    isError: false,
+    error: null,
     isFetching: false,
     isFetchingNextPage: false,
     hasNextPage: false,
     fetchNextPage: vi.fn(),
+    refetch: vi.fn(),
   };
 }
 
@@ -90,7 +93,7 @@ describe('PrintablesBrowserModal', () => {
     mockUsePrintablesUserModels.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesSearch.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesOAuthStatus.mockReturnValue({
-      data: { isConnected: false, provider: 'Prusa Account' },
+      data: { isLinked: false, hasRefreshToken: false, scope: null, linkedAtUtc: null, accessTokenExpiresAtUtc: null },
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -232,7 +235,7 @@ describe('PrintablesBrowserModal', () => {
     renderModal();
 
     expect(screen.getByText('Prusa Account')).toBeInTheDocument();
-    expect(screen.getByText('Experimental')).toBeInTheDocument();
+    expect(screen.getByText('Experimental Beta')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect Prusa Account' })).toBeInTheDocument();
     expect(screen.getByText('Private Printables data unavailable')).toBeInTheDocument();
   });
@@ -240,7 +243,7 @@ describe('PrintablesBrowserModal', () => {
   it('renders liked models and download history sections when oauth is connected', async () => {
     mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
     mockUsePrintablesOAuthStatus.mockReturnValue({
-      data: { isConnected: true, provider: 'Prusa Account', statusMessage: 'Connected as ripley' },
+      data: { isLinked: true, hasRefreshToken: true, scope: 'public profile', linkedAtUtc: '2026-06-15T00:00:00Z' },
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -256,9 +259,71 @@ describe('PrintablesBrowserModal', () => {
 
     expect(screen.getByText('Liked models')).toBeInTheDocument();
     expect(screen.getByText('Download history')).toBeInTheDocument();
-    expect(screen.getByText('Connected as ripley')).toBeInTheDocument();
+    expect(screen.getByText(/Linked on/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
     expect(await screen.findByText('Liked model')).toBeInTheDocument();
     expect(await screen.findByText('History model')).toBeInTheDocument();
+  });
+
+  it('shows not-supported messaging when authenticated endpoints return 501', () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: { isLinked: true, hasRefreshToken: true, scope: 'public', linkedAtUtc: null },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUsePrintablesLikedModels.mockReturnValue({
+      ...createInfiniteQueryResult([]),
+      isError: true,
+      error: { statusCode: 501, details: 'Not supported' },
+    });
+    mockUsePrintablesDownloadHistory.mockReturnValue({
+      ...createInfiniteQueryResult([]),
+      isError: true,
+      error: { statusCode: 501, details: 'Not supported' },
+    });
+
+    renderModal();
+
+    expect(screen.getByText('Private data endpoints are not supported yet')).toBeInTheDocument();
+    expect(screen.getByText('Liked models are not supported on this backend yet.')).toBeInTheDocument();
+    expect(screen.getByText('Download history is not supported on this backend yet.')).toBeInTheDocument();
+  });
+
+  it('shows unavailable messaging when oauth status cannot be loaded', () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+
+    renderModal();
+
+    expect(screen.getByText('Could not load Printables OAuth state')).toBeInTheDocument();
+    expect(screen.getByText(/OAuth is currently unavailable on this server/i)).toBeInTheDocument();
+  });
+
+  it('shows reconnect messaging when private endpoints report not-linked (409)', () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: { isLinked: true, hasRefreshToken: true, scope: 'public', linkedAtUtc: null },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUsePrintablesLikedModels.mockReturnValue({
+      ...createInfiniteQueryResult([]),
+      isError: true,
+      error: { statusCode: 409, details: 'Printables account is not linked.' },
+    });
+
+    renderModal();
+
+    expect(screen.getByText('Prusa Account link is no longer valid')).toBeInTheDocument();
+    expect(screen.getByText('Reconnect your Prusa Account to load liked models.')).toBeInTheDocument();
+    expect(screen.getByText('Reconnect your Prusa Account to load download history.')).toBeInTheDocument();
   });
 });

@@ -135,7 +135,7 @@ export function usePrintablesDownloadHistory(enabled: boolean) {
 
 export function usePrintablesOAuthAuthorize() {
   return useMutation({
-    mutationFn: (returnUrl: string) => apiClient.getPrintablesOAuthAuthorizeUrl(returnUrl),
+    mutationFn: () => apiClient.getPrintablesOAuthAuthorizeUrl(),
   });
 }
 

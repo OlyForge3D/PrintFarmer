@@ -303,9 +303,10 @@ describe("ApiClient", () => {
       it("should fetch printables oauth status", async () => {
         const mockResponse = {
           data: {
-            isConnected: true,
-            provider: "Prusa Account",
-            statusMessage: "Connected",
+            isLinked: true,
+            hasRefreshToken: true,
+            scope: "public",
+            linkedAtUtc: "2026-06-15T00:00:00Z",
           },
         };
 
@@ -328,21 +329,19 @@ describe("ApiClient", () => {
         const mockPost = vi.fn().mockResolvedValue(mockResponse);
         (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
 
-        const result = await apiClient.getPrintablesOAuthAuthorizeUrl("https://app.local/files");
+        const result = await apiClient.getPrintablesOAuthAuthorizeUrl();
 
-        expect(mockPost).toHaveBeenCalledWith("/3d-models/printables/oauth/authorize-url", {
-          returnUrl: "https://app.local/files",
-        });
+        expect(mockPost).toHaveBeenCalledWith("/3d-models/printables/oauth/connect");
         expect(result).toEqual(mockResponse.data);
       });
 
       it("should disconnect printables oauth connection", async () => {
-        const mockDelete = vi.fn().mockResolvedValue({ data: undefined });
-        (apiClient as unknown as { client: { delete: typeof mockDelete } }).client.delete = mockDelete;
+        const mockPost = vi.fn().mockResolvedValue({ data: undefined });
+        (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
 
         await apiClient.disconnectPrintablesOAuth();
 
-        expect(mockDelete).toHaveBeenCalledWith("/3d-models/printables/oauth/connection");
+        expect(mockPost).toHaveBeenCalledWith("/3d-models/printables/oauth/disconnect");
       });
 
       it("should fetch liked models from private printables endpoint", async () => {
@@ -358,7 +357,7 @@ describe("ApiClient", () => {
 
         const result = await apiClient.getPrintablesLikedModels({ cursor: "cursor-1", limit: 24 });
 
-        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/me/liked-models", {
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/liked", {
           params: { cursor: "cursor-1", limit: 24 },
         });
         expect(result).toEqual(mockResponse.data);
@@ -377,7 +376,7 @@ describe("ApiClient", () => {
 
         const result = await apiClient.getPrintablesDownloadHistory({ limit: 24 });
 
-        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/me/download-history", {
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/history", {
           params: { cursor: undefined, limit: 24 },
         });
         expect(result).toEqual(mockResponse.data);

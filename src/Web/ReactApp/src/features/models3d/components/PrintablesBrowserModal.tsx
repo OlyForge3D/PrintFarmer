@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { Modal } from '@/common/components/modals/Modal';
 import { SearchIcon, ExternalLinkIcon, FolderOpenIcon, CubeIcon, ChevronDownIcon, ChevronRightIcon } from '@/common/components/icons/MdiIcons';
 import { Alert, Badge, Button, Input, Spinner, Tabs } from '@/common/components/ui';
+import type { ApiError } from '@/types/api';
 import type { PrintablesModelSummary } from '@/types/models';
 import {
   SEARCH_DEBOUNCE_MS,
@@ -33,6 +34,24 @@ function getModelUrl(model: PrintablesModelSummary): string {
   return trimmedSlug
     ? `https://www.printables.com/model/${model.id}-${trimmedSlug}`
     : `https://www.printables.com/model/${model.id}`;
+}
+
+function getApiErrorStatusCode(error: unknown): number | null {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  const statusCode = (error as ApiError).statusCode;
+  return typeof statusCode === 'number' ? statusCode : null;
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== 'object') {
+    return fallback;
+  }
+
+  const apiError = error as ApiError;
+  return apiError.details ?? apiError.message ?? fallback;
 }
 
 function PrintablesModelCard({
@@ -104,8 +123,8 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
   const oauthStatusQuery = usePrintablesOAuthStatus();
   const oauthAuthorizeMutation = usePrintablesOAuthAuthorize();
   const oauthDisconnectMutation = usePrintablesOAuthDisconnect();
-  const likedModelsQuery = usePrintablesLikedModels(oauthStatusQuery.data?.isConnected ?? false);
-  const downloadHistoryQuery = usePrintablesDownloadHistory(oauthStatusQuery.data?.isConnected ?? false);
+  const likedModelsQuery = usePrintablesLikedModels(oauthStatusQuery.data?.isLinked ?? false);
+  const downloadHistoryQuery = usePrintablesDownloadHistory(oauthStatusQuery.data?.isLinked ?? false);
 
   const collections = useMemo(() => flattenInfiniteItems(collectionsQuery.data), [collectionsQuery.data]);
   const userModels = useMemo(() => flattenInfiniteItems(userModelsQuery.data), [userModelsQuery.data]);
@@ -144,15 +163,28 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
   };
 
   const hasUsername = username.length > 0;
-  const isConnectedToPrusaAccount = oauthStatusQuery.data?.isConnected ?? false;
+  const isConnectedToPrusaAccount = oauthStatusQuery.data?.isLinked ?? false;
+  const oauthLinkedDate = oauthStatusQuery.data?.linkedAtUtc
+    ? new Date(oauthStatusQuery.data.linkedAtUtc).toLocaleString()
+    : null;
+
+  const likedModelsErrorStatus = getApiErrorStatusCode(likedModelsQuery.error);
+  const downloadHistoryErrorStatus = getApiErrorStatusCode(downloadHistoryQuery.error);
+  const privateDataNotLinked = likedModelsErrorStatus === 409 || downloadHistoryErrorStatus === 409;
+  const privateDataNotSupported = likedModelsErrorStatus === 501 || downloadHistoryErrorStatus === 501;
+  const privateDataUnavailable =
+    likedModelsErrorStatus === 503
+    || downloadHistoryErrorStatus === 503
+    || (likedModelsQuery.isError && !privateDataNotLinked && !privateDataNotSupported)
+    || (downloadHistoryQuery.isError && !privateDataNotLinked && !privateDataNotSupported);
 
   const handleConnectPrusaAccount = async () => {
     setOauthActionError(null);
     try {
-      const result = await oauthAuthorizeMutation.mutateAsync(window.location.href);
+      const result = await oauthAuthorizeMutation.mutateAsync();
       window.location.assign(result.authorizationUrl);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to start OAuth flow.';
+      const message = getApiErrorMessage(error, 'Failed to start OAuth flow.');
       setOauthActionError(message);
     }
   };
@@ -167,7 +199,7 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
         downloadHistoryQuery.refetch(),
       ]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to disconnect account.';
+      const message = getApiErrorMessage(error, 'Failed to disconnect account.');
       setOauthActionError(message);
     }
   };
@@ -219,10 +251,10 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <h3 className="text-sm font-semibold text-pf-text-primary">Prusa Account</h3>
-                        <Badge size="sm">Experimental</Badge>
+                        <Badge size="sm">Experimental Beta</Badge>
                       </div>
                       <p className="text-xs text-pf-text-secondary">
-                        Connect OAuth2 to browse your liked models and download history.
+                        Opt-in OAuth2 access for liked models and download history.
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -257,7 +289,7 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
 
                   {oauthStatusQuery.isError && (
                     <Alert variant="warning" title="Could not load Printables OAuth state">
-                      Authentication looks unavailable right now. Public collections and search still work.
+                      OAuth is currently unavailable on this server. Public collections and search still work.
                     </Alert>
                   )}
 
@@ -267,8 +299,28 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                     </Alert>
                   )}
 
-                  {isConnectedToPrusaAccount && oauthStatusQuery.data?.statusMessage && (
-                    <p className="text-xs text-pf-text-secondary">{oauthStatusQuery.data.statusMessage}</p>
+                  {isConnectedToPrusaAccount && oauthLinkedDate && (
+                    <p className="text-xs text-pf-text-secondary">
+                      Linked on {oauthLinkedDate}
+                    </p>
+                  )}
+
+                  {isConnectedToPrusaAccount && privateDataNotLinked && (
+                    <Alert variant="warning" title="Prusa Account link is no longer valid">
+                      Reconnect your account to restore liked models and download history.
+                    </Alert>
+                  )}
+
+                  {isConnectedToPrusaAccount && privateDataNotSupported && (
+                    <Alert variant="info" title="Private data endpoints are not supported yet">
+                      This server has authenticated liked/download endpoints disabled while beta integration is finalized.
+                    </Alert>
+                  )}
+
+                  {isConnectedToPrusaAccount && privateDataUnavailable && (
+                    <Alert variant="warning" title="Private Printables data is temporarily unavailable">
+                      Try again later. Public collections and search are still available.
+                    </Alert>
                   )}
                 </section>
 
@@ -369,7 +421,19 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                       <h3 className="text-sm font-semibold text-pf-text-primary">Liked models</h3>
                       {likedModelsQuery.isFetching && <Spinner size="sm" />}
                     </div>
-                    {likedModels.length === 0 && !likedModelsQuery.isLoading ? (
+                    {privateDataNotSupported ? (
+                      <p className="text-sm text-pf-text-secondary">
+                        Liked models are not supported on this backend yet.
+                      </p>
+                    ) : privateDataNotLinked ? (
+                      <p className="text-sm text-pf-text-secondary">
+                        Reconnect your Prusa Account to load liked models.
+                      </p>
+                    ) : privateDataUnavailable ? (
+                      <p className="text-sm text-pf-text-secondary">
+                        Liked models are temporarily unavailable.
+                      </p>
+                    ) : likedModels.length === 0 && !likedModelsQuery.isLoading ? (
                       <p className="text-sm text-pf-text-secondary">No liked models returned from your account yet.</p>
                     ) : (
                       <div className="grid gap-3 md:grid-cols-2">
@@ -398,7 +462,19 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                       <h3 className="text-sm font-semibold text-pf-text-primary">Download history</h3>
                       {downloadHistoryQuery.isFetching && <Spinner size="sm" />}
                     </div>
-                    {downloadHistoryItems.length === 0 && !downloadHistoryQuery.isLoading ? (
+                    {privateDataNotSupported ? (
+                      <p className="text-sm text-pf-text-secondary">
+                        Download history is not supported on this backend yet.
+                      </p>
+                    ) : privateDataNotLinked ? (
+                      <p className="text-sm text-pf-text-secondary">
+                        Reconnect your Prusa Account to load download history.
+                      </p>
+                    ) : privateDataUnavailable ? (
+                      <p className="text-sm text-pf-text-secondary">
+                        Download history is temporarily unavailable.
+                      </p>
+                    ) : downloadHistoryItems.length === 0 && !downloadHistoryQuery.isLoading ? (
                       <p className="text-sm text-pf-text-secondary">No download history returned from your account yet.</p>
                     ) : (
                       <div className="grid gap-3 md:grid-cols-2">
