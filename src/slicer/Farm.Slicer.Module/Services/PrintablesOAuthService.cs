@@ -68,6 +68,40 @@ public sealed class PrintablesOAuthService(
         return new PrintablesOAuthConnectResponseDto(authorizationUrl, expiresAtUtc);
     }
 
+    private static bool IsNonRecoverableRefreshFailure(HttpStatusCode statusCode, string responseBody)
+    {
+        if (statusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            return true;
+        }
+
+        if (statusCode != HttpStatusCode.BadRequest)
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(responseBody);
+            if (!doc.RootElement.TryGetProperty("error", out JsonElement errorElement) ||
+                errorElement.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string? error = errorElement.GetString();
+            return string.Equals(error, "invalid_grant", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(error, "unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(error, "unauthorized_client", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(error, "invalid_client", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(error, "invalid_token", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public async Task<PrintablesOAuthStatusDto> HandleCallbackAsync(Guid userId, string code, string state, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(code))
@@ -186,11 +220,12 @@ public sealed class PrintablesOAuthService(
         catch (UnauthorizedAccessException)
         {
             await InvalidateLinkedTokensAsync(userId, ct);
-            throw new InvalidOperationException("Printables authorization expired or was revoked. Reconnect your Printables account.");
+            throw new PrintablesOAuthNotLinkedException("Printables authorization expired or was revoked. Reconnect your Printables account.");
         }
         catch (PrintablesApiException ex) when (ex.IsTransient)
         {
-            throw new InvalidOperationException("Printables liked models are temporarily unavailable. Please try again.");
+            string message = "Printables liked models are temporarily unavailable. Please try again.";
+            throw new PrintablesOAuthTemporarilyUnavailableException(message, ex);
         }
         catch (PrintablesApiException)
         {
@@ -252,11 +287,12 @@ public sealed class PrintablesOAuthService(
         catch (UnauthorizedAccessException)
         {
             await InvalidateLinkedTokensAsync(userId, ct);
-            throw new InvalidOperationException("Printables authorization expired or was revoked. Reconnect your Printables account.");
+            throw new PrintablesOAuthNotLinkedException("Printables authorization expired or was revoked. Reconnect your Printables account.");
         }
         catch (PrintablesApiException ex) when (ex.IsTransient)
         {
-            throw new InvalidOperationException("Printables download history is temporarily unavailable. Please try again.");
+            string message = "Printables download history is temporarily unavailable. Please try again.";
+            throw new PrintablesOAuthTemporarilyUnavailableException(message, ex);
         }
         catch (PrintablesApiException)
         {
@@ -299,7 +335,7 @@ public sealed class PrintablesOAuthService(
         UserSettings? settings = await _db.UserSettings.FirstOrDefaultAsync(x => x.UserId == userId, ct);
         if (settings is null || string.IsNullOrWhiteSpace(settings.PrintablesOAuthAccessToken))
         {
-            throw new InvalidOperationException("Printables account is not linked.");
+            throw new PrintablesOAuthNotLinkedException("Printables account is not linked.");
         }
 
         DateTime utcNow = DateTime.UtcNow;
@@ -313,7 +349,7 @@ public sealed class PrintablesOAuthService(
         if (string.IsNullOrWhiteSpace(accessToken))
         {
             await InvalidateLinkedTokensAsync(settings, ct);
-            throw new InvalidOperationException("Stored Printables credentials are invalid. Reconnect your Printables account.");
+            throw new PrintablesOAuthNotLinkedException("Stored Printables credentials are invalid. Reconnect your Printables account.");
         }
 
         return accessToken;
@@ -350,14 +386,14 @@ public sealed class PrintablesOAuthService(
         if (string.IsNullOrWhiteSpace(settings.PrintablesOAuthRefreshToken))
         {
             await InvalidateLinkedTokensAsync(settings, ct);
-            throw new InvalidOperationException("Printables authorization has expired. Reconnect your Printables account.");
+            throw new PrintablesOAuthNotLinkedException("Printables authorization has expired. Reconnect your Printables account.");
         }
 
         string? refreshToken = _sensitiveDataProtector.Unprotect(settings.PrintablesOAuthRefreshToken);
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
             await InvalidateLinkedTokensAsync(settings, ct);
-            throw new InvalidOperationException("Stored Printables refresh token is invalid. Reconnect your Printables account.");
+            throw new PrintablesOAuthNotLinkedException("Stored Printables refresh token is invalid. Reconnect your Printables account.");
         }
 
         TokenExchangeResponse refreshed;
@@ -365,10 +401,15 @@ public sealed class PrintablesOAuthService(
         {
             refreshed = await ExchangeRefreshTokenAsync(refreshToken, ct);
         }
-        catch (PrintablesApiException)
+        catch (PrintablesOAuthNotLinkedException)
         {
             await InvalidateLinkedTokensAsync(settings, ct);
-            throw new InvalidOperationException("Printables authorization refresh failed. Reconnect your Printables account.");
+            throw;
+        }
+        catch (PrintablesApiException ex)
+        {
+            string message = "Printables authorization refresh is temporarily unavailable. Please try again.";
+            throw new PrintablesOAuthTemporarilyUnavailableException(message, ex);
         }
 
         settings.PrintablesOAuthAccessToken = _sensitiveDataProtector.Protect(refreshed.AccessToken);
@@ -402,14 +443,25 @@ public sealed class PrintablesOAuthService(
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
         {
+            string responseBody = await response.Content.ReadAsStringAsync(ct);
             bool isTransient = IsTransientStatusCode(response.StatusCode);
-            throw new PrintablesApiException(
-                $"Printables OAuth token refresh failed with HTTP {(int)response.StatusCode}.",
-                isTransient: isTransient);
+            if (isTransient)
+            {
+                throw new PrintablesOAuthTemporarilyUnavailableException(
+                    "Printables authorization refresh is temporarily unavailable. Please try again.");
+            }
+
+            if (IsNonRecoverableRefreshFailure(response.StatusCode, responseBody))
+            {
+                throw new PrintablesOAuthNotLinkedException(
+                    "Printables authorization refresh was rejected. Reconnect your Printables account.");
+            }
+
+            throw new PrintablesApiException($"Printables OAuth token refresh failed with HTTP {(int)response.StatusCode}.");
         }
 
-        string responseBody = await response.Content.ReadAsStringAsync(ct);
-        return ParseTokenExchangeResponse(responseBody);
+        string successfulResponseBody = await response.Content.ReadAsStringAsync(ct);
+        return ParseTokenExchangeResponse(successfulResponseBody);
     }
 
     private static TokenExchangeResponse ParseTokenExchangeResponse(string responseBody)

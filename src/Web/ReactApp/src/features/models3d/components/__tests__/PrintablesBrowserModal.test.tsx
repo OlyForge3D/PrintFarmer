@@ -386,4 +386,31 @@ it('shows not-supported messaging when authenticated endpoints return 501', () =
     expect(screen.getByText('Reconnect your Prusa Account to load liked models.')).toBeInTheDocument();
     expect(screen.getByText('Reconnect your Prusa Account to load download history.')).toBeInTheDocument();
   });
+
+  it('shows temporary-unavailable messaging when private endpoints return 503', () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });
+    mockUsePrintablesOAuthStatus.mockReturnValue({
+      data: { isLinked: true, hasRefreshToken: true, scope: 'public', linkedAtUtc: null },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUsePrintablesLikedModels.mockReturnValue({
+      ...createInfiniteQueryResult([]),
+      isError: true,
+      error: { statusCode: 503, details: 'temporarily unavailable' },
+    });
+    mockUsePrintablesDownloadHistory.mockReturnValue({
+      ...createInfiniteQueryResult([]),
+      isError: true,
+      error: { statusCode: 503, details: 'temporarily unavailable' },
+    });
+
+    renderModal();
+
+    expect(screen.getByText('Private Printables data is temporarily unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Liked models are temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('Download history is temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('Prusa Account link is no longer valid')).not.toBeInTheDocument();
+  });
 });

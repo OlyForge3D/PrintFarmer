@@ -104,13 +104,13 @@ public class PrintablesOAuthServiceTests
     }
 
     [Fact]
-    public async Task GetLikedModelsAsync_NotLinked_ThrowsInvalidOperation()
+    public async Task GetLikedModelsAsync_NotLinked_ThrowsNotLinkedException()
     {
         await using AppDbContext db = CreateDbContext();
         PrintablesOAuthService sut = CreateService(db, new HttpClient(new SequenceHttpHandler(_ => Json(HttpStatusCode.OK, "{}"))));
 
         Func<Task> act = () => sut.GetLikedModelsAsync(Guid.NewGuid(), 24, null, CancellationToken.None);
-        _ = await act.Should().ThrowAsync<InvalidOperationException>()
+        _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
             .WithMessage("*not linked*");
     }
 
@@ -132,7 +132,7 @@ public class PrintablesOAuthServiceTests
         PrintablesOAuthService sut = CreateService(db, client);
 
         Func<Task> act = () => sut.GetDownloadHistoryAsync(userId, 24, null, CancellationToken.None);
-        _ = await act.Should().ThrowAsync<InvalidOperationException>()
+        _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
             .WithMessage("*Reconnect*");
 
         UserSettings settings = await db.UserSettings.SingleAsync(x => x.UserId == userId);
@@ -208,7 +208,7 @@ public class PrintablesOAuthServiceTests
         Mock<IPrintablesOAuthService> oauthMock = new(MockBehavior.Strict);
         _ = oauthMock
             .Setup(x => x.GetLikedModelsAsync(It.IsAny<Guid>(), 24, null, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Printables account is not linked."));
+            .ThrowsAsync(new PrintablesOAuthNotLinkedException("Printables account is not linked."));
 
         PrintablesImportController controller = new(importMock.Object, oauthMock.Object, Mock.Of<ILogger<PrintablesImportController>>());
         controller.ControllerContext = BuildControllerContext(Guid.NewGuid());
@@ -232,6 +232,103 @@ public class PrintablesOAuthServiceTests
         IActionResult result = await controller.GetDownloadHistoryAsync(limit: 24, cursor: null, CancellationToken.None);
         ObjectResult status = Assert.IsType<ObjectResult>(result);
         status.StatusCode.Should().Be(StatusCodes.Status501NotImplemented);
+    }
+
+    [Fact]
+    public async Task Controller_History_WhenTransientUnavailable_ReturnsServiceUnavailable()
+    {
+        Mock<IPrintablesImportService> importMock = new(MockBehavior.Strict);
+        Mock<IPrintablesOAuthService> oauthMock = new(MockBehavior.Strict);
+        _ = oauthMock
+            .Setup(x => x.GetDownloadHistoryAsync(It.IsAny<Guid>(), 24, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrintablesOAuthTemporarilyUnavailableException("temporary outage"));
+
+        PrintablesImportController controller = new(importMock.Object, oauthMock.Object, Mock.Of<ILogger<PrintablesImportController>>());
+        controller.ControllerContext = BuildControllerContext(Guid.NewGuid());
+
+        IActionResult result = await controller.GetDownloadHistoryAsync(limit: 24, cursor: null, CancellationToken.None);
+        ObjectResult status = Assert.IsType<ObjectResult>(result);
+        status.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_TransientUpstream_ThrowsTemporarilyUnavailable()
+    {
+        Guid userId = Guid.NewGuid();
+        await using AppDbContext db = CreateDbContext();
+        _ = db.UserSettings.Add(new UserSettings
+        {
+            UserId = userId,
+            PrintablesOAuthAccessToken = "enc:access-token",
+            PrintablesOAuthRefreshToken = "enc:refresh-token",
+            PrintablesOAuthTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
+        });
+        _ = await db.SaveChangesAsync();
+
+        HttpClient client = new(new SequenceHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        PrintablesOAuthService sut = CreateService(db, client);
+
+        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        _ = await act.Should().ThrowAsync<PrintablesOAuthTemporarilyUnavailableException>()
+            .WithMessage("*temporarily unavailable*");
+
+        UserSettings settings = await db.UserSettings.SingleAsync(x => x.UserId == userId);
+        settings.PrintablesOAuthAccessToken.Should().NotBeNull();
+        settings.PrintablesOAuthRefreshToken.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_RefreshTransientFailure_PreservesStoredTokens()
+    {
+        Guid userId = Guid.NewGuid();
+        await using AppDbContext db = CreateDbContext();
+        _ = db.UserSettings.Add(new UserSettings
+        {
+            UserId = userId,
+            PrintablesOAuthAccessToken = "enc:expired-access",
+            PrintablesOAuthRefreshToken = "enc:refresh-token",
+            PrintablesOAuthTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(-2),
+        });
+        _ = await db.SaveChangesAsync();
+
+        HttpClient client = new(new SequenceHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        PrintablesOAuthService sut = CreateService(db, client);
+
+        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        _ = await act.Should().ThrowAsync<PrintablesOAuthTemporarilyUnavailableException>()
+            .WithMessage("*temporarily unavailable*");
+
+        UserSettings settings = await db.UserSettings.SingleAsync(x => x.UserId == userId);
+        settings.PrintablesOAuthAccessToken.Should().Be("enc:expired-access");
+        settings.PrintablesOAuthRefreshToken.Should().Be("enc:refresh-token");
+        settings.PrintablesOAuthTokenExpiresAtUtc.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_RefreshInvalidGrant_RevokesStoredTokens()
+    {
+        Guid userId = Guid.NewGuid();
+        await using AppDbContext db = CreateDbContext();
+        _ = db.UserSettings.Add(new UserSettings
+        {
+            UserId = userId,
+            PrintablesOAuthAccessToken = "enc:expired-access",
+            PrintablesOAuthRefreshToken = "enc:refresh-token",
+            PrintablesOAuthTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(-2),
+        });
+        _ = await db.SaveChangesAsync();
+
+        HttpClient client = new(new SequenceHttpHandler(_ => Json(HttpStatusCode.BadRequest, """{ "error": "invalid_grant" }""")));
+        PrintablesOAuthService sut = CreateService(db, client);
+
+        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
+            .WithMessage("*Reconnect*");
+
+        UserSettings settings = await db.UserSettings.SingleAsync(x => x.UserId == userId);
+        settings.PrintablesOAuthAccessToken.Should().BeNull();
+        settings.PrintablesOAuthRefreshToken.Should().BeNull();
+        settings.PrintablesOAuthTokenExpiresAtUtc.Should().BeNull();
     }
 
     private static ControllerContext BuildControllerContext(Guid userId)

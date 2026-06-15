@@ -232,6 +232,7 @@ public sealed class PrintablesImportController(
     [ProducesResponseType(typeof(PrintablesAuthenticatedCursorPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetLikedModelsAsync(
         [FromQuery] int limit = DefaultPageSize,
@@ -249,9 +250,13 @@ public sealed class PrintablesImportController(
             PrintablesAuthenticatedCursorPageDto page = await _oauthService.GetLikedModelsAsync(userId, normalizedLimit, cursor, ct);
             return Ok(page);
         }
-        catch (InvalidOperationException ex)
+        catch (PrintablesOAuthNotLinkedException ex)
         {
             return Conflict(ex.Message);
+        }
+        catch (PrintablesOAuthTemporarilyUnavailableException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
         }
         catch (NotSupportedException ex)
         {
@@ -266,6 +271,7 @@ public sealed class PrintablesImportController(
     [ProducesResponseType(typeof(PrintablesAuthenticatedCursorPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     [ProducesResponseType(StatusCodes.Status501NotImplemented)]
     public async Task<IActionResult> GetDownloadHistoryAsync(
         [FromQuery] int limit = DefaultPageSize,
@@ -283,9 +289,13 @@ public sealed class PrintablesImportController(
             PrintablesAuthenticatedCursorPageDto page = await _oauthService.GetDownloadHistoryAsync(userId, normalizedLimit, cursor, ct);
             return Ok(page);
         }
-        catch (InvalidOperationException ex)
+        catch (PrintablesOAuthNotLinkedException ex)
         {
             return Conflict(ex.Message);
+        }
+        catch (PrintablesOAuthTemporarilyUnavailableException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
         }
         catch (NotSupportedException ex)
         {
