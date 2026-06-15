@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.Notifications;
@@ -377,6 +378,7 @@ public class NotificationService(
     public async Task<NotificationPreferences?> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         return await dbContext.NotificationPreferences
+            .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
     }
 
@@ -521,7 +523,8 @@ public class NotificationService(
             ["notificationType"] = type.ToString()
         };
 
-        var message = new EmailMessage(user.Email, subject, PlainBody: body, HtmlBody: $"<p>{body}</p>", TemplateKey: "PrintEvent", Metadata: metadata);
+        string encodedBody = WebUtility.HtmlEncode(body);
+        var message = new EmailMessage(user.Email, subject, PlainBody: body, HtmlBody: $"<p>{encodedBody}</p>", TemplateKey: "PrintEvent", Metadata: metadata);
         EmailDispatchResult result = await emailService.SendAsync(message, cancellationToken);
         if (!result.Success)
         {
@@ -554,6 +557,7 @@ public class NotificationService(
         });
 
         var expiredSubscriptions = new List<PushSubscription>();
+        bool hasSubscriptionUpdates = false;
 
         foreach (PushSubscription subscription in subscriptions)
         {
@@ -569,15 +573,21 @@ public class NotificationService(
             else
             {
                 subscription.LastUsedAt = DateTime.UtcNow;
+                hasSubscriptionUpdates = true;
             }
         }
 
+        bool hasUpdates = hasSubscriptionUpdates;
         if (expiredSubscriptions.Count > 0)
         {
             dbContext.PushSubscriptions.RemoveRange(expiredSubscriptions);
+            hasUpdates = true;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        if (hasUpdates)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)

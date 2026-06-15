@@ -11,7 +11,7 @@ public interface IWebPushNotificationSender
     Task<WebPushDispatchResult> SendAsync(DomainPushSubscription subscription, string payload, CancellationToken cancellationToken = default);
 }
 
-public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender> logger) : IWebPushNotificationSender
+public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender> logger) : IWebPushNotificationSender, IDisposable
 {
     private readonly ILogger<WebPushNotificationSender> _logger = logger;
     private readonly WebPushClient _client = new();
@@ -50,6 +50,11 @@ public sealed class WebPushNotificationSender(ILogger<WebPushNotificationSender>
             _logger.LogWarning(ex, "Web push delivery failed for endpoint {Endpoint}", subscription.Endpoint);
             return new WebPushDispatchResult(Success: false, SubscriptionExpired: false, Error: ex.Message);
         }
+    }
+
+    public void Dispose()
+    {
+        _client.Dispose();
     }
 }
 

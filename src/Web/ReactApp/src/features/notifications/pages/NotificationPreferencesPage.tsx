@@ -55,7 +55,6 @@ function withDerivedLegacyFlags(request: UpdateNotificationPreferencesRequest): 
   const byEvent = (eventType: NotificationPreferenceEventType) => matrix.find(x => x.eventType === eventType);
   const started = byEvent(NotificationPreferenceEventType.JobStarted);
   const completed = byEvent(NotificationPreferenceEventType.JobCompleted);
-  const failed = byEvent(NotificationPreferenceEventType.JobFailed);
   const paused = byEvent(NotificationPreferenceEventType.JobPaused);
 
   return {
@@ -85,6 +84,10 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
+    if (isDirty) {
+      return;
+    }
+
     if (!preferences) {
       setFormState(DEFAULT_PREFERENCES);
       setIsDirty(false);
@@ -108,7 +111,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
     setFormState(nextState);
     setIsDirty(false);
-  }, [preferences]);
+  }, [preferences, isDirty]);
 
   const isAnyPushEnabled = useMemo(
     () => (formState.eventChannelPreferences ?? []).some(item => item.push),

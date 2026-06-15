@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain.Notifications;
@@ -460,6 +461,19 @@ public class NotificationsController(INotificationService notificationService) :
                     break;
             }
         }
+
+        preferences.EnableInAppNotifications = matrix.Any(static item => item.InApp);
+        preferences.EnableEmailNotifications = matrix.Any(static item => item.Email);
+        preferences.EnablePushNotifications = matrix.Any(static item => item.Push);
+
+        NotificationEventChannelPreferenceDto? started = matrix.FirstOrDefault(static item => item.EventType == NotificationPreferenceEventType.JobStarted);
+        NotificationEventChannelPreferenceDto? completed = matrix.FirstOrDefault(static item => item.EventType == NotificationPreferenceEventType.JobCompleted);
+        NotificationEventChannelPreferenceDto? paused = matrix.FirstOrDefault(static item => item.EventType == NotificationPreferenceEventType.JobPaused);
+
+        preferences.NotifyOnStart = started is not null && (started.InApp || started.Email || started.Push);
+        preferences.NotifyOnCompletion = completed is not null && (completed.InApp || completed.Email || completed.Push);
+        preferences.NotifyOnFailure = true;
+        preferences.NotifyOnPause = paused is not null && (paused.InApp || paused.Email || paused.Push);
     }
 
     /// <summary>
