@@ -2179,6 +2179,16 @@ export class ApiClient {
     return response.data;
   }
 
+  async completePrintablesOAuthCallback(code: string, state: string): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/callback",
+      {
+        params: { code, state },
+      }
+    );
+    return response.data;
+  }
+
   async disconnectPrintablesOAuth(): Promise<void> {
     await this.client.post("/3d-models/printables/oauth/disconnect");
   }

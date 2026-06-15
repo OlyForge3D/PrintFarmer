@@ -1,9 +1,9 @@
+using System.Security.Claims;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using System.Security.Claims;
 
 namespace Farm.Slicer.Module.Api.Controllers;
 
@@ -194,6 +194,14 @@ public sealed class PrintablesImportController(
             _logger.LogWarning("Printables OAuth callback is unavailable for user {UserId}: {Message}", userId, ex.Message);
             return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
         }
+        catch (PrintablesOAuthNotLinkedException ex)
+        {
+            return Conflict(ex.Message);
+        }
+        catch (PrintablesOAuthTemporarilyUnavailableException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
+        }
         catch (PrintablesApiException ex)
         {
             _logger.LogWarning(ex, "Printables OAuth callback token exchange failed for user {UserId}", userId);
@@ -218,11 +226,20 @@ public sealed class PrintablesImportController(
     /// </summary>
     [HttpPost("oauth/disconnect")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> OAuthDisconnectAsync(CancellationToken ct)
     {
         Guid userId = GetUserId();
-        await _oauthService.DisconnectAsync(userId, ct);
-        return NoContent();
+        try
+        {
+            await _oauthService.DisconnectAsync(userId, ct);
+            return NoContent();
+        }
+        catch (PrintablesOAuthTemporarilyUnavailableException ex)
+        {
+            _logger.LogWarning(ex, "Printables OAuth disconnect is temporarily unavailable for user {UserId}", userId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
+        }
     }
 
     /// <summary>

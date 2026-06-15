@@ -10,6 +10,7 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -329,6 +330,75 @@ public class PrintablesOAuthServiceTests
         settings.PrintablesOAuthAccessToken.Should().BeNull();
         settings.PrintablesOAuthRefreshToken.Should().BeNull();
         settings.PrintablesOAuthTokenExpiresAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetLikedModelsAsync_RefreshConcurrencyConflictWithDisconnect_ThrowsNotLinked()
+    {
+        Guid userId = Guid.NewGuid();
+        await using SqliteConnection connection = new("Data Source=file:printables-oauth-refresh-conflict?mode=memory&cache=shared");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (AppDbContext seedDb = new(options))
+        {
+            await seedDb.Database.EnsureCreatedAsync();
+            _ = seedDb.Users.Add(new User
+            {
+                Id = userId,
+                Username = "printables-test-user",
+                Email = "printables-test@example.com",
+                PasswordHash = "hash",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = seedDb.UserSettings.Add(new UserSettings
+            {
+                UserId = userId,
+                PrintablesOAuthAccessToken = "enc:expired-access",
+                PrintablesOAuthRefreshToken = "enc:refresh-token",
+                PrintablesOAuthTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(-5),
+            });
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext primaryDb = new(options);
+        await using AppDbContext concurrentDb = new(options);
+
+        HttpClient client = new(new SequenceHttpHandler(req =>
+        {
+            req.RequestUri!.AbsoluteUri.Should().Contain("/oauth2/token");
+
+            UserSettings row = concurrentDb.UserSettings.Single(x => x.UserId == userId);
+            row.PrintablesOAuthAccessToken = null;
+            row.PrintablesOAuthRefreshToken = null;
+            row.PrintablesOAuthTokenType = null;
+            row.PrintablesOAuthScope = null;
+            row.PrintablesOAuthTokenExpiresAtUtc = null;
+            row.PrintablesOAuthLinkedAtUtc = null;
+            row.UpdatedAt = DateTime.UtcNow;
+            _ = concurrentDb.SaveChanges();
+
+            return Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "new-access",
+                  "refresh_token": "new-refresh",
+                  "token_type": "Bearer",
+                  "scope": "likes history",
+                  "expires_in": 3600
+                }
+                """);
+        }));
+
+        PrintablesOAuthService sut = CreateService(primaryDb, client);
+
+        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
+            .WithMessage("*no longer linked*");
     }
 
     private static ControllerContext BuildControllerContext(Guid userId)

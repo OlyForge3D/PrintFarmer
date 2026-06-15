@@ -407,6 +407,27 @@ describe("ApiClient", () => {
         expect(result).toEqual(mockResponse.data);
       });
 
+      it("should complete printables oauth callback with code and state", async () => {
+        const mockResponse = {
+          data: {
+            isLinked: true,
+            hasRefreshToken: true,
+            scope: "likes history",
+            linkedAtUtc: "2026-06-15T00:00:00Z",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.completePrintablesOAuthCallback("oauth-code", "oauth-state");
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/oauth/callback", {
+          params: { code: "oauth-code", state: "oauth-state" },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
       it("should disconnect printables oauth connection", async () => {
         const mockPost = vi.fn().mockResolvedValue({ data: undefined });
         (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
