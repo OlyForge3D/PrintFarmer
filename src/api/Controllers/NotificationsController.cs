@@ -462,18 +462,26 @@ public class NotificationsController(INotificationService notificationService) :
             }
         }
 
-        preferences.EnableInAppNotifications = matrix.Any(static item => item.InApp);
-        preferences.EnableEmailNotifications = matrix.Any(static item => item.Email);
-        preferences.EnablePushNotifications = matrix.Any(static item => item.Push);
+        preferences.EnableInAppNotifications =
+            preferences.InAppOnJobStarted
+            || preferences.InAppOnJobCompleted
+            || preferences.InAppOnJobFailed
+            || preferences.InAppOnJobPaused;
+        preferences.EnableEmailNotifications =
+            preferences.EmailOnJobStarted
+            || preferences.EmailOnJobCompleted
+            || preferences.EmailOnJobFailed
+            || preferences.EmailOnJobPaused;
+        preferences.EnablePushNotifications =
+            preferences.PushOnJobStarted
+            || preferences.PushOnJobCompleted
+            || preferences.PushOnJobFailed
+            || preferences.PushOnJobPaused;
 
-        NotificationEventChannelPreferenceDto? started = matrix.FirstOrDefault(static item => item.EventType == NotificationPreferenceEventType.JobStarted);
-        NotificationEventChannelPreferenceDto? completed = matrix.FirstOrDefault(static item => item.EventType == NotificationPreferenceEventType.JobCompleted);
-        NotificationEventChannelPreferenceDto? paused = matrix.FirstOrDefault(static item => item.EventType == NotificationPreferenceEventType.JobPaused);
-
-        preferences.NotifyOnStart = started is not null && (started.InApp || started.Email || started.Push);
-        preferences.NotifyOnCompletion = completed is not null && (completed.InApp || completed.Email || completed.Push);
+        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted;
+        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted;
         preferences.NotifyOnFailure = true;
-        preferences.NotifyOnPause = paused is not null && (paused.InApp || paused.Email || paused.Push);
+        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused;
     }
 
     /// <summary>

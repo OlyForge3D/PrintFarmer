@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/components/ui';
@@ -82,9 +82,14 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
   const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest>(DEFAULT_PREFERENCES);
   const [isDirty, setIsDirty] = useState(false);
+  const isDirtyRef = useRef(false);
 
   useEffect(() => {
-    if (isDirty) {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
+
+  useEffect(() => {
+    if (isDirtyRef.current) {
       return;
     }
 
@@ -111,7 +116,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
     setFormState(nextState);
     setIsDirty(false);
-  }, [preferences, isDirty]);
+  }, [preferences]);
 
   const isAnyPushEnabled = useMemo(
     () => (formState.eventChannelPreferences ?? []).some(item => item.push),
