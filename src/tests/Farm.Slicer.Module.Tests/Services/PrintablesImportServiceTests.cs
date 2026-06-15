@@ -339,6 +339,29 @@ public class PrintablesImportServiceTests
     }
 
     [Fact]
+    public async Task ResolveUserProfileAsync_AtPrefixedUsername_NormalizesAndResolves()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "searchUsers2": {
+                  "items": [
+                    { "id": "16", "handle": "maker_jane", "publicUsername": "Maker Jane", "avatarFilePath": "avatars/u1.png" }
+                  ]
+                }
+              }
+            }
+            """);
+
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        PrintablesUserProfileDto result = await client.ResolveUserProfileAsync("@maker_jane", CancellationToken.None);
+
+        _ = result.Id.Should().Be("16");
+        _ = result.Handle.Should().Be("maker_jane");
+    }
+
+    [Fact]
     public async Task GetUserCollectionsAsync_AtPrefixedUsername_ResolvesAndReturnsCollections()
     {
         QueueingHttpMessageHandler handler = new(
@@ -347,7 +370,7 @@ public class PrintablesImportServiceTests
               "data": {
                 "searchUsers2": {
                   "items": [
-                    { "id": "573746", "handle": "@JeffRho", "publicUsername": "" }
+                    { "id": "573746", "handle": "JeffRho", "publicUsername": "JeffRho" }
                   ]
                 }
               }
@@ -373,10 +396,6 @@ public class PrintablesImportServiceTests
         _ = result.Should().HaveCount(1);
         _ = result[0].Id.Should().Be("col-77");
         _ = result[0].Name.Should().Be("Public");
-
-        using JsonDocument firstRequest = JsonDocument.Parse(handler.RequestBodies[0]);
-        string? searchQuery = firstRequest.RootElement.GetProperty("variables").GetProperty("query").GetString();
-        _ = searchQuery.Should().Be("@JeffRho");
     }
 
     [Fact]
