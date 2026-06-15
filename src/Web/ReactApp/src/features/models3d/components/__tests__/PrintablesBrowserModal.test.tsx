@@ -184,6 +184,15 @@ describe('PrintablesBrowserModal', () => {
     });
   });
 
+  it('renders @handle usernames without duplicating the @ prefix in empty-state copy', () => {
+    mockUsePrintablesUsername.mockReturnValue({ username: '@ripley', isLoading: false, error: null });
+
+    renderModal();
+
+    expect(screen.getByText('No public collections found for @ripley.')).toBeInTheDocument();
+    expect(screen.getByText('No uploaded models found for @ripley.')).toBeInTheDocument();
+  });
+
   it('loads next search page when results indicate more data', async () => {
     const fetchNextPage = vi.fn();
     mockUsePrintablesUsername.mockReturnValue({ username: 'ripley', isLoading: false, error: null });

@@ -190,6 +190,10 @@ export class ApiClient {
       }
     );
   }
+
+  private static normalizePrintablesUsername(username: string): string {
+    return username.trim().replace(/^@+/, "");
+  }
   // ============ Generic Settings API methods ============
   /**
    * Get settings for any settings class by class name
@@ -1978,8 +1982,13 @@ export class ApiClient {
     username: string,
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesCollectionSummary>> {
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
     const response = await this.client.get<PrintablesPagedResponse<PrintablesCollectionSummary>>(
-      `/3d-models/printables/users/${encodeURIComponent(username)}/collections`,
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/collections`,
       {
         params: {
           cursor: options?.cursor,
@@ -1994,8 +2003,13 @@ export class ApiClient {
     username: string,
     options?: { cursor?: string; limit?: number }
   ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
     const response = await this.client.get<PrintablesPagedResponse<PrintablesModelSummary>>(
-      `/3d-models/printables/users/${encodeURIComponent(username)}/models`,
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/models`,
       {
         params: {
           cursor: options?.cursor,

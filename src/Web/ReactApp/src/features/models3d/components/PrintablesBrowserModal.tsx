@@ -110,6 +110,7 @@ function PrintablesModelCard({
 export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: PrintablesBrowserModalProps) {
   const navigate = useNavigate();
   const { username, isLoading: isLoadingUsername } = usePrintablesUsername();
+  const normalizedUsername = username.trim().replace(/^@+/, '');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearchInput, setDebouncedSearchInput] = useState('');
   const [activeTab, setActiveTab] = useState<'browse' | 'search' | 'url'>('browse');
@@ -117,8 +118,8 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
   const [expandedCollectionIds, setExpandedCollectionIds] = useState<Record<string, boolean>>({});
   const [oauthActionError, setOauthActionError] = useState<string | null>(null);
 
-  const collectionsQuery = usePrintablesCollections(username);
-  const userModelsQuery = usePrintablesUserModels(username);
+  const collectionsQuery = usePrintablesCollections(normalizedUsername);
+  const userModelsQuery = usePrintablesUserModels(normalizedUsername);
   const searchQuery = usePrintablesSearch(debouncedSearchInput);
   const oauthStatusQuery = usePrintablesOAuthStatus();
   const oauthAuthorizeMutation = usePrintablesOAuthAuthorize();
@@ -162,7 +163,7 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
     onImportUrl(normalized);
   };
 
-  const hasUsername = username.length > 0;
+  const hasUsername = normalizedUsername.length > 0;
   const isConnectedToPrusaAccount = oauthStatusQuery.data?.isLinked ?? false;
   const oauthLinkedDate = oauthStatusQuery.data?.linkedAtUtc
     ? new Date(oauthStatusQuery.data.linkedAtUtc).toLocaleString()
@@ -330,7 +331,7 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                     {collectionsQuery.isFetching && <Spinner size="sm" />}
                   </div>
                   {collections.length === 0 && !collectionsQuery.isLoading ? (
-                    <p className="text-sm text-pf-text-secondary">No public collections found for @{username}.</p>
+                    <p className="text-sm text-pf-text-secondary">No public collections found for @{normalizedUsername}.</p>
                   ) : (
                     <div className="space-y-3">
                       {collections.map((collection) => {
@@ -394,7 +395,7 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                     {userModelsQuery.isFetching && <Spinner size="sm" />}
                   </div>
                   {userModels.length === 0 && !userModelsQuery.isLoading ? (
-                    <p className="text-sm text-pf-text-secondary">No uploaded models found for @{username}.</p>
+                    <p className="text-sm text-pf-text-secondary">No uploaded models found for @{normalizedUsername}.</p>
                   ) : (
                     <div className="grid gap-3 md:grid-cols-2">
                       {userModels.map((model) => (

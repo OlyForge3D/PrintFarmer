@@ -259,6 +259,24 @@ describe("ApiClient", () => {
         expect(result).toEqual(mockResponse.data);
       });
 
+      it("should normalize @-prefixed usernames for printables collections requests", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "collection-1", name: "Favorites", modelCount: 12 }],
+            nextCursor: null,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        await apiClient.getPrintablesUserCollections("@ripley", { limit: 8 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/collections", {
+          params: { cursor: undefined, limit: 8 },
+        });
+      });
+
       it("should fetch user models from the printables models endpoint", async () => {
         const mockResponse = {
           data: {
@@ -276,6 +294,24 @@ describe("ApiClient", () => {
           params: { cursor: undefined, limit: 24 },
         });
         expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should normalize @-prefixed usernames for printables models requests", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "model-1", title: "Voron clip", author: "ripley" }],
+            nextCursor: null,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        await apiClient.getPrintablesUserModels("@ripley", { limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/models", {
+          params: { cursor: undefined, limit: 24 },
+        });
       });
 
       it("should query printables search endpoint with keyword and cursor", async () => {

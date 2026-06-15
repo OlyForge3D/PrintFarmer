@@ -32,7 +32,7 @@ function normalizePage<T>(
 
 export function usePrintablesUsername() {
   const { data, isLoading, error } = useUserSettings();
-  const username = data?.printablesUsername?.trim() ?? '';
+  const username = (data?.printablesUsername?.trim() ?? '').replace(/^@+/, '');
   return { username, isLoading, error };
 }
 
