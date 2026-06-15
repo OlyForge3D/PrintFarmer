@@ -10,7 +10,7 @@ import {
   UserX,
 } from 'lucide-react';
 import { apiClient } from '@/services/api';
-import { DeleteIcon, SearchIcon, EditIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, SearchIcon, EditIcon, LockIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, FormField, Alert, Checkbox } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
@@ -39,6 +39,12 @@ export function UserManagementPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [userToChangePassword, setUserToChangePassword] = useState<User | null>(null);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [showChangePasswordConfirm, setShowChangePasswordConfirm] = useState(false);
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordChangeForm, setPasswordChangeForm] = useState({ newPassword: '', confirmNewPassword: '' });
   const { data: passwordPolicy } = usePasswordPolicy();
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
@@ -54,9 +60,9 @@ export function UserManagementPage() {
   // Helper: Check if a role is admin role
   const isAdminRole = (roleName: string | undefined) => roleName === 'farm_admin';
 
-  const passwordMeetsPolicy = () => {
+  const passwordMeetsPolicyValue = (password: string) => {
     if (!passwordPolicy) return true; // don't block while loading
-    const p = newUser.password;
+    const p = password;
     if (p.length < passwordPolicy.minLength) return false;
     if (passwordPolicy.requireUppercase && !/[A-Z]/.test(p)) return false;
     if (passwordPolicy.requireLowercase && !/[a-z]/.test(p)) return false;
@@ -64,6 +70,8 @@ export function UserManagementPage() {
     if (passwordPolicy.requireSymbol && !/[^A-Za-z0-9]/.test(p)) return false;
     return true;
   };
+
+  const passwordMeetsPolicy = () => passwordMeetsPolicyValue(newUser.password);
 
   // Batched debounced availability checks (single request for username + email)
   useEffect(() => {
@@ -368,6 +376,21 @@ export function UserManagementPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end space-x-2">
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => {
+                          setUserToChangePassword(user);
+                          setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+                          setChangePasswordError(null);
+                          setShowChangePasswordModal(true);
+                        }}
+                        className="!p-2 !h-auto"
+                        title="Change password"
+                      >
+                        <LockIcon className="h-4 w-4" />
+                      </Button>
                       <Button
                         type="button"
                         variant="subtle"
@@ -896,6 +919,156 @@ export function UserManagementPage() {
             </div>
           </Modal>
         )}
+
+        {showChangePasswordModal && userToChangePassword && (
+          <Modal
+            isOpen={showChangePasswordModal}
+            onClose={() => {
+              if (isChangingPassword) return;
+              setShowChangePasswordModal(false);
+              setUserToChangePassword(null);
+              setShowChangePasswordConfirm(false);
+              setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+              setChangePasswordError(null);
+            }}
+            title={`Change Password: ${userToChangePassword.username}`}
+            size="md"
+          >
+            <div className="space-y-4">
+              {changePasswordError && <Alert type="error">{changePasswordError}</Alert>}
+
+              <Alert type="warning" title="Admin Action">
+                This will immediately replace the user's password and revoke existing sessions.
+              </Alert>
+
+              <FormField label="New Password" required>
+                <Input
+                  type="password"
+                  value={passwordChangeForm.newPassword}
+                  onChange={(e) => {
+                    setPasswordChangeForm((prev) => ({ ...prev, newPassword: e.target.value }));
+                    setChangePasswordError(null);
+                  }}
+                  placeholder="Enter new password"
+                  disabled={isChangingPassword}
+                />
+              </FormField>
+
+              <FormField label="Confirm New Password" required>
+                <Input
+                  type="password"
+                  value={passwordChangeForm.confirmNewPassword}
+                  onChange={(e) => {
+                    setPasswordChangeForm((prev) => ({ ...prev, confirmNewPassword: e.target.value }));
+                    setChangePasswordError(null);
+                  }}
+                  placeholder="Confirm new password"
+                  disabled={isChangingPassword}
+                />
+              </FormField>
+
+              {passwordPolicy && (
+                <ul className="space-y-1 text-xs text-pf-text-secondary">
+                  <li className={passwordChangeForm.newPassword.length >= passwordPolicy.minLength ? 'text-pf-success' : 'text-pf-text-secondary'}>
+                    ✓ Min length: {passwordPolicy.minLength}
+                  </li>
+                  {passwordPolicy.requireUppercase && (
+                    <li className={/[A-Z]/.test(passwordChangeForm.newPassword) ? 'text-pf-success' : 'text-pf-text-secondary'}>
+                      ✓ At least one uppercase letter
+                    </li>
+                  )}
+                  {passwordPolicy.requireLowercase && (
+                    <li className={/[a-z]/.test(passwordChangeForm.newPassword) ? 'text-pf-success' : 'text-pf-text-secondary'}>
+                      ✓ At least one lowercase letter
+                    </li>
+                  )}
+                  {passwordPolicy.requireDigit && (
+                    <li className={/[0-9]/.test(passwordChangeForm.newPassword) ? 'text-pf-success' : 'text-pf-text-secondary'}>
+                      ✓ At least one digit
+                    </li>
+                  )}
+                  {passwordPolicy.requireSymbol && (
+                    <li className={/[^A-Za-z0-9]/.test(passwordChangeForm.newPassword) ? 'text-pf-success' : 'text-pf-text-secondary'}>
+                      ✓ At least one symbol
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowChangePasswordModal(false);
+                  setUserToChangePassword(null);
+                  setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+                  setChangePasswordError(null);
+                }}
+                disabled={isChangingPassword}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={isChangingPassword || !passwordChangeForm.newPassword || !passwordChangeForm.confirmNewPassword}
+                onClick={() => {
+                  if (passwordChangeForm.newPassword !== passwordChangeForm.confirmNewPassword) {
+                    setChangePasswordError('Password confirmation does not match.');
+                    return;
+                  }
+                  if (!passwordMeetsPolicyValue(passwordChangeForm.newPassword)) {
+                    setChangePasswordError('Password does not meet policy requirements.');
+                    return;
+                  }
+                  setShowChangePasswordConfirm(true);
+                }}
+              >
+                Continue
+              </Button>
+            </div>
+          </Modal>
+        )}
+
+        <ConfirmationModal
+          isOpen={showChangePasswordConfirm}
+          title="Confirm Password Change?"
+          message={`Are you sure you want to change the password for "${userToChangePassword?.username}"?`}
+          confirmButtonText={isChangingPassword ? 'Changing...' : 'Change Password'}
+          cancelButtonText="Cancel"
+          isDangerous
+          onConfirm={async () => {
+            if (!userToChangePassword || isChangingPassword) return;
+            setIsChangingPassword(true);
+            try {
+              await apiClient.adminChangeUserPassword(
+                userToChangePassword.id,
+                passwordChangeForm.newPassword,
+                passwordChangeForm.confirmNewPassword
+              );
+              toast.success(`Password changed for "${userToChangePassword.username}"`);
+              setShowChangePasswordConfirm(false);
+              setShowChangePasswordModal(false);
+              setUserToChangePassword(null);
+              setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+              setChangePasswordError(null);
+            } catch (err) {
+              const error = err as { response?: { data?: Record<string, unknown> } };
+              const message = (error.response?.data as Record<string, unknown> | undefined)?.error as string
+                || (error.response?.data as Record<string, unknown> | undefined)?.message as string
+                || 'Failed to change user password';
+              setChangePasswordError(message);
+              setShowChangePasswordConfirm(false);
+              toast.error(message);
+            } finally {
+              setIsChangingPassword(false);
+            }
+          }}
+          onCancel={() => {
+            if (isChangingPassword) return;
+            setShowChangePasswordConfirm(false);
+          }}
+        />
 
         {/* Delete User Confirmation Modal */}
         <ConfirmationModal

@@ -208,4 +208,25 @@ public class UsersService(
 
         return new UserAvailabilityDto(usernameExists, emailExists);
     }
+
+    /// <summary>
+    /// Changes the password hash for the specified target user.
+    /// </summary>
+    /// <param name="userId">Target user identifier.</param>
+    /// <param name="newPassword">The new plaintext password (hashed before save).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True when target user exists and was updated.</returns>
+    public async Task<bool> ChangeUserPasswordAsync(Guid userId, string newPassword, CancellationToken ct)
+    {
+        User? user = await _users.GetUserEntityAsync(userId, ct);
+        if (user is null)
+        {
+            return false;
+        }
+
+        user.PasswordHash = _passwordHashingService.HashPassword(newPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _users.SaveChangesAsync(ct);
+        return true;
+    }
 }

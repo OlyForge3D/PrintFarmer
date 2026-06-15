@@ -2866,6 +2866,21 @@ export class ApiClient {
     await this.client.delete(`/users/${userId}`);
   }
 
+  /**
+   * Admin: change another user's password.
+   */
+  async adminChangeUserPassword(
+    userId: string,
+    newPassword: string,
+    confirmNewPassword: string
+  ): Promise<{ message: string }> {
+    const response = await this.client.post<{ message: string }>(`/users/${userId}/change-password`, {
+      newPassword,
+      confirmNewPassword,
+    });
+    return response.data;
+  }
+
   // ============ Setup & Initialization API methods ============
 
   /**

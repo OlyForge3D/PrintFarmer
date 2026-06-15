@@ -20,11 +20,13 @@ public class UsersController(
     Farm.Infrastructure.Services.Users.IUsersService usersService,
     IAuthenticationService authService,
     ITokenRevocationService tokenRevocationService,
+    IAuthAuditService authAuditService,
     ILogger<UsersController> logger) : ControllerBase
 {
     private readonly Farm.Infrastructure.Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
     private readonly ITokenRevocationService _tokenRevocation = tokenRevocationService;
+    private readonly IAuthAuditService _authAuditService = authAuditService;
     private readonly ILogger<UsersController> _logger = logger;
 
     /// <summary>
@@ -142,6 +144,72 @@ public class UsersController(
     {
         IReadOnlyList<RoleDto> roles = await _users.GetRolesAsync(ct);
         return Ok(roles);
+    }
+
+    /// <summary>
+    /// Allows an administrator to change another user's password.
+    /// </summary>
+    [HttpPost("{id:guid}/change-password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AdminChangeUserPasswordAsync(Guid id, [FromBody] AdminChangeUserPasswordRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.NewPassword) || string.IsNullOrWhiteSpace(request.ConfirmNewPassword))
+        {
+            return BadRequest(new { error = "New password and confirmation are required" });
+        }
+
+        if (!string.Equals(request.NewPassword, request.ConfirmNewPassword, StringComparison.Ordinal))
+        {
+            return BadRequest(new { error = "Password confirmation does not match" });
+        }
+
+        if (request.NewPassword.Length < 8)
+        {
+            return BadRequest(new { error = "New password must be at least 8 characters long" });
+        }
+
+        string? adminUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminUserIdClaim) || !Guid.TryParse(adminUserIdClaim, out Guid adminUserId))
+        {
+            return Unauthorized();
+        }
+
+        if (adminUserId == id)
+        {
+            return BadRequest(new { error = "Use your profile password change flow for your own account" });
+        }
+
+        bool changed = await _users.ChangeUserPasswordAsync(id, request.NewPassword, ct);
+        if (!changed)
+        {
+            return NotFound(new { error = $"User {id} not found" });
+        }
+
+        string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        await _authAuditService.LogPasswordChangeAsync(
+            id,
+            ipAddress,
+            null,
+            $"admin-password-change:{adminUserId}",
+            ct);
+
+        int revokedCount = await _tokenRevocation.RevokeAllUserTokensAsync(
+            id,
+            adminUserId,
+            "Password changed by administrator",
+            ipAddress ?? "unknown");
+
+        _logger.LogInformation(
+            "Admin {AdminUserId} changed password for user {TargetUserId}; revoked {RevokedTokenCount} active sessions",
+            adminUserId,
+            id,
+            revokedCount);
+
+        return Ok(new { message = "User password changed successfully" });
     }
 
     /// <summary>
