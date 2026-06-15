@@ -37,16 +37,14 @@
 
 ## Repos
 
-| Repo | Local Path | Primary Language | Domain |
+| Repository | GitHub Repo | Primary Language | Domain |
 |------|-----------|-----------------|--------|
-| PrintFarmer (PFarm1) | `/Users/jpapiez/s/PFarm1` | C# .NET + React TypeScript | Backend API, React dashboard, slicer workers |
-| PrintFarmerMobile (PFarm-Ios) | `/Users/jpapiez/s/PFarm-Ios` | Swift / SwiftUI | iOS companion app |
-| Spoolman fork (spoolman_pf) | `/Users/jpapiez/s/spoolman_pf` | Python + React TypeScript | Filament spool tracking service |
+| PrintFarmer | `OlyForge3D/PrintFarmer` | C# .NET + React TypeScript + Swift | Backend API, React dashboard, slicer workers, iOS companion app (`mobile/`) |
+| Spoolman fork | `OlyForge3D/spoolman_pf` | Python + React TypeScript | Filament spool tracking service |
 
 ## Stacks
 
-| Repo | Stack |
+| Repository | Stack |
 |------|-------|
-| PFarm1 | C# .NET 10, ASP.NET Core, EF Core, SignalR, React 19, TypeScript, Tailwind CSS, Vitest, xUnit |
-| PFarm-Ios | Swift 6, SwiftUI, Combine, XCTest |
-| spoolman_pf | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |
+| PrintFarmer (`OlyForge3D/PrintFarmer`) | C# .NET 10, ASP.NET Core, EF Core, SignalR, React 19, TypeScript, Tailwind CSS, Vitest, xUnit, Swift 6, SwiftUI, Combine, XCTest |
+| Spoolman fork (`OlyForge3D/spoolman_pf`) | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |
