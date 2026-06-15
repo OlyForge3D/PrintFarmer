@@ -1,13 +1,20 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { usePrintablesCollections, usePrintablesUsername } from '../usePrintablesBrowser';
+import {
+  usePrintablesCollectionModels,
+  usePrintablesCollections,
+  usePrintablesSearch,
+  usePrintablesUsername,
+} from '../usePrintablesBrowser';
 import { apiClient } from '@/services/api';
 import { useUserSettings } from '@/features/settings/hooks/useUserSettings';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrintablesUserCollections: vi.fn(),
+    getPrintablesCollectionModels: vi.fn(),
+    searchPrintablesModels: vi.fn(),
   },
 }));
 
@@ -65,6 +72,64 @@ describe('usePrintablesBrowser', () => {
       expect(apiClient.getPrintablesUserCollections).toHaveBeenCalledWith('@maker_jane', {
         cursor: undefined,
         limit: 8,
+      });
+    });
+  });
+
+  it('fetches collection models only after expand is enabled', async () => {
+    vi.mocked(apiClient.getPrintablesCollectionModels).mockResolvedValue({
+      items: [{ id: 'model-1', title: 'Clip', author: 'ripley' }],
+      nextCursor: null,
+      hasMore: false,
+    });
+
+    const { rerender } = renderHook(
+      ({ enabled }) => usePrintablesCollectionModels('collection-1', enabled),
+      { wrapper, initialProps: { enabled: false } },
+    );
+
+    expect(apiClient.getPrintablesCollectionModels).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+
+    await waitFor(() => {
+      expect(apiClient.getPrintablesCollectionModels).toHaveBeenCalledWith('collection-1', {
+        cursor: undefined,
+        limit: 24,
+      });
+    });
+  });
+
+  it('uses offset pagination for search and advances using offset + limit', async () => {
+    vi.mocked(apiClient.searchPrintablesModels)
+      .mockResolvedValueOnce({
+        items: [{ id: 'result-1', title: 'Tool holder', author: 'maker' }],
+        offset: 0,
+        limit: 24,
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [{ id: 'result-2', title: 'Tool caddy', author: 'maker' }],
+        offset: 24,
+        limit: 24,
+        hasMore: false,
+      });
+
+    const { result } = renderHook(() => usePrintablesSearch('tool'), { wrapper });
+
+    await waitFor(() => {
+      expect(apiClient.searchPrintablesModels).toHaveBeenNthCalledWith(1, 'tool', {
+        offset: 0,
+        limit: 24,
+      });
+    });
+
+    await result.current.fetchNextPage();
+
+    await waitFor(() => {
+      expect(apiClient.searchPrintablesModels).toHaveBeenNthCalledWith(2, 'tool', {
+        offset: 24,
+        limit: 24,
       });
     });
   });

@@ -109,6 +109,9 @@ export interface PrintablesCollectionSummary {
 export interface PrintablesPagedResponse<T> {
   items: T[];
   nextCursor?: string | null;
+  hasMore?: boolean;
+  offset?: number;
+  limit?: number;
 }
 
 export interface PrintablesOAuthStatus {

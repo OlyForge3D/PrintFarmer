@@ -280,8 +280,9 @@ describe("ApiClient", () => {
       it("should fetch user models from the printables models endpoint", async () => {
         const mockResponse = {
           data: {
-            items: [{ id: "model-1", title: "Voron clip", author: "ripley" }],
+            items: [{ id: "model-1", name: "Voron clip", authorHandle: "ripley", downloadCount: 12 }],
             nextCursor: null,
+            hasMore: false,
           },
         };
 
@@ -293,7 +294,11 @@ describe("ApiClient", () => {
         expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/models", {
           params: { cursor: undefined, limit: 24 },
         });
-        expect(result).toEqual(mockResponse.data);
+        expect(result).toEqual({
+          items: [{ id: "model-1", title: "Voron clip", author: "ripley", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: 12, fileCount: undefined, sourceUrl: undefined }],
+          nextCursor: null,
+          hasMore: false,
+        });
       });
 
       it("should normalize @-prefixed usernames for printables models requests", async () => {
@@ -314,11 +319,13 @@ describe("ApiClient", () => {
         });
       });
 
-      it("should query printables search endpoint with keyword and cursor", async () => {
+      it("should query printables search endpoint with keyword and offset pagination", async () => {
         const mockResponse = {
           data: {
-            items: [{ id: "result-1", title: "tool holder", author: "maker" }],
-            nextCursor: "cursor-2",
+            items: [{ id: "result-1", name: "tool holder", authorHandle: "maker", downloadCount: 101 }],
+            offset: 24,
+            limit: 24,
+            hasMore: true,
           },
         };
 
@@ -326,14 +333,43 @@ describe("ApiClient", () => {
         (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
 
         const result = await apiClient.searchPrintablesModels("tool holder", {
-          cursor: "cursor-1",
+          offset: 24,
           limit: 24,
         });
 
         expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/search", {
-          params: { query: "tool holder", cursor: "cursor-1", limit: 24 },
+          params: { query: "tool holder", offset: 24, limit: 24 },
         });
-        expect(result).toEqual(mockResponse.data);
+        expect(result).toEqual({
+          items: [{ id: "result-1", title: "tool holder", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: 101, fileCount: undefined, sourceUrl: undefined }],
+          hasMore: true,
+          offset: 24,
+          limit: 24,
+        });
+      });
+
+      it("should fetch collection models from the printables collection endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "model-1", name: "Collection model", authorHandle: "maker" }],
+            nextCursor: "cursor-2",
+            hasMore: true,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesCollectionModels("collection-1", { cursor: "cursor-1", limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/collections/collection-1/models", {
+          params: { cursor: "cursor-1", limit: 24, query: undefined, ordering: undefined },
+        });
+        expect(result).toEqual({
+          items: [{ id: "model-1", title: "Collection model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: undefined, fileCount: undefined, sourceUrl: undefined }],
+          nextCursor: "cursor-2",
+          hasMore: true,
+        });
       });
 
       it("should fetch printables oauth status", async () => {
@@ -383,8 +419,9 @@ describe("ApiClient", () => {
       it("should fetch liked models from private printables endpoint", async () => {
         const mockResponse = {
           data: {
-            items: [{ id: "liked-1", title: "Liked model", author: "maker" }],
+            items: [{ id: "liked-1", name: "Liked model", authorHandle: "maker", downloadCount: 41 }],
             nextCursor: "cursor-2",
+            hasMore: true,
           },
         };
 
@@ -396,14 +433,19 @@ describe("ApiClient", () => {
         expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/liked", {
           params: { cursor: "cursor-1", limit: 24 },
         });
-        expect(result).toEqual(mockResponse.data);
+        expect(result).toEqual({
+          items: [{ id: "liked-1", title: "Liked model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: 41, fileCount: undefined, sourceUrl: undefined }],
+          nextCursor: "cursor-2",
+          hasMore: true,
+        });
       });
 
       it("should fetch printables download history from private endpoint", async () => {
         const mockResponse = {
           data: {
-            items: [{ id: "history-1", title: "History model", author: "maker" }],
+            items: [{ id: "history-1", name: "History model", authorHandle: "maker", downloadedAt: "2026-06-15T01:02:03Z" }],
             nextCursor: null,
+            hasMore: false,
           },
         };
 
@@ -415,7 +457,11 @@ describe("ApiClient", () => {
         expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/history", {
           params: { cursor: undefined, limit: 24 },
         });
-        expect(result).toEqual(mockResponse.data);
+        expect(result).toEqual({
+          items: [{ id: "history-1", title: "History model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: undefined, fileCount: undefined, sourceUrl: undefined, downloadedAt: "2026-06-15T01:02:03Z" }],
+          nextCursor: null,
+          hasMore: false,
+        });
       });
     });
   });

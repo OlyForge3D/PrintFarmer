@@ -10,6 +10,7 @@ const {
   mockNavigate,
   mockUsePrintablesUsername,
   mockUsePrintablesCollections,
+  mockUsePrintablesCollectionModels,
   mockUsePrintablesUserModels,
   mockUsePrintablesSearch,
   mockUsePrintablesOAuthStatus,
@@ -21,6 +22,7 @@ const {
   mockNavigate: vi.fn(),
   mockUsePrintablesUsername: vi.fn(),
   mockUsePrintablesCollections: vi.fn(),
+  mockUsePrintablesCollectionModels: vi.fn(),
   mockUsePrintablesUserModels: vi.fn(),
   mockUsePrintablesSearch: vi.fn(),
   mockUsePrintablesOAuthStatus: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock('@/features/models3d/hooks/usePrintablesBrowser', () => ({
     data?.pages.flatMap((page) => page.items) ?? [],
   usePrintablesUsername: () => mockUsePrintablesUsername(),
   usePrintablesCollections: (username: string) => mockUsePrintablesCollections(username),
+  usePrintablesCollectionModels: (collectionId: string, enabled: boolean) => mockUsePrintablesCollectionModels(collectionId, enabled),
   usePrintablesUserModels: (username: string) => mockUsePrintablesUserModels(username),
   usePrintablesSearch: (query: string) => mockUsePrintablesSearch(query),
   usePrintablesOAuthStatus: () => mockUsePrintablesOAuthStatus(),
@@ -91,6 +94,7 @@ describe('PrintablesBrowserModal', () => {
     mockUsePrintablesUsername.mockReturnValue({ username: '', isLoading: false, error: null });
     mockUsePrintablesCollections.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesUserModels.mockReturnValue(createInfiniteQueryResult([]));
+    mockUsePrintablesCollectionModels.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesSearch.mockReturnValue(createInfiniteQueryResult([]));
     mockUsePrintablesOAuthStatus.mockReturnValue({
       data: { isLinked: false, hasRefreshToken: false, scope: null, linkedAtUtc: null, accessTokenExpiresAtUtc: null },
@@ -161,7 +165,12 @@ describe('PrintablesBrowserModal', () => {
           name: 'Favorites',
           modelCount: 1,
           likesCount: 4,
-          models: [
+        },
+      ]),
+    );
+    mockUsePrintablesCollectionModels.mockImplementation((_collectionId: string, enabled: boolean) => (
+      enabled
+        ? createInfiniteQueryResult([
             {
               id: '777',
               title: 'Direct Source Model',
@@ -169,14 +178,16 @@ describe('PrintablesBrowserModal', () => {
               author: 'maker',
               sourceUrl: 'https://www.printables.com/model/777-from-source',
             },
-          ],
-        },
-      ]),
-    );
+          ])
+        : createInfiniteQueryResult([])
+    ));
 
     renderModal(onImportUrl);
 
     fireEvent.click(screen.getByRole('button', { name: 'Show models' }));
+    await waitFor(() => {
+      expect(mockUsePrintablesCollectionModels).toHaveBeenCalledWith('collection-1', true);
+    });
     fireEvent.click(await screen.findByRole('button', { name: 'Import' }));
 
     await waitFor(() => {

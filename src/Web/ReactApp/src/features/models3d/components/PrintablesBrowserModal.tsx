@@ -4,10 +4,11 @@ import { Modal } from '@/common/components/modals/Modal';
 import { SearchIcon, ExternalLinkIcon, FolderOpenIcon, CubeIcon, ChevronDownIcon, ChevronRightIcon } from '@/common/components/icons/MdiIcons';
 import { Alert, Badge, Button, Input, Spinner, Tabs } from '@/common/components/ui';
 import type { ApiError } from '@/types/api';
-import type { PrintablesModelSummary } from '@/types/models';
+import type { PrintablesCollectionSummary, PrintablesModelSummary } from '@/types/models';
 import {
   SEARCH_DEBOUNCE_MS,
   flattenInfiniteItems,
+  usePrintablesCollectionModels,
   usePrintablesDownloadHistory,
   usePrintablesLikedModels,
   usePrintablesOAuthAuthorize,
@@ -104,6 +105,75 @@ function PrintablesModelCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function PrintablesCollectionCard({
+  collection,
+  isExpanded,
+  onToggle,
+  onImport,
+}: {
+  collection: PrintablesCollectionSummary;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onImport: (model: PrintablesModelSummary) => void;
+}) {
+  const collectionModelsQuery = usePrintablesCollectionModels(collection.id, isExpanded);
+  const fetchedCollectionModels = useMemo(
+    () => flattenInfiniteItems(collectionModelsQuery.data),
+    [collectionModelsQuery.data],
+  );
+  const collectionModels = fetchedCollectionModels.length > 0 ? fetchedCollectionModels : (collection.models ?? []);
+  const isLoadingCollectionModels = isExpanded && collectionModelsQuery.isFetching && collectionModels.length === 0;
+
+  return (
+    <section className="rounded-xl border border-pf-border bg-pf-bg-1 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-pf-text-primary">{collection.name}</h4>
+          <p className="text-xs text-pf-text-secondary">{collection.modelCount} models</p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onToggle}
+          iconLeft={isExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+        >
+          {isExpanded ? 'Hide models' : 'Show models'}
+        </Button>
+      </div>
+      {isExpanded && (
+        <div className="mt-3 space-y-3">
+          {isLoadingCollectionModels && (
+            <div className="flex items-center gap-2 text-sm text-pf-text-secondary">
+              <Spinner size="sm" />
+              Loading collection models…
+            </div>
+          )}
+          {!isLoadingCollectionModels && collectionModels.length > 0 ? (
+            collectionModels.map((model) => (
+              <PrintablesModelCard key={`${collection.id}-${model.id}`} model={model} onImport={onImport} />
+            ))
+          ) : null}
+          {!isLoadingCollectionModels && collectionModels.length === 0 ? (
+            <p className="text-sm text-pf-text-secondary">No models available in this collection.</p>
+          ) : null}
+          {collectionModelsQuery.hasNextPage && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void collectionModelsQuery.fetchNextPage()}
+              loading={collectionModelsQuery.isFetchingNextPage}
+            >
+              Load more collection models
+            </Button>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -336,42 +406,20 @@ export function PrintablesBrowserModal({ isOpen, onClose, onImportUrl }: Printab
                     <div className="space-y-3">
                       {collections.map((collection) => {
                         const isExpanded = Boolean(expandedCollectionIds[collection.id]);
-                        const collectionModels = collection.models ?? [];
 
                         return (
-                          <section key={collection.id} className="rounded-xl border border-pf-border bg-pf-bg-1 p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <h4 className="text-sm font-semibold text-pf-text-primary">{collection.name}</h4>
-                                <p className="text-xs text-pf-text-secondary">{collection.modelCount} models</p>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => {
-                                  setExpandedCollectionIds((current) => ({
-                                    ...current,
-                                    [collection.id]: !isExpanded,
-                                  }));
-                                }}
-                                iconLeft={isExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
-                              >
-                                {isExpanded ? 'Hide models' : 'Show models'}
-                              </Button>
-                            </div>
-                            {isExpanded && (
-                              <div className="mt-3 space-y-3">
-                                {collectionModels.length > 0 ? (
-                                  collectionModels.map((model) => (
-                                    <PrintablesModelCard key={`${collection.id}-${model.id}`} model={model} onImport={handleImport} />
-                                  ))
-                                ) : (
-                                  <p className="text-sm text-pf-text-secondary">No models available in this collection.</p>
-                                )}
-                              </div>
-                            )}
-                          </section>
+                          <PrintablesCollectionCard
+                            key={collection.id}
+                            collection={collection}
+                            isExpanded={isExpanded}
+                            onToggle={() => {
+                              setExpandedCollectionIds((current) => ({
+                                ...current,
+                                [collection.id]: !isExpanded,
+                              }));
+                            }}
+                            onImport={handleImport}
+                          />
                         );
                       })}
                     </div>
