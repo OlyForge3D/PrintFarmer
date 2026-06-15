@@ -475,6 +475,76 @@ public class PrintablesOAuthServiceTests
         (await assertDb.UserSettings.CountAsync(x => x.UserId == userId)).Should().Be(1);
     }
 
+    [Fact]
+    public async Task HandleCallbackAsync_FirstLinkUniqueRace_WithCompetingUnlinkedRow_LinksSuccessfully()
+    {
+        Guid userId = Guid.NewGuid();
+        await using SqliteConnection connection = new("Data Source=file:printables-oauth-callback-first-link-unlinked-race?mode=memory&cache=shared");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (AppDbContext seedDb = new(options))
+        {
+            await seedDb.Database.EnsureCreatedAsync();
+            _ = seedDb.Users.Add(new User
+            {
+                Id = userId,
+                Username = "printables-callback-unlinked-race-user",
+                Email = "printables-callback-unlinked-race@example.com",
+                PasswordHash = "hash",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext db = new(options);
+        HttpClient client = new(new SequenceHttpHandler(_ => Json(HttpStatusCode.OK, """
+            {
+              "access_token": "callback-access",
+              "refresh_token": "callback-refresh",
+              "token_type": "Bearer",
+              "scope": "likes history",
+              "expires_in": 3600
+            }
+            """)));
+
+        PrintablesOAuthService sut = CreateService(db, client);
+        PrintablesOAuthConnectResponseDto connect = await sut.BuildConnectUrlAsync(userId, CancellationToken.None);
+        string state = GetRequiredQueryParam(connect.AuthorizationUrl, "state");
+
+        bool insertedConcurrentRow = false;
+        db.SavingChanges += (_, _) =>
+        {
+            if (insertedConcurrentRow)
+            {
+                return;
+            }
+
+            insertedConcurrentRow = true;
+            using AppDbContext concurrentDb = new(options);
+            _ = concurrentDb.UserSettings.Add(new UserSettings
+            {
+                UserId = userId,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = concurrentDb.SaveChanges();
+        };
+
+        PrintablesOAuthStatusDto status = await sut.HandleCallbackAsync(userId, "oauth-code", state, CancellationToken.None);
+
+        status.IsLinked.Should().BeTrue();
+
+        await using AppDbContext assertDb = new(options);
+        UserSettings? linked = await assertDb.UserSettings.SingleAsync(x => x.UserId == userId);
+        linked.PrintablesOAuthAccessToken.Should().Be("enc:callback-access");
+        linked.PrintablesOAuthRefreshToken.Should().Be("enc:callback-refresh");
+    }
+
     private static ControllerContext BuildControllerContext(Guid userId)
     {
         ClaimsPrincipal principal = new(new ClaimsIdentity(

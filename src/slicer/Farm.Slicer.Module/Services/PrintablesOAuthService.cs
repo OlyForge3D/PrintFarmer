@@ -133,13 +133,7 @@ public sealed class PrintablesOAuthService(
         TokenExchangeResponse tokenResponse = await ExchangeCodeForTokensAsync(code.Trim(), pending.CodeVerifier, ct);
 
         UserSettings settings = await GetOrCreateUserSettingsAsync(userId, ct);
-        settings.PrintablesOAuthAccessToken = _sensitiveDataProtector.Protect(tokenResponse.AccessToken);
-        settings.PrintablesOAuthRefreshToken = _sensitiveDataProtector.Protect(tokenResponse.RefreshToken);
-        settings.PrintablesOAuthTokenType = tokenResponse.TokenType;
-        settings.PrintablesOAuthScope = tokenResponse.Scope;
-        settings.PrintablesOAuthTokenExpiresAtUtc = tokenResponse.ExpiresAtUtc;
-        settings.PrintablesOAuthLinkedAtUtc = DateTime.UtcNow;
-        settings.UpdatedAt = DateTime.UtcNow;
+        ApplyLinkedOAuthTokens(settings, tokenResponse);
 
         try
         {
@@ -165,15 +159,40 @@ public sealed class PrintablesOAuthService(
             _logger.LogWarning(ex, "Concurrent Printables OAuth callback first-link race for user {UserId}", userId);
             _db.ChangeTracker.Clear();
 
-            UserSettings? latest = await _db.UserSettings.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == userId, ct);
-            if (!HasLinkedOAuthTokens(latest))
+            UserSettings? latest = await _db.UserSettings.FirstOrDefaultAsync(x => x.UserId == userId, ct);
+            if (latest is null)
             {
                 throw new PrintablesOAuthNotLinkedException(
                     "Printables account is no longer linked due to a concurrent update. Reconnect and try again.",
                     ex);
             }
 
-            return MapStatus(latest!);
+            if (!HasLinkedOAuthTokens(latest))
+            {
+                ApplyLinkedOAuthTokens(latest, tokenResponse);
+
+                try
+                {
+                    await _db.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Concurrent Printables OAuth callback race retry conflict for user {UserId}", userId);
+                    _db.ChangeTracker.Clear();
+
+                    UserSettings? latestAfterRetry = await _db.UserSettings.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == userId, ct);
+                    if (HasLinkedOAuthTokens(latestAfterRetry))
+                    {
+                        return MapStatus(latestAfterRetry!);
+                    }
+
+                    throw new PrintablesOAuthTemporarilyUnavailableException(
+                        "Printables authorization is temporarily unavailable due to concurrent updates. Please retry.",
+                        retryEx);
+                }
+            }
+
+            return MapStatus(latest);
         }
 
         _logger.LogInformation("Linked Printables OAuth2 account for user {UserId}", userId);
@@ -875,6 +894,17 @@ public sealed class PrintablesOAuthService(
 
     private static bool HasLinkedOAuthTokens(UserSettings? settings) =>
         settings is not null && !string.IsNullOrWhiteSpace(settings.PrintablesOAuthAccessToken);
+
+    private void ApplyLinkedOAuthTokens(UserSettings settings, TokenExchangeResponse tokenResponse)
+    {
+        settings.PrintablesOAuthAccessToken = _sensitiveDataProtector.Protect(tokenResponse.AccessToken);
+        settings.PrintablesOAuthRefreshToken = _sensitiveDataProtector.Protect(tokenResponse.RefreshToken);
+        settings.PrintablesOAuthTokenType = tokenResponse.TokenType;
+        settings.PrintablesOAuthScope = tokenResponse.Scope;
+        settings.PrintablesOAuthTokenExpiresAtUtc = tokenResponse.ExpiresAtUtc;
+        settings.PrintablesOAuthLinkedAtUtc = DateTime.UtcNow;
+        settings.UpdatedAt = DateTime.UtcNow;
+    }
 
     private static void ClearLinkedOAuthTokens(UserSettings settings)
     {
