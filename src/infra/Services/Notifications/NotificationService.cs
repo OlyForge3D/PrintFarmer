@@ -158,7 +158,8 @@ public class NotificationService(
     IHubContext<PrinterHub>? hubContext = null,
     IWebhookService? webhookService = null,
     IEmailService? emailService = null,
-    IWebPushNotificationSender? webPushNotificationSender = null) : INotificationService
+    IWebPushNotificationSender? webPushNotificationSender = null,
+    Func<string, CancellationToken, Task<bool>>? pushEndpointValidatorOverride = null) : INotificationService
 {
     private static readonly string[] KnownPushServiceHosts =
     {
@@ -171,6 +172,7 @@ public class NotificationService(
     private const int MaxPushSubscriptionsPerUser = 5;
     private const int ChannelFanOutConcurrency = 8;
     private const int PushFanOutConcurrency = 8;
+    private readonly Func<string, CancellationToken, Task<bool>> pushEndpointValidator = pushEndpointValidatorOverride ?? IsValidPushEndpointAsync;
 
     public async Task SendJobStartedAsync(
         string jobId,
@@ -599,9 +601,9 @@ public class NotificationService(
             },
             async (target, ct) =>
             {
-                if (!await IsValidPushEndpointAsync(target.Endpoint, ct))
+                if (!await pushEndpointValidator(target.Endpoint, ct))
                 {
-                    outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: true, Error: "Endpoint no longer routable/public"));
+                    outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: false, Error: "Endpoint failed local validation"));
                     return;
                 }
 
@@ -699,7 +701,7 @@ public class NotificationService(
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
     {
-        if (!await IsValidPushEndpointAsync(endpoint, cancellationToken))
+        if (!await pushEndpointValidator(endpoint, cancellationToken))
         {
             throw new ArgumentException("Endpoint must be an absolute HTTPS URL and cannot target local/private hosts", nameof(endpoint));
         }

@@ -5,6 +5,7 @@ using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.Notifications;
+using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -175,6 +176,72 @@ public class NotificationServiceDeliveryTests : IDisposable
         _notificationRepository.Verify(x => x.AddAsync(It.Is<Notification>(n => n.Type == NotificationType.JobFailed), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task SendJobCompletedAsync_EndpointValidationFailsWithoutProviderExpiry_DoesNotRemoveSubscription()
+    {
+        UserDto user = CreateUser();
+        _usersRepository.Setup(x => x.GetUsersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserDto> { user });
+
+        _dbContext.NotificationPreferences.Add(new NotificationPreferences
+        {
+            UserId = user.Id,
+            EnablePushNotifications = true,
+            PushOnJobCompleted = true
+        });
+
+        var subscription = new PushSubscription
+        {
+            UserId = user.Id,
+            Endpoint = "https://fcm.googleapis.com/sub-transient",
+            P256dh = "k1",
+            Auth = "a1"
+        };
+        _dbContext.PushSubscriptions.Add(subscription);
+        await _dbContext.SaveChangesAsync();
+
+        NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(false));
+
+        await service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
+
+        _webPushSender.Verify(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        int remaining = await _dbContext.PushSubscriptions.CountAsync(s => s.UserId == user.Id);
+        remaining.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SendJobCompletedAsync_ProviderSignalsSubscriptionExpired_RemovesSubscription()
+    {
+        UserDto user = CreateUser();
+        _usersRepository.Setup(x => x.GetUsersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserDto> { user });
+        _webPushSender.Setup(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WebPushDispatchResult(Success: false, SubscriptionExpired: true, Error: "SubscriptionExpired"));
+
+        _dbContext.NotificationPreferences.Add(new NotificationPreferences
+        {
+            UserId = user.Id,
+            EnablePushNotifications = true,
+            PushOnJobCompleted = true
+        });
+
+        _dbContext.PushSubscriptions.Add(new PushSubscription
+        {
+            UserId = user.Id,
+            Endpoint = "https://fcm.googleapis.com/sub-expired",
+            P256dh = "k1",
+            Auth = "a1"
+        });
+        await _dbContext.SaveChangesAsync();
+
+        NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(true));
+
+        await service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
+
+        int remaining = await _dbContext.PushSubscriptions.CountAsync(s => s.UserId == user.Id);
+        remaining.Should().Be(0);
+    }
+
     private UserDto CreateUser()
     {
         return new UserDto
@@ -186,7 +253,7 @@ public class NotificationServiceDeliveryTests : IDisposable
         };
     }
 
-    private NotificationService CreateService()
+    private NotificationService CreateService(Func<string, CancellationToken, Task<bool>>? endpointValidator = null)
     {
         return new NotificationService(
             _notificationRepository.Object,
@@ -196,7 +263,8 @@ public class NotificationServiceDeliveryTests : IDisposable
             null,
             null,
             _emailService.Object,
-            _webPushSender.Object);
+            _webPushSender.Object,
+            endpointValidator);
     }
 
     public void Dispose()
