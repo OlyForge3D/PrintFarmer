@@ -505,6 +505,30 @@ public class PrintablesImportServiceTests
     }
 
     [Fact]
+    public async Task GetCollectionModelsAsync_OrderingMissing_UsesAddedToCollectionDefault()
+    {
+        QueueingHttpMessageHandler handler = new(
+            """
+            {
+              "data": {
+                "moreCollectionModels": {
+                  "cursor": null,
+                  "items": []
+                }
+              }
+            }
+            """);
+        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+
+        _ = await client.GetCollectionModelsAsync(" 2695539 ", 24, null, null, null, CancellationToken.None);
+
+        using JsonDocument payload = JsonDocument.Parse(handler.RequestBodies.Last());
+        JsonElement variables = payload.RootElement.GetProperty("variables");
+        _ = variables.GetProperty("collectionId").GetString().Should().Be("2695539");
+        _ = variables.GetProperty("ordering").GetString().Should().Be("added_to_collection");
+    }
+
+    [Fact]
     public async Task GetPrintProfileAsync_TransientFailure_RetriesAndSucceeds()
     {
         TransientThenSuccessHandler handler = new(

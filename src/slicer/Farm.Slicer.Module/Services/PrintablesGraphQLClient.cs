@@ -192,7 +192,8 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         string? normalizedCursor = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim();
         string? normalizedQuery = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
         string? normalizedOrdering = NormalizeOptionalOrdering(ordering);
-        string cacheKey = $"printables:collection-models:{normalizedCollectionId}:{normalizedLimit}:{normalizedCursor}:{normalizedQuery}:{normalizedOrdering}";
+        string effectiveOrdering = normalizedOrdering ?? "added_to_collection";
+        string cacheKey = $"printables:collection-models:{normalizedCollectionId}:{normalizedLimit}:{normalizedCursor}:{normalizedQuery}:{effectiveOrdering}";
 
         return GetOrCreateCachedAsync(
             cacheKey,
@@ -244,7 +245,7 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
                             limit = normalizedLimit,
                             cursor = normalizedCursor,
                             query = normalizedQuery,
-                            ordering = normalizedOrdering,
+                            ordering = effectiveOrdering,
                         },
                     },
                     token);

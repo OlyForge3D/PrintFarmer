@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain.Notifications;
@@ -190,20 +191,8 @@ public class NotificationsController(INotificationService notificationService) :
             Guid userId = GetUserIdFromClaims();
 
             NotificationPreferences? preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
-            NotificationPreferences effective = preferences ?? new NotificationPreferences { UserId = userId };
-            return Ok(new NotificationPreferencesDto
-            {
-                UserId = effective.UserId,
-                EnableEmailNotifications = effective.EnableEmailNotifications,
-                EnablePushNotifications = effective.EnablePushNotifications,
-                EnableInAppNotifications = effective.EnableInAppNotifications,
-                NotifyOnCompletion = effective.NotifyOnCompletion,
-                NotifyOnFailure = effective.NotifyOnFailure,
-                NotifyOnStart = effective.NotifyOnStart,
-                NotifyOnPause = effective.NotifyOnPause,
-                Frequency = effective.Frequency,
-                RetentionDays = effective.RetentionDays
-            });
+            NotificationPreferences effective = preferences ?? CreateDefaultPreferences(userId);
+            return Ok(ToDto(effective));
         }
         catch (InvalidOperationException)
         {
@@ -251,21 +240,9 @@ public class NotificationsController(INotificationService notificationService) :
                 RetentionDays = request.RetentionDays ?? 30
             };
 
+            ApplyEventChannelPreferences(preferences, request);
             await notificationService.UpdatePreferencesAsync(userId, preferences, cancellationToken);
-
-            return Ok(new NotificationPreferencesDto
-            {
-                UserId = preferences.UserId,
-                EnableEmailNotifications = preferences.EnableEmailNotifications,
-                EnablePushNotifications = preferences.EnablePushNotifications,
-                EnableInAppNotifications = preferences.EnableInAppNotifications,
-                NotifyOnCompletion = preferences.NotifyOnCompletion,
-                NotifyOnFailure = preferences.NotifyOnFailure,
-                NotifyOnStart = preferences.NotifyOnStart,
-                NotifyOnPause = preferences.NotifyOnPause,
-                Frequency = preferences.Frequency,
-                RetentionDays = preferences.RetentionDays
-            });
+            return Ok(ToDto(preferences));
         }
         catch (InvalidOperationException)
         {
@@ -315,7 +292,12 @@ public class NotificationsController(INotificationService notificationService) :
                 return BadRequest(new { error = "Endpoint is required" });
             }
 
-            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys?.P256dh ?? string.Empty, request.Keys?.Auth ?? string.Empty, cancellationToken);
+            if (string.IsNullOrWhiteSpace(request.Keys?.P256dh) || string.IsNullOrWhiteSpace(request.Keys?.Auth))
+            {
+                return BadRequest(new { error = "Subscription keys p256dh and auth are required" });
+            }
+
+            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys.P256dh, request.Keys.Auth, cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException)
@@ -360,6 +342,156 @@ public class NotificationsController(INotificationService notificationService) :
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
+    {
+        return new NotificationPreferencesDto
+        {
+            UserId = preferences.UserId,
+            EnableEmailNotifications = preferences.EnableEmailNotifications,
+            EnablePushNotifications = preferences.EnablePushNotifications,
+            EnableInAppNotifications = preferences.EnableInAppNotifications,
+            NotifyOnCompletion = preferences.NotifyOnCompletion,
+            NotifyOnFailure = preferences.NotifyOnFailure,
+            NotifyOnStart = preferences.NotifyOnStart,
+            NotifyOnPause = preferences.NotifyOnPause,
+            EventChannelPreferences = BuildEventChannelPreferences(preferences),
+            Frequency = preferences.Frequency,
+            RetentionDays = preferences.RetentionDays
+        };
+    }
+
+    private static NotificationPreferences CreateDefaultPreferences(Guid userId)
+    {
+        var defaults = new NotificationPreferences
+        {
+            UserId = userId
+        };
+        ApplyEventChannelPreferences(defaults, new UpdateNotificationPreferencesRequest());
+        return defaults;
+    }
+
+    private static List<NotificationEventChannelPreferenceDto> BuildEventChannelPreferences(NotificationPreferences preferences)
+    {
+        return new List<NotificationEventChannelPreferenceDto>
+        {
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobStarted,
+                InApp = preferences.InAppOnJobStarted,
+                Email = preferences.EmailOnJobStarted,
+                Push = preferences.PushOnJobStarted
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobCompleted,
+                InApp = preferences.InAppOnJobCompleted,
+                Email = preferences.EmailOnJobCompleted,
+                Push = preferences.PushOnJobCompleted
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobFailed,
+                InApp = true,
+                Email = preferences.EmailOnJobFailed,
+                Push = preferences.PushOnJobFailed
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobPaused,
+                InApp = preferences.InAppOnJobPaused,
+                Email = preferences.EmailOnJobPaused,
+                Push = preferences.PushOnJobPaused
+            }
+        };
+    }
+
+    private static void ApplyEventChannelPreferences(NotificationPreferences preferences, UpdateNotificationPreferencesRequest request)
+    {
+        List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
+        if (matrix is null || matrix.Count == 0)
+        {
+            preferences.InAppOnJobStarted = request.EnableInAppNotifications && request.NotifyOnStart;
+            preferences.InAppOnJobCompleted = request.EnableInAppNotifications && request.NotifyOnCompletion;
+            preferences.InAppOnJobFailed = true;
+            preferences.InAppOnJobPaused = request.EnableInAppNotifications && request.NotifyOnPause;
+            preferences.EmailOnJobStarted = request.EnableEmailNotifications && request.NotifyOnStart;
+            preferences.EmailOnJobCompleted = request.EnableEmailNotifications && request.NotifyOnCompletion;
+            preferences.EmailOnJobFailed = request.EnableEmailNotifications && request.NotifyOnFailure;
+            preferences.EmailOnJobPaused = request.EnableEmailNotifications && request.NotifyOnPause;
+            preferences.PushOnJobStarted = request.EnablePushNotifications && request.NotifyOnStart;
+            preferences.PushOnJobCompleted = request.EnablePushNotifications && request.NotifyOnCompletion;
+            preferences.PushOnJobFailed = request.EnablePushNotifications && request.NotifyOnFailure;
+            preferences.PushOnJobPaused = request.EnablePushNotifications && request.NotifyOnPause;
+            return;
+        }
+
+        preferences.InAppOnJobStarted = false;
+        preferences.InAppOnJobCompleted = true;
+        preferences.InAppOnJobFailed = true;
+        preferences.InAppOnJobPaused = true;
+        preferences.EmailOnJobStarted = false;
+        preferences.EmailOnJobCompleted = true;
+        preferences.EmailOnJobFailed = true;
+        preferences.EmailOnJobPaused = true;
+        preferences.PushOnJobStarted = false;
+        preferences.PushOnJobCompleted = true;
+        preferences.PushOnJobFailed = true;
+        preferences.PushOnJobPaused = true;
+
+        foreach (NotificationEventChannelPreferenceDto item in matrix)
+        {
+            if (item is null)
+            {
+                continue;
+            }
+
+            switch (item.EventType)
+            {
+                case NotificationPreferenceEventType.JobStarted:
+                    preferences.InAppOnJobStarted = item.InApp;
+                    preferences.EmailOnJobStarted = item.Email;
+                    preferences.PushOnJobStarted = item.Push;
+                    break;
+                case NotificationPreferenceEventType.JobCompleted:
+                    preferences.InAppOnJobCompleted = item.InApp;
+                    preferences.EmailOnJobCompleted = item.Email;
+                    preferences.PushOnJobCompleted = item.Push;
+                    break;
+                case NotificationPreferenceEventType.JobFailed:
+                    preferences.InAppOnJobFailed = true;
+                    preferences.EmailOnJobFailed = item.Email;
+                    preferences.PushOnJobFailed = item.Push;
+                    break;
+                case NotificationPreferenceEventType.JobPaused:
+                    preferences.InAppOnJobPaused = item.InApp;
+                    preferences.EmailOnJobPaused = item.Email;
+                    preferences.PushOnJobPaused = item.Push;
+                    break;
+            }
+        }
+
+        preferences.EnableInAppNotifications =
+            preferences.InAppOnJobStarted
+            || preferences.InAppOnJobCompleted
+            || preferences.InAppOnJobFailed
+            || preferences.InAppOnJobPaused;
+        preferences.EnableEmailNotifications =
+            preferences.EmailOnJobStarted
+            || preferences.EmailOnJobCompleted
+            || preferences.EmailOnJobFailed
+            || preferences.EmailOnJobPaused;
+        preferences.EnablePushNotifications =
+            preferences.PushOnJobStarted
+            || preferences.PushOnJobCompleted
+            || preferences.PushOnJobFailed
+            || preferences.PushOnJobPaused;
+
+        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted;
+        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted;
+        preferences.NotifyOnFailure = true;
+        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused;
     }
 
     /// <summary>
@@ -410,13 +542,16 @@ public class UpdateNotificationPreferencesRequest
     public bool NotifyOnStart { get; set; } = false;
 
     /// <summary>Notify on job pause</summary>
-    public bool NotifyOnPause { get; set; } = false;
+    public bool NotifyOnPause { get; set; } = true;
 
     /// <summary>Notification frequency (RealTime, Hourly, Daily, Weekly, Never)</summary>
     public NotificationFrequency Frequency { get; set; } = NotificationFrequency.RealTime;
 
     /// <summary>Retention days for notification history</summary>
     public int? RetentionDays { get; set; } = 30;
+
+    /// <summary>Per-event by channel notification matrix.</summary>
+    public List<NotificationEventChannelPreferenceDto>? EventChannelPreferences { get; set; }
 }
 
 /// <summary>
@@ -493,11 +628,33 @@ public class NotificationPreferencesDto
     /// <summary>Notify on job pause</summary>
     public bool NotifyOnPause { get; set; }
 
+    /// <summary>Per-event by channel notification matrix.</summary>
+    public List<NotificationEventChannelPreferenceDto> EventChannelPreferences { get; set; } = new();
+
     /// <summary>Notification frequency</summary>
     public NotificationFrequency Frequency { get; set; }
 
     /// <summary>Retention days for notification history</summary>
     public int RetentionDays { get; set; }
+}
+
+public enum NotificationPreferenceEventType
+{
+    JobStarted,
+    JobCompleted,
+    JobFailed,
+    JobPaused
+}
+
+public class NotificationEventChannelPreferenceDto
+{
+    public NotificationPreferenceEventType EventType { get; set; }
+
+    public bool InApp { get; set; }
+
+    public bool Email { get; set; }
+
+    public bool Push { get; set; }
 }
 
 /// <summary>

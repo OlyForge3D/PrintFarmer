@@ -22,9 +22,9 @@
 | 🔍 Brett | Researcher | .squad/agents/brett/charter.md | Active |
 | ⚙️ Parker | DevOps & Deployment Engineer | .squad/agents/parker/charter.md | Active |
 | 🎨 Newt | Designer (Industrial UI) | .squad/agents/newt/charter.md | Active |
-| 🔍 Bishop | Code Reviewer (GPT-5.4) | .squad/agents/bishop/charter.md | Active |
-| 🔍 Hicks | Code Reviewer (Gemini 3 Pro) | .squad/agents/hicks/charter.md | Active |
-| 🔍 Vasquez | Code Reviewer (Opus 4.6) | .squad/agents/vasquez/charter.md | Active |
+| 🔍 Bishop | Code Reviewer (Claude Opus 4.8) | .squad/agents/bishop/charter.md | Active |
+| 🔍 Hicks | Code Reviewer (GPT-5.5) | .squad/agents/hicks/charter.md | Active |
+| 🔍 Vasquez | Code Reviewer (Gemini 3.1 Pro Preview) | .squad/agents/vasquez/charter.md | Active |
 | 📋 Scribe | Session Logger | .squad/agents/scribe/charter.md | Active |
 | 🔄 Ralph | Work Monitor | — | Active |
 
@@ -37,16 +37,14 @@
 
 ## Repos
 
-| Repo | Local Path | Primary Language | Domain |
+| Repository | GitHub Repo | Primary Language | Domain |
 |------|-----------|-----------------|--------|
-| PrintFarmer (PFarm1) | `/Users/jpapiez/s/PFarm1` | C# .NET + React TypeScript | Backend API, React dashboard, slicer workers |
-| PrintFarmerMobile (PFarm-Ios) | `/Users/jpapiez/s/PFarm-Ios` | Swift / SwiftUI | iOS companion app |
-| Spoolman fork (spoolman_pf) | `/Users/jpapiez/s/spoolman_pf` | Python + React TypeScript | Filament spool tracking service |
+| PrintFarmer | `OlyForge3D/PrintFarmer` | C# .NET + React TypeScript + Swift | Backend API, React dashboard, slicer workers, iOS companion app (`mobile/`) |
+| Spoolman | `OlyForge3D/Spoolman` | Python + React TypeScript | Filament spool tracking service |
 
 ## Stacks
 
-| Repo | Stack |
+| Repository | Stack |
 |------|-------|
-| PFarm1 | C# .NET 10, ASP.NET Core, EF Core, SignalR, React 19, TypeScript, Tailwind CSS, Vitest, xUnit |
-| PFarm-Ios | Swift 6, SwiftUI, Combine, XCTest |
-| spoolman_pf | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |
+| PrintFarmer (`OlyForge3D/PrintFarmer`) | C# .NET 10, ASP.NET Core, EF Core, SignalR, React 19, TypeScript, Tailwind CSS, Vitest, xUnit, Swift 6, SwiftUI, Combine, XCTest |
+| Spoolman (`OlyForge3D/Spoolman`) | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |

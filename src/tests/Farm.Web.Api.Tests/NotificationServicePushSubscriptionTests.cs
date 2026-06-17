@@ -10,6 +10,9 @@ namespace Farm.Web.Api.Tests;
 
 public class NotificationServicePushSubscriptionTests : IDisposable
 {
+    private const string ValidP256dh = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=";
+    private const string ValidAuth = "AQIDBAUGBwgJCgsMDQ4PEA==";
+
     private readonly AppDbContext _dbContext;
     private readonly NotificationService _service;
 
@@ -96,6 +99,72 @@ public class NotificationServicePushSubscriptionTests : IDisposable
         // Assert: existing subscription untouched
         var remaining = await _dbContext.PushSubscriptions.Where(s => s.UserId == userId).ToListAsync();
         remaining.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_InvalidEndpoint_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "http://localhost:8080/push", ValidP256dh, ValidAuth);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_ExceedingMaxSubscriptions_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+        for (int i = 0; i < 5; i++)
+        {
+            _dbContext.PushSubscriptions.Add(new PushSubscription
+            {
+                UserId = userId,
+                Endpoint = $"https://push.example.com/sub{i}",
+                P256dh = $"k{i}",
+                Auth = $"a{i}"
+            });
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://fcm.googleapis.com/sub-overflow", ValidP256dh, ValidAuth);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Maximum of 5 push subscriptions per user exceeded*");
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_InvalidKeyMaterial_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://fcm.googleapis.com/sub", "%%%%", "###");
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*p256dh/auth are invalid*");
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_IPv4MappedPrivateIPv6Endpoint_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://[::ffff:10.0.0.1]/sub", ValidP256dh, ValidAuth);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*cannot target local/private hosts*");
+    }
+
+    [Fact]
+    public async Task SavePushSubscriptionAsync_IPv4CompatibleLoopbackIPv6Endpoint_ThrowsArgumentException()
+    {
+        var userId = Guid.NewGuid();
+
+        Func<Task> act = () => _service.SavePushSubscriptionAsync(userId, "https://[::127.0.0.1]/sub", ValidP256dh, ValidAuth);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*cannot target local/private hosts*");
     }
 
     public void Dispose()

@@ -1,8 +1,12 @@
-﻿using Farm.Infrastructure.Contracts.Auth;
+using System.Collections.Concurrent;
+using System.Net;
+using System.Text.Json;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
@@ -152,8 +156,24 @@ public class NotificationService(
     ILogger<NotificationService> logger,
     AppDbContext dbContext,
     IHubContext<PrinterHub>? hubContext = null,
-    IWebhookService? webhookService = null) : INotificationService
+    IWebhookService? webhookService = null,
+    IEmailService? emailService = null,
+    IWebPushNotificationSender? webPushNotificationSender = null,
+    Func<string, CancellationToken, Task<bool>>? pushEndpointValidatorOverride = null) : INotificationService
 {
+    private static readonly string[] KnownPushServiceHosts =
+    {
+        "fcm.googleapis.com",
+        "updates.push.services.mozilla.com",
+        "web.push.apple.com",
+        "notify.windows.com",
+    };
+
+    private const int MaxPushSubscriptionsPerUser = 5;
+    private const int ChannelFanOutConcurrency = 8;
+    private const int PushFanOutConcurrency = 8;
+    private readonly Func<string, CancellationToken, Task<bool>> pushEndpointValidator = pushEndpointValidatorOverride ?? IsValidPushEndpointAsync;
+
     public async Task SendJobStartedAsync(
         string jobId,
         string jobName,
@@ -243,20 +263,7 @@ public class NotificationService(
 
         try
         {
-            IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
-            IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
-
-            foreach (UserDto user in activeUsers)
-            {
-                if (!await ShouldNotifyUserAsync(user.Id, type, cancellationToken))
-                {
-                    continue;
-                }
-
-                await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
-            }
-
-            // Broadcast real-time event via SignalR so connected clients update immediately
+            // Broadcast realtime/webhook first so UI and integrations are not delayed by channel fan-out work.
             if (hubContext != null)
             {
                 await hubContext.Clients.All.SendAsync(
@@ -265,8 +272,7 @@ public class NotificationService(
                     cancellationToken);
             }
 
-            // Dispatch webhook for job events
-            var webhookEventType = type switch
+            string? webhookEventType = type switch
             {
                 NotificationType.JobStarted => "job.started",
                 NotificationType.JobCompleted => "job.completed",
@@ -279,6 +285,65 @@ public class NotificationService(
             {
                 webhookService?.Enqueue(webhookEventType, new { jobId = parsedJobId, subject, body });
             }
+
+            IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
+            IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
+            var pendingEmailTargets = new List<EmailDispatchTarget>();
+            var pendingPushTargets = new List<PushDispatchTarget>();
+
+            foreach (UserDto user in activeUsers)
+            {
+                NotificationPreferences? prefs = await GetPreferencesAsync(user.Id, cancellationToken);
+                NotificationPreferences effectivePrefs = prefs ?? BuildDefaultPreferences(user.Id);
+
+                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.InApp))
+                {
+                    await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
+                }
+
+                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Email))
+                {
+                    pendingEmailTargets.Add(new EmailDispatchTarget(user));
+                }
+
+                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Push))
+                {
+                    List<PushSubscription> userSubscriptions = await dbContext.PushSubscriptions
+                        .AsNoTracking()
+                        .Where(s => s.UserId == user.Id)
+                        .ToListAsync(cancellationToken);
+                    foreach (PushSubscription subscription in userSubscriptions)
+                    {
+                        pendingPushTargets.Add(new PushDispatchTarget(
+                            subscription.Id,
+                            user.Id,
+                            subscription.Endpoint,
+                            subscription.P256dh,
+                            subscription.Auth));
+                    }
+                }
+            }
+
+            Task pushDispatchTask = Task.CompletedTask;
+            if (pendingPushTargets.Count > 0)
+            {
+                string payload = JsonSerializer.Serialize(new
+                {
+                    type = type.ToString(),
+                    subject,
+                    body,
+                    jobId = parsedJobId
+                });
+                pushDispatchTask = DispatchPushTargetsAsync(pendingPushTargets, payload, cancellationToken);
+            }
+
+            Task emailDispatchTask = Task.CompletedTask;
+            if (pendingEmailTargets.Count > 0)
+            {
+                emailDispatchTask = DispatchEmailTargetsAsync(pendingEmailTargets, type, subject, body, cancellationToken);
+            }
+
+            await Task.WhenAll(pushDispatchTask, emailDispatchTask);
 
             logger.LogInformation(
                 "Job notification broadcast ({Type}) for job {JobId}: {Subject}",
@@ -362,6 +427,7 @@ public class NotificationService(
     public async Task<NotificationPreferences?> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         return await dbContext.NotificationPreferences
+            .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
     }
 
@@ -374,6 +440,7 @@ public class NotificationService(
         {
             preferences.Id = Guid.NewGuid().ToString();
             preferences.UserId = userId;
+            preferences.InAppOnJobFailed = true;
             preferences.CreatedAt = DateTime.UtcNow;
             preferences.UpdatedAt = DateTime.UtcNow;
             dbContext.NotificationPreferences.Add(preferences);
@@ -387,6 +454,18 @@ public class NotificationService(
             existing.NotifyOnFailure = preferences.NotifyOnFailure;
             existing.NotifyOnStart = preferences.NotifyOnStart;
             existing.NotifyOnPause = preferences.NotifyOnPause;
+            existing.InAppOnJobStarted = preferences.InAppOnJobStarted;
+            existing.InAppOnJobCompleted = preferences.InAppOnJobCompleted;
+            existing.InAppOnJobFailed = true;
+            existing.InAppOnJobPaused = preferences.InAppOnJobPaused;
+            existing.EmailOnJobStarted = preferences.EmailOnJobStarted;
+            existing.EmailOnJobCompleted = preferences.EmailOnJobCompleted;
+            existing.EmailOnJobFailed = preferences.EmailOnJobFailed;
+            existing.EmailOnJobPaused = preferences.EmailOnJobPaused;
+            existing.PushOnJobStarted = preferences.PushOnJobStarted;
+            existing.PushOnJobCompleted = preferences.PushOnJobCompleted;
+            existing.PushOnJobFailed = preferences.PushOnJobFailed;
+            existing.PushOnJobPaused = preferences.PushOnJobPaused;
             existing.Frequency = preferences.Frequency;
             existing.RetentionDays = preferences.RetentionDays;
             existing.UpdatedAt = DateTime.UtcNow;
@@ -415,63 +494,236 @@ public class NotificationService(
         }
     }
 
-    /// <summary>
-    /// Checks if a user should receive a notification of the given type based on their preferences.
-    /// If no preferences are stored, the user receives all notifications (opt-out model).
-    /// </summary>
-    private async Task<bool> ShouldNotifyUserAsync(Guid userId, NotificationType type, CancellationToken cancellationToken)
+    private static NotificationPreferences BuildDefaultPreferences(Guid userId)
     {
-        var prefs = await dbContext.NotificationPreferences
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-
-        if (prefs is null)
+        return new NotificationPreferences
         {
-            return true; // no preferences set — default to all enabled
+            UserId = userId,
+            EnableEmailNotifications = true,
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
+            NotifyOnCompletion = true,
+            NotifyOnFailure = true,
+            NotifyOnStart = false,
+            NotifyOnPause = true,
+            InAppOnJobStarted = false,
+            InAppOnJobCompleted = true,
+            InAppOnJobFailed = true,
+            InAppOnJobPaused = true,
+            EmailOnJobStarted = false,
+            EmailOnJobCompleted = true,
+            EmailOnJobFailed = true,
+            EmailOnJobPaused = true,
+            PushOnJobStarted = false,
+            PushOnJobCompleted = true,
+            PushOnJobFailed = true,
+            PushOnJobPaused = true,
+            Frequency = NotificationFrequency.RealTime,
+            RetentionDays = 30
+        };
+    }
+
+    private static bool ShouldDeliverToChannel(NotificationPreferences preferences, NotificationType type, NotificationDeliveryChannel channel)
+    {
+        if (type == NotificationType.JobFailed && channel == NotificationDeliveryChannel.InApp)
+        {
+            return true;
         }
 
-        if (!prefs.EnableInAppNotifications)
+        bool channelGloballyEnabled = channel switch
+        {
+            NotificationDeliveryChannel.InApp => preferences.EnableInAppNotifications,
+            NotificationDeliveryChannel.Email => preferences.EnableEmailNotifications,
+            NotificationDeliveryChannel.Push => preferences.EnablePushNotifications,
+            _ => false
+        };
+
+        if (!channelGloballyEnabled)
         {
             return false;
         }
 
-        return type switch
+        if (!IsPrintEventType(type))
         {
-            NotificationType.JobStarted => prefs.NotifyOnStart,
-            NotificationType.JobCompleted => prefs.NotifyOnCompletion,
-            NotificationType.JobFailed => prefs.NotifyOnFailure,
-            NotificationType.JobPaused => prefs.NotifyOnPause,
-            NotificationType.JobResumed => prefs.NotifyOnPause, // resume follows pause preference
-            NotificationType.QueueAlert => true,                // always notify
-            NotificationType.SystemAlert => true,               // always notify
-            _ => true
+            return channel == NotificationDeliveryChannel.InApp;
+        }
+
+        return preferences.IsChannelEnabled(type, channel);
+    }
+
+    private static bool IsPrintEventType(NotificationType type)
+    {
+        return type is NotificationType.JobStarted
+            or NotificationType.JobCompleted
+            or NotificationType.JobFailed
+            or NotificationType.JobPaused
+            or NotificationType.JobResumed;
+    }
+
+    private async Task SendEmailNotificationAsync(UserDto user, NotificationType type, string subject, string body, CancellationToken cancellationToken)
+    {
+        if (emailService is null || string.IsNullOrWhiteSpace(user.Email))
+        {
+            return;
+        }
+
+        var metadata = new Dictionary<string, string>
+        {
+            ["notificationType"] = type.ToString()
         };
+
+        string encodedBody = WebUtility.HtmlEncode(body);
+        var message = new EmailMessage(user.Email, subject, PlainBody: body, HtmlBody: $"<p>{encodedBody}</p>", TemplateKey: "PrintEvent", Metadata: metadata);
+        EmailDispatchResult result = await emailService.SendAsync(message, cancellationToken);
+        if (!result.Success)
+        {
+            logger.LogWarning("Email delivery failed for user {UserId}: {Error}", user.Id, result.Error ?? result.ProviderMessage);
+        }
+    }
+
+    private async Task DispatchPushTargetsAsync(
+        IReadOnlyList<PushDispatchTarget> targets,
+        string payload,
+        CancellationToken cancellationToken)
+    {
+        if (webPushNotificationSender is null || targets.Count == 0)
+        {
+            return;
+        }
+
+        var outcomes = new ConcurrentBag<PushDispatchOutcome>();
+        await Parallel.ForEachAsync(
+            targets,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = PushFanOutConcurrency,
+                CancellationToken = cancellationToken
+            },
+            async (target, ct) =>
+            {
+                if (!await pushEndpointValidator(target.Endpoint, ct))
+                {
+                    outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: false, Error: "Endpoint failed local validation"));
+                    return;
+                }
+
+                var dispatchSubscription = new PushSubscription
+                {
+                    Id = target.SubscriptionId,
+                    UserId = target.UserId,
+                    Endpoint = target.Endpoint,
+                    P256dh = target.P256dh,
+                    Auth = target.Auth
+                };
+
+                WebPushDispatchResult result = await webPushNotificationSender.SendAsync(dispatchSubscription, payload, ct);
+                outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, result.Success, result.SubscriptionExpired, result.Error));
+            });
+
+        var outcomeList = outcomes.ToList();
+        var expiredIds = outcomeList
+            .Where(o => o.Expired)
+            .Select(o => o.SubscriptionId)
+            .Distinct()
+            .ToList();
+        var successfulIds = outcomeList
+            .Where(o => o.Success && !o.Expired)
+            .Select(o => o.SubscriptionId)
+            .Distinct()
+            .ToList();
+
+        foreach (PushDispatchOutcome failed in outcomeList.Where(o => !o.Success && !o.Expired))
+        {
+            logger.LogWarning(
+                "Web push delivery failed for user {UserId} endpoint {Endpoint}: {Error}",
+                failed.UserId,
+                failed.Endpoint,
+                failed.Error);
+        }
+
+        bool hasUpdates = false;
+        if (successfulIds.Count > 0)
+        {
+            DateTime now = DateTime.UtcNow;
+            List<PushSubscription> successfulSubscriptions = await dbContext.PushSubscriptions
+                .Where(s => successfulIds.Contains(s.Id))
+                .ToListAsync(cancellationToken);
+            foreach (PushSubscription subscription in successfulSubscriptions)
+            {
+                subscription.LastUsedAt = now;
+            }
+
+            hasUpdates = successfulSubscriptions.Count > 0;
+        }
+
+        if (expiredIds.Count > 0)
+        {
+            List<PushSubscription> expiredSubscriptions = await dbContext.PushSubscriptions
+                .Where(s => expiredIds.Contains(s.Id))
+                .ToListAsync(cancellationToken);
+            if (expiredSubscriptions.Count > 0)
+            {
+                dbContext.PushSubscriptions.RemoveRange(expiredSubscriptions);
+                hasUpdates = true;
+            }
+        }
+
+        if (hasUpdates)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task DispatchEmailTargetsAsync(
+        IReadOnlyList<EmailDispatchTarget> targets,
+        NotificationType type,
+        string subject,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        await Parallel.ForEachAsync(
+            targets,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = ChannelFanOutConcurrency,
+                CancellationToken = cancellationToken
+            },
+            async (target, ct) =>
+            {
+                await SendEmailNotificationAsync(target.User, type, subject, body, ct);
+            });
     }
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)
     {
-        var existing = await dbContext.PushSubscriptions
-            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
-
-        if (existing is not null)
+        if (!await pushEndpointValidator(endpoint, cancellationToken))
         {
-            existing.P256dh = p256dh;
-            existing.Auth = auth;
-            existing.LastUsedAt = DateTime.UtcNow;
+            throw new ArgumentException("Endpoint must be an absolute HTTPS URL and cannot target local/private hosts", nameof(endpoint));
+        }
+
+        if (!IsValidPushKeys(p256dh, auth))
+        {
+            throw new ArgumentException("Subscription keys p256dh/auth are invalid");
+        }
+
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         else
         {
-            dbContext.PushSubscriptions.Add(new PushSubscription
-            {
-                UserId = userId,
-                Endpoint = endpoint,
-                P256dh = p256dh,
-                Auth = auth,
-                CreatedAt = DateTime.UtcNow
-            });
+            await UpsertPushSubscriptionAsync(userId, endpoint, p256dh, auth, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Saved push subscription for user {UserId}", userId);
     }
 
@@ -487,4 +739,245 @@ public class NotificationService(
             logger.LogInformation("Deleted push subscription for user {UserId} endpoint {Endpoint}", userId, endpoint);
         }
     }
+
+    private static async Task<bool> IsValidPushEndpointAsync(string endpoint, CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string host = uri.IdnHost.Trim('[', ']');
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!IsKnownPushServiceHost(host))
+        {
+            return false;
+        }
+
+        try
+        {
+            IPAddress[] resolved = await Dns.GetHostAddressesAsync(host, cancellationToken);
+            return resolved.Length > 0 && resolved.All(IsPublicRoutableAddress);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPublicRoutableAddress(IPAddress address)
+    {
+        IPAddress ipAddress = address;
+        if (ipAddress.IsIPv4MappedToIPv6)
+        {
+            ipAddress = ipAddress.MapToIPv4();
+        }
+        else if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            byte[] v6Bytes = ipAddress.GetAddressBytes();
+            bool isIpv4Compatible = v6Bytes.Take(12).All(b => b == 0);
+            if (isIpv4Compatible)
+            {
+                ipAddress = new IPAddress(v6Bytes.Skip(12).ToArray());
+            }
+        }
+
+        if (IPAddress.IsLoopback(ipAddress))
+        {
+            return false;
+        }
+
+        if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            if (ipAddress.Equals(IPAddress.IPv6None) || ipAddress.Equals(IPAddress.IPv6Any))
+            {
+                return false;
+            }
+
+            if (ipAddress.IsIPv6LinkLocal || ipAddress.IsIPv6Multicast || ipAddress.IsIPv6SiteLocal || ipAddress.IsIPv6Teredo)
+            {
+                return false;
+            }
+
+            byte[] v6 = ipAddress.GetAddressBytes();
+            bool isNat64WellKnownPrefix = v6[0] == 0x00
+                && v6[1] == 0x64
+                && v6[2] == 0xFF
+                && v6[3] == 0x9B
+                && v6[4] == 0x00
+                && v6[5] == 0x00
+                && v6[6] == 0x00
+                && v6[7] == 0x00
+                && v6[8] == 0x00
+                && v6[9] == 0x00
+                && v6[10] == 0x00
+                && v6[11] == 0x00;
+            if (isNat64WellKnownPrefix)
+            {
+                return false;
+            }
+
+            return (v6[0] & 0xFE) != 0xFC;
+        }
+
+        byte[] ipv4Bytes = ipAddress.GetAddressBytes();
+        if (ipv4Bytes[0] == 0 || ipv4Bytes[0] == 10 || ipv4Bytes[0] == 127)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 100 && ipv4Bytes[1] >= 64 && ipv4Bytes[1] <= 127)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 169 && ipv4Bytes[1] == 254)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 172 && ipv4Bytes[1] >= 16 && ipv4Bytes[1] <= 31)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 192 && ipv4Bytes[1] == 168)
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] == 198 && (ipv4Bytes[1] == 18 || ipv4Bytes[1] == 19))
+        {
+            return false;
+        }
+
+        if (ipv4Bytes[0] >= 224)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsKnownPushServiceHost(string host)
+    {
+        foreach (string knownHost in KnownPushServiceHosts)
+        {
+            if (string.Equals(host, knownHost, StringComparison.OrdinalIgnoreCase) ||
+                host.EndsWith($".{knownHost}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsValidPushKeys(string p256dh, string auth)
+    {
+        if (string.IsNullOrWhiteSpace(p256dh) || string.IsNullOrWhiteSpace(auth))
+        {
+            return false;
+        }
+
+        if (p256dh.Length > 512 || auth.Length > 256)
+        {
+            return false;
+        }
+
+        return TryDecodeBase64Url(p256dh, out byte[]? p256dhBytes)
+            && p256dhBytes.Length is >= 32 and <= 200
+            && TryDecodeBase64Url(auth, out byte[]? authBytes)
+            && authBytes.Length is >= 8 and <= 64;
+    }
+
+    private static bool TryDecodeBase64Url(string input, out byte[] decoded)
+    {
+        decoded = Array.Empty<byte>();
+        try
+        {
+            foreach (char ch in input)
+            {
+                if (char.IsWhiteSpace(ch))
+                {
+                    return false;
+                }
+
+                if (!(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '='))
+                {
+                    return false;
+                }
+            }
+
+            string normalized = input.Replace('-', '+').Replace('_', '/');
+            int firstPadding = normalized.IndexOf('=');
+            if (firstPadding >= 0 && normalized[firstPadding..].Any(c => c != '='))
+            {
+                return false;
+            }
+
+            normalized = normalized.TrimEnd('=');
+            int padding = normalized.Length % 4;
+            if (padding > 0)
+            {
+                normalized = normalized.PadRight(normalized.Length + (4 - padding), '=');
+            }
+
+            decoded = Convert.FromBase64String(normalized);
+            return decoded.Length > 0;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private async Task UpsertPushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken)
+    {
+        PushSubscription? existing = await dbContext.PushSubscriptions
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint, cancellationToken);
+
+        if (existing is not null)
+        {
+            existing.P256dh = p256dh;
+            existing.Auth = auth;
+            existing.LastUsedAt = DateTime.UtcNow;
+            return;
+        }
+
+        int existingCount = await dbContext.PushSubscriptions.CountAsync(s => s.UserId == userId, cancellationToken);
+        if (existingCount >= MaxPushSubscriptionsPerUser)
+        {
+            throw new ArgumentException($"Maximum of {MaxPushSubscriptionsPerUser} push subscriptions per user exceeded");
+        }
+
+        dbContext.PushSubscriptions.Add(new PushSubscription
+        {
+            UserId = userId,
+            Endpoint = endpoint,
+            P256dh = p256dh,
+            Auth = auth,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    private sealed record EmailDispatchTarget(UserDto User);
+
+    private sealed record PushDispatchTarget(string SubscriptionId, Guid UserId, string Endpoint, string P256dh, string Auth);
+
+    private sealed record PushDispatchOutcome(string SubscriptionId, Guid UserId, string Endpoint, bool Success, bool Expired, string? Error);
 }

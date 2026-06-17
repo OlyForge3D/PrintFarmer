@@ -3526,6 +3526,20 @@ export enum NotificationFrequency {
   Never = 'Never'
 }
 
+export enum NotificationPreferenceEventType {
+  JobStarted = 'JobStarted',
+  JobCompleted = 'JobCompleted',
+  JobFailed = 'JobFailed',
+  JobPaused = 'JobPaused'
+}
+
+export interface NotificationEventChannelPreferenceDto {
+  eventType: NotificationPreferenceEventType;
+  inApp: boolean;
+  email: boolean;
+  push: boolean;
+}
+
 export interface NotificationDto {
   id: string;
   userId: string;
@@ -3548,6 +3562,7 @@ export interface NotificationPreferencesDto {
   notifyOnFailure: boolean;
   notifyOnStart: boolean;
   notifyOnPause: boolean;
+  eventChannelPreferences: NotificationEventChannelPreferenceDto[];
   frequency: NotificationFrequency;
   retentionDays: number;
 }
@@ -3560,6 +3575,7 @@ export interface UpdateNotificationPreferencesRequest {
   notifyOnFailure: boolean;
   notifyOnStart: boolean;
   notifyOnPause: boolean;
+  eventChannelPreferences?: NotificationEventChannelPreferenceDto[];
   frequency: NotificationFrequency;
   retentionDays?: number;
 }
