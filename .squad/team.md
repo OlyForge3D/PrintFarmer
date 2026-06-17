@@ -40,11 +40,11 @@
 | Repository | GitHub Repo | Primary Language | Domain |
 |------|-----------|-----------------|--------|
 | PrintFarmer | `OlyForge3D/PrintFarmer` | C# .NET + React TypeScript + Swift | Backend API, React dashboard, slicer workers, iOS companion app (`mobile/`) |
-| Spoolman fork | `OlyForge3D/spoolman_pf` | Python + React TypeScript | Filament spool tracking service |
+| Spoolman | `OlyForge3D/Spoolman` | Python + React TypeScript | Filament spool tracking service |
 
 ## Stacks
 
 | Repository | Stack |
 |------|-------|
 | PrintFarmer (`OlyForge3D/PrintFarmer`) | C# .NET 10, ASP.NET Core, EF Core, SignalR, React 19, TypeScript, Tailwind CSS, Vitest, xUnit, Swift 6, SwiftUI, Combine, XCTest |
-| Spoolman fork (`OlyForge3D/spoolman_pf`) | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |
+| Spoolman (`OlyForge3D/Spoolman`) | Python 3.10, FastAPI, SQLAlchemy async, Alembic, React 19, TypeScript, Ant Design, Refine |
