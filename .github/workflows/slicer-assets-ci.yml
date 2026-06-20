@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install tools
         run: |
@@ -69,7 +69,7 @@ jobs:
     if: ${{ github.event.inputs.disable_slicer_builds != 'true' && github.event.inputs.disable_slicer_builds != '1' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Download Orca assets artifact
         uses: actions/download-artifact@v8
