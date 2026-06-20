@@ -125,7 +125,7 @@
     <!-- Global overrides for vulnerable transitive dependencies -->
     <!-- These fix high-severity vulnerabilities in packages pulled in by Refit, SignalR, etc. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Microsoft.AspNetCore.WebSockets" Version="2.3.9" />
+    <PackageReference Include="Microsoft.AspNetCore.WebSockets" Version="2.3.10" />
     <PackageReference Include="System.Net.WebSockets.WebSocketProtocol" Version="5.1.3" />
     <PackageReference Include="Refit" Version="10.0.1" />
   </ItemGroup>
