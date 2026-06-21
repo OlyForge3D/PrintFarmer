@@ -25,7 +25,7 @@ jobs:
         allow_stub: [false] # Can extend later with true for a soft-mode build
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Check dispatch input (disable_slicer_builds)
         id: check
