@@ -63,7 +63,9 @@ public class MaintenanceAlertEngine(
         Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logs
             .Where(l => l.MaintenanceTaskId.HasValue)
             .GroupBy(l => l.MaintenanceTaskId!.Value)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
+            .ToDictionary(
+                g => g.Key,
+                g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
         int alertsGenerated = 0;
 

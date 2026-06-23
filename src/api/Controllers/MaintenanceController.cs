@@ -354,7 +354,9 @@ public class MaintenanceController(
                 Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logsByPrinter[printer.Id]
                     .Where(l => l.MaintenanceTaskId.HasValue)
                     .GroupBy(l => l.MaintenanceTaskId!.Value)
-                    .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
                 // Track tasks already processed (avoid duplicates if same task in multiple plans)
                 HashSet<Guid> processedTasks = [];

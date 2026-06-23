@@ -669,7 +669,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             var pngThumbnails = thumbnailBlocks.Where(t => t.Format == "PNG").ToList();
             if (pngThumbnails.Count > 0)
             {
-                var largest = pngThumbnails.OrderByDescending(t => t.Width * t.Height).First();
+                var largest = pngThumbnails.MaxBy(t => t.Width * t.Height);
                 selectedThumbnail = largest;
                 _logger.LogInformation("ExtractThumbnail: Selected largest PNG thumbnail ({LargestWidth}x{LargestHeight}) from {PngThumbnailsCount} PNG options", largest.Width, largest.Height, pngThumbnails.Count);
             }
@@ -679,14 +679,14 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                 var qoiThumbnails = thumbnailBlocks.Where(t => t.Format == "QOI").ToList();
                 if (qoiThumbnails.Count > 0)
                 {
-                    var largest = qoiThumbnails.OrderByDescending(t => t.Width * t.Height).First();
+                    var largest = qoiThumbnails.MaxBy(t => t.Width * t.Height);
                     selectedThumbnail = largest;
                     _logger.LogInformation("ExtractThumbnail: Selected largest QOI thumbnail ({LargestWidth}x{LargestHeight}) from {QoiThumbnailsCount} QOI options (no PNG found)", largest.Width, largest.Height, qoiThumbnails.Count);
                 }
                 else if (thumbnailBlocks.Count > 0)
                 {
                     // Fallback: use largest available thumbnail of any format
-                    var largest = thumbnailBlocks.OrderByDescending(t => t.Width * t.Height).First();
+                    var largest = thumbnailBlocks.MaxBy(t => t.Width * t.Height);
                     selectedThumbnail = largest;
                     _logger.LogInformation("ExtractThumbnail: Selected largest {LargestFormat} thumbnail ({LargestWidth}x{LargestHeight}) as fallback", largest.Format, largest.Width, largest.Height);
                 }
