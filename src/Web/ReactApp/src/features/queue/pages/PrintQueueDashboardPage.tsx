@@ -11,6 +11,8 @@ import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
 import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
+import { QueueJobsCardView, QueueJobsListView } from "../components/QueueJobsCollectionViews";
+import { QueueViewModeSelector, type QueueViewMode } from "../components/QueueViewModeSelector";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
@@ -34,7 +36,9 @@ import type {
 
 // localStorage keys for persisting user preferences
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
+const STORAGE_KEY_QUEUE_VIEW_MODE = 'printfarmer-queue-view-mode';
 const VALID_TABS = ['print-queue', 'timeline', 'history', 'dispatch-log'] as const;
+const VALID_QUEUE_VIEW_MODES: QueueViewMode[] = ["table", "list", "cards"];
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
 
@@ -132,6 +136,10 @@ export function PrintQueueDashboardPage() {
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
+  const [queueViewMode, setQueueViewModeState] = useState<QueueViewMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_QUEUE_VIEW_MODE);
+    return saved && VALID_QUEUE_VIEW_MODES.includes(saved as QueueViewMode) ? (saved as QueueViewMode) : "table";
+  });
   
   // Persist active tab — URL path takes priority, then search param, then localStorage
   const [activeTab, setActiveTabState] = useState(() => {
@@ -147,6 +155,11 @@ export function PrintQueueDashboardPage() {
     localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tab);
     navigate(`/printQueue/${tab}`, { replace: true });
   }, [navigate]);
+
+  const setQueueViewMode = useCallback((mode: QueueViewMode) => {
+    setQueueViewModeState(mode);
+    localStorage.setItem(STORAGE_KEY_QUEUE_VIEW_MODE, mode);
+  }, []);
   
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -517,31 +530,78 @@ export function PrintQueueDashboardPage() {
                       isLoading={loading || isRefreshing}
                     />
                   </div>
-                  <AutoDispatchGlobalToggle />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <QueueViewModeSelector value={queueViewMode} onChange={setQueueViewMode} />
+                    <AutoDispatchGlobalToggle />
+                  </div>
                 </div>
               </div>
 
-              {/* Jobs Table */}
+              {/* Queue Jobs */}
               <div data-tour="queue-jobs-table" className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
-                <QueueJobsTable
-                  jobs={jobs}
-                  isLoading={loading}
-                  dispatchingJobId={dispatchingJobId}
-                  cancelingJobId={cancelingJobId}
-                  dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
-                  onPause={handlePauseJob}
-                  onResume={handleResumeJob}
-                  onCancel={handleCancelJob}
-                  onAbortPrint={handleAbortPrint}
-                  onPriority={handlePriorityChange}
-                  onDispatch={handleDispatchJob}
-                  onSchedule={(jobId) => setScheduleModalJobId(jobId)}
-                  onReorder={handleReorder}
-                  onEdit={(jobId) => {
-                    setSelectedJobId(jobId);
-                    setIsJobDetailsModalOpen(true);
-                  }}
-                />
+                {queueViewMode === "table" ? (
+                  <QueueJobsTable
+                    jobs={jobs}
+                    isLoading={loading}
+                    dispatchingJobId={dispatchingJobId}
+                    cancelingJobId={cancelingJobId}
+                    dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    onPause={handlePauseJob}
+                    onResume={handleResumeJob}
+                    onCancel={handleCancelJob}
+                    onAbortPrint={handleAbortPrint}
+                    onPriority={handlePriorityChange}
+                    onDispatch={handleDispatchJob}
+                    onSchedule={(jobId) => setScheduleModalJobId(jobId)}
+                    onReorder={handleReorder}
+                    onEdit={(jobId) => {
+                      setSelectedJobId(jobId);
+                      setIsJobDetailsModalOpen(true);
+                    }}
+                  />
+                ) : loading ? (
+                  <div className="flex justify-center items-center py-12 bg-pf-bg-1 border border-pf-border rounded-lg">
+                    <div className="text-pf-text-secondary">Loading jobs...</div>
+                  </div>
+                ) : jobs.length === 0 ? (
+                  <QueueJobsTable jobs={[]} />
+                ) : queueViewMode === "list" ? (
+                  <QueueJobsListView
+                    jobs={jobs}
+                    dispatchingJobId={dispatchingJobId}
+                    cancelingJobId={cancelingJobId}
+                    dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    onPause={handlePauseJob}
+                    onResume={handleResumeJob}
+                    onCancel={handleCancelJob}
+                    onAbortPrint={handleAbortPrint}
+                    onPriority={handlePriorityChange}
+                    onDispatch={handleDispatchJob}
+                    onSchedule={(jobId) => setScheduleModalJobId(jobId)}
+                    onEdit={(jobId) => {
+                      setSelectedJobId(jobId);
+                      setIsJobDetailsModalOpen(true);
+                    }}
+                  />
+                ) : (
+                  <QueueJobsCardView
+                    jobs={jobs}
+                    dispatchingJobId={dispatchingJobId}
+                    cancelingJobId={cancelingJobId}
+                    dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    onPause={handlePauseJob}
+                    onResume={handleResumeJob}
+                    onCancel={handleCancelJob}
+                    onAbortPrint={handleAbortPrint}
+                    onPriority={handlePriorityChange}
+                    onDispatch={handleDispatchJob}
+                    onSchedule={(jobId) => setScheduleModalJobId(jobId)}
+                    onEdit={(jobId) => {
+                      setSelectedJobId(jobId);
+                      setIsJobDetailsModalOpen(true);
+                    }}
+                  />
+                )}
               </div>
             </div>
           </Tabs.Panel>
