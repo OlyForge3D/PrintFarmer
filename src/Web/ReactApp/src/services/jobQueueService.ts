@@ -4,6 +4,7 @@ import type {
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
   QueueOverviewDto,
+  QueueStatsDto,
 } from '@/types/api';
 
 /**
@@ -123,7 +124,7 @@ export const jobQueueService = {
     return apiClient.getAnalyticsPrinterQueue(printerId, limit);
   },
 
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     return apiClient.getAnalyticsQueueStats();
   },
 

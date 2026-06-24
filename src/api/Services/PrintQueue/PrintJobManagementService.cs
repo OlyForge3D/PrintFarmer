@@ -13,6 +13,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,7 +38,8 @@ public class PrintJobManagementService(
     IJobCostCalculationService? jobCostCalculationService = null,
     ICameraSnapshotService? cameraSnapshotService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    IDispatchScorer? dispatchScorer = null) : IPrintJobManagementService
+    IDispatchScorer? dispatchScorer = null,
+    ISettingsService? settingsService = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -53,6 +55,10 @@ public class PrintJobManagementService(
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly IDispatchScorer? _dispatchScorer = dispatchScorer;
+    private readonly ISettingsService? _settingsService = settingsService;
+    private const int QueuePlanningMaxJobs = 5000;
+    private const int DefaultEstimatedPrintMinutes = 90;
+    private const int MinimumRemainingPrintMinutes = 5;
 
     // ============= QUERY OPERATIONS =============
 
@@ -140,13 +146,34 @@ public class PrintJobManagementService(
         {
             (int queued, int printing, int paused, int completed, int failed) = await _repository.GetQueueStatsAsync(cancellationToken);
             double avgWait = await _repository.GetAverageWaitTimeMinutesAsync(printerModelId: null, lookbackDays: 30, ct: cancellationToken);
+            QueuePlanningSettings settings = GetQueuePlanningSettings();
+            List<PrintJob> activeJobs = await _repository.GetFilteredJobsAsync(
+                filterStatus: null,
+                filterModel: null,
+                filterMaterial: null,
+                deadlineStartUtc: null,
+                deadlineEndUtc: null,
+                sortBy: "priority",
+                limit: QueuePlanningMaxJobs,
+                offset: 0,
+                ct: cancellationToken);
+
+            QueuePlanningProjection planning = BuildQueuePlanningProjection(activeJobs, settings, DateTime.UtcNow);
 
             return new QueueStatsDto
             {
                 TotalQueued = queued,
                 TotalPrinting = printing,
                 TotalPaused = paused,
-                AverageWaitTimeMinutes = (int)Math.Round(avgWait)
+                AverageWaitTimeMinutes = (int)Math.Round(avgWait),
+                EstimatedQueueCompletionUtc = planning.EstimatedQueueCompletionUtc,
+                StaffedCompletionUtc = planning.StaffedCompletionUtc,
+                Assumptions = new QueuePlanningAssumptionsDto
+                {
+                    WorkdayStartHourUtc = settings.WorkdayStartHourUtc,
+                    WorkdayEndHourUtc = settings.WorkdayEndHourUtc,
+                    BedClearMinutes = settings.BedClearMinutes
+                }
             };
         }
         catch (Exception ex)
@@ -215,9 +242,12 @@ public class PrintJobManagementService(
                 filterStatus: null,
                 filterModel: null,
                 filterMaterial: null,
+                deadlineStartUtc: null,
+                deadlineEndUtc: null,
+                sortBy: "priority",
                 limit: 500,
                 offset: 0,
-                cancellationToken);
+                ct: cancellationToken);
 
             List<PrintJob> queuedJobs = jobs
                 .Where(j => j.Status is PrintJobStatus.Queued or PrintJobStatus.Assigned)
@@ -1830,6 +1860,244 @@ public class PrintJobManagementService(
 
         return estimatedStart.Value + job.EstimatedPrintTime.Value;
     }
+
+    private QueuePlanningSettings GetQueuePlanningSettings()
+    {
+        QueuePlanningSettings fallback = new();
+        if (_settingsService is null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            QueuePlanningSettings? settings = _settingsService.Get<QueuePlanningSettings>();
+            if (settings is null)
+            {
+                return fallback;
+            }
+
+            settings.Validate();
+            return settings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load QueuePlanning settings. Falling back to defaults.");
+            return fallback;
+        }
+    }
+
+    private static QueuePlanningProjection BuildQueuePlanningProjection(
+        IReadOnlyCollection<PrintJob> activeJobs,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
+    {
+        if (activeJobs.Count == 0)
+        {
+            return new QueuePlanningProjection(null, null);
+        }
+
+        int bedClearMinutes = Math.Clamp(settings.BedClearMinutes, 0, 120);
+        Dictionary<Guid, DateTime> printerAvailableUtc = new();
+        Dictionary<Guid, bool> printerHasScheduledWork = new();
+
+        List<PrintJob> assignedJobs = activeJobs
+            .Where(job => job.AssignedPrinterId.HasValue)
+            .OrderByDescending(job => job.Priority)
+            .ThenBy(job => job.QueuePosition)
+            .ToList();
+
+        foreach (IGrouping<Guid, PrintJob> group in assignedJobs.GroupBy(job => job.AssignedPrinterId!.Value))
+        {
+            DateTime availability = nowUtc;
+            bool hasScheduled = false;
+
+            foreach (PrintJob job in group)
+            {
+                if (hasScheduled && bedClearMinutes > 0)
+                {
+                    availability = availability.AddMinutes(bedClearMinutes);
+                }
+
+                availability = availability.Add(EstimateRemainingDuration(job, nowUtc));
+                hasScheduled = true;
+            }
+
+            printerAvailableUtc[group.Key] = availability;
+            printerHasScheduledWork[group.Key] = hasScheduled;
+        }
+
+        List<PrintJob> unassignedJobs = activeJobs
+            .Where(job => !job.AssignedPrinterId.HasValue)
+            .OrderByDescending(job => job.Priority)
+            .ThenBy(job => job.QueuePosition)
+            .ToList();
+
+        if (unassignedJobs.Count > 0 && printerAvailableUtc.Count == 0)
+        {
+            Guid syntheticPlannerLaneId = Guid.Empty;
+            printerAvailableUtc[syntheticPlannerLaneId] = nowUtc;
+            printerHasScheduledWork[syntheticPlannerLaneId] = false;
+        }
+
+        foreach (PrintJob job in unassignedJobs)
+        {
+            KeyValuePair<Guid, DateTime> earliestLane = printerAvailableUtc.OrderBy(kvp => kvp.Value).First();
+            DateTime availability = earliestLane.Value;
+            bool hasScheduled = printerHasScheduledWork[earliestLane.Key];
+
+            if (hasScheduled && bedClearMinutes > 0)
+            {
+                availability = availability.AddMinutes(bedClearMinutes);
+            }
+
+            availability = availability.Add(EstimateRemainingDuration(job, nowUtc));
+            printerAvailableUtc[earliestLane.Key] = availability;
+            printerHasScheduledWork[earliestLane.Key] = true;
+        }
+
+        List<DateTime> completionCandidates = printerAvailableUtc
+            .Where(kvp => printerHasScheduledWork.TryGetValue(kvp.Key, out bool hasWork) && hasWork)
+            .Select(kvp => kvp.Value)
+            .ToList();
+
+        if (completionCandidates.Count == 0)
+        {
+            return new QueuePlanningProjection(null, null);
+        }
+
+        DateTime estimatedQueueCompletionUtc = completionCandidates.Max();
+        DateTime staffedCompletionUtc = AdjustToStaffedCompletionUtc(
+            nowUtc,
+            estimatedQueueCompletionUtc,
+            settings.WorkdayStartHourUtc,
+            settings.WorkdayEndHourUtc);
+
+        return new QueuePlanningProjection(estimatedQueueCompletionUtc, staffedCompletionUtc);
+    }
+
+    private static TimeSpan EstimateRemainingDuration(PrintJob job, DateTime nowUtc)
+    {
+        if (job.EstimatedPrintTime.HasValue && job.EstimatedPrintTime.Value > TimeSpan.Zero)
+        {
+            if (job.Status is PrintJobStatus.Printing or PrintJobStatus.Starting or PrintJobStatus.Paused
+                && job.ActualStartTime.HasValue)
+            {
+                TimeSpan elapsed = nowUtc - job.ActualStartTime.Value;
+                if (elapsed < TimeSpan.Zero)
+                {
+                    elapsed = TimeSpan.Zero;
+                }
+
+                TimeSpan remaining = job.EstimatedPrintTime.Value - elapsed;
+                if (remaining > TimeSpan.Zero)
+                {
+                    return remaining;
+                }
+
+                return TimeSpan.FromMinutes(MinimumRemainingPrintMinutes);
+            }
+
+            return job.EstimatedPrintTime.Value;
+        }
+
+        return TimeSpan.FromMinutes(DefaultEstimatedPrintMinutes);
+    }
+
+    private static DateTime AdjustToStaffedCompletionUtc(
+        DateTime planningStartUtc,
+        DateTime estimatedCompletionUtc,
+        int workdayStartHourUtc,
+        int workdayEndHourUtc)
+    {
+        if (estimatedCompletionUtc <= planningStartUtc)
+        {
+            return planningStartUtc;
+        }
+
+        TimeSpan remaining = estimatedCompletionUtc - planningStartUtc;
+        DateTime current = planningStartUtc;
+        int guard = 0;
+
+        while (remaining > TimeSpan.Zero && guard < 10000)
+        {
+            guard++;
+
+            if (IsWithinWorkingWindow(current, workdayStartHourUtc, workdayEndHourUtc))
+            {
+                DateTime windowEnd = GetCurrentWindowEnd(current, workdayStartHourUtc, workdayEndHourUtc);
+                TimeSpan available = windowEnd - current;
+                TimeSpan consumed = available <= remaining ? available : remaining;
+                current = current.Add(consumed);
+                remaining -= consumed;
+                continue;
+            }
+
+            current = GetNextWorkingWindowStart(current, workdayStartHourUtc, workdayEndHourUtc);
+        }
+
+        return current;
+    }
+
+    private static bool IsWithinWorkingWindow(DateTime timestampUtc, int workdayStartHourUtc, int workdayEndHourUtc)
+    {
+        if (workdayStartHourUtc == workdayEndHourUtc)
+        {
+            return true;
+        }
+
+        TimeSpan start = TimeSpan.FromHours(workdayStartHourUtc);
+        TimeSpan end = TimeSpan.FromHours(workdayEndHourUtc);
+        TimeSpan current = timestampUtc.TimeOfDay;
+
+        return workdayStartHourUtc < workdayEndHourUtc
+            ? current >= start && current < end
+            : current >= start || current < end;
+    }
+
+    private static DateTime GetCurrentWindowEnd(DateTime timestampUtc, int workdayStartHourUtc, int workdayEndHourUtc)
+    {
+        if (workdayStartHourUtc == workdayEndHourUtc)
+        {
+            return timestampUtc.AddYears(1);
+        }
+
+        DateTime dayStart = timestampUtc.Date;
+        TimeSpan end = TimeSpan.FromHours(workdayEndHourUtc);
+
+        if (workdayStartHourUtc < workdayEndHourUtc)
+        {
+            return dayStart.Add(end);
+        }
+
+        return timestampUtc.TimeOfDay < end
+            ? dayStart.Add(end)
+            : dayStart.AddDays(1).Add(end);
+    }
+
+    private static DateTime GetNextWorkingWindowStart(DateTime timestampUtc, int workdayStartHourUtc, int workdayEndHourUtc)
+    {
+        if (workdayStartHourUtc == workdayEndHourUtc)
+        {
+            return timestampUtc;
+        }
+
+        DateTime dayStart = timestampUtc.Date;
+        DateTime startToday = dayStart.AddHours(workdayStartHourUtc);
+
+        if (workdayStartHourUtc < workdayEndHourUtc)
+        {
+            return timestampUtc < startToday ? startToday : startToday.AddDays(1);
+        }
+
+        return timestampUtc.TimeOfDay < TimeSpan.FromHours(workdayStartHourUtc)
+            ? startToday
+            : startToday.AddDays(1);
+    }
+
+    private readonly record struct QueuePlanningProjection(
+        DateTime? EstimatedQueueCompletionUtc,
+        DateTime? StaffedCompletionUtc);
 
     private static IEnumerable<QueueRecommendationDto> BuildQueueRecommendations(
         IReadOnlyDictionary<string, HashSet<Guid>> affectedJobsByCategory)

@@ -364,6 +364,21 @@ public class QueueStatsDto
     public int AverageWaitTimeMinutes { get; set; }
 
     public List<QueuePrinterModelStatsDto> ByModel { get; set; } = new();
+
+    public DateTime? EstimatedQueueCompletionUtc { get; set; }
+
+    public DateTime? StaffedCompletionUtc { get; set; }
+
+    public QueuePlanningAssumptionsDto Assumptions { get; set; } = new();
+}
+
+public class QueuePlanningAssumptionsDto
+{
+    public int WorkdayStartHourUtc { get; set; }
+
+    public int WorkdayEndHourUtc { get; set; }
+
+    public int BedClearMinutes { get; set; }
 }
 
 /// <summary>

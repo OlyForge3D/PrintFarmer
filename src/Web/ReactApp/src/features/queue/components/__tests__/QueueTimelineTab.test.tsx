@@ -20,6 +20,13 @@ const stats: QueueStatsDto = {
   totalPrinting: 3,
   totalPaused: 1,
   averageWaitTimeMinutes: 12,
+  estimatedQueueCompletionUtc: "2026-06-24T19:30:00.000Z",
+  staffedCompletionUtc: "2026-06-25T16:15:00.000Z",
+  assumptions: {
+    workdayStartHourUtc: 8,
+    workdayEndHourUtc: 17,
+    bedClearMinutes: 10,
+  },
   byModel: {},
 };
 
@@ -106,6 +113,9 @@ describe("QueueTimelineTab", () => {
     expect(screen.getByText("Currently Printing")).toBeInTheDocument();
     expect(screen.getByText("Active Printers")).toBeInTheDocument();
     expect(screen.getByText("Next Estimated Completion")).toBeInTheDocument();
+    expect(screen.getByText("Queue Completion (Continuous)")).toBeInTheDocument();
+    expect(screen.getByText("Queue Completion (Staffed Hours)")).toBeInTheDocument();
+    expect(screen.getByText(/Adjusted for non-working hours/i)).toBeInTheDocument();
     expect(screen.getByText("6")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("Core One A")).toBeInTheDocument();

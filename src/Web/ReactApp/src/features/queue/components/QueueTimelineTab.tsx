@@ -150,13 +150,33 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
       .filter((value) => !Number.isNaN(value.getTime()))
       .sort((a, b) => a.getTime() - b.getTime());
 
+    const queueCompletion = stats?.estimatedQueueCompletionUtc
+      ? new Date(stats.estimatedQueueCompletionUtc)
+      : null;
+    const staffedCompletion = stats?.staffedCompletionUtc
+      ? new Date(stats.staffedCompletionUtc)
+      : null;
+    const hasQueueCompletion = queueCompletion && !Number.isNaN(queueCompletion.getTime());
+    const hasStaffedCompletion = staffedCompletion && !Number.isNaN(staffedCompletion.getTime());
+    const staffedAdjustedForNonWorkingHours = Boolean(
+      hasQueueCompletion &&
+      hasStaffedCompletion &&
+      staffedCompletion &&
+      queueCompletion &&
+      staffedCompletion.getTime() > queueCompletion.getTime(),
+    );
+
     return {
       queued: stats?.totalQueued ?? 0,
       printing: stats?.totalPrinting ?? 0,
       activePrinters,
       nextCompletion: completionCandidates[0] ?? null,
+      queueCompletion: hasQueueCompletion ? queueCompletion : null,
+      staffedCompletion: hasStaffedCompletion ? staffedCompletion : null,
+      staffedAdjustedForNonWorkingHours,
+      assumptions: stats?.assumptions ?? null,
     };
-  }, [queueOverview, stats?.totalPrinting, stats?.totalQueued]);
+  }, [queueOverview, stats]);
 
   const laneNames = useMemo(() => Object.keys(groupedEvents).sort((a, b) => a.localeCompare(b)), [groupedEvents]);
   const timelineDurationMs = Math.max(timelineEndMs - timelineStartMs, MIN_EVENT_DURATION_SECONDS * 1000);
@@ -171,7 +191,7 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
 
   return (
     <div className="space-y-4">
-      <section aria-label="Timeline planning summary" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <section aria-label="Timeline planning summary" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
         <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
           <div className="text-pf-text-secondary text-sm font-medium">Queued Jobs</div>
           <div className="text-3xl font-bold text-pf-info">{summary.queued}</div>
@@ -189,6 +209,24 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
           <div className="text-xl font-semibold text-pf-text-primary">
             {summary.nextCompletion ? formatDateTime(summary.nextCompletion) : "No estimate"}
           </div>
+        </div>
+        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+          <div className="text-pf-text-secondary text-sm font-medium">Queue Completion (Continuous)</div>
+          <div className="text-xl font-semibold text-pf-text-primary">
+            {summary.queueCompletion ? formatDateTime(summary.queueCompletion) : "No estimate"}
+          </div>
+        </div>
+        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+          <div className="text-pf-text-secondary text-sm font-medium">Queue Completion (Staffed Hours)</div>
+          <div className="text-xl font-semibold text-pf-text-primary">
+            {summary.staffedCompletion ? formatDateTime(summary.staffedCompletion) : "No estimate"}
+          </div>
+          {summary.staffedAdjustedForNonWorkingHours && summary.assumptions ? (
+            <div className="mt-1 text-xs text-pf-warning">
+              Adjusted for non-working hours ({summary.assumptions.workdayStartHourUtc}:00-
+              {summary.assumptions.workdayEndHourUtc}:00 UTC, +{summary.assumptions.bedClearMinutes}m bed clear)
+            </div>
+          ) : null}
         </div>
       </section>
 

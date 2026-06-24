@@ -3734,9 +3734,9 @@ export class ApiClient {
   /**
    * Get queue statistics (analytics)
    */
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     const response = await this.client.get(`/job-queue-analytics/stats`);
-    return response.data;
+    return response.data as QueueStatsDto;
   }
 
   /**

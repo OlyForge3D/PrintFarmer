@@ -37,7 +37,16 @@ public class PrintJobManagementServiceQueueRecommendationsTests
         PrintJob idleOpportunityJob = CreateQueuedJob();
 
         repository
-            .Setup(r => r.GetFilteredJobsAsync(null, null, null, 500, 0, It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetFilteredJobsAsync(
+                null,
+                null,
+                null,
+                null,
+                null,
+                "priority",
+                500,
+                0,
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync([materialJobA, materialJobB, nozzleJob, bedClearJob, idleOpportunityJob]);
 
         scorer.Setup(s => s.ScorePrintersForJobAsync(materialJobA.Id, It.IsAny<CancellationToken>()))
@@ -83,6 +92,9 @@ public class PrintJobManagementServiceQueueRecommendationsTests
                 It.IsAny<PrintJobStatus?>(),
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
                 It.IsAny<int>(),
                 It.IsAny<int>(),
                 It.IsAny<CancellationToken>()),

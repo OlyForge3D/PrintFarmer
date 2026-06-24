@@ -2325,7 +2325,16 @@ export interface QueueStatsDto {
   totalPrinting: number;
   totalPaused: number;
   averageWaitTimeMinutes: number;
+  estimatedQueueCompletionUtc?: string;
+  staffedCompletionUtc?: string;
+  assumptions: QueuePlanningAssumptionsDto;
   byModel: Record<string, QueuePrinterModelStatsDto>;
+}
+
+export interface QueuePlanningAssumptionsDto {
+  workdayStartHourUtc: number;
+  workdayEndHourUtc: number;
+  bedClearMinutes: number;
 }
 
 export interface QueueRecommendationDto {
