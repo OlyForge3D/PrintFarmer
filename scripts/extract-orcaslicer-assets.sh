@@ -17,9 +17,23 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Paths
-# Override the source location with ORCA_RESOURCES env var (e.g. on Windows/Git Bash:
-#   ORCA_RESOURCES="/c/Program Files/OrcaSlicer/resources/profiles" ./scripts/extract-orcaslicer-assets.sh)
-ORCA_RESOURCES="${ORCA_RESOURCES:-/Applications/OrcaSlicer.app/Contents/Resources/profiles}"
+# Resolve the OrcaSlicer resources/profiles directory cross-platform. Precedence:
+#   1. ORCA_PROFILES_PATH env (canonical; matches restore-orcaslicer-assets.js and docs)
+#   2. ORCA_RESOURCES env (legacy alias, kept for backward compatibility)
+#   3. First CLI argument
+#   4. Per-platform default (macOS / Linux / Windows Git Bash)
+# Examples:
+#   ORCA_PROFILES_PATH="/c/Program Files/OrcaSlicer/resources/profiles" ./scripts/extract-orcaslicer-assets.sh
+#   ./scripts/extract-orcaslicer-assets.sh /usr/share/OrcaSlicer/resources/profiles
+default_orca_profiles_path() {
+    case "$(uname -s)" in
+        Darwin) echo "/Applications/OrcaSlicer.app/Contents/Resources/profiles" ;;
+        Linux)  echo "/usr/share/OrcaSlicer/resources/profiles" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "/c/Program Files/OrcaSlicer/resources/profiles" ;;
+        *)      echo "/Applications/OrcaSlicer.app/Contents/Resources/profiles" ;;
+    esac
+}
+ORCA_RESOURCES="${ORCA_PROFILES_PATH:-${ORCA_RESOURCES:-${1:-$(default_orca_profiles_path)}}}"
 REACT_ASSETS="src/Web/ReactApp/public/assets/orcaslicer"
 MANIFEST="${REACT_ASSETS}/manifest.json"
 
@@ -30,7 +44,11 @@ echo -e "${BLUE}═════════════════════�
 # Verify OrcaSlicer installation exists
 if [ ! -d "$ORCA_RESOURCES" ]; then
     echo -e "${RED}✗ Error: OrcaSlicer not found at ${ORCA_RESOURCES}${NC}"
-    echo -e "${YELLOW}Set ORCA_RESOURCES to your OrcaSlicer resources/profiles dir, or install from https://github.com/OrcaSlicer/OrcaSlicer${NC}"
+    echo -e "${YELLOW}Set ORCA_PROFILES_PATH (or pass the path as the first argument) to your OrcaSlicer resources/profiles dir:${NC}"
+    echo -e "${YELLOW}  macOS:   /Applications/OrcaSlicer.app/Contents/Resources/profiles${NC}"
+    echo -e "${YELLOW}  Linux:   /usr/share/OrcaSlicer/resources/profiles${NC}"
+    echo -e "${YELLOW}  Windows: /c/Program Files/OrcaSlicer/resources/profiles (Git Bash)${NC}"
+    echo -e "${YELLOW}Or install from https://github.com/OrcaSlicer/OrcaSlicer${NC}"
     exit 1
 fi
 

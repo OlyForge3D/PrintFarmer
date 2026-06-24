@@ -498,5 +498,37 @@ export interface OrcaProcessSettings {
   fan_max_speed?: number;
   overhang_fan_speed?: number;
   full_fan_speed_layer?: number;
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  bridge_line_width?: number;
+  brim_flow_ratio?: number;
+  draft_shield?: string;
+  elefant_foot_layers_density?: number;
+  filename_format?: string;
+  fuzzy_skin_layers_between_ripple_offset?: number;
+  fuzzy_skin_ripple_offset?: number;
+  fuzzy_skin_ripples_per_layer?: number;
+  gyroid_optimized?: boolean;
+  initial_layer_travel_acceleration?: number;
+  initial_layer_travel_jerk?: number;
+  lightning_overhang_angle?: number;
+  lightning_prune_angle?: number;
+  lightning_straightening_angle?: number;
+  post_process?: string;
+  print_order?: string;
+  process_change_extrusion_role_gcode?: string;
+  relative_bridge_angle?: boolean;
+  skirt_type?: string;
+  support_parallel_printheads?: boolean;
+  timelapse_type?: string;
+  wall_maximum_deviation?: number;
+  wall_maximum_resolution?: number;
+  wipe_tower_filament?: number;
+  wipe_tower_wall_type?: string;
+  zaa_dont_alternate_fill_direction?: boolean;
+  zaa_enabled?: boolean;
+  zaa_min_z?: number;
+  zaa_minimize_perimeter_height?: number;
+
 }
 
