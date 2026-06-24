@@ -28,9 +28,9 @@ jobs:
           if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Version must be vX.Y.Z"; exit 1; fi
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Checkout (with PAT for push)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.REPO_PAT }}
@@ -54,7 +54,7 @@ jobs:
     needs: tag-and-build
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Determine previous tag
@@ -69,7 +69,7 @@ jobs:
           config: cliff.toml
           args: --current-tag ${{ github.event.inputs.version }} ${{ steps.prev.outputs.prev_tag && format('--previous-tag {0}', steps.prev.outputs.prev_tag) || '' }}
       - name: Wait for image build
-        uses: lewagon/wait-on-check-action@v1.7.0
+        uses: lewagon/wait-on-check-action@v1.8.0
         with:
           ref: ${{ github.event.inputs.version }}
           check-name: 'Build & Push Images'
@@ -152,7 +152,7 @@ jobs:
             jq -r '.checks[] | select(.name=="Code-Review" or .name=="Vulnerabilities" or .name=="Dependency-Update-Tool" or .name=="Branch-Protection") | "- " + .name + ": " + (.score|tostring)' scorecard.json >> RELEASE_NOTES.md || true
           fi
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.event.inputs.version }}
           tag_name: ${{ github.event.inputs.version }}
