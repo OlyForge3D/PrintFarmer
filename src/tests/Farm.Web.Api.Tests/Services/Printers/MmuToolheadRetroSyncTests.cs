@@ -195,11 +195,12 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
             .OrderBy(t => t.Index)
             .ToListAsync();
 
-        toolheads.Should().HaveCount(4);
+        toolheads.Should().HaveCount(5);
         toolheads[0].ToolheadType.Should().Be(ToolheadType.Physical);
         toolheads[1].ToolheadType.Should().Be(ToolheadType.MmuGate);
         toolheads[2].ToolheadType.Should().Be(ToolheadType.MmuGate);
         toolheads[3].ToolheadType.Should().Be(ToolheadType.MmuGate);
+        toolheads[4].ToolheadType.Should().Be(ToolheadType.MmuGate);
     }
 
     [Fact]
