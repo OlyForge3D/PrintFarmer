@@ -60,23 +60,22 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
             cost.AveragePrinterWattage = request.AveragePrinterWattage.Value;
         }
 
+        bool costChanged = request.ElectricityRatePerKwh.HasValue
+            || request.DefaultMachineHourlyRate.HasValue
+            || request.AveragePrinterWattage.HasValue;
+
+        if (costChanged)
+        {
+            if (expectedRowVersion is not null)
+                SaveWithConcurrencyCheck(cost, expectedRowVersion);
+            else
+                _settings.Save(cost);
+        }
+
         SlicerSettings slicer = _settings.Get<SlicerSettings>();
         if (request.SlicerMode.HasValue)
         {
             slicer.SlicerMode = request.SlicerMode.Value;
-        }
-
-        if (expectedRowVersion is not null)
-        {
-            SaveWithConcurrencyCheck(cost, expectedRowVersion);
-        }
-        else
-        {
-            _settings.Save(cost);
-        }
-
-        if (request.SlicerMode.HasValue)
-        {
             _settings.Save(slicer);
         }
     }

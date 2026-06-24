@@ -25,7 +25,6 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
-import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
 import { useFarmSettings } from '@/features/settings/hooks/useFarmSettings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
@@ -185,8 +184,8 @@ export const NewSliceJobPage: React.FC = () => {
   } as const;
 
   const { user } = useAuth();
-  const slicerMode = useSlicerMode();
   const { data: farmSettingsData } = useFarmSettings();
+  const slicerMode = farmSettingsData === undefined ? null : (farmSettingsData.slicerMode ?? 'Simple');
   const canWrite = farmSettingsData?.canWrite ?? false;
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -2325,7 +2324,7 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
 
           {/* SIMPLE MODE: supports + bed adhesion overrides (layer height and infill hidden) */}
-          {slicerMode === 'Simple' && (
+          {slicerMode !== 'Advanced' && (
             <SimpleSlicerSettingsPanel
               settings={simpleSlicerSettings}
               onSettingsChange={handleSimpleSettingsChange}
@@ -2334,7 +2333,7 @@ export const NewSliceJobPage: React.FC = () => {
           )}
 
           {/* Admin escape-hatch: quiet hint visible only to admins in Simple mode */}
-          {slicerMode === 'Simple' && canWrite && (
+          {slicerMode !== 'Advanced' && canWrite && (
             <p className="px-1 text-xs text-pf-text-muted">
               Need more control?{' '}
               <button
@@ -2434,7 +2433,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
                 onModelsReplace={handleWorkspaceModelsReplace}
-                simpleMode={slicerMode === 'Simple'}
+                simpleMode={slicerMode !== 'Advanced'}
                 className="h-full"
               />
             ) : (
