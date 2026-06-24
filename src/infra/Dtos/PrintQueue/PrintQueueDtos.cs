@@ -82,6 +82,11 @@ public class QueuedPrintJobDto
     public DateTime QueuedAtUtc { get; set; }
 
     /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
+
+    /// <summary>
     /// True when the job was imported from a printer history API.
     /// </summary>
     public bool WasSeededFromHistory { get; set; }
@@ -226,6 +231,11 @@ public class EnqueueQueueJobRequest
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -240,6 +250,11 @@ public class UpdateQueueJobRequest
     public string? Status { get; set; }
 
     public string? FailureReason { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -440,6 +455,11 @@ public class QueueHistoryEntryDto
 
     public DateTime? CompletedAtUtc { get; set; }
 
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
+
     public int ActualPrintTimeSeconds { get; set; }
 
     public string? FailureReason { get; set; }
@@ -510,6 +530,11 @@ public class UpdateJobDetailsRequest
     /// Number of copies to print. Must be >= CompletedCopies.
     /// </summary>
     public int? Copies { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>

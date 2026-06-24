@@ -24,6 +24,9 @@ public interface IPrintJobManagementService
         string? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
+        DateTime? deadlineStart = null,
+        DateTime? deadlineEnd = null,
+        string sortBy = "priority",
         int limit = 100,
         int offset = 0,
         CancellationToken cancellationToken = default);
@@ -77,6 +80,8 @@ public interface IPrintJobManagementService
         List<string>? statuses = null,
         DateTime? dateStart = null,
         DateTime? dateEnd = null,
+        DateTime? deadlineStart = null,
+        DateTime? deadlineEnd = null,
         CancellationToken cancellationToken = default);
 
     // ============= COMMAND OPERATIONS =============

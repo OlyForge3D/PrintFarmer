@@ -661,6 +661,46 @@ public class JobQueueServiceTests
     }
 
     [Fact]
+    public async Task AddJobToQueueAsync_WithDeadline_MapsDeadlineToCreatedJobAndDto()
+    {
+        // Arrange
+        var printerId = Guid.NewGuid();
+        DateTime deadline = DateTime.UtcNow.AddHours(6);
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "deadline-test.gcode",
+            FileName = "deadline-test.gcode"
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+            DeadlineAtUtc = deadline
+        };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.DeadlineAtUtc.Should().BeCloseTo(deadline, TimeSpan.FromSeconds(1));
+        _mockRepo.Verify(x => x.AddAsync(
+            It.Is<PrintJob>(j => j.DeadlineAtUtc.HasValue && j.DeadlineAtUtc.Value == deadline),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task AddJobToQueueAsync_WithHighPriority_AssignsHigherPriority()
     {
         // Arrange
@@ -1185,6 +1225,29 @@ public class JobQueueServiceTests
         result.Should().NotBeNull();
         result!.ActualFilamentUsage.Should().Be(28.3);
         job.ActualFilamentUsage.Should().Be(28.3);
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_WithDeadline_UpdatesDeadlineAndReturnsDto()
+    {
+        // Arrange
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        DateTime deadline = DateTime.UtcNow.AddDays(2);
+        var request = new UpdatePrintJobStatusDto
+        {
+            DeadlineAtUtc = deadline
+        };
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        // Act
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.DeadlineAtUtc.Should().BeCloseTo(deadline, TimeSpan.FromSeconds(1));
+        job.DeadlineAtUtc.Should().BeCloseTo(deadline, TimeSpan.FromSeconds(1));
     }
 
     [Fact]

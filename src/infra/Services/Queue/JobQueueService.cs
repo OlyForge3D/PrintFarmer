@@ -213,6 +213,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = j.ProjectFileId,
             PlateIndex = j.PlateIndex,
             PlateName = j.PlateName,
+            DeadlineAtUtc = j.DeadlineAtUtc,
             CreatedAt = j.CreatedAt,
             UpdatedAt = j.UpdatedAt,
             GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
@@ -275,7 +276,8 @@ public class JobQueueService : IJobQueueService
             Priority = request.Priority,
             RequiredNozzleDiameter = request.RequiredNozzleDiameter ?? (decimal?)gcode.RequiredNozzleDiameter,
             RequiredMaterialType = request.RequiredMaterialType ?? gcode.RequiredMaterial,
-            RequiredPrinterModel = request.RequiredPrinterModel ?? gcode.PrinterModel?.Name ?? gcode.ExtractedPrinterModelName
+            RequiredPrinterModel = request.RequiredPrinterModel ?? gcode.PrinterModel?.Name ?? gcode.ExtractedPrinterModelName,
+            DeadlineAtUtc = request.DeadlineAtUtc
         };
 
         Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
@@ -319,7 +321,8 @@ public class JobQueueService : IJobQueueService
             PlateName = request.PlateName,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
-            QueuedAt = DateTime.UtcNow
+            QueuedAt = DateTime.UtcNow,
+            DeadlineAtUtc = NormalizeUtcDeadline(request.DeadlineAtUtc)
         };
 
         // Calculate estimated cost if cost calculator is available
@@ -394,6 +397,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = job.ProjectFileId,
             PlateIndex = job.PlateIndex,
             PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
@@ -447,6 +451,7 @@ public class JobQueueService : IJobQueueService
                 ProjectFileId = job.ProjectFileId,
                 PlateIndex = job.PlateIndex,
                 PlateName = job.PlateName,
+                DeadlineAtUtc = job.DeadlineAtUtc,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt,
                 ToolheadUsages = MapToolheadUsages(job)
@@ -526,6 +531,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = job.ProjectFileId,
             PlateIndex = job.PlateIndex,
             PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
@@ -596,6 +602,11 @@ public class JobQueueService : IJobQueueService
             job.FailureReason = request.FailureReason;
         }
 
+        if (request.DeadlineAtUtc.HasValue)
+        {
+            job.DeadlineAtUtc = NormalizeUtcDeadline(request.DeadlineAtUtc);
+        }
+
         if (!string.IsNullOrEmpty(request.Name))
         {
             job.Name = request.Name;
@@ -661,6 +672,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = job.ProjectFileId,
             PlateIndex = job.PlateIndex,
             PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job!)
@@ -740,4 +752,19 @@ public class JobQueueService : IJobQueueService
                 tu.FilamentColor,
                 tu.MaterialCostUsd))
             .ToList();
+
+    private static DateTime? NormalizeUtcDeadline(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
+    }
 }

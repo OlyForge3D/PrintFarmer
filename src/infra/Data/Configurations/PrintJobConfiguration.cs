@@ -79,6 +79,7 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         // Indexes for common queries
         builder.HasIndex(pj => pj.Status);
         builder.HasIndex(pj => pj.QueuedAt);
+        builder.HasIndex(pj => pj.DeadlineAtUtc);
         builder.HasIndex(pj => pj.Priority);
         builder.HasIndex(pj => pj.AssignedPrinterId);
 

@@ -72,6 +72,9 @@ public interface IPrintJobManagementRepository
         PrintJobStatus? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
+        DateTime? deadlineStartUtc = null,
+        DateTime? deadlineEndUtc = null,
+        string sortBy = "priority",
         int limit = 100,
         int offset = 0,
         CancellationToken ct = default);
@@ -127,6 +130,8 @@ public interface IPrintJobManagementRepository
         List<string>? statuses = null,
         DateTime? dateStart = null,
         DateTime? dateEnd = null,
+        DateTime? deadlineStartUtc = null,
+        DateTime? deadlineEndUtc = null,
         CancellationToken ct = default);
 
     // ============= TIMELINE & HISTORY =============

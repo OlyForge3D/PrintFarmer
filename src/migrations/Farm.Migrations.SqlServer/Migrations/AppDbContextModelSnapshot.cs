@@ -2834,6 +2834,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("DeadlineAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<int?>("DispatchMode")
                         .HasColumnType("int");
 
@@ -2974,6 +2977,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedPrinterId");
+
+                    b.HasIndex("DeadlineAtUtc");
 
                     b.HasIndex("GcodeFileId");
 

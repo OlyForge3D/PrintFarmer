@@ -62,6 +62,9 @@ public class PrintJobManagementService(
     /// <param name="filterStatus">Optional filter by job status.</param>
     /// <param name="filterModel">Optional filter by printer model name.</param>
     /// <param name="filterMaterial">Optional filter by required material type.</param>
+    /// <param name="deadlineStart">Optional inclusive lower bound for job deadlines.</param>
+    /// <param name="deadlineEnd">Optional inclusive upper bound for job deadlines.</param>
+    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
@@ -69,6 +72,9 @@ public class PrintJobManagementService(
         string? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
+        DateTime? deadlineStart = null,
+        DateTime? deadlineEnd = null,
+        string sortBy = "priority",
         int limit = 100,
         int offset = 0,
         CancellationToken cancellationToken = default)
@@ -83,7 +89,7 @@ public class PrintJobManagementService(
             }
 
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
-                status, filterModel, filterMaterial, limit, offset, cancellationToken);
+                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, cancellationToken);
 
             return jobs.Select(pj => MapToQueuedPrintJobWithFileMeta(pj)).ToList();
         }
@@ -313,6 +319,8 @@ public class PrintJobManagementService(
     /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
     /// <param name="dateStart">Optional start date filter (inclusive).</param>
     /// <param name="dateEnd">Optional end date filter (inclusive).</param>
+    /// <param name="deadlineStart">Optional inclusive lower bound for job deadlines.</param>
+    /// <param name="deadlineEnd">Optional inclusive upper bound for job deadlines.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueHistoryPageDto> GetQueueHistoryAsync(
         int limit = 50,
@@ -321,12 +329,14 @@ public class PrintJobManagementService(
         List<string>? statuses = null,
         DateTime? dateStart = null,
         DateTime? dateEnd = null,
+        DateTime? deadlineStart = null,
+        DateTime? deadlineEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             (List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds) =
-                await _repository.GetHistoryAsync(limit, offset, sortBy, statuses, dateStart, dateEnd, cancellationToken);
+                await _repository.GetHistoryAsync(limit, offset, sortBy, statuses, dateStart, dateEnd, deadlineStart, deadlineEnd, cancellationToken);
 
             var entries = jobs
                 .Select(pj => new QueueHistoryEntryDto
@@ -338,6 +348,7 @@ public class PrintJobManagementService(
                     CompletionPercentage = pj.Status == PrintJobStatus.Completed ? 100 : 0,
                     StartedAtUtc = pj.ActualStartTime ?? pj.CreatedAt,
                     CompletedAtUtc = pj.ActualEndTime,
+                    DeadlineAtUtc = pj.DeadlineAtUtc,
                     ActualPrintTimeSeconds = (int?)pj.ActualPrintTime?.TotalSeconds ?? 0,
                     FailureReason = pj.FailureReason,
                     FilamentName = pj.FilamentName,
@@ -443,6 +454,7 @@ public class PrintJobManagementService(
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
+                DeadlineAtUtc = NormalizeUtcDeadline(request.DeadlineAtUtc),
                 EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
                     : null,
@@ -511,6 +523,11 @@ public class PrintJobManagementService(
             if (!string.IsNullOrEmpty(request.FailureReason))
             {
                 job.FailureReason = request.FailureReason;
+            }
+
+            if (request.DeadlineAtUtc.HasValue)
+            {
+                job.DeadlineAtUtc = NormalizeUtcDeadline(request.DeadlineAtUtc);
             }
 
             job.UpdatedAt = DateTime.UtcNow;
@@ -1189,6 +1206,7 @@ public class PrintJobManagementService(
                 RequiredCapabilities = originalJob.RequiredCapabilities,
                 EstimatedPrintTime = originalJob.EstimatedPrintTime,
                 EstimatedFilamentUsage = originalJob.EstimatedFilamentUsage,
+                DeadlineAtUtc = originalJob.DeadlineAtUtc,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow
@@ -1763,6 +1781,21 @@ public class PrintJobManagementService(
     }
 
     // ============= PRIVATE HELPERS =============
+    private static DateTime? NormalizeUtcDeadline(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
+    }
+
     private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(PrintJob job)
     {
         DateTime? estimatedStart = EstimateStartTime(job);
@@ -1891,6 +1924,7 @@ public class PrintJobManagementService(
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             WasSeededFromHistory = job.WasSeededFromHistory,
             ToolheadUsages = job.ToolheadUsages
                 .OrderBy(tu => tu.ToolheadIndex)
@@ -2081,6 +2115,11 @@ public class PrintJobManagementService(
                 }
 
                 job.Copies = updates.Copies.Value;
+            }
+
+            if (updates.DeadlineAtUtc.HasValue)
+            {
+                job.DeadlineAtUtc = NormalizeUtcDeadline(updates.DeadlineAtUtc);
             }
 
             job.UpdatedAt = DateTime.UtcNow;

@@ -31,6 +31,9 @@ public class JobQueueAnalyticsController(
     /// <param name="filterStatus">Filter by job status (Queued, Printing, Paused, etc.)</param>
     /// <param name="filterModel">Filter by printer model name</param>
     /// <param name="filterMaterial">Filter by material type</param>
+    /// <param name="deadlineStart">Filter jobs with deadline at or after this UTC timestamp</param>
+    /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
+    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
@@ -43,6 +46,9 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? filterStatus,
         [FromQuery] string? filterModel,
         [FromQuery] string? filterMaterial,
+        [FromQuery] DateTime? deadlineStart = null,
+        [FromQuery] DateTime? deadlineEnd = null,
+        [FromQuery] string sortBy = "priority",
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0,
         CancellationToken cancellationToken = default)
@@ -60,7 +66,7 @@ public class JobQueueAnalyticsController(
             }
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
-                filterStatus, filterModel, filterMaterial, limit, offset, cancellationToken);
+                filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, cancellationToken);
 
             return Ok(jobs);
         }
@@ -183,10 +189,12 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="limit">Maximum number of results (default 50, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
-    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status)</param>
+    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status, deadline, deadline_desc)</param>
     /// <param name="statuses">Comma-separated list of statuses to filter by (completed, failed, cancelled)</param>
     /// <param name="dateStart">Start date filter (ISO 8601 format, inclusive)</param>
     /// <param name="dateEnd">End date filter (ISO 8601 format, inclusive)</param>
+    /// <param name="deadlineStart">Deadline start filter (ISO 8601 format, inclusive)</param>
+    /// <param name="deadlineEnd">Deadline end filter (ISO 8601 format, inclusive)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("history")]
     [ProducesResponseType(typeof(QueueHistoryPageDto), StatusCodes.Status200OK)]
@@ -199,6 +207,8 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? statuses = null,
         [FromQuery] DateTime? dateStart = null,
         [FromQuery] DateTime? dateEnd = null,
+        [FromQuery] DateTime? deadlineStart = null,
+        [FromQuery] DateTime? deadlineEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -216,7 +226,7 @@ public class JobQueueAnalyticsController(
             }
 
             QueueHistoryPageDto history = await _printJobManagementService.GetQueueHistoryAsync(
-                limit, offset, sortBy, statusList, dateStart, dateEnd, cancellationToken);
+                limit, offset, sortBy, statusList, dateStart, dateEnd, deadlineStart, deadlineEnd, cancellationToken);
             return Ok(history);
         }
         catch (Exception ex)
