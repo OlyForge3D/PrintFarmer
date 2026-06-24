@@ -14,6 +14,7 @@ import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
+import QueueTimelineTab from "../components/QueueTimelineTab";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
@@ -31,7 +32,7 @@ import type {
 
 // localStorage keys for persisting user preferences
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
-const VALID_TABS = ['print-queue', 'history', 'dispatch-log'] as const;
+const VALID_TABS = ['print-queue', 'timeline', 'history', 'dispatch-log'] as const;
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
 
@@ -473,6 +474,7 @@ export function PrintQueueDashboardPage() {
         <div data-tour="queue-tabs">
           <Tabs.List>
             <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
+            <Tabs.Tab id="timeline">Timeline</Tabs.Tab>
             <Tabs.Tab id="history">History</Tabs.Tab>
             <Tabs.Tab id="dispatch-log">Dispatch Log</Tabs.Tab>
           </Tabs.List>
@@ -523,7 +525,12 @@ export function PrintQueueDashboardPage() {
             </div>
           </Tabs.Panel>
 
-          {/* Tab 2: History */}
+          {/* Tab 2: Timeline */}
+          <Tabs.Panel id="timeline">
+            <QueueTimelineTab stats={stats} />
+          </Tabs.Panel>
+
+          {/* Tab 3: History */}
           <Tabs.Panel id="history">
             <QueueHistoryTab
               onRerun={handleRerunJob}
@@ -534,7 +541,7 @@ export function PrintQueueDashboardPage() {
             />
           </Tabs.Panel>
 
-          {/* Tab 3: Dispatch Log */}
+          {/* Tab 4: Dispatch Log */}
           <Tabs.Panel id="dispatch-log">
             <DispatchLogTab />
           </Tabs.Panel>
