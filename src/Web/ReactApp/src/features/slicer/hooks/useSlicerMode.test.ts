@@ -19,12 +19,20 @@ describe('useSlicerMode', () => {
     expect(result.current).toBe('Advanced');
   });
 
-  it('returns Simple when settings data is null', () => {
-    mockUseFarmSettings.mockReturnValue({ data: undefined } as ReturnType<typeof useFarmSettings>);
+  it('returns null while settings data is loading', () => {
+    mockUseFarmSettings.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useFarmSettings>);
 
     const { result } = renderHook(() => useSlicerMode());
 
-    expect(result.current).toBe('Simple');
+    expect(result.current).toBeNull();
+  });
+
+  it('returns null when settings data is undefined and not loading', () => {
+    mockUseFarmSettings.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useFarmSettings>);
+
+    const { result } = renderHook(() => useSlicerMode());
+
+    expect(result.current).toBeNull();
   });
 
   it('returns Simple when slicerMode is undefined', () => {
