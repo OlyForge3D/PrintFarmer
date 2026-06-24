@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -264,7 +265,7 @@ public class SettingsControllerConcurrencyTests : IDisposable
     {
         Guid userId = Guid.NewGuid();
         _farmSettingsMock.Setup(x => x.GetFarmSettingsRowVersion()).Returns((string?)null);
-        _farmSettingsMock.Setup(x => x.GetFarmSettings()).Returns(new FarmSettingsDto(0.15m, 1.25m, 120m, false));
+        _farmSettingsMock.Setup(x => x.GetFarmSettings()).Returns(new FarmSettingsDto(0.15m, 1.25m, 120m, false, SlicerMode.Simple));
 
         using var db = new AppDbContext(_dbOptions);
         var controller = CreateController(db, userId);
