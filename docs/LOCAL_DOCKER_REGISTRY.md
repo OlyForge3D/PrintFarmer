@@ -71,24 +71,24 @@ ifconfig | grep "inet " | grep -v 127.0.0.1
 
 # 1. Build the optimized binary layer
 docker build -f Dockerfile.orcaslicer-binaries \
-  -t localhost:5000/orcaslicer-binaries:2.3.2 \
-  --build-arg ORCASLICER_VERSION=2.3.2 \
+  -t localhost:5000/orcaslicer-binaries:2.4.0 \
+  --build-arg ORCASLICER_VERSION=2.4.0 \
   .
 
 # 2. Push binary layer to local registry
-docker push localhost:5000/orcaslicer-binaries:2.3.2
+docker push localhost:5000/orcaslicer-binaries:2.4.0
 
 # 3. Build worker using cached binaries
 docker build -f Dockerfile.orcaslicer \
   -t localhost:5000/printfarmer-orcaslicer-worker:latest \
-  --build-arg ORCASLICER_VERSION=2.3.2 \
+  --build-arg ORCASLICER_VERSION=2.4.0 \
   .
 
 # 4. Push worker to local registry
 docker push localhost:5000/printfarmer-orcaslicer-worker:latest
 
 # 5. Tag as latest for easy reference
-docker tag localhost:5000/orcaslicer-binaries:2.3.2 localhost:5000/orcaslicer-binaries:latest
+docker tag localhost:5000/orcaslicer-binaries:2.4.0 localhost:5000/orcaslicer-binaries:latest
 docker push localhost:5000/orcaslicer-binaries:latest
 
 # Legacy note: The canonical Dockerfile files are stored under
@@ -100,11 +100,11 @@ docker push localhost:5000/orcaslicer-binaries:latest
 
 ```bash
 # On deployment server, pull the images
-docker pull YOUR_DEV_IP:5000/orcaslicer-binaries:2.3.2
+docker pull YOUR_DEV_IP:5000/orcaslicer-binaries:2.4.0
 docker pull YOUR_DEV_IP:5000/printfarmer-orcaslicer-worker:latest
 
 # Tag them for local use
-docker tag YOUR_DEV_IP:5000/orcaslicer-binaries:2.3.2 orcaslicer-binaries:2.3.2
+docker tag YOUR_DEV_IP:5000/orcaslicer-binaries:2.4.0 orcaslicer-binaries:2.4.0
 docker tag YOUR_DEV_IP:5000/printfarmer-orcaslicer-worker:latest printfarmer-orcaslicer-worker:latest
 
 # Run with docker-compose (images are now local)
@@ -120,7 +120,7 @@ Create a `docker-compose.registry.yml` for registry-based deployments:
 ```yaml
 services:
   orcaslicer-binaries:
-    image: YOUR_DEV_IP:5000/orcaslicer-binaries:${ORCASLICER_VERSION:-2.3.2}
+    image: YOUR_DEV_IP:5000/orcaslicer-binaries:${ORCASLICER_VERSION:-2.4.0}
     profiles:
       - orca-binaries
 
@@ -159,18 +159,18 @@ volumes:
    ./scripts/build-orcaslicer-optimized.sh
    
    # Tag for registry
-   docker tag orcaslicer-binaries:2.3.2 localhost:5000/orcaslicer-binaries:2.3.2
+   docker tag orcaslicer-binaries:2.4.0 localhost:5000/orcaslicer-binaries:2.4.0
    docker tag printfarmer-orcaslicer-worker localhost:5000/printfarmer-orcaslicer-worker:latest
    
    # Push to registry
-   docker push localhost:5000/orcaslicer-binaries:2.3.2
+   docker push localhost:5000/orcaslicer-binaries:2.4.0
    docker push localhost:5000/printfarmer-orcaslicer-worker:latest
    ```
 
 2. **Deploy on Server**:
    ```bash
    # Pull latest images
-   docker pull YOUR_DEV_IP:5000/orcaslicer-binaries:2.3.2
+   docker pull YOUR_DEV_IP:5000/orcaslicer-binaries:2.4.0
    docker pull YOUR_DEV_IP:5000/printfarmer-orcaslicer-worker:latest
    
    # Deploy with compose

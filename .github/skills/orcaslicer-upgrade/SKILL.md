@@ -23,8 +23,8 @@ Condensed command sequence. Each line must succeed before continuing. If a step 
 
 ```bash
 # ── 0. Set variables ──────────────────────────────────────────────────────
-OLD=2.3.2                # current version
-NEW=2.4.0                # target version
+OLD=2.4.0                # current version
+NEW=2.x.y                # target version
 PFARM_ROOT="<PrintFarmer repo root>"
 ORCA_SRC="<OrcaSlicer source checkout>"
 DEPLOY_HOST="<user@host>"
@@ -147,7 +147,7 @@ ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && sed -i 's/ORCASLICER_VERSION=OLD/ORCASL
 
 OrcaSlicer frequently adds new shared library requirements between versions. The runtime deps are installed in the `slicer-base` Dockerfile stage.
 
-**Current deps** (for 2.3.2):
+**Current deps** (for 2.4.0):
 ```dockerfile
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl wget ca-certificates \
@@ -245,16 +245,16 @@ print(f\"Icons: {len(d['icons'])} section icons\")
 "
 ```
 
-| Metric | v2.3.2 Baseline | Check |
+| Metric | v2.4.0 Baseline | Check |
 |---|---|---|
-| `totalSettings` | 781 | Should increase or stay same (never decrease significantly) |
-| `filamentSettings` | 108 | Filament-specific settings count |
-| `machineSettings` | 113 | Machine-specific settings count |
-| `processSettings` | 344 | Process-specific settings count |
+| `totalSettings` | 841 | Should increase or stay same (never decrease significantly) |
+| `filamentSettings` | 97 | Filament-specific settings count |
+| `machineSettings` | 115 | Machine-specific settings count |
+| `processSettings` | 343 | Process-specific settings count |
 | Filament tabs | 7 | Tab layout count |
-| Machine tabs | 5 | Tab layout count |
+| Machine tabs | 6 | Tab layout count |
 | Process tabs | 6 | Tab layout count |
-| Section icons | 115 | SVG icon mappings |
+| Section icons | 116 | SVG icon mappings |
 
 ### Step 6: Copy New SVG Icons
 
@@ -563,3 +563,4 @@ OrcaSlicer.app (macOS)           ──►  src/Web/ReactApp/public/assets/orcas
 |---|---|---|---|
 | 2.3.1 | ~9200 | ~750 | Initial version; CLI segfault in headless mode (calc_exclude_triangles) |
 | 2.3.2 | ~9961 | 781 | Fixed CLI segfault; stricter type validation (requires native JSON types for integers); new deps: libglu1-mesa, libegl1, libgstreamer, libmspack0; 6+ new manufacturers |
+| 2.4.0 | ~9961 | 841 | Repo transferred SoftFever/OrcaSlicer -> OrcaSlicer/OrcaSlicer; first release shipping a separate Linux aarch64 AppImage (asset selection must exclude aarch64/arm64 on amd64); machine tabs 5 -> 6 (input shaping / motion); fuzzy-skin overhaul; per-feature filament assignment; 116 section icons |
