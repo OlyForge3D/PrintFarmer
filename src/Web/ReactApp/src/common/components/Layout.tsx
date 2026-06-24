@@ -34,7 +34,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
@@ -657,49 +657,41 @@ export function Layout() {
               />
             </div>
 
-            <nav className="flex-1 min-h-0 space-y-3 overflow-y-auto px-3 py-3" aria-label="Main navigation">
-              {navigationGroups.map((group) => {
-                const SectionIcon = group.header.icon;
-                const isSectionActive = group.items.some((item) => isNavItemActive(item));
-
+            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-3 py-3" aria-label="Main navigation">
+              {navigationGroups.map((group, groupIndex) => {
                 return (
-                  <section
-                    key={group.header.name}
-                    className="space-y-0.5"
-                  >
-                    <div className={clsx('flex items-center gap-2 px-3 py-1.5', isSectionActive ? 'text-pf-accent' : 'text-pf-text-tertiary')}>
-                      <span aria-hidden="true">
-                        <SectionIcon className="h-4 w-4 shrink-0" />
-                      </span>
-                      <span className="text-xs font-semibold uppercase tracking-wider">{group.header.name}</span>
-                    </div>
+                  <Fragment key={group.header.name}>
+                    {groupIndex > 0 && (
+                      <hr className="border-pf-border mx-3" aria-hidden="true" />
+                    )}
+                    <section aria-label={group.header.name} className="space-y-0.5">
+                      <div className="space-y-0.5">
+                        {group.items.map((item) => {
+                          const ItemIcon = item.icon;
+                          const isActive = isNavItemActive(item);
 
-                    <div className="space-y-0.5">
-                      {group.items.map((item) => {
-                        const ItemIcon = item.icon;
-                        const isActive = isNavItemActive(item);
-
-                        return (
-                          <NavLink
-                            key={item.href}
-                            to={item.href}
-                            onClick={() => setSidebarOpen(false)}
-                            className={clsx(
-                              'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                              isActive
-                                ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
-                                : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                            )}
-                          >
-                            <span aria-hidden="true">
-                              <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
-                            </span>
-                            <span className="flex-1 text-left">{item.name}</span>
-                          </NavLink>
-                        );
-                      })}
-                    </div>
-                  </section>
+                          return (
+                            <NavLink
+                              key={item.href}
+                              to={item.href}
+                              onClick={() => setSidebarOpen(false)}
+                              className={clsx(
+                                'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                isActive
+                                  ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+                                  : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                              )}
+                            >
+                              <span aria-hidden="true">
+                                <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
+                              </span>
+                              <span className="flex-1 text-left">{item.name}</span>
+                            </NavLink>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  </Fragment>
                 );
               })}
             </nav>
@@ -817,48 +809,40 @@ export function Layout() {
                   })}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {navigationGroups.map((group) => {
-                    const SectionIcon = group.header.icon;
-                    const isSectionActive = group.items.some((item) => isNavItemActive(item));
-
+                <div className="space-y-1">
+                  {navigationGroups.map((group, groupIndex) => {
                     return (
-                      <section
-                        key={group.header.name}
-                        className="space-y-0.5"
-                      >
-                        <div className={clsx('flex items-center gap-2 px-3 py-1.5', isSectionActive ? 'text-pf-accent' : 'text-pf-text-tertiary')}>
-                          <span aria-hidden="true">
-                            <SectionIcon className="h-4 w-4 shrink-0" />
-                          </span>
-                          <span className="text-xs font-semibold uppercase tracking-wider">{group.header.name}</span>
-                        </div>
+                      <Fragment key={group.header.name}>
+                        {groupIndex > 0 && (
+                          <hr className="border-pf-border mx-3" aria-hidden="true" />
+                        )}
+                        <section aria-label={group.header.name} className="space-y-0.5">
+                          <div className="space-y-0.5">
+                            {group.items.map((item) => {
+                              const ItemIcon = item.icon;
+                              const isActive = isNavItemActive(item);
 
-                        <div className="space-y-0.5">
-                          {group.items.map((item) => {
-                            const ItemIcon = item.icon;
-                            const isActive = isNavItemActive(item);
-
-                            return (
-                              <NavLink
-                                key={item.href}
-                                to={item.href}
-                                className={clsx(
-                                  'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                                  isActive
-                                    ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
-                                    : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                                )}
-                              >
-                                <span aria-hidden="true">
-                                  <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
-                                </span>
-                                <span className="flex-1 text-left">{item.name}</span>
-                              </NavLink>
-                            );
-                          })}
-                        </div>
-                      </section>
+                              return (
+                                <NavLink
+                                  key={item.href}
+                                  to={item.href}
+                                  className={clsx(
+                                    'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                    isActive
+                                      ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+                                      : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                                  )}
+                                >
+                                  <span aria-hidden="true">
+                                    <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
+                                  </span>
+                                  <span className="flex-1 text-left">{item.name}</span>
+                                </NavLink>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      </Fragment>
                     );
                   })}
                 </div>
