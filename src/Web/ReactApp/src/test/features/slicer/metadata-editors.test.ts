@@ -149,9 +149,12 @@ describe('Tab/Section completeness', () => {
   });
 
   it('every section has at least one field (with known exceptions)', () => {
-    // filament "Setting Overrides / Retraction" section is an empty placeholder
-    // in the OrcaSlicer metadata — no fields assigned to it.
-    const KNOWN_EMPTY_SECTIONS = new Set(['filament/Setting Overrides/Retraction']);
+    // filament "Setting Overrides" sections (Retraction, Ironing) are empty
+    // placeholders in the OrcaSlicer metadata — no fields assigned to them.
+    const KNOWN_EMPTY_SECTIONS = new Set([
+      'filament/Setting Overrides/Retraction',
+      'filament/Setting Overrides/Ironing',
+    ]);
     for (const pt of PROFILE_TYPES) {
       const pm = getProfileMeta(pt);
       for (const tab of pm.tabs) {
@@ -504,10 +507,6 @@ describe('Min/max/default validation', () => {
     '%s — defaults fall within min/max range (with known exceptions)',
     (profileType) => {
       const pm = getProfileMeta(profileType);
-      // Known upstream metadata inconsistency: filament_cooling_moves has max=0 but default=4.
-      // This is a data issue in the OrcaSlicer metadata, not a code bug.
-      const KNOWN_VIOLATIONS = new Set(['filament_cooling_moves']);
-
       const violations: string[] = [];
       for (const meta of Object.values(pm.settings)) {
         if (meta.default === undefined) continue;
@@ -516,10 +515,10 @@ describe('Min/max/default validation', () => {
         const val = parseFloat(meta.default.replace('%', ''));
         if (isNaN(val)) continue;
 
-        if (meta.min !== undefined && val < meta.min && !KNOWN_VIOLATIONS.has(meta.key)) {
+        if (meta.min !== undefined && val < meta.min) {
           violations.push(`${meta.key}: default=${val} < min=${meta.min}`);
         }
-        if (meta.max !== undefined && meta.max > 0 && val > meta.max && !KNOWN_VIOLATIONS.has(meta.key)) {
+        if (meta.max !== undefined && meta.max > 0 && val > meta.max) {
           violations.push(`${meta.key}: default=${val} > max=${meta.max}`);
         }
       }
@@ -527,12 +526,12 @@ describe('Min/max/default validation', () => {
     },
   );
 
-  it('filament_cooling_moves is a known metadata inconsistency', () => {
+  it('filament_cooling_moves has a valid min/max/default range', () => {
     const pm = getProfileMeta('filament');
     const meta = pm.settings['filament_cooling_moves'];
     expect(meta).toBeDefined();
-    // Upstream metadata says max=0 but default=4 — this is an OrcaSlicer extraction artifact
-    expect(meta.max).toBe(0);
+    // OrcaSlicer 2.4.0 corrected the prior extraction artifact (max was 0).
+    expect(meta.max).toBe(20);
     expect(meta.default).toBe('4');
   });
 

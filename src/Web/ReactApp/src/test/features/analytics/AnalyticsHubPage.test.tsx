@@ -99,7 +99,7 @@ describe('AnalyticsHubPage', () => {
     expect(screen.getByText('3.8%')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /production/i })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('production-panel')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Custom' })).toBeInTheDocument();
   });
 
   it('selects the requested lens from the query string', () => {

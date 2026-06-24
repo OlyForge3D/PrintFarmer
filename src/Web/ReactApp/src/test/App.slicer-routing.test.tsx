@@ -59,6 +59,8 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     isAuthenticated: true,
     isLoading: false,
     user: { id: 'user-1', email: 'admin@test.com', role: 'farm_admin', isActive: true },
+    hasRole: (role: string) => role === 'farm_admin',
+    hasPermission: () => true,
   }),
 }));
 
@@ -115,7 +117,7 @@ describe('App slicer route consolidation', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/settings');
+      expect(window.location.pathname).toBe('/admin/settings');
       expect(window.location.search).toContain('tab=slicing');
     });
   });

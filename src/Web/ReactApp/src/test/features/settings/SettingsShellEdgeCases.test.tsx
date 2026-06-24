@@ -152,7 +152,7 @@ describe('SettingsShell edge cases', () => {
     expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
-    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
   });
 
   it('falls back to User Settings when a non-admin deep-links into the Admin scope', () => {
