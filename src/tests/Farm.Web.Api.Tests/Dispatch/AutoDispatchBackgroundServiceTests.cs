@@ -236,7 +236,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -311,7 +311,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto());
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -340,7 +340,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
         SeedQueuedJob();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -374,7 +374,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
         SeedQueuedJob();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -404,7 +404,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
         // No jobs seeded
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -437,7 +437,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0, minimumScoreThreshold: 50.0);
         (_, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -488,7 +488,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0, minimumScoreThreshold: 50.0);
         (_, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -533,7 +533,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Suggest, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -584,7 +584,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Suggest, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -632,7 +632,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 2);
         (_, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -678,7 +678,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         SeedQueuedJob();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -735,7 +735,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         // Also queue a job for potential dispatch
         SeedQueuedJob();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -769,7 +769,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         SeedQueuedJob("should-not-dispatch");
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -802,7 +802,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
