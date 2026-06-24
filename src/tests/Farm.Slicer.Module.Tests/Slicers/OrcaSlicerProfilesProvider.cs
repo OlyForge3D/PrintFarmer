@@ -4,7 +4,7 @@ using Farm.Slicer.Module.Contracts.Libraries;
 namespace Farm.Slicer.Module.Tests.Slicers;
 
 /// <summary>
-/// Test double for loading OrcaSlicer v2.3.1 profiles from the file system.
+/// Test double for loading OrcaSlicer v2.4.0 profiles from the file system.
 /// 
 /// This is used ONLY for testing profile loading logic with sample data.
 /// Production code uses NullProfilesProvider and loads profiles from the OrcaSlicer worker service.
@@ -56,7 +56,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         return _universalFilamentsJson;
     }
 
-    public string GetProfilesVersion() => "2.3.1";
+    public string GetProfilesVersion() => "2.4.0";
 
     private async Task EnsureInitializedAsync(CancellationToken ct)
     {

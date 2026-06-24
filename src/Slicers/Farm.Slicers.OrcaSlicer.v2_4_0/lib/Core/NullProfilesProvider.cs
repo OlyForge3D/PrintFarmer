@@ -1,6 +1,6 @@
 ﻿using Farm.Slicer.Module.Contracts.Libraries;
 
-namespace Farm.Slicers.OrcaSlicer.v2_3_1;
+namespace Farm.Slicers.OrcaSlicer.v2_4_0;
 
 /// <summary>
 /// Null implementation of ISlicerProfilesProvider.
@@ -31,5 +31,5 @@ internal class NullProfilesProvider : ISlicerProfilesProvider
         return Task.FromResult((string?)null);
     }
 
-    public string GetProfilesVersion() => "2.3.1";
+    public string GetProfilesVersion() => "2.4.0";
 }

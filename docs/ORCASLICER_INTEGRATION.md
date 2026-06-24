@@ -266,7 +266,7 @@ Each manufacturer has a JSON bundle at `/opt/orcaslicer/resources/profiles/{manu
 - **compatible_printers** array contains exact machine_list names
 - **compatible_printers_condition** is an expression evaluated against machine properties
 
-### Profile Counts (OrcaSlicer 2.3.x)
+### Profile Counts (OrcaSlicer 2.4.x)
 
 - ~200 machine profiles (variants across manufacturers)
 - ~2000 filament profiles
@@ -543,7 +543,7 @@ Allows users to import their own OrcaSlicer config bundle JSON files.
 
 ### Components
 
-**Wizard UI**: `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx`
+**Wizard UI**: `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx`
 
 ```
 Step 1: Upload
@@ -790,7 +790,7 @@ To load bed STL models:
 | `src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx` | Settings UI |
 | `src/Web/ReactApp/src/features/models3d/components/3d/ModelViewer3D.tsx` | 3D viewer |
 | `src/Web/ReactApp/src/contexts/SlicerContext.tsx` | Slicer availability state |
-| `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx` | Import wizard |
+| `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx` | Import wizard |
 
 ### Docker
 

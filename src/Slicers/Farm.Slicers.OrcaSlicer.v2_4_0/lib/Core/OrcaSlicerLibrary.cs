@@ -1,12 +1,12 @@
 ﻿using Farm.Slicer.Module.Contracts.Libraries;
 
-namespace Farm.Slicers.OrcaSlicer.v2_3_1;
+namespace Farm.Slicers.OrcaSlicer.v2_4_0;
 
 /// <summary>
-/// OrcaSlicer v2.3.1 slicer library implementation.
+/// OrcaSlicer v2.4.0 slicer library implementation.
 /// </summary>
 #pragma warning disable S101 // Class name required to match version numbering for plugin discovery
-public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
+public class OrcaSlicerLibrary_v2_4_0 : ISlicerLibrary
 #pragma warning restore S101
 {
     private readonly ISlicerProfilesProvider _profilesProvider;
@@ -14,7 +14,7 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
 
     public string SlicerName => "OrcaSlicer";
 
-    public string SlicerVersion => "2.3.1";
+    public string SlicerVersion => "2.4.0";
 
     public string SlicerType => "OrcaSlicer";
 
@@ -22,7 +22,7 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
 
     public ISlicerAssetRegistry AssetRegistry => _assetRegistry;
 
-    public OrcaSlicerLibrary_v2_3_1()
+    public OrcaSlicerLibrary_v2_4_0()
     {
         // Profiles are loaded from the OrcaSlicer worker service (/api/profiles), not from bundled resources
         // The worker parses profiles from the official OrcaSlicer installation at /opt/orcaslicer/resources/profiles/

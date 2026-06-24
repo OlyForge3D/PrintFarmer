@@ -14,8 +14,7 @@
       "@/types/*": ["./src/types/*"],
       "@/utils/*": ["./src/utils/*"],
       "@/pages/*": ["./src/pages/*"],
-      "@/test/*": ["./src/test/*"],
-      "@farm/slicers-orcaslicer-v2_3_1": ["../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui"]
+      "@/test/*": ["./src/test/*"]
     }
   }
 }

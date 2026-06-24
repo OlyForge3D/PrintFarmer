@@ -1,6 +1,6 @@
-# Farm.Slicers.OrcaSlicer.v2_3_1
+# Farm.Slicers.OrcaSlicer.v2_4_0
 
-OrcaSlicer v2.3.1 slicer library for PrintFarmer.
+OrcaSlicer v2.4.0 slicer library for PrintFarmer.
 
 ## Structure
 
@@ -25,7 +25,7 @@ OrcaSlicer v2.3.1 slicer library for PrintFarmer.
 │   └── index.ts                   # Main UI export
 │
 ├── package.json                   # npm package metadata
-├── Farm.Slicers.OrcaSlicer.v2_3_1.csproj  # NuGet project file
+├── Farm.Slicers.OrcaSlicer.v2_4_0.csproj  # NuGet project file
 └── README.md                      # This file
 ```
 
@@ -33,10 +33,10 @@ OrcaSlicer v2.3.1 slicer library for PrintFarmer.
 
 ### Implementing ISlicerLibrary
 
-The `OrcaSlicerLibrary_v2_3_1` class implements `ISlicerLibrary` and serves as the entry point for the backend:
+The `OrcaSlicerLibrary_v2_4_0` class implements `ISlicerLibrary` and serves as the entry point for the backend:
 
 ```csharp
-var library = new OrcaSlicerLibrary_v2_3_1();
+var library = new OrcaSlicerLibrary_v2_4_0();
 services.AddSlicerLibrary(library);
 ```
 
@@ -60,7 +60,7 @@ The `OrcaSlicerUI` object in `ui/index.ts` exports all OrcaSlicer-specific UI:
 ```typescript
 import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_3_x/ui';
 
-slicerUIRegistry.registerUI('OrcaSlicer', '2.3.1', OrcaSlicerUI);
+slicerUIRegistry.registerUI('OrcaSlicer', '2.4.0', OrcaSlicerUI);
 ```
 
 ### UI Components (To Be Migrated)
@@ -89,8 +89,8 @@ TypeScript types to migrate from core:
 
 ```csharp
 services
-  .AddSlicerLibrary<OrcaSlicerLibrary_v2_3_1>()
-  .AddSlicerUIProvider<OrcaSlicerUIProvider_v2_3_1>()
+  .AddSlicerLibrary<OrcaSlicerLibrary_v2_4_0>()
+  .AddSlicerUIProvider<OrcaSlicerUIProvider_v2_4_0>()
   .AddSlicerRegistry();
 ```
 
@@ -100,7 +100,7 @@ services
 import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_3_x/ui';
 
 const slicerUIRegistry = new SlicerUIRegistry();
-slicerUIRegistry.registerUI('OrcaSlicer', '2.3.1', OrcaSlicerUI);
+slicerUIRegistry.registerUI('OrcaSlicer', '2.4.0', OrcaSlicerUI);
 ```
 
 ## Property Changes

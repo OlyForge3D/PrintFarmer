@@ -931,7 +931,7 @@ function Deploy-OfflineMode {
 function Cache-OrcaSlicer {
     param(
         [string]$TargetDir = "./docker-images/orcaslicer",
-        [string]$Version = "2.3.1"
+        [string]$Version = "2.4.0"
     )
     
     Write-Header "Caching OrcaSlicer Linux AppImage"
@@ -1854,8 +1854,8 @@ if (-not $NonInteractive) {
             Write-Success "OrcaSlicer workers enabled"
             
             # OrcaSlicer version
-            $orcaVersion = Read-Host "OrcaSlicer version to deploy (default: 2.3.1)"
-            $config['ORCASLICER_VERSION'] = if ([string]::IsNullOrWhiteSpace($orcaVersion)) { '2.3.1' } else { $orcaVersion }
+            $orcaVersion = Read-Host "OrcaSlicer version to deploy (default: 2.4.0)"
+            $config['ORCASLICER_VERSION'] = if ([string]::IsNullOrWhiteSpace($orcaVersion)) { '2.4.0' } else { $orcaVersion }
             
             # Worker replica count
             $workerCount = Read-Host "Number of OrcaSlicer worker replicas (default: 1)"

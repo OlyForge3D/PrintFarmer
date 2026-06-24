@@ -72,7 +72,7 @@ These are the main documentation files you should read first:
 - **docs/SLICER_SERVICE_METRICS.md** - Slicer service monitoring
 - **docs/SLICER_WORKER_API_KEYS.md** - Slicer worker authentication
 - **docs/SLICER_WORKER_CI_SECURITY.md** - Slicer worker security
-- **src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/.copilot-instructions.md** - OrcaSlicer worker setup
+- **src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/.copilot-instructions.md** - OrcaSlicer worker setup
 
 ### Features
 

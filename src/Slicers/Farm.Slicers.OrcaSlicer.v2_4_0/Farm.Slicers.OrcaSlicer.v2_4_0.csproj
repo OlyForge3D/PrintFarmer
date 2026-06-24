@@ -7,9 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <WarningsNotAsErrors>nullable</WarningsNotAsErrors>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <Title>Farm.Slicers.OrcaSlicer.v2_3_1</Title>
-    <Description>OrcaSlicer v2.3.1 slicer library for PrintFarmer. Contains profiles, assets, and UI components.</Description>
-    <Version>2.3.1</Version>
+    <Title>Farm.Slicers.OrcaSlicer.v2_4_0</Title>
+    <Description>OrcaSlicer v2.4.0 slicer library for PrintFarmer. Contains profiles, assets, and UI components.</Description>
+    <Version>2.4.0</Version>
     <Authors>PrintFarmer</Authors>
   </PropertyGroup>
 
@@ -20,8 +20,8 @@
   <!-- Embed assets as resources -->
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
-    <EmbeddedResource Include="lib/Assets/**/*">
-      <LogicalName>OrcaSlicer_v2_3_1_Assets_%(Filename)</LogicalName>
+    <EmbeddedResource Include="lib/Assets/**/*" Exclude="lib/Assets/**/*.cs">
+      <LogicalName>OrcaSlicer_v2_4_0_Assets_%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
