@@ -6,6 +6,8 @@ import type { QueueStatsDto, TimelineEventDto } from "@/types/api";
 
 interface QueueTimelineTabProps {
   stats: QueueStatsDto | null;
+  dateFrom: Date | null;
+  dateTo: Date | null;
 }
 
 interface TimelineEventWithDates {
@@ -85,22 +87,24 @@ function buildTimelineWindow() {
   return { from, to: now };
 }
 
-export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
+export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimelineTabProps) {
+  const from = dateFrom ?? new Date(Date.now() - TIMELINE_LOOKBACK_HOURS * 3600 * 1000);
+  const to = dateTo ?? new Date();
+
   const {
     data: timelineData,
     isLoading: isTimelineLoading,
     error: timelineError,
   } = useQuery<TimelineQueryResult>({
-    queryKey: ["queue-timeline-events"],
+    queryKey: ["queue-timeline-events", from.toISOString(), to.toISOString()],
     queryFn: async () => {
-      const window = buildTimelineWindow();
-      const events = await apiClient.getAnalyticsTimeline(window.from, window.to, undefined, undefined, TIMELINE_LIMIT);
-      return { events, window };
+      const events = await apiClient.getAnalyticsTimeline(from, to, undefined, undefined, TIMELINE_LIMIT);
+      return { events, window: { from, to } };
     },
     staleTime: 10_000,
     refetchInterval: 10_000,
   });
-  const timelineWindow = timelineData?.window ?? buildTimelineWindow();
+  const timelineWindow = timelineData?.window ?? { from, to };
   const timelineEvents = timelineData?.events ?? [];
 
   const { data: queueOverview = [] } = useQuery({

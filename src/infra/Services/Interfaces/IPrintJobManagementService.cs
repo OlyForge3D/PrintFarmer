@@ -22,6 +22,8 @@ public interface IPrintJobManagementService
     /// <param name="sortBy">Sort mode for queued jobs (for example: priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
+    /// <param name="queuedFrom">Optional inclusive lower bound for when the job was queued (UTC).</param>
+    /// <param name="queuedTo">Optional inclusive upper bound for when the job was queued (UTC).</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<List<QueuedPrintJobWithFileMetaDto>> GetAllQueuedJobsAsync(
         string? filterStatus = null,
@@ -32,6 +34,8 @@ public interface IPrintJobManagementService
         string sortBy = "priority",
         int limit = 100,
         int offset = 0,
+        DateTime? queuedFrom = null,
+        DateTime? queuedTo = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

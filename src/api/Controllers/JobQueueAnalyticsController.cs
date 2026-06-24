@@ -34,6 +34,8 @@ public class JobQueueAnalyticsController(
     /// <param name="filterMaterial">Filter by material type</param>
     /// <param name="deadlineStart">Filter jobs with deadline at or after this UTC timestamp</param>
     /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
+    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp</param>
+    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp</param>
     /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
@@ -49,6 +51,8 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? filterMaterial,
         [FromQuery] DateTime? deadlineStart = null,
         [FromQuery] DateTime? deadlineEnd = null,
+        [FromQuery] DateTime? queuedFrom = null,
+        [FromQuery] DateTime? queuedTo = null,
         [FromQuery] string sortBy = "priority",
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0,
@@ -67,7 +71,7 @@ public class JobQueueAnalyticsController(
             }
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
-                filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, cancellationToken);
+                filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
 
             return Ok(jobs);
         }

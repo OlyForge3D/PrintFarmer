@@ -80,6 +80,8 @@ public interface IPrintJobManagementRepository
         string sortBy = "priority",
         int limit = 100,
         int offset = 0,
+        DateTime? queuedFrom = null,
+        DateTime? queuedTo = null,
         CancellationToken ct = default);
 
     /// <summary>

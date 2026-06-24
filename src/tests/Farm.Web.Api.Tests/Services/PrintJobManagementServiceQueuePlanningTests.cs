@@ -43,6 +43,8 @@ public class PrintJobManagementServiceQueuePlanningTests
                 "priority",
                 5000,
                 0,
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([
                 new PrintJob
@@ -116,6 +118,8 @@ public class PrintJobManagementServiceQueuePlanningTests
                 "priority",
                 5000,
                 0,
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
@@ -150,6 +154,8 @@ public class PrintJobManagementServiceQueuePlanningTests
                 "priority",
                 5000,
                 0,
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 

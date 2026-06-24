@@ -81,6 +81,8 @@ public class PrintJobManagementService(
     /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
+    /// <param name="queuedFrom">Optional inclusive lower bound for when the job was queued.</param>
+    /// <param name="queuedTo">Optional inclusive upper bound for when the job was queued.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<List<QueuedPrintJobWithFileMetaDto>> GetAllQueuedJobsAsync(
         string? filterStatus = null,
@@ -91,6 +93,8 @@ public class PrintJobManagementService(
         string sortBy = "priority",
         int limit = 100,
         int offset = 0,
+        DateTime? queuedFrom = null,
+        DateTime? queuedTo = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -103,7 +107,7 @@ public class PrintJobManagementService(
             }
 
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
-                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, cancellationToken);
+                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
 
             return jobs.Select(pj => MapToQueuedPrintJobWithFileMeta(pj)).ToList();
         }

@@ -87,6 +87,8 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         string sortBy = "priority",
         int limit = 100,
         int offset = 0,
+        DateTime? queuedFrom = null,
+        DateTime? queuedTo = null,
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
@@ -142,6 +144,16 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         if (deadlineEndUtc.HasValue)
         {
             query = query.Where(pj => pj.DeadlineAtUtc.HasValue && pj.DeadlineAtUtc.Value <= deadlineEndUtc.Value);
+        }
+
+        if (queuedFrom.HasValue)
+        {
+            query = query.Where(pj => pj.QueuedAt >= queuedFrom.Value);
+        }
+
+        if (queuedTo.HasValue)
+        {
+            query = query.Where(pj => pj.QueuedAt <= queuedTo.Value);
         }
 
         query = sortBy.ToLowerInvariant() switch
@@ -234,7 +246,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         }
 
         double totalWaitMinutes = completedJobs
-            .Sum(j => (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes);
+            .Sum(j => Math.Max(0.0, (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes));
 
         return totalWaitMinutes / completedJobs.Count;
     }

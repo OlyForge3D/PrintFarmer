@@ -46,6 +46,8 @@ public class PrintJobManagementServiceQueueRecommendationsTests
                 "priority",
                 100,
                 0,
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([materialJobA, materialJobB, nozzleJob, bedClearJob, idleOpportunityJob]);
 
@@ -97,6 +99,8 @@ public class PrintJobManagementServiceQueueRecommendationsTests
                 It.IsAny<string>(),
                 It.IsAny<int>(),
                 It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }

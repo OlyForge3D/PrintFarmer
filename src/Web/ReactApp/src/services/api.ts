@@ -2530,9 +2530,14 @@ export class ApiClient {
 
   // ============ Dispatch history ============
 
-  async getDispatchHistory(page: number = 1, pageSize: number = 20): Promise<DispatchHistoryPageDto> {
+  async getDispatchHistory(page: number = 1, pageSize: number = 20, dateFrom?: Date, dateTo?: Date): Promise<DispatchHistoryPageDto> {
     const response = await this.client.get<DispatchHistoryPageDto>('/dispatch/history', {
-      params: { page, pageSize },
+      params: {
+        page,
+        pageSize,
+        ...(dateFrom && { dateFrom: dateFrom.toISOString() }),
+        ...(dateTo && { dateTo: dateTo.toISOString() }),
+      },
     });
     return response.data;
   }
@@ -3704,7 +3709,9 @@ export class ApiClient {
     filterMaterial?: string,
     sortBy: "priority" | "deadline" | "deadline_desc" = "priority",
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
+    queuedFrom?: Date,
+    queuedTo?: Date
   ): Promise<unknown[]> {
     const params = new URLSearchParams();
     if (filterStatus) params.append("filterStatus", filterStatus);
@@ -3713,6 +3720,8 @@ export class ApiClient {
     params.append("sortBy", sortBy);
     params.append("limit", limit.toString());
     params.append("offset", offset.toString());
+    if (queuedFrom) params.append("queuedFrom", queuedFrom.toISOString());
+    if (queuedTo) params.append("queuedTo", queuedTo.toISOString());
 
     const response = await this.client.get(`/job-queue-analytics?${params.toString()}`);
     return response.data;

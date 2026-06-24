@@ -94,6 +94,8 @@ export interface ModelFiltersBarProps {
 export interface QueueHistoryTabProps {
   onRerun?: (jobId: string) => Promise<void>;
   onViewDetails?: (jobId: string) => void;
+  dateFrom: Date | null;
+  dateTo: Date | null;
 }
 
 export interface HistoryFiltersBarProps {

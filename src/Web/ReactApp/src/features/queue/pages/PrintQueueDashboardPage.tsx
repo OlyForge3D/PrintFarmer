@@ -18,6 +18,8 @@ import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
 import QueueTimelineTab from "../components/QueueTimelineTab";
 import { QueueRecommendationsPanel } from "../components/QueueRecommendationsPanel";
+import QueueDateRangeBar, { defaultDateRange } from "../components/QueueDateRangeBar";
+import type { DateRange } from "../components/QueueDateRangeBar";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
@@ -134,6 +136,7 @@ export function PrintQueueDashboardPage() {
   const [modelFilter, setModelFilter] = useState<string | null>(null);
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"priority" | "deadline" | "deadline_desc">("priority");
+  const [dateRange, setDateRange] = useState<DateRange>(defaultDateRange);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
@@ -173,14 +176,16 @@ export function PrintQueueDashboardPage() {
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
-    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy],
+    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
     queryFn: () => apiClient.getAnalyticsQueueJobs(
       statusFilter || undefined,
       modelFilter || undefined,
       materialFilter || undefined,
       sortBy,
       100,
-      0
+      0,
+      dateRange.from ?? undefined,
+      dateRange.to ?? undefined,
     ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
     staleTime: 10_000,
     refetchInterval: 10_000,
@@ -503,9 +508,10 @@ export function PrintQueueDashboardPage() {
         </div>
       )}
 
-      <QueueRecommendationsPanel
-        recommendations={recommendations}
-        isLoading={recommendationsLoading}
+      <QueueDateRangeBar
+        dateFrom={dateRange.from}
+        dateTo={dateRange.to}
+        onChange={setDateRange}
       />
 
       {/* Tabbed Interface */}
@@ -523,6 +529,14 @@ export function PrintQueueDashboardPage() {
           {/* Tab 1: Queue */}
           <Tabs.Panel id="print-queue">
             <div className="flex flex-col h-full w-full min-h-0">
+              {/* To-Do Recommendations */}
+              <div className="px-4 pt-4">
+                <QueueRecommendationsPanel
+                  recommendations={recommendations}
+                  isLoading={recommendationsLoading}
+                />
+              </div>
+
               {/* Filters + Auto-dispatch global toggle */}
               <div data-tour="queue-filters" className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -614,7 +628,7 @@ export function PrintQueueDashboardPage() {
 
           {/* Tab 2: Timeline */}
           <Tabs.Panel id="timeline">
-            <QueueTimelineTab stats={stats} />
+            <QueueTimelineTab stats={stats} dateFrom={dateRange.from} dateTo={dateRange.to} />
           </Tabs.Panel>
 
           {/* Tab 3: History */}
@@ -625,12 +639,14 @@ export function PrintQueueDashboardPage() {
                 setSelectedJobId(jobId);
                 setIsJobDetailsModalOpen(true);
               }}
+              dateFrom={dateRange.from}
+              dateTo={dateRange.to}
             />
           </Tabs.Panel>
 
           {/* Tab 4: Dispatch Log */}
           <Tabs.Panel id="dispatch-log">
-            <DispatchLogTab />
+            <DispatchLogTab dateFrom={dateRange.from} dateTo={dateRange.to} />
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>

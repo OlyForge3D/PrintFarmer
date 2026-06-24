@@ -28,7 +28,7 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-export default function DispatchLogTab() {
+export default function DispatchLogTab({ dateFrom, dateTo }: { dateFrom: Date | null; dateTo: Date | null }) {
   const [items, setItems] = useState<DispatchHistoryDto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -41,7 +41,12 @@ export default function DispatchLogTab() {
     setLoading(true);
     setError(null);
     try {
-      const data: DispatchHistoryPageDto = await apiClient.getDispatchHistory(p, PAGE_SIZE);
+      const data: DispatchHistoryPageDto = await apiClient.getDispatchHistory(
+        p,
+        PAGE_SIZE,
+        dateFrom ?? undefined,
+        dateTo ?? undefined,
+      );
       setItems(data.items);
       setTotalCount(data.totalCount);
       setPage(data.page);
@@ -50,11 +55,12 @@ export default function DispatchLogTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
-    fetchData(page);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setPage(1);
+    fetchData(1);
+  }, [fetchData]); // re-fetch whenever dateFrom/dateTo change (fetchData dep)
 
   const handlePrev = () => {
     if (page > 1) fetchData(page - 1);

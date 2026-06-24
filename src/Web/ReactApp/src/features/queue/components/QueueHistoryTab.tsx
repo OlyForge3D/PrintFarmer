@@ -26,6 +26,8 @@ import type { QueueHistoryTabProps } from "@/types/components";
 export default function QueueHistoryTab({
   onRerun,
   onViewDetails,
+  dateFrom,
+  dateTo,
 }: QueueHistoryTabProps) {
   // State
   const [jobs, setJobs] = useState<HistoryJob[]>([]);
@@ -41,18 +43,10 @@ export default function QueueHistoryTab({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Filter state - default to last 7 days
-  const [dateStart, setDateStart] = useState<Date | null>(() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 7);
-    date.setHours(0, 0, 0, 0);
-    return date;
-  });
-  const [dateEnd, setDateEnd] = useState<Date | null>(() => {
-    const date = new Date();
-    date.setHours(23, 59, 59, 999);
-    return date;
-  });
+  // Date range comes from the global bar (props); local state is no longer needed.
+  const dateStart = dateFrom;
+  const dateEnd = dateTo;
+
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(["completed", "failed", "cancelled"]);
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "duration" | "model">("newest");
   
@@ -240,10 +234,6 @@ export default function QueueHistoryTab({
       <HistoryFiltersBar
         selectedStatuses={selectedStatuses}
         onStatusChange={setSelectedStatuses}
-        dateStart={dateStart}
-        onDateStartChange={setDateStart}
-        dateEnd={dateEnd}
-        onDateEndChange={setDateEnd}
         sortBy={sortBy}
         onSortChange={setSortBy}
         onRefresh={loadHistory}
