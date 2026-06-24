@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
@@ -10,10 +11,13 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Api.Services.PrintQueue;
@@ -35,7 +39,10 @@ public class PrintJobManagementService(
     IPrinterStatusRefreshService? printerStatusRefreshService = null,
     IJobCostCalculationService? jobCostCalculationService = null,
     ICameraSnapshotService? cameraSnapshotService = null,
-    IServiceScopeFactory? serviceScopeFactory = null) : IPrintJobManagementService
+    IServiceScopeFactory? serviceScopeFactory = null,
+    IDispatchScorer? dispatchScorer = null,
+    ISettingsService? settingsService = null,
+    IMemoryCache? memoryCache = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -50,6 +57,16 @@ public class PrintJobManagementService(
     private readonly IJobCostCalculationService? _jobCostCalculationService = jobCostCalculationService;
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
+    private readonly IDispatchScorer? _dispatchScorer = dispatchScorer;
+    private readonly ISettingsService? _settingsService = settingsService;
+    private readonly IMemoryCache? _memoryCache = memoryCache;
+    private const int QueuePlanningMaxJobs = 5000;
+    private const int DefaultEstimatedPrintMinutes = 90;
+    private const int MinimumRemainingPrintMinutes = 5;
+    private const int RecommendationCandidateMultiplier = 20;
+    private const int RecommendationMinScoredJobs = 25;
+    private const int RecommendationMaxScoredJobs = 150;
+    private static readonly TimeSpan RecommendationCacheDuration = TimeSpan.FromSeconds(45);
 
     // ============= QUERY OPERATIONS =============
 
@@ -59,6 +76,9 @@ public class PrintJobManagementService(
     /// <param name="filterStatus">Optional filter by job status.</param>
     /// <param name="filterModel">Optional filter by printer model name.</param>
     /// <param name="filterMaterial">Optional filter by required material type.</param>
+    /// <param name="deadlineStart">Optional inclusive lower bound for job deadlines.</param>
+    /// <param name="deadlineEnd">Optional inclusive upper bound for job deadlines.</param>
+    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
@@ -66,6 +86,9 @@ public class PrintJobManagementService(
         string? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
+        DateTime? deadlineStart = null,
+        DateTime? deadlineEnd = null,
+        string sortBy = "priority",
         int limit = 100,
         int offset = 0,
         CancellationToken cancellationToken = default)
@@ -80,7 +103,7 @@ public class PrintJobManagementService(
             }
 
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
-                status, filterModel, filterMaterial, limit, offset, cancellationToken);
+                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, cancellationToken);
 
             return jobs.Select(pj => MapToQueuedPrintJobWithFileMeta(pj)).ToList();
         }
@@ -131,13 +154,37 @@ public class PrintJobManagementService(
         {
             (int queued, int printing, int paused, int completed, int failed) = await _repository.GetQueueStatsAsync(cancellationToken);
             double avgWait = await _repository.GetAverageWaitTimeMinutesAsync(printerModelId: null, lookbackDays: 30, ct: cancellationToken);
+            QueuePlanningSettings settings = GetQueuePlanningSettings();
+            List<PrintJob> activeJobs = await _repository.GetFilteredJobsAsync(
+                filterStatus: null,
+                filterModel: null,
+                filterMaterial: null,
+                deadlineStartUtc: null,
+                deadlineEndUtc: null,
+                sortBy: "priority",
+                limit: QueuePlanningMaxJobs,
+                offset: 0,
+                ct: cancellationToken);
+
+            QueuePlanningProjection planning = BuildQueuePlanningProjection(activeJobs, settings, DateTime.UtcNow);
 
             return new QueueStatsDto
             {
                 TotalQueued = queued,
                 TotalPrinting = printing,
                 TotalPaused = paused,
-                AverageWaitTimeMinutes = (int)Math.Round(avgWait)
+                AverageWaitTimeMinutes = (int)Math.Round(avgWait),
+                EstimatedQueueCompletionUtc = planning.EstimatedQueueCompletionUtc,
+                StaffedCompletionUtc = planning.StaffedCompletionUtc,
+                Assumptions = new QueuePlanningAssumptionsDto
+                {
+                    WorkdayStartHourUtc = settings.WorkdayStartHourUtc,
+                    WorkdayEndHourUtc = settings.WorkdayEndHourUtc,
+                    BedClearMinutes = settings.BedClearMinutes,
+                    DefaultDeadlineHours = settings.DefaultDeadlineHours,
+                    RequireDeadline = settings.RequireDeadline,
+                    MinimumLeadHours = settings.MinimumLeadHours
+                }
             };
         }
         catch (Exception ex)
@@ -187,6 +234,147 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
+    /// Get prioritized to-do recommendations to unlock queued jobs.
+    /// </summary>
+    /// <param name="limit">Maximum number of recommendations to return.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    public async Task<List<QueueRecommendationDto>> GetQueueRecommendationsAsync(
+        int limit = 5,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0 || _dispatchScorer is null)
+        {
+            return [];
+        }
+
+        string cacheKey = $"queue:recommendations:v1:{limit}";
+        if (_memoryCache is not null
+            && _memoryCache.TryGetValue(cacheKey, out List<QueueRecommendationDto>? cachedRecommendations)
+            && cachedRecommendations is not null)
+        {
+            return cachedRecommendations;
+        }
+
+        try
+        {
+            int maxScoredJobs = Math.Clamp(
+                limit * RecommendationCandidateMultiplier,
+                RecommendationMinScoredJobs,
+                RecommendationMaxScoredJobs);
+
+            List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
+                filterStatus: null,
+                filterModel: null,
+                filterMaterial: null,
+                deadlineStartUtc: null,
+                deadlineEndUtc: null,
+                sortBy: "priority",
+                limit: maxScoredJobs,
+                offset: 0,
+                ct: cancellationToken);
+
+            List<PrintJob> queuedJobs = jobs
+                .Where(j => j.Status is PrintJobStatus.Queued or PrintJobStatus.Assigned)
+                .ToList();
+
+            if (queuedJobs.Count == 0)
+            {
+                return [];
+            }
+
+            Dictionary<string, HashSet<Guid>> affectedJobsByCategory = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["material-mismatch"] = [],
+                ["nozzle-mismatch"] = [],
+                ["bed-clear-blocking"] = [],
+                ["idle-printer-opportunity"] = [],
+            };
+
+            foreach (PrintJob job in queuedJobs)
+            {
+                List<DispatchScore> scores = await _dispatchScorer.ScorePrintersForJobAsync(job.Id, cancellationToken);
+                if (scores.Count == 0)
+                {
+                    continue;
+                }
+
+                bool hasIdleOpportunity = scores
+                    .Where(s => !s.Eliminated)
+                    .Any(s =>
+                        s.ScoreBreakdown.TryGetValue("Availability", out FactorScore? availability)
+                        && availability.Score >= 100
+                        && s.ScoreBreakdown.TryGetValue("QueueDepth", out FactorScore? queueDepth)
+                        && queueDepth.Score >= 100);
+
+                if (hasIdleOpportunity)
+                {
+                    affectedJobsByCategory["idle-printer-opportunity"].Add(job.Id);
+                    continue;
+                }
+
+                List<string> eliminationReasons = scores
+                    .SelectMany(s => s.EliminationReasons)
+                    .Where(r => !string.IsNullOrWhiteSpace(r))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (eliminationReasons.Count == 0)
+                {
+                    continue;
+                }
+
+                bool hasBedClearBlocking = eliminationReasons.Any(r =>
+                    r.Contains("bed clear", StringComparison.OrdinalIgnoreCase));
+
+                bool hasNozzleMismatch = eliminationReasons.Any(r =>
+                    r.Contains("nozzle diameter", StringComparison.OrdinalIgnoreCase)
+                    || r.Contains("hardened nozzle", StringComparison.OrdinalIgnoreCase));
+
+                bool hasMaterialMismatch = eliminationReasons.Any(r =>
+                    r.Contains("material", StringComparison.OrdinalIgnoreCase)
+                    || r.Contains("enclosure", StringComparison.OrdinalIgnoreCase));
+
+                if (hasBedClearBlocking)
+                {
+                    affectedJobsByCategory["bed-clear-blocking"].Add(job.Id);
+                }
+
+                if (hasNozzleMismatch)
+                {
+                    affectedJobsByCategory["nozzle-mismatch"].Add(job.Id);
+                }
+
+                if (hasMaterialMismatch)
+                {
+                    affectedJobsByCategory["material-mismatch"].Add(job.Id);
+                }
+            }
+
+            List<QueueRecommendationDto> recommendations = BuildQueueRecommendations(affectedJobsByCategory)
+                .Where(r => r.EstimatedUnlockedJobCount > 0)
+                .OrderByDescending(r => r.PriorityScore)
+                .ThenBy(r => r.Category, StringComparer.Ordinal)
+                .Take(limit)
+                .ToList();
+
+            _memoryCache?.Set(
+                cacheKey,
+                recommendations,
+                new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = RecommendationCacheDuration
+                });
+
+            return recommendations;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating queue recommendations");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Get print job history (Phase 2)
     /// </summary>
     /// <param name="limit">Maximum number of history entries to return.</param>
@@ -195,6 +383,8 @@ public class PrintJobManagementService(
     /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
     /// <param name="dateStart">Optional start date filter (inclusive).</param>
     /// <param name="dateEnd">Optional end date filter (inclusive).</param>
+    /// <param name="deadlineStart">Optional inclusive lower bound for job deadlines.</param>
+    /// <param name="deadlineEnd">Optional inclusive upper bound for job deadlines.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueHistoryPageDto> GetQueueHistoryAsync(
         int limit = 50,
@@ -203,12 +393,14 @@ public class PrintJobManagementService(
         List<string>? statuses = null,
         DateTime? dateStart = null,
         DateTime? dateEnd = null,
+        DateTime? deadlineStart = null,
+        DateTime? deadlineEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             (List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds) =
-                await _repository.GetHistoryAsync(limit, offset, sortBy, statuses, dateStart, dateEnd, cancellationToken);
+                await _repository.GetHistoryAsync(limit, offset, sortBy, statuses, dateStart, dateEnd, deadlineStart, deadlineEnd, cancellationToken);
 
             var entries = jobs
                 .Select(pj => new QueueHistoryEntryDto
@@ -220,6 +412,7 @@ public class PrintJobManagementService(
                     CompletionPercentage = pj.Status == PrintJobStatus.Completed ? 100 : 0,
                     StartedAtUtc = pj.ActualStartTime ?? pj.CreatedAt,
                     CompletedAtUtc = pj.ActualEndTime,
+                    DeadlineAtUtc = pj.DeadlineAtUtc,
                     ActualPrintTimeSeconds = (int?)pj.ActualPrintTime?.TotalSeconds ?? 0,
                     FailureReason = pj.FailureReason,
                     FilamentName = pj.FilamentName,
@@ -312,6 +505,8 @@ public class PrintJobManagementService(
             // Create new print job
             // Status is Assigned if a printer is specified, otherwise Queued
             Guid? assignedPrinterId = string.IsNullOrEmpty(request.AssignedPrinterId) ? null : Guid.Parse(request.AssignedPrinterId);
+            QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
+            DateTime? resolvedDeadlineAtUtc = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings);
             var job = new PrintJob
             {
                 Id = Guid.NewGuid(),
@@ -325,6 +520,7 @@ public class PrintJobManagementService(
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
+                DeadlineAtUtc = resolvedDeadlineAtUtc,
                 EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
                     : null,
@@ -393,6 +589,11 @@ public class PrintJobManagementService(
             if (!string.IsNullOrEmpty(request.FailureReason))
             {
                 job.FailureReason = request.FailureReason;
+            }
+
+            if (request.DeadlineAtUtc.HasValue)
+            {
+                job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings());
             }
 
             job.UpdatedAt = DateTime.UtcNow;
@@ -1071,6 +1272,7 @@ public class PrintJobManagementService(
                 RequiredCapabilities = originalJob.RequiredCapabilities,
                 EstimatedPrintTime = originalJob.EstimatedPrintTime,
                 EstimatedFilamentUsage = originalJob.EstimatedFilamentUsage,
+                DeadlineAtUtc = originalJob.DeadlineAtUtc,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow
@@ -1645,6 +1847,21 @@ public class PrintJobManagementService(
     }
 
     // ============= PRIVATE HELPERS =============
+    private static DateTime? NormalizeUtcDeadline(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
+    }
+
     private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(PrintJob job)
     {
         DateTime? estimatedStart = EstimateStartTime(job);
@@ -1678,6 +1895,352 @@ public class PrintJobManagementService(
         }
 
         return estimatedStart.Value + job.EstimatedPrintTime.Value;
+    }
+
+    private QueuePlanningSettings GetQueuePlanningSettings()
+    {
+        QueuePlanningSettings fallback = new();
+        if (_settingsService is null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            QueuePlanningSettings? settings = _settingsService.Get<QueuePlanningSettings>();
+            if (settings is null)
+            {
+                _logger.LogWarning("QueuePlanning settings were missing. Enforcing strict deadline fallback policy.");
+                return new QueuePlanningSettings
+                {
+                    RequireDeadline = true,
+                    MinimumLeadHours = 0,
+                    DefaultDeadlineHours = null
+                };
+            }
+
+            settings.Validate();
+            return settings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load QueuePlanning settings. Enforcing strict deadline fallback policy.");
+            return new QueuePlanningSettings
+            {
+                RequireDeadline = true,
+                MinimumLeadHours = 0,
+                DefaultDeadlineHours = null
+            };
+        }
+    }
+
+    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    {
+        DateTime nowUtc = DateTime.UtcNow;
+        DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
+        if (!normalizedDeadline.HasValue)
+        {
+            if (settings.RequireDeadline)
+            {
+                throw new ValidationException("Deadline is required by queue policy.");
+            }
+
+            if (settings.DefaultDeadlineHours.HasValue)
+            {
+                normalizedDeadline = nowUtc.AddHours(settings.DefaultDeadlineHours.Value);
+            }
+        }
+
+        ValidateDeadlineLeadTime(normalizedDeadline, settings.MinimumLeadHours, nowUtc);
+        return normalizedDeadline;
+    }
+
+    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    {
+        DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
+        if (!normalized.HasValue)
+        {
+            throw new ValidationException("Deadline is required by queue policy.");
+        }
+
+        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, DateTime.UtcNow);
+        return normalized.Value;
+    }
+
+    private static void ValidateDeadlineLeadTime(DateTime? deadlineAtUtc, int minimumLeadHours, DateTime nowUtc)
+    {
+        int effectiveMinimumLeadHours = Math.Max(0, minimumLeadHours);
+        if (!deadlineAtUtc.HasValue || effectiveMinimumLeadHours == 0)
+        {
+            return;
+        }
+
+        DateTime minimumAllowedDeadline = nowUtc.AddHours(effectiveMinimumLeadHours);
+        if (deadlineAtUtc.Value < minimumAllowedDeadline)
+        {
+            throw new ValidationException(
+                $"Deadline must be at least {effectiveMinimumLeadHours} hour(s) in the future.");
+        }
+    }
+
+    private static QueuePlanningProjection BuildQueuePlanningProjection(
+        List<PrintJob> activeJobs,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
+    {
+        if (activeJobs.Count == 0)
+        {
+            return new QueuePlanningProjection(null, null);
+        }
+
+        int bedClearMinutes = Math.Clamp(settings.BedClearMinutes, 0, 120);
+        Dictionary<Guid, DateTime> printerAvailableUtc = new();
+        Dictionary<Guid, bool> printerHasScheduledWork = new();
+
+        List<PrintJob> assignedJobs = activeJobs
+            .Where(job => job.AssignedPrinterId.HasValue)
+            .OrderByDescending(job => job.Priority)
+            .ThenBy(job => job.QueuePosition)
+            .ToList();
+
+        foreach (IGrouping<Guid, PrintJob> group in assignedJobs.GroupBy(job => job.AssignedPrinterId!.Value))
+        {
+            DateTime availability = nowUtc;
+            bool hasScheduled = false;
+
+            foreach (PrintJob job in group)
+            {
+                if (hasScheduled && bedClearMinutes > 0)
+                {
+                    availability = availability.AddMinutes(bedClearMinutes);
+                }
+
+                availability = availability.Add(EstimateRemainingDuration(job, nowUtc));
+                hasScheduled = true;
+            }
+
+            printerAvailableUtc[group.Key] = availability;
+            printerHasScheduledWork[group.Key] = hasScheduled;
+        }
+
+        List<PrintJob> unassignedJobs = activeJobs
+            .Where(job => !job.AssignedPrinterId.HasValue)
+            .OrderByDescending(job => job.Priority)
+            .ThenBy(job => job.QueuePosition)
+            .ToList();
+
+        if (unassignedJobs.Count > 0 && printerAvailableUtc.Count == 0)
+        {
+            Guid syntheticPlannerLaneId = Guid.Empty;
+            printerAvailableUtc[syntheticPlannerLaneId] = nowUtc;
+            printerHasScheduledWork[syntheticPlannerLaneId] = false;
+        }
+
+        foreach (PrintJob job in unassignedJobs)
+        {
+            KeyValuePair<Guid, DateTime> earliestLane = printerAvailableUtc.OrderBy(kvp => kvp.Value).First();
+            DateTime availability = earliestLane.Value;
+            bool hasScheduled = printerHasScheduledWork[earliestLane.Key];
+
+            if (hasScheduled && bedClearMinutes > 0)
+            {
+                availability = availability.AddMinutes(bedClearMinutes);
+            }
+
+            availability = availability.Add(EstimateRemainingDuration(job, nowUtc));
+            printerAvailableUtc[earliestLane.Key] = availability;
+            printerHasScheduledWork[earliestLane.Key] = true;
+        }
+
+        List<DateTime> completionCandidates = printerAvailableUtc
+            .Where(kvp => printerHasScheduledWork.TryGetValue(kvp.Key, out bool hasWork) && hasWork)
+            .Select(kvp => kvp.Value)
+            .ToList();
+
+        if (completionCandidates.Count == 0)
+        {
+            return new QueuePlanningProjection(null, null);
+        }
+
+        DateTime estimatedQueueCompletionUtc = completionCandidates.Max();
+        DateTime staffedCompletionUtc = AdjustToStaffedCompletionUtc(
+            nowUtc,
+            estimatedQueueCompletionUtc,
+            settings.WorkdayStartHourUtc,
+            settings.WorkdayEndHourUtc);
+
+        return new QueuePlanningProjection(estimatedQueueCompletionUtc, staffedCompletionUtc);
+    }
+
+    private static TimeSpan EstimateRemainingDuration(PrintJob job, DateTime nowUtc)
+    {
+        if (job.EstimatedPrintTime.HasValue && job.EstimatedPrintTime.Value > TimeSpan.Zero)
+        {
+            if (job.Status is PrintJobStatus.Printing or PrintJobStatus.Starting or PrintJobStatus.Paused
+                && job.ActualStartTime.HasValue)
+            {
+                TimeSpan elapsed = nowUtc - job.ActualStartTime.Value;
+                if (elapsed < TimeSpan.Zero)
+                {
+                    elapsed = TimeSpan.Zero;
+                }
+
+                TimeSpan remaining = job.EstimatedPrintTime.Value - elapsed;
+                if (remaining > TimeSpan.Zero)
+                {
+                    return remaining;
+                }
+
+                return TimeSpan.FromMinutes(MinimumRemainingPrintMinutes);
+            }
+
+            return job.EstimatedPrintTime.Value;
+        }
+
+        return TimeSpan.FromMinutes(DefaultEstimatedPrintMinutes);
+    }
+
+    private static DateTime AdjustToStaffedCompletionUtc(
+        DateTime planningStartUtc,
+        DateTime estimatedCompletionUtc,
+        int workdayStartHourUtc,
+        int workdayEndHourUtc)
+    {
+        if (estimatedCompletionUtc <= planningStartUtc)
+        {
+            return planningStartUtc;
+        }
+
+        TimeSpan remaining = estimatedCompletionUtc - planningStartUtc;
+        DateTime current = planningStartUtc;
+        int guard = 0;
+
+        while (remaining > TimeSpan.Zero && guard < 10000)
+        {
+            guard++;
+
+            if (IsWithinWorkingWindow(current, workdayStartHourUtc, workdayEndHourUtc))
+            {
+                DateTime windowEnd = GetCurrentWindowEnd(current, workdayStartHourUtc, workdayEndHourUtc);
+                TimeSpan available = windowEnd - current;
+                TimeSpan consumed = available <= remaining ? available : remaining;
+                current = current.Add(consumed);
+                remaining -= consumed;
+                continue;
+            }
+
+            current = GetNextWorkingWindowStart(current, workdayStartHourUtc, workdayEndHourUtc);
+        }
+
+        return current;
+    }
+
+    private static bool IsWithinWorkingWindow(DateTime timestampUtc, int workdayStartHourUtc, int workdayEndHourUtc)
+    {
+        if (workdayStartHourUtc == workdayEndHourUtc)
+        {
+            return true;
+        }
+
+        TimeSpan start = TimeSpan.FromHours(workdayStartHourUtc);
+        TimeSpan end = TimeSpan.FromHours(workdayEndHourUtc);
+        TimeSpan current = timestampUtc.TimeOfDay;
+
+        return workdayStartHourUtc < workdayEndHourUtc
+            ? current >= start && current < end
+            : current >= start || current < end;
+    }
+
+    private static DateTime GetCurrentWindowEnd(DateTime timestampUtc, int workdayStartHourUtc, int workdayEndHourUtc)
+    {
+        if (workdayStartHourUtc == workdayEndHourUtc)
+        {
+            return timestampUtc.AddYears(1);
+        }
+
+        DateTime dayStart = timestampUtc.Date;
+        TimeSpan end = TimeSpan.FromHours(workdayEndHourUtc);
+
+        if (workdayStartHourUtc < workdayEndHourUtc)
+        {
+            return dayStart.Add(end);
+        }
+
+        return timestampUtc.TimeOfDay < end
+            ? dayStart.Add(end)
+            : dayStart.AddDays(1).Add(end);
+    }
+
+    private static DateTime GetNextWorkingWindowStart(DateTime timestampUtc, int workdayStartHourUtc, int workdayEndHourUtc)
+    {
+        if (workdayStartHourUtc == workdayEndHourUtc)
+        {
+            return timestampUtc;
+        }
+
+        DateTime dayStart = timestampUtc.Date;
+        DateTime startToday = dayStart.AddHours(workdayStartHourUtc);
+
+        if (workdayStartHourUtc < workdayEndHourUtc)
+        {
+            return timestampUtc < startToday ? startToday : startToday.AddDays(1);
+        }
+
+        return timestampUtc.TimeOfDay < TimeSpan.FromHours(workdayStartHourUtc)
+            ? startToday
+            : startToday.AddDays(1);
+    }
+
+    private readonly record struct QueuePlanningProjection(
+        DateTime? EstimatedQueueCompletionUtc,
+        DateTime? StaffedCompletionUtc);
+
+    private static IEnumerable<QueueRecommendationDto> BuildQueueRecommendations(
+        IReadOnlyDictionary<string, HashSet<Guid>> affectedJobsByCategory)
+    {
+        yield return CreateRecommendation(
+            "material-mismatch",
+            "Material mismatch",
+            "Load matching material on compatible printers to unlock blocked jobs.",
+            affectedJobsByCategory);
+
+        yield return CreateRecommendation(
+            "nozzle-mismatch",
+            "Nozzle mismatch",
+            "Swap to the required nozzle size or move jobs to printers with matching nozzles.",
+            affectedJobsByCategory);
+
+        yield return CreateRecommendation(
+            "bed-clear-blocking",
+            "Bed clear confirmation needed",
+            "Confirm bed clear on blocked printers so queued jobs can start.",
+            affectedJobsByCategory);
+
+        yield return CreateRecommendation(
+            "idle-printer-opportunity",
+            "Idle printer opportunity",
+            "Dispatch queued jobs to currently idle compatible printers.",
+            affectedJobsByCategory);
+    }
+
+    private static QueueRecommendationDto CreateRecommendation(
+        string category,
+        string title,
+        string actionText,
+        IReadOnlyDictionary<string, HashSet<Guid>> affectedJobsByCategory)
+    {
+        int unlockedCount = affectedJobsByCategory.TryGetValue(category, out HashSet<Guid>? jobs)
+            ? jobs.Count
+            : 0;
+
+        return new QueueRecommendationDto
+        {
+            Category = category,
+            Title = title,
+            ActionText = actionText,
+            EstimatedUnlockedJobCount = unlockedCount,
+            PriorityScore = unlockedCount
+        };
     }
 
     private QueuedPrintJobDto MapToQueuedPrintJobDto(PrintJob job)
@@ -1725,6 +2288,7 @@ public class PrintJobManagementService(
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             WasSeededFromHistory = job.WasSeededFromHistory,
             ToolheadUsages = job.ToolheadUsages
                 .OrderBy(tu => tu.ToolheadIndex)
@@ -1915,6 +2479,11 @@ public class PrintJobManagementService(
                 }
 
                 job.Copies = updates.Copies.Value;
+            }
+
+            if (updates.DeadlineAtUtc.HasValue)
+            {
+                job.DeadlineAtUtc = ValidateProvidedDeadline(updates.DeadlineAtUtc, GetQueuePlanningSettings());
             }
 
             job.UpdatedAt = DateTime.UtcNow;

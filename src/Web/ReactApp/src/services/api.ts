@@ -50,6 +50,7 @@ import {
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
+  QueueRecommendationDto,
   QueueOverviewDto,
   RegisterRequest,
   SystemInfo,
@@ -3701,6 +3702,7 @@ export class ApiClient {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy: "priority" | "deadline" | "deadline_desc" = "priority",
     limit: number = 50,
     offset: number = 0
   ): Promise<unknown[]> {
@@ -3708,6 +3710,7 @@ export class ApiClient {
     if (filterStatus) params.append("filterStatus", filterStatus);
     if (filterModel) params.append("filterModel", filterModel);
     if (filterMaterial) params.append("filterMaterial", filterMaterial);
+    params.append("sortBy", sortBy);
     params.append("limit", limit.toString());
     params.append("offset", offset.toString());
 
@@ -3731,9 +3734,19 @@ export class ApiClient {
   /**
    * Get queue statistics (analytics)
    */
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     const response = await this.client.get(`/job-queue-analytics/stats`);
-    return response.data;
+    return response.data as QueueStatsDto;
+  }
+
+  /**
+   * Get prioritized queue to-do recommendations (analytics)
+   */
+  async getAnalyticsQueueRecommendations(limit: number = 5): Promise<QueueRecommendationDto[]> {
+    const response = await this.client.get(`/job-queue-analytics/recommendations`, {
+      params: { limit },
+    });
+    return response.data as QueueRecommendationDto[];
   }
 
   /**

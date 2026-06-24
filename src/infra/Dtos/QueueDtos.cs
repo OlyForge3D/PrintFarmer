@@ -137,6 +137,11 @@ public class QueuePrintJobDto
     /// Optional plate name from a multi-plate 3MF model.
     /// </summary>
     public string? PlateName { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -168,6 +173,11 @@ public class UpdatePrintJobStatusDto
     public string? FilamentVendor { get; set; }
 
     public string? FilamentColor { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -266,6 +276,11 @@ public class JobQueuePrintJobDto
     /// Optional plate name from a multi-plate 3MF model.
     /// </summary>
     public string? PlateName { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 
     /// <summary>
     /// Per-toolhead filament usage records for multi-tool/MMU jobs.

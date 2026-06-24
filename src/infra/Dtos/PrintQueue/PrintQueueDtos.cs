@@ -82,6 +82,11 @@ public class QueuedPrintJobDto
     public DateTime QueuedAtUtc { get; set; }
 
     /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
+
+    /// <summary>
     /// True when the job was imported from a printer history API.
     /// </summary>
     public bool WasSeededFromHistory { get; set; }
@@ -226,6 +231,11 @@ public class EnqueueQueueJobRequest
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -240,6 +250,11 @@ public class UpdateQueueJobRequest
     public string? Status { get; set; }
 
     public string? FailureReason { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -349,6 +364,58 @@ public class QueueStatsDto
     public int AverageWaitTimeMinutes { get; set; }
 
     public List<QueuePrinterModelStatsDto> ByModel { get; set; } = new();
+
+    public DateTime? EstimatedQueueCompletionUtc { get; set; }
+
+    public DateTime? StaffedCompletionUtc { get; set; }
+
+    public QueuePlanningAssumptionsDto Assumptions { get; set; } = new();
+}
+
+public class QueuePlanningAssumptionsDto
+{
+    public int WorkdayStartHourUtc { get; set; }
+
+    public int WorkdayEndHourUtc { get; set; }
+
+    public int BedClearMinutes { get; set; }
+
+    public int? DefaultDeadlineHours { get; set; }
+
+    public bool RequireDeadline { get; set; }
+
+    public int MinimumLeadHours { get; set; }
+}
+
+/// <summary>
+/// Recommendation item for high-impact queue operator actions.
+/// </summary>
+public class QueueRecommendationDto
+{
+    /// <summary>
+    /// Machine-readable category key.
+    /// </summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Short recommendation title.
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Operator action text shown in the dashboard.
+    /// </summary>
+    public string ActionText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Number of queued jobs expected to unlock after taking this action.
+    /// </summary>
+    public int EstimatedUnlockedJobCount { get; set; }
+
+    /// <summary>
+    /// Deterministic ranking score for ordering recommendations.
+    /// </summary>
+    public int PriorityScore { get; set; }
 }
 
 // ============= HISTORY DTOs (Phase 2) =============
@@ -408,6 +475,11 @@ public class QueueHistoryEntryDto
     public DateTime StartedAtUtc { get; set; }
 
     public DateTime? CompletedAtUtc { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 
     public int ActualPrintTimeSeconds { get; set; }
 
@@ -479,6 +551,11 @@ public class UpdateJobDetailsRequest
     /// Number of copies to print. Must be >= CompletedCopies.
     /// </summary>
     public int? Copies { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>

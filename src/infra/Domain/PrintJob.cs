@@ -121,6 +121,11 @@ public class PrintJob
 
     public DateTime QueuedAt { get; set; }
 
+    /// <summary>
+    /// Optional UTC deadline for this queued job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
+
     // History Seeding: Track external job source for deduplication
 
     /// <summary>

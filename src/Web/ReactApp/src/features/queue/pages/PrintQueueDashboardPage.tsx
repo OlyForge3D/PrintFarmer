@@ -11,9 +11,13 @@ import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
 import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
+import { QueueJobsCardView, QueueJobsListView } from "../components/QueueJobsCollectionViews";
+import { QueueViewModeSelector, type QueueViewMode } from "../components/QueueViewModeSelector";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
+import QueueTimelineTab from "../components/QueueTimelineTab";
+import { QueueRecommendationsPanel } from "../components/QueueRecommendationsPanel";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
@@ -25,15 +29,19 @@ import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
 import { HelpButton } from "@/common/components/HelpButton";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
+  QueueRecommendationDto,
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
 } from "@/types/api";
 
 // localStorage keys for persisting user preferences
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
-const VALID_TABS = ['print-queue', 'history', 'dispatch-log'] as const;
+const STORAGE_KEY_QUEUE_VIEW_MODE = 'printfarmer-queue-view-mode';
+const VALID_TABS = ['print-queue', 'timeline', 'history', 'dispatch-log'] as const;
+const VALID_QUEUE_VIEW_MODES: QueueViewMode[] = ["table", "list", "cards"];
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
+const RECOMMENDATIONS_POLL_INTERVAL_MS = 60_000;
 
 interface DispatchSettingsResponse {
   autoDispatchEnabled: boolean;
@@ -125,9 +133,14 @@ export function PrintQueueDashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState<string | null>(null);
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"priority" | "deadline" | "deadline_desc">("priority");
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
+  const [queueViewMode, setQueueViewModeState] = useState<QueueViewMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_QUEUE_VIEW_MODE);
+    return saved && VALID_QUEUE_VIEW_MODES.includes(saved as QueueViewMode) ? (saved as QueueViewMode) : "table";
+  });
   
   // Persist active tab — URL path takes priority, then search param, then localStorage
   const [activeTab, setActiveTabState] = useState(() => {
@@ -143,6 +156,11 @@ export function PrintQueueDashboardPage() {
     localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tab);
     navigate(`/printQueue/${tab}`, { replace: true });
   }, [navigate]);
+
+  const setQueueViewMode = useCallback((mode: QueueViewMode) => {
+    setQueueViewModeState(mode);
+    localStorage.setItem(STORAGE_KEY_QUEUE_VIEW_MODE, mode);
+  }, []);
   
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -155,11 +173,12 @@ export function PrintQueueDashboardPage() {
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
-    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter],
+    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy],
     queryFn: () => apiClient.getAnalyticsQueueJobs(
       statusFilter || undefined,
       modelFilter || undefined,
       materialFilter || undefined,
+      sortBy,
       100,
       0
     ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
@@ -174,10 +193,26 @@ export function PrintQueueDashboardPage() {
     refetchInterval: 10_000,
   });
 
+  const {
+    data: recommendations = [],
+    isLoading: recommendationsLoading,
+  } = useQuery({
+    queryKey: ['queue-recommendations'],
+    queryFn: () => apiClient.getAnalyticsQueueRecommendations(5) as Promise<QueueRecommendationDto[]>,
+    staleTime: 30_000,
+    refetchInterval: () => (
+      typeof document !== 'undefined' && document.visibilityState === 'visible'
+        ? RECOMMENDATIONS_POLL_INTERVAL_MS
+        : false
+    ),
+    refetchIntervalInBackground: false,
+  });
+
   const invalidateQueue = useCallback(() => {
     setError(null);
     queryClient.invalidateQueries({ queryKey: ['queue-jobs'] });
     queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
+    queryClient.invalidateQueries({ queryKey: ['queue-recommendations'] });
   }, [queryClient]);
 
   const displayError = error || (jobsError ? (jobsError instanceof Error ? jobsError.message : "Failed to load jobs") : null);
@@ -468,11 +503,17 @@ export function PrintQueueDashboardPage() {
         </div>
       )}
 
+      <QueueRecommendationsPanel
+        recommendations={recommendations}
+        isLoading={recommendationsLoading}
+      />
+
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
         <div data-tour="queue-tabs">
           <Tabs.List>
             <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
+            <Tabs.Tab id="timeline">Timeline</Tabs.Tab>
             <Tabs.Tab id="history">History</Tabs.Tab>
             <Tabs.Tab id="dispatch-log">Dispatch Log</Tabs.Tab>
           </Tabs.List>
@@ -490,40 +531,93 @@ export function PrintQueueDashboardPage() {
                       onStatusChange={setStatusFilter}
                       onModelChange={setModelFilter}
                       onMaterialChange={setMaterialFilter}
+                      onSortChange={setSortBy}
                       onRefresh={invalidateQueue}
                       isLoading={loading || isRefreshing}
                     />
                   </div>
-                  <AutoDispatchGlobalToggle />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <QueueViewModeSelector value={queueViewMode} onChange={setQueueViewMode} />
+                    <AutoDispatchGlobalToggle />
+                  </div>
                 </div>
               </div>
 
-              {/* Jobs Table */}
+              {/* Queue Jobs */}
               <div data-tour="queue-jobs-table" className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
-                <QueueJobsTable
-                  jobs={jobs}
-                  isLoading={loading}
-                  dispatchingJobId={dispatchingJobId}
-                  cancelingJobId={cancelingJobId}
-                  dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
-                  onPause={handlePauseJob}
-                  onResume={handleResumeJob}
-                  onCancel={handleCancelJob}
-                  onAbortPrint={handleAbortPrint}
-                  onPriority={handlePriorityChange}
-                  onDispatch={handleDispatchJob}
-                  onSchedule={(jobId) => setScheduleModalJobId(jobId)}
-                  onReorder={handleReorder}
-                  onEdit={(jobId) => {
-                    setSelectedJobId(jobId);
-                    setIsJobDetailsModalOpen(true);
-                  }}
-                />
+                {queueViewMode === "table" ? (
+                  <QueueJobsTable
+                    jobs={jobs}
+                    isLoading={loading}
+                    dispatchingJobId={dispatchingJobId}
+                    cancelingJobId={cancelingJobId}
+                    dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    onPause={handlePauseJob}
+                    onResume={handleResumeJob}
+                    onCancel={handleCancelJob}
+                    onAbortPrint={handleAbortPrint}
+                    onPriority={handlePriorityChange}
+                    onDispatch={handleDispatchJob}
+                    onSchedule={(jobId) => setScheduleModalJobId(jobId)}
+                    onReorder={handleReorder}
+                    onEdit={(jobId) => {
+                      setSelectedJobId(jobId);
+                      setIsJobDetailsModalOpen(true);
+                    }}
+                  />
+                ) : loading ? (
+                  <div className="flex justify-center items-center py-12 bg-pf-bg-1 border border-pf-border rounded-lg">
+                    <div className="text-pf-text-secondary">Loading jobs...</div>
+                  </div>
+                ) : jobs.length === 0 ? (
+                  <QueueJobsTable jobs={[]} />
+                ) : queueViewMode === "list" ? (
+                  <QueueJobsListView
+                    jobs={jobs}
+                    dispatchingJobId={dispatchingJobId}
+                    cancelingJobId={cancelingJobId}
+                    dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    onPause={handlePauseJob}
+                    onResume={handleResumeJob}
+                    onCancel={handleCancelJob}
+                    onAbortPrint={handleAbortPrint}
+                    onPriority={handlePriorityChange}
+                    onDispatch={handleDispatchJob}
+                    onSchedule={(jobId) => setScheduleModalJobId(jobId)}
+                    onEdit={(jobId) => {
+                      setSelectedJobId(jobId);
+                      setIsJobDetailsModalOpen(true);
+                    }}
+                  />
+                ) : (
+                  <QueueJobsCardView
+                    jobs={jobs}
+                    dispatchingJobId={dispatchingJobId}
+                    cancelingJobId={cancelingJobId}
+                    dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    onPause={handlePauseJob}
+                    onResume={handleResumeJob}
+                    onCancel={handleCancelJob}
+                    onAbortPrint={handleAbortPrint}
+                    onPriority={handlePriorityChange}
+                    onDispatch={handleDispatchJob}
+                    onSchedule={(jobId) => setScheduleModalJobId(jobId)}
+                    onEdit={(jobId) => {
+                      setSelectedJobId(jobId);
+                      setIsJobDetailsModalOpen(true);
+                    }}
+                  />
+                )}
               </div>
             </div>
           </Tabs.Panel>
 
-          {/* Tab 2: History */}
+          {/* Tab 2: Timeline */}
+          <Tabs.Panel id="timeline">
+            <QueueTimelineTab stats={stats} />
+          </Tabs.Panel>
+
+          {/* Tab 3: History */}
           <Tabs.Panel id="history">
             <QueueHistoryTab
               onRerun={handleRerunJob}
@@ -534,7 +628,7 @@ export function PrintQueueDashboardPage() {
             />
           </Tabs.Panel>
 
-          {/* Tab 3: Dispatch Log */}
+          {/* Tab 4: Dispatch Log */}
           <Tabs.Panel id="dispatch-log">
             <DispatchLogTab />
           </Tabs.Panel>

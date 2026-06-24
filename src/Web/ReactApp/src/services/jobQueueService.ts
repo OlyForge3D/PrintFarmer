@@ -4,6 +4,7 @@ import type {
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
   QueueOverviewDto,
+  QueueStatsDto,
 } from '@/types/api';
 
 /**
@@ -112,22 +113,27 @@ export const jobQueueService = {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy?: "priority" | "deadline" | "deadline_desc",
     limit?: number,
     offset?: number
   ): Promise<unknown[]> {
-    return apiClient.getAnalyticsQueueJobs(filterStatus, filterModel, filterMaterial, limit, offset);
+    return apiClient.getAnalyticsQueueJobs(filterStatus, filterModel, filterMaterial, sortBy, limit, offset);
   },
 
   async getAnalyticsPrinterQueue(printerId: string, limit?: number): Promise<unknown[]> {
     return apiClient.getAnalyticsPrinterQueue(printerId, limit);
   },
 
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     return apiClient.getAnalyticsQueueStats();
   },
 
   async getAnalyticsQueueModelStats(): Promise<unknown[]> {
     return apiClient.getAnalyticsQueueModelStats();
+  },
+
+  async getAnalyticsQueueRecommendations(limit?: number): Promise<unknown[]> {
+    return apiClient.getAnalyticsQueueRecommendations(limit);
   },
 
   async getAnalyticsQueueHistory(

@@ -2,8 +2,10 @@ import { Button, Select, Spinner } from "@/common/components/ui";
 import { useState, useRef, useCallback } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import type { DispatchUploadProgressDto } from "@/types/api";
-import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen } from "lucide-react";
+import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
+
+const DUE_SOON_HOURS = 24;
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -26,6 +28,22 @@ function formatDateTime(iso?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function getDeadlineState(deadlineAtUtc: string | undefined, status: string): "none" | "due-soon" | "overdue" {
+  if (!deadlineAtUtc) return "none";
+  if (["Completed", "Cancelled", "Failed"].includes(status)) return "none";
+
+  const deadlineTs = new Date(deadlineAtUtc).getTime();
+  if (Number.isNaN(deadlineTs)) return "none";
+
+  const nowTs = Date.now();
+  if (deadlineTs < nowTs) return "overdue";
+
+  const dueSoonThresholdMs = DUE_SOON_HOURS * 60 * 60 * 1000;
+  if (deadlineTs - nowTs <= dueSoonThresholdMs) return "due-soon";
+
+  return "none";
 }
 
 function DetailChip({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
@@ -191,7 +209,7 @@ export function QueueJobsTable({
   return (
     <div className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden" role="list" aria-label="Print job queue">
       {/* Header */}
-      <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 py-2.5 bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary">
+      <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 py-2.5 bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary">
         <span className="sr-only">Reorder</span>
         <span className="sr-only">Thumbnail</span>
         <span className="px-2">File</span>
@@ -199,6 +217,7 @@ export function QueueJobsTable({
         <span className="px-2 w-32">Printer</span>
         <span className="px-2 w-16 text-center">Copies</span>
         <span className="px-2 w-28">Priority</span>
+        <span className="px-2 w-44">Deadline</span>
         <span className="px-2 min-w-[180px]">Actions</span>
       </div>
 
@@ -240,6 +259,9 @@ export function QueueJobsTable({
         const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
         const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
         const estimatedCost = job.estimatedCost;
+        const deadlineAtUtc = job.deadlineAtUtc;
+        const deadlineState = getDeadlineState(deadlineAtUtc, status);
+        const deadlineDisplay = formatDateTime(deadlineAtUtc);
         const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
         const dispatchProgressText = (() => {
           if (!dispatchProgress || dispatchProgress.isCompleted) {
@@ -259,7 +281,7 @@ export function QueueJobsTable({
           <div
             key={jobId}
             role="listitem"
-            aria-label={`Print job: ${fileName}`}
+            aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
             draggable
             onDragStart={(e) => handleDragStart(e, index)}
             onDragEnd={handleDragEnd}
@@ -271,6 +293,8 @@ export function QueueJobsTable({
               "transition-colors cursor-pointer hover:bg-pf-bg-2/50",
               !isLastJob && "border-b border-pf-border",
               isDragTarget && "border-t-2 border-t-pf-accent",
+              deadlineState === "due-soon" && "bg-pf-warning/5",
+              deadlineState === "overdue" && "bg-pf-error/10",
             )}
             onClick={() => onEdit?.(jobId)}
             tabIndex={0}
@@ -282,7 +306,7 @@ export function QueueJobsTable({
             }}
           >
             {/* Row 1 — Primary: drag, thumbnail, file name, status, printer, copies, priority, actions */}
-            <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 pt-2.5 pb-1 text-sm">
+            <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 pt-2.5 pb-1 text-sm">
               {/* Drag handle */}
               <div
                 className="flex items-center justify-center cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
@@ -355,6 +379,45 @@ export function QueueJobsTable({
                   <option value="2">Urgent</option>
                   <option value="-1">Low</option>
                 </Select>
+              </div>
+
+              {/* Deadline */}
+              <div className="px-2 w-44">
+                {deadlineDisplay === "-" ? (
+                  <span className="text-pf-text-tertiary text-xs">No deadline</span>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    {deadlineState !== "none" && (
+                      <AlertTriangle
+                        className={clsx(
+                          "h-3.5 w-3.5 shrink-0",
+                          deadlineState === "overdue" ? "text-pf-error" : "text-pf-warning"
+                        )}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span
+                      className={clsx(
+                        "text-xs",
+                        deadlineState === "overdue" && "text-pf-error font-semibold",
+                        deadlineState === "due-soon" && "text-pf-warning font-medium",
+                        deadlineState === "none" && "text-pf-text-secondary"
+                      )}
+                    >
+                      {deadlineDisplay}
+                    </span>
+                    {deadlineState === "overdue" && (
+                      <span className="inline-flex items-center rounded-full bg-pf-error/15 px-1.5 py-0.5 text-[10px] font-semibold text-pf-error">
+                        Overdue
+                      </span>
+                    )}
+                    {deadlineState === "due-soon" && (
+                      <span className="inline-flex items-center rounded-full bg-pf-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-pf-warning">
+                        Due soon
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Actions */}

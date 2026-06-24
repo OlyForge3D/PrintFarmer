@@ -2259,6 +2259,7 @@ export interface QueuedPrintJobDto {
   createdAtUtc: string;
   updatedAtUtc: string;
   queuedAtUtc: string;
+  deadlineAtUtc?: string;
   wasSeededFromHistory?: boolean;
   notes?: string;
   tags?: string[];
@@ -2324,7 +2325,24 @@ export interface QueueStatsDto {
   totalPrinting: number;
   totalPaused: number;
   averageWaitTimeMinutes: number;
+  estimatedQueueCompletionUtc?: string;
+  staffedCompletionUtc?: string;
+  assumptions: QueuePlanningAssumptionsDto;
   byModel: Record<string, QueuePrinterModelStatsDto>;
+}
+
+export interface QueuePlanningAssumptionsDto {
+  workdayStartHourUtc: number;
+  workdayEndHourUtc: number;
+  bedClearMinutes: number;
+}
+
+export interface QueueRecommendationDto {
+  category: 'material-mismatch' | 'nozzle-mismatch' | 'bed-clear-blocking' | 'idle-printer-opportunity';
+  title: string;
+  actionText: string;
+  estimatedUnlockedJobCount: number;
+  priorityScore: number;
 }
 
 export interface QueuePrinterModelStatsDto {

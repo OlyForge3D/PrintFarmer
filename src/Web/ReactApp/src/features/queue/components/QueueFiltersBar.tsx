@@ -6,6 +6,7 @@ export interface TableFiltersBarProps {
   onStatusChange: (status: string | null) => void;
   onModelChange: (model: string | null) => void;
   onMaterialChange: (material: string | null) => void;
+  onSortChange: (sortBy: "priority" | "deadline" | "deadline_desc") => void;
   onRefresh: () => void;
   isLoading?: boolean;
 }
@@ -33,12 +34,14 @@ export function TableFiltersBar({
   onStatusChange,
   onModelChange,
   onMaterialChange,
+  onSortChange,
   onRefresh,
   isLoading = false,
 }: TableFiltersBarProps) {
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedSortBy, setSelectedSortBy] = useState<"priority" | "deadline" | "deadline_desc">("priority");
 
   const handleStatusChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -71,12 +74,23 @@ export function TableFiltersBar({
     setSelectedStatus(null);
     setSelectedMaterial(null);
     setSelectedModel(null);
+    setSelectedSortBy("priority");
     onStatusChange(null);
     onMaterialChange(null);
     onModelChange(null);
-  }, [onStatusChange, onMaterialChange, onModelChange]);
+    onSortChange("priority");
+  }, [onStatusChange, onMaterialChange, onModelChange, onSortChange]);
 
-  const hasActiveFilters = selectedStatus || selectedMaterial || selectedModel;
+  const handleSortChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = (e.target.value || "priority") as "priority" | "deadline" | "deadline_desc";
+      setSelectedSortBy(value);
+      onSortChange(value);
+    },
+    [onSortChange]
+  );
+
+  const hasActiveFilters = selectedStatus || selectedMaterial || selectedModel || selectedSortBy !== "priority";
 
   return (
     <div className="flex items-center gap-3 bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
@@ -115,6 +129,17 @@ export function TableFiltersBar({
             {option.label}
           </option>
         ))}
+      </Select>
+
+      <Select
+        value={selectedSortBy}
+        onChange={handleSortChange}
+        className="w-40 text-sm"
+        aria-label="Sort queue jobs"
+      >
+        <option value="priority">Sort: Priority</option>
+        <option value="deadline">Sort: Deadline (Soonest)</option>
+        <option value="deadline_desc">Sort: Deadline (Latest)</option>
       </Select>
 
       <div className="flex items-center gap-1 ml-auto">

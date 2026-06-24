@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue;
@@ -39,6 +41,7 @@ public class JobQueueService : IJobQueueService
     private readonly IAutoDispatchTrigger? _dispatchTrigger;
     private readonly IAutoDispatchService? _autoDispatchService;
     private readonly IPrinterGroupService? _printerGroupService;
+    private readonly ISettingsService? _settingsService;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -50,6 +53,7 @@ public class JobQueueService : IJobQueueService
     /// <param name="dispatchTrigger">Optional dispatch trigger for notifying the auto-dispatch service</param>
     /// <param name="autoDispatchService">Optional auto-dispatch ready-gate service for triggering bed-clear confirmation on idle printers</param>
     /// <param name="printerGroupService">Optional printer group service for ACL checks on queue submission</param>
+    /// <param name="settingsService">Optional app settings service for queue deadline policy enforcement</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -58,7 +62,8 @@ public class JobQueueService : IJobQueueService
         IPrintCostCalculator? costCalculator = null,
         IAutoDispatchTrigger? dispatchTrigger = null,
         IAutoDispatchService? autoDispatchService = null,
-        IPrinterGroupService? printerGroupService = null)
+        IPrinterGroupService? printerGroupService = null,
+        ISettingsService? settingsService = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -70,6 +75,7 @@ public class JobQueueService : IJobQueueService
         _dispatchTrigger = dispatchTrigger;
         _autoDispatchService = autoDispatchService;
         _printerGroupService = printerGroupService;
+        _settingsService = settingsService;
     }
 
     /// <summary>
@@ -213,6 +219,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = j.ProjectFileId,
             PlateIndex = j.PlateIndex,
             PlateName = j.PlateName,
+            DeadlineAtUtc = j.DeadlineAtUtc,
             CreatedAt = j.CreatedAt,
             UpdatedAt = j.UpdatedAt,
             GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
@@ -275,7 +282,8 @@ public class JobQueueService : IJobQueueService
             Priority = request.Priority,
             RequiredNozzleDiameter = request.RequiredNozzleDiameter ?? (decimal?)gcode.RequiredNozzleDiameter,
             RequiredMaterialType = request.RequiredMaterialType ?? gcode.RequiredMaterial,
-            RequiredPrinterModel = request.RequiredPrinterModel ?? gcode.PrinterModel?.Name ?? gcode.ExtractedPrinterModelName
+            RequiredPrinterModel = request.RequiredPrinterModel ?? gcode.PrinterModel?.Name ?? gcode.ExtractedPrinterModelName,
+            DeadlineAtUtc = request.DeadlineAtUtc
         };
 
         Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
@@ -293,6 +301,9 @@ public class JobQueueService : IJobQueueService
                 return null;
             }
         }
+
+        QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
+        DateTime? resolvedDeadline = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings);
 
         PrintJob job = new PrintJob
         {
@@ -319,7 +330,8 @@ public class JobQueueService : IJobQueueService
             PlateName = request.PlateName,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
-            QueuedAt = DateTime.UtcNow
+            QueuedAt = DateTime.UtcNow,
+            DeadlineAtUtc = resolvedDeadline
         };
 
         // Calculate estimated cost if cost calculator is available
@@ -394,6 +406,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = job.ProjectFileId,
             PlateIndex = job.PlateIndex,
             PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
@@ -447,6 +460,7 @@ public class JobQueueService : IJobQueueService
                 ProjectFileId = job.ProjectFileId,
                 PlateIndex = job.PlateIndex,
                 PlateName = job.PlateName,
+                DeadlineAtUtc = job.DeadlineAtUtc,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt,
                 ToolheadUsages = MapToolheadUsages(job)
@@ -526,6 +540,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = job.ProjectFileId,
             PlateIndex = job.PlateIndex,
             PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
@@ -596,6 +611,11 @@ public class JobQueueService : IJobQueueService
             job.FailureReason = request.FailureReason;
         }
 
+        if (request.DeadlineAtUtc.HasValue)
+        {
+            job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings());
+        }
+
         if (!string.IsNullOrEmpty(request.Name))
         {
             job.Name = request.Name;
@@ -661,6 +681,7 @@ public class JobQueueService : IJobQueueService
             ProjectFileId = job.ProjectFileId,
             PlateIndex = job.PlateIndex,
             PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job!)
@@ -740,4 +761,105 @@ public class JobQueueService : IJobQueueService
                 tu.FilamentColor,
                 tu.MaterialCostUsd))
             .ToList();
+
+    private static DateTime? NormalizeUtcDeadline(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
+    }
+
+    private QueuePlanningSettings GetQueuePlanningSettings()
+    {
+        QueuePlanningSettings fallback = new();
+        if (_settingsService is null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            QueuePlanningSettings? settings = _settingsService.Get<QueuePlanningSettings>();
+            if (settings is null)
+            {
+                _logger.LogWarning("QueuePlanning settings were missing. Enforcing strict deadline fallback policy.");
+                return new QueuePlanningSettings
+                {
+                    RequireDeadline = true,
+                    MinimumLeadHours = 0,
+                    DefaultDeadlineHours = null
+                };
+            }
+
+            settings.Validate();
+            return settings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load QueuePlanning settings for deadline policy checks. Enforcing strict deadline fallback policy.");
+            return new QueuePlanningSettings
+            {
+                RequireDeadline = true,
+                MinimumLeadHours = 0,
+                DefaultDeadlineHours = null
+            };
+        }
+    }
+
+    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    {
+        DateTime nowUtc = DateTime.UtcNow;
+        DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
+        if (!normalizedDeadline.HasValue)
+        {
+            if (settings.RequireDeadline)
+            {
+                throw new ValidationException("Deadline is required by queue policy.");
+            }
+
+            if (settings.DefaultDeadlineHours.HasValue)
+            {
+                normalizedDeadline = nowUtc.AddHours(settings.DefaultDeadlineHours.Value);
+            }
+        }
+
+        ValidateDeadlineLeadTime(normalizedDeadline, settings.MinimumLeadHours, nowUtc);
+        return normalizedDeadline;
+    }
+
+    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    {
+        DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
+        if (!normalized.HasValue)
+        {
+            throw new ValidationException("Deadline is required by queue policy.");
+        }
+
+        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, DateTime.UtcNow);
+        return normalized.Value;
+    }
+
+    private static void ValidateDeadlineLeadTime(DateTime? deadlineAtUtc, int minimumLeadHours, DateTime nowUtc)
+    {
+        int effectiveMinimumLeadHours = Math.Max(0, minimumLeadHours);
+        if (!deadlineAtUtc.HasValue || effectiveMinimumLeadHours == 0)
+        {
+            return;
+        }
+
+        DateTime minimumAllowedDeadline = nowUtc.AddHours(effectiveMinimumLeadHours);
+        if (deadlineAtUtc.Value < minimumAllowedDeadline)
+        {
+            throw new ValidationException(
+                $"Deadline must be at least {effectiveMinimumLeadHours} hour(s) in the future.");
+        }
+    }
 }

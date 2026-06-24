@@ -8,6 +8,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -25,6 +26,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange,
       onModelChange: vi.fn(),
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -42,6 +44,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange,
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -59,6 +62,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
       onMaterialChange,
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -76,6 +80,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh,
     };
 
@@ -91,10 +96,12 @@ describe("TableFiltersBar Component", () => {
     const onStatusChange = vi.fn();
     const onModelChange = vi.fn();
     const onMaterialChange = vi.fn();
+    const onSortChange = vi.fn();
     const mockHandlers = {
       onStatusChange,
       onModelChange,
       onMaterialChange,
+      onSortChange,
       onRefresh: vi.fn(),
     };
 
@@ -112,6 +119,7 @@ describe("TableFiltersBar Component", () => {
     expect(onStatusChange).toHaveBeenCalledWith(null);
     expect(onModelChange).toHaveBeenCalledWith(null);
     expect(onMaterialChange).toHaveBeenCalledWith(null);
+    expect(onSortChange).toHaveBeenCalledWith("priority");
   });
 
   it("should disable refresh button when loading", () => {
@@ -119,6 +127,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -133,6 +142,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -154,6 +164,7 @@ describe("TableFiltersBar Component", () => {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
       onMaterialChange: vi.fn(),
+      onSortChange: vi.fn(),
       onRefresh: vi.fn(),
     };
 
@@ -167,5 +178,22 @@ describe("TableFiltersBar Component", () => {
     expect(materialValues).toContain("PETG");
     expect(materialValues).toContain("ABS");
   });
-});
 
+  it("should call onSortChange when sort changes", () => {
+    const onSortChange = vi.fn();
+    const mockHandlers = {
+      onStatusChange: vi.fn(),
+      onModelChange: vi.fn(),
+      onMaterialChange: vi.fn(),
+      onSortChange,
+      onRefresh: vi.fn(),
+    };
+
+    render(<TableFiltersBar {...mockHandlers} />);
+
+    const sortSelect = screen.getByLabelText("Sort queue jobs") as HTMLSelectElement;
+    fireEvent.change(sortSelect, { target: { value: "deadline" } });
+
+    expect(onSortChange).toHaveBeenCalledWith("deadline");
+  });
+});

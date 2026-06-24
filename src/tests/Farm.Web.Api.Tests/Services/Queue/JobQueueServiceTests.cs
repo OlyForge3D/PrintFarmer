@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -661,6 +663,227 @@ public class JobQueueServiceTests
     }
 
     [Fact]
+    public async Task AddJobToQueueAsync_WithDeadline_MapsDeadlineToCreatedJobAndDto()
+    {
+        // Arrange
+        var printerId = Guid.NewGuid();
+        DateTime deadline = DateTime.UtcNow.AddHours(6);
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "deadline-test.gcode",
+            FileName = "deadline-test.gcode"
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+            DeadlineAtUtc = deadline
+        };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.DeadlineAtUtc.Should().BeCloseTo(deadline, TimeSpan.FromSeconds(1));
+        _mockRepo.Verify(x => x.AddAsync(
+            It.Is<PrintJob>(j => j.DeadlineAtUtc.HasValue && j.DeadlineAtUtc.Value == deadline),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_WithRequireDeadlineEnabledAndNoDeadline_ThrowsValidationException()
+    {
+        // Arrange
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "required-deadline.gcode",
+            FileName = "required-deadline.gcode"
+        };
+
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            Priority = PrintJobPriority.Normal
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>())
+            .Returns(new QueuePlanningSettings
+            {
+                RequireDeadline = true
+            });
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { new PrinterBuilder().WithId(Guid.NewGuid()).AsOnlineAndReady().Build() });
+
+        // Act
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*Deadline is required by queue policy.*");
+        _mockRepo.Verify(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_WithMissingQueuePlanningSettingsAndNoDeadline_ThrowsValidationException()
+    {
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "missing-settings.gcode",
+            FileName = "missing-settings.gcode"
+        };
+
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            Priority = PrintJobPriority.Normal
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>())
+            .Returns((QueuePlanningSettings?)null);
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { new PrinterBuilder().WithId(Guid.NewGuid()).AsOnlineAndReady().Build() });
+
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*Deadline is required by queue policy.*");
+        _mockRepo.Verify(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_WithDefaultDeadlineHoursAndNoDeadline_AppliesDefaultDeadline()
+    {
+        // Arrange
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "default-deadline.gcode",
+            FileName = "default-deadline.gcode"
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>())
+            .Returns(new QueuePlanningSettings
+            {
+                DefaultDeadlineHours = 2,
+                RequireDeadline = false,
+                MinimumLeadHours = 0
+            });
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        DateTime startedAt = DateTime.UtcNow;
+
+        // Act
+        JobQueuePrintJobDto? result = await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.DeadlineAtUtc.Should().NotBeNull();
+        result.DeadlineAtUtc!.Value.Should().BeOnOrAfter(startedAt.AddHours(2).AddSeconds(-2));
+        result.DeadlineAtUtc!.Value.Should().BeOnOrBefore(DateTime.UtcNow.AddHours(2).AddSeconds(2));
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_WithMinimumLeadHoursAndDeadlineTooSoon_ThrowsValidationException()
+    {
+        // Arrange
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "lead-time.gcode",
+            FileName = "lead-time.gcode"
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+            DeadlineAtUtc = DateTime.UtcNow.AddHours(1)
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>())
+            .Returns(new QueuePlanningSettings
+            {
+                MinimumLeadHours = 4
+            });
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*at least 4 hour(s) in the future*");
+    }
+
+    [Fact]
     public async Task AddJobToQueueAsync_WithHighPriority_AssignsHigherPriority()
     {
         // Arrange
@@ -1185,6 +1408,63 @@ public class JobQueueServiceTests
         result.Should().NotBeNull();
         result!.ActualFilamentUsage.Should().Be(28.3);
         job.ActualFilamentUsage.Should().Be(28.3);
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_WithDeadline_UpdatesDeadlineAndReturnsDto()
+    {
+        // Arrange
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        DateTime deadline = DateTime.UtcNow.AddDays(2);
+        var request = new UpdatePrintJobStatusDto
+        {
+            DeadlineAtUtc = deadline
+        };
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        // Act
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.DeadlineAtUtc.Should().BeCloseTo(deadline, TimeSpan.FromSeconds(1));
+        job.DeadlineAtUtc.Should().BeCloseTo(deadline, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_WithMinimumLeadHoursAndDeadlineTooSoon_ThrowsValidationException()
+    {
+        // Arrange
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        var request = new UpdatePrintJobStatusDto
+        {
+            DeadlineAtUtc = DateTime.UtcNow.AddHours(1)
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>())
+            .Returns(new QueuePlanningSettings
+            {
+                MinimumLeadHours = 3
+            });
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object);
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        // Act
+        Func<Task> act = async () => await sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*at least 3 hour(s) in the future*");
     }
 
     [Fact]
