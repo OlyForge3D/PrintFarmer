@@ -130,6 +130,10 @@ export const jobQueueService = {
     return apiClient.getAnalyticsQueueModelStats();
   },
 
+  async getAnalyticsQueueRecommendations(limit?: number): Promise<unknown[]> {
+    return apiClient.getAnalyticsQueueRecommendations(limit);
+  },
+
   async getAnalyticsQueueHistory(
     limit?: number,
     offset?: number,

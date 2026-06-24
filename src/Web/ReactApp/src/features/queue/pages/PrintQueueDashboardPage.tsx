@@ -15,6 +15,7 @@ import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
 import QueueTimelineTab from "../components/QueueTimelineTab";
+import { QueueRecommendationsPanel } from "../components/QueueRecommendationsPanel";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
@@ -26,6 +27,7 @@ import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
 import { HelpButton } from "@/common/components/HelpButton";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
+  QueueRecommendationDto,
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
 } from "@/types/api";
@@ -175,10 +177,21 @@ export function PrintQueueDashboardPage() {
     refetchInterval: 10_000,
   });
 
+  const {
+    data: recommendations = [],
+    isLoading: recommendationsLoading,
+  } = useQuery({
+    queryKey: ['queue-recommendations'],
+    queryFn: () => apiClient.getAnalyticsQueueRecommendations(5) as Promise<QueueRecommendationDto[]>,
+    staleTime: 10_000,
+    refetchInterval: 10_000,
+  });
+
   const invalidateQueue = useCallback(() => {
     setError(null);
     queryClient.invalidateQueries({ queryKey: ['queue-jobs'] });
     queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
+    queryClient.invalidateQueries({ queryKey: ['queue-recommendations'] });
   }, [queryClient]);
 
   const displayError = error || (jobsError ? (jobsError instanceof Error ? jobsError.message : "Failed to load jobs") : null);
@@ -468,6 +481,11 @@ export function PrintQueueDashboardPage() {
           </div>
         </div>
       )}
+
+      <QueueRecommendationsPanel
+        recommendations={recommendations}
+        isLoading={recommendationsLoading}
+      />
 
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>

@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.DTOs.SignalR;
@@ -35,7 +36,8 @@ public class PrintJobManagementService(
     IPrinterStatusRefreshService? printerStatusRefreshService = null,
     IJobCostCalculationService? jobCostCalculationService = null,
     ICameraSnapshotService? cameraSnapshotService = null,
-    IServiceScopeFactory? serviceScopeFactory = null) : IPrintJobManagementService
+    IServiceScopeFactory? serviceScopeFactory = null,
+    IDispatchScorer? dispatchScorer = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -50,6 +52,7 @@ public class PrintJobManagementService(
     private readonly IJobCostCalculationService? _jobCostCalculationService = jobCostCalculationService;
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
+    private readonly IDispatchScorer? _dispatchScorer = dispatchScorer;
 
     // ============= QUERY OPERATIONS =============
 
@@ -182,6 +185,121 @@ public class PrintJobManagementService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving printer model statistics");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Get prioritized to-do recommendations to unlock queued jobs.
+    /// </summary>
+    /// <param name="limit">Maximum number of recommendations to return.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    public async Task<List<QueueRecommendationDto>> GetQueueRecommendationsAsync(
+        int limit = 5,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0 || _dispatchScorer is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
+                filterStatus: null,
+                filterModel: null,
+                filterMaterial: null,
+                limit: 500,
+                offset: 0,
+                cancellationToken);
+
+            List<PrintJob> queuedJobs = jobs
+                .Where(j => j.Status is PrintJobStatus.Queued or PrintJobStatus.Assigned)
+                .ToList();
+
+            if (queuedJobs.Count == 0)
+            {
+                return [];
+            }
+
+            Dictionary<string, HashSet<Guid>> affectedJobsByCategory = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["material-mismatch"] = [],
+                ["nozzle-mismatch"] = [],
+                ["bed-clear-blocking"] = [],
+                ["idle-printer-opportunity"] = [],
+            };
+
+            foreach (PrintJob job in queuedJobs)
+            {
+                List<DispatchScore> scores = await _dispatchScorer.ScorePrintersForJobAsync(job.Id, cancellationToken);
+                if (scores.Count == 0)
+                {
+                    continue;
+                }
+
+                bool hasIdleOpportunity = scores
+                    .Where(s => !s.Eliminated)
+                    .Any(s =>
+                        s.ScoreBreakdown.TryGetValue("Availability", out FactorScore? availability)
+                        && availability.Score >= 100
+                        && s.ScoreBreakdown.TryGetValue("QueueDepth", out FactorScore? queueDepth)
+                        && queueDepth.Score >= 100);
+
+                if (hasIdleOpportunity)
+                {
+                    affectedJobsByCategory["idle-printer-opportunity"].Add(job.Id);
+                    continue;
+                }
+
+                List<string> eliminationReasons = scores
+                    .SelectMany(s => s.EliminationReasons)
+                    .Where(r => !string.IsNullOrWhiteSpace(r))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (eliminationReasons.Count == 0)
+                {
+                    continue;
+                }
+
+                bool hasBedClearBlocking = eliminationReasons.Any(r =>
+                    r.Contains("bed clear", StringComparison.OrdinalIgnoreCase));
+
+                bool hasNozzleMismatch = eliminationReasons.Any(r =>
+                    r.Contains("nozzle diameter", StringComparison.OrdinalIgnoreCase)
+                    || r.Contains("hardened nozzle", StringComparison.OrdinalIgnoreCase));
+
+                bool hasMaterialMismatch = eliminationReasons.Any(r =>
+                    r.Contains("material", StringComparison.OrdinalIgnoreCase)
+                    || r.Contains("enclosure", StringComparison.OrdinalIgnoreCase));
+
+                if (hasBedClearBlocking)
+                {
+                    affectedJobsByCategory["bed-clear-blocking"].Add(job.Id);
+                }
+
+                if (hasNozzleMismatch)
+                {
+                    affectedJobsByCategory["nozzle-mismatch"].Add(job.Id);
+                }
+
+                if (hasMaterialMismatch)
+                {
+                    affectedJobsByCategory["material-mismatch"].Add(job.Id);
+                }
+            }
+
+            return BuildQueueRecommendations(affectedJobsByCategory)
+                .Where(r => r.EstimatedUnlockedJobCount > 0)
+                .OrderByDescending(r => r.PriorityScore)
+                .ThenBy(r => r.Category, StringComparer.Ordinal)
+                .Take(limit)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating queue recommendations");
             throw;
         }
     }
@@ -1678,6 +1796,54 @@ public class PrintJobManagementService(
         }
 
         return estimatedStart.Value + job.EstimatedPrintTime.Value;
+    }
+
+    private static IEnumerable<QueueRecommendationDto> BuildQueueRecommendations(
+        IReadOnlyDictionary<string, HashSet<Guid>> affectedJobsByCategory)
+    {
+        yield return CreateRecommendation(
+            "material-mismatch",
+            "Material mismatch",
+            "Load matching material on compatible printers to unlock blocked jobs.",
+            affectedJobsByCategory);
+
+        yield return CreateRecommendation(
+            "nozzle-mismatch",
+            "Nozzle mismatch",
+            "Swap to the required nozzle size or move jobs to printers with matching nozzles.",
+            affectedJobsByCategory);
+
+        yield return CreateRecommendation(
+            "bed-clear-blocking",
+            "Bed clear confirmation needed",
+            "Confirm bed clear on blocked printers so queued jobs can start.",
+            affectedJobsByCategory);
+
+        yield return CreateRecommendation(
+            "idle-printer-opportunity",
+            "Idle printer opportunity",
+            "Dispatch queued jobs to currently idle compatible printers.",
+            affectedJobsByCategory);
+    }
+
+    private static QueueRecommendationDto CreateRecommendation(
+        string category,
+        string title,
+        string actionText,
+        IReadOnlyDictionary<string, HashSet<Guid>> affectedJobsByCategory)
+    {
+        int unlockedCount = affectedJobsByCategory.TryGetValue(category, out HashSet<Guid>? jobs)
+            ? jobs.Count
+            : 0;
+
+        return new QueueRecommendationDto
+        {
+            Category = category,
+            Title = title,
+            ActionText = actionText,
+            EstimatedUnlockedJobCount = unlockedCount,
+            PriorityScore = unlockedCount
+        };
     }
 
     private QueuedPrintJobDto MapToQueuedPrintJobDto(PrintJob job)

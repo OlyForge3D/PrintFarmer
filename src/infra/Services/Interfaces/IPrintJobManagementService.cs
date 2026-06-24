@@ -52,6 +52,15 @@ public interface IPrintJobManagementService
     Task<List<QueuePrinterModelStatsDto>> GetModelStatsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Get prioritized to-do recommendations to unlock queued jobs.
+    /// </summary>
+    /// <param name="limit">Maximum number of recommendations to return.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task<List<QueueRecommendationDto>> GetQueueRecommendationsAsync(
+        int limit = 5,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get print job history (Phase 2)
     /// </summary>
     /// <param name="limit">Maximum number of history records to return.</param>

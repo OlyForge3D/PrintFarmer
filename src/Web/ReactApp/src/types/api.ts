@@ -2327,6 +2327,14 @@ export interface QueueStatsDto {
   byModel: Record<string, QueuePrinterModelStatsDto>;
 }
 
+export interface QueueRecommendationDto {
+  category: 'material-mismatch' | 'nozzle-mismatch' | 'bed-clear-blocking' | 'idle-printer-opportunity';
+  title: string;
+  actionText: string;
+  estimatedUnlockedJobCount: number;
+  priorityScore: number;
+}
+
 export interface QueuePrinterModelStatsDto {
   modelName: string;
   totalQueued: number;

@@ -148,6 +148,37 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
+    /// Get prioritized to-do recommendations that can unlock queued jobs.
+    /// </summary>
+    /// <param name="limit">Maximum recommendations to return (default 5, max 20)</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
+    [HttpGet("recommendations")]
+    [ProducesResponseType(typeof(List<QueueRecommendationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetQueueRecommendationsAsync(
+        [FromQuery] int limit = 5,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (limit <= 0 || limit > 20)
+            {
+                return BadRequest(new { error = "Limit must be between 1 and 20" });
+            }
+
+            List<QueueRecommendationDto> recommendations = await _printJobManagementService.GetQueueRecommendationsAsync(limit, cancellationToken);
+            return Ok(recommendations);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving queue recommendations");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve recommendations" });
+        }
+    }
+
+    /// <summary>
     /// Get print queue history (Phase 2)
     /// </summary>
     /// <param name="limit">Maximum number of results (default 50, max 1000)</param>
