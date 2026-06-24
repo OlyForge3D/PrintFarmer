@@ -192,31 +192,31 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
   return (
     <div className="space-y-4">
       <section aria-label="Timeline planning summary" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+        <div className="bg-pf-bg-1/95 border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)] backdrop-blur-sm">
           <div className="text-pf-text-secondary text-sm font-medium">Queued Jobs</div>
-          <div className="text-3xl font-bold text-pf-info">{summary.queued}</div>
+          <div className="text-3xl font-bold text-pf-info tracking-tight">{summary.queued}</div>
         </div>
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+        <div className="bg-pf-bg-1/95 border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)] backdrop-blur-sm">
           <div className="text-pf-text-secondary text-sm font-medium">Currently Printing</div>
-          <div className="text-3xl font-bold text-pf-success">{summary.printing}</div>
+          <div className="text-3xl font-bold text-pf-success tracking-tight">{summary.printing}</div>
         </div>
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+        <div className="bg-pf-bg-1/95 border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)] backdrop-blur-sm">
           <div className="text-pf-text-secondary text-sm font-medium">Active Printers</div>
-          <div className="text-3xl font-bold text-pf-text-primary">{summary.activePrinters}</div>
+          <div className="text-3xl font-bold text-pf-text-primary tracking-tight">{summary.activePrinters}</div>
         </div>
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+        <div className="bg-pf-bg-1/95 border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)] backdrop-blur-sm">
           <div className="text-pf-text-secondary text-sm font-medium">Next Estimated Completion</div>
           <div className="text-xl font-semibold text-pf-text-primary">
             {summary.nextCompletion ? formatDateTime(summary.nextCompletion) : "No estimate"}
           </div>
         </div>
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+        <div className="bg-pf-bg-1/95 border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)] backdrop-blur-sm">
           <div className="text-pf-text-secondary text-sm font-medium">Queue Completion (Continuous)</div>
           <div className="text-xl font-semibold text-pf-text-primary">
             {summary.queueCompletion ? formatDateTime(summary.queueCompletion) : "No estimate"}
           </div>
         </div>
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+        <div className="bg-pf-bg-1/95 border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)] backdrop-blur-sm">
           <div className="text-pf-text-secondary text-sm font-medium">Queue Completion (Staffed Hours)</div>
           <div className="text-xl font-semibold text-pf-text-primary">
             {summary.staffedCompletion ? formatDateTime(summary.staffedCompletion) : "No estimate"}
@@ -232,7 +232,7 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
 
       <section
         aria-label="Queue timeline"
-        className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden"
+        className="border border-pf-border rounded-xl bg-pf-bg-1/95 overflow-hidden shadow-[0_12px_28px_rgba(0,0,0,0.16)] backdrop-blur-sm"
       >
         <header className="px-4 py-3 border-b border-pf-border bg-pf-bg-0 flex flex-wrap items-center justify-between gap-3">
           <div>
