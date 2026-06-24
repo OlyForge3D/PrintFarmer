@@ -14,7 +14,7 @@ import type {
   FieldRef,
   ViewMode,
 } from '@/features/slicer/components/settings/metadataTypes';
-import { CONDITIONAL_HIDDEN_KEYS } from '@/features/slicer/components/settings/metadataTypes';
+import { CONDITIONAL_HIDDEN_KEYS, TEXTAREA_KEYS } from '@/features/slicer/components/settings/metadataTypes';
 import { OrcaIcon } from '@/features/slicer/components/settings/OrcaIcon';
 
 // ── Compound Row (renders multiple fields on one line with a shared label) ──
@@ -206,15 +206,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             const otherKey = pairMap.get(field.key);
             const isTextarea = meta.key && (
               meta.gui_type !== 'color' &&
-              ['machine_start_gcode', 'machine_end_gcode', 'machine_pause_gcode',
-               'template_custom_gcode', 'change_filament_gcode', 'layer_change_gcode',
-               'time_lapse_gcode', 'before_layer_change_gcode', 'file_start_gcode',
-               'printing_by_object_gcode', 'wrapping_detection_gcode',
-               'change_extrusion_role_gcode', 'filament_start_gcode', 'filament_end_gcode',
-               'adaptive_pressure_advance_model', 'filament_notes', 'printer_notes',
-               'filename_format', 'notes',
-               'compatible_printers_condition', 'compatible_prints_condition',
-              ].includes(meta.key)
+              TEXTAREA_KEYS.has(meta.key)
             );
             const showLabel = isTextarea ? visibleFields.length > 1 : true;
 

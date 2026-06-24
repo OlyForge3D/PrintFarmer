@@ -256,6 +256,7 @@ export const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; i
     { value: 'Auto For Flush', label: 'Auto (for flush)' },
     { value: 'Auto For Match', label: 'Auto (for match)' },
     { value: 'Manual', label: 'Manual' },
+    { value: 'Default', label: 'Default' },
   ],
 
   // ── Process: Seam & walls ──────────────────────────────────────────
@@ -359,12 +360,14 @@ export const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; i
     { value: 'perobject', label: 'Per object' },
   ],
 
-  // ── Process: Fuzzy skin ────────────────────────────────────────────
+  // ── Process: Fuzzy skin (OrcaSlicer 2.4.0 overhaul) ─────────────────
   fuzzy_skin: [
-    { value: 'none', label: 'None' },
-    { value: 'external', label: 'Outside wall' },
-    { value: 'all', label: 'All walls' },
-    { value: 'allwalls', label: 'All walls (incl. inner)' },
+    { value: 'none', label: 'Painted only' },
+    { value: 'external', label: 'Contour' },
+    { value: 'hole', label: 'Hole' },
+    { value: 'all', label: 'Contour and hole' },
+    { value: 'allwalls', label: 'All walls' },
+    { value: 'disabled_fuzzy', label: 'Disabled' },
   ],
   fuzzy_skin_mode: [
     { value: 'displacement', label: 'Displacement' },
@@ -377,6 +380,7 @@ export const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; i
     { value: 'billow', label: 'Billow' },
     { value: 'ridgedmulti', label: 'Ridged Multi' },
     { value: 'voronoi', label: 'Voronoi' },
+    { value: 'ripple', label: 'Ripple' },
   ],
 
   // ── Process: Other enums ───────────────────────────────────────────
@@ -428,6 +432,23 @@ export const KNOWN_ENUMS: Record<string, Array<{ value: string; label: string; i
     { value: 'topbottom', label: 'Top and bottom surfaces' },
     { value: 'nowhere', label: 'Nowhere' },
   ],
+
+  // ── Machine: Motion / Input shaping (OrcaSlicer 2.4.0) ──────────────
+  input_shaping_type: [
+    { value: 'Default', label: 'Default' },
+    { value: 'MZV', label: 'MZV' },
+    { value: 'ZV', label: 'ZV' },
+    { value: 'ZVD', label: 'ZVD' },
+    { value: 'ZVDD', label: 'ZVDD' },
+    { value: 'ZVDDD', label: 'ZVDDD' },
+    { value: 'EI', label: 'EI' },
+    { value: 'EI2', label: 'EI2' },
+    { value: '2HUMP_EI', label: '2HUMP_EI' },
+    { value: 'EI3', label: 'EI3' },
+    { value: '3HUMP_EI', label: '3HUMP_EI' },
+    { value: 'DAA', label: 'DAA' },
+    { value: 'Disable', label: 'Disable' },
+  ],
 };
 
 /** Bed type options for OrcaSlicer's curr_bed_type override */
@@ -442,6 +463,7 @@ export const TEXTAREA_KEYS = new Set([
   'file_start_gcode', 'printing_by_object_gcode',
   'wrapping_detection_gcode', 'change_extrusion_role_gcode',
   'filament_start_gcode', 'filament_end_gcode',
+  'filament_change_extrusion_role_gcode', 'process_change_extrusion_role_gcode',
   'adaptive_pressure_advance_model',
   'filament_notes', 'printer_notes',
   'filename_format', 'notes',
