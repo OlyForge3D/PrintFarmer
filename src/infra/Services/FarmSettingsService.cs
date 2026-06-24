@@ -17,13 +17,15 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
     public FarmSettingsDto GetFarmSettings()
     {
         CostTrackingSettings cost = _settings.Get<CostTrackingSettings>();
+        SlicerSettings slicer = _settings.Get<SlicerSettings>();
 
         // canWrite is always false here; the controller sets it based on role.
         return new FarmSettingsDto(
             ElectricityRatePerKwh: cost.ElectricityRatePerKwh,
             DefaultMachineHourlyRate: cost.DefaultMachineHourlyRate,
             AveragePrinterWattage: cost.AveragePrinterWattage,
-            CanWrite: false);
+            CanWrite: false,
+            SlicerMode: slicer.SlicerMode);
     }
 
     /// <inheritdoc />
@@ -58,13 +60,23 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
             cost.AveragePrinterWattage = request.AveragePrinterWattage.Value;
         }
 
-        if (expectedRowVersion is not null)
+        bool costChanged = request.ElectricityRatePerKwh.HasValue
+            || request.DefaultMachineHourlyRate.HasValue
+            || request.AveragePrinterWattage.HasValue;
+
+        if (costChanged)
         {
-            SaveWithConcurrencyCheck(cost, expectedRowVersion);
+            if (expectedRowVersion is not null)
+                SaveWithConcurrencyCheck(cost, expectedRowVersion);
+            else
+                _settings.Save(cost);
         }
-        else
+
+        SlicerSettings slicer = _settings.Get<SlicerSettings>();
+        if (request.SlicerMode.HasValue)
         {
-            _settings.Save(cost);
+            slicer.SlicerMode = request.SlicerMode.Value;
+            _settings.Save(slicer);
         }
     }
 

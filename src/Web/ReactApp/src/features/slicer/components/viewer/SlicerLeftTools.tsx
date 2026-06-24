@@ -56,6 +56,8 @@ export interface SlicerLeftToolsProps {
   onGridToggle?: () => void;
   textToolActive?: boolean;
   onTextTool?: () => void;
+  /** When true, hides the text tool button (Simple slicer mode). */
+  simpleMode?: boolean;
 }
 
 export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
@@ -68,6 +70,7 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
   onGridToggle,
   textToolActive = false,
   onTextTool,
+  simpleMode = false,
 }) => {
   return (
     <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10 pointer-events-none">
@@ -112,15 +115,17 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
         />
       </div>
 
-      {/* Text annotation tool */}
-      <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg pointer-events-auto">
-        <ToolButton
-          icon={<TextToolIcon />}
-          title="3D Text (A)"
-          active={textToolActive}
-          onClick={onTextTool}
-        />
-      </div>
+      {/* Text annotation tool — hidden in Simple mode */}
+      {!simpleMode && (
+        <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg pointer-events-auto">
+          <ToolButton
+            icon={<TextToolIcon />}
+            title="3D Text (A)"
+            active={textToolActive}
+            onClick={onTextTool}
+          />
+        </div>
+      )}
     </div>
   );
 };

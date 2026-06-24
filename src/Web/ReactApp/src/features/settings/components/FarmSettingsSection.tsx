@@ -75,6 +75,7 @@ function FarmSettingsForm({
   const [electricityRate, setElectricityRate] = useState(String(data.electricityRatePerKwh));
   const [hourlyRate, setHourlyRate] = useState(String(data.defaultMachineHourlyRate));
   const [wattage, setWattage] = useState(String(data.averagePrinterWattage));
+  const [slicerMode, setSlicerMode] = useState<'Simple' | 'Advanced'>(data.slicerMode ?? 'Simple');
 
   const canWrite = data.canWrite;
 
@@ -84,6 +85,7 @@ function FarmSettingsForm({
       defaultMachineHourlyRate: Number(hourlyRate),
       averagePrinterWattage: Number(wattage),
       rowVersion: data.rowVersion,
+      slicerMode,
     };
 
     if (payload.electricityRatePerKwh < 0 || payload.electricityRatePerKwh > 10) {
@@ -160,6 +162,34 @@ function FarmSettingsForm({
               aria-label="Average printer wattage"
               className={!canWrite ? disabledInputClassName : undefined}
             />
+          </FormField>
+        </div>
+
+        <div className="mt-4 border-t border-pf-border pt-4">
+          <FormField
+            label="Browser Slicer Mode"
+            helper="Simple exposes only profile selection and basic print overrides. Advanced unlocks the full OrcaSlicer parameter editor."
+          >
+            <div className="flex gap-2">
+              {(['Simple', 'Advanced'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={!canWrite}
+                  onClick={() => canWrite && setSlicerMode(mode)}
+                  className={[
+                    'flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                    slicerMode === mode
+                      ? 'border-pf-accent bg-pf-accent/10 text-pf-accent'
+                      : 'border-pf-border bg-pf-bg-2 text-pf-text-secondary hover:border-pf-accent/50 hover:text-pf-text-primary',
+                    !canWrite && 'cursor-not-allowed opacity-50',
+                  ].join(' ')}
+                  aria-pressed={slicerMode === mode}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
           </FormField>
         </div>
       </Card.Body>

@@ -87,6 +87,8 @@ export interface SlicerWorkspaceProps {
   onPlateStateChange?: (state: PlateManagerState) => void;
   /** Additional CSS class */
   className?: string;
+  /** When true, hides cut plane and text tool (Simple slicer mode). */
+  simpleMode?: boolean;
 }
 
 type TransformSnapshot = {
@@ -143,6 +145,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   onModelsReplace,
   onPlateStateChange,
   className = '',
+  simpleMode = false,
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
   const [showLayers, setShowLayers] = useState(false);
@@ -1261,6 +1264,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         fuzzySkinPaintActive={fuzzySkinPaintMode}
         onSequentialToggle={handleSequentialToggle}
         sequentialActive={sequentialMode}
+        simpleMode={simpleMode}
       />
 
       {/* Plate Tab Bar */}
@@ -1412,6 +1416,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onGridToggle={() => setShowGridLines(prev => !prev)}
           textToolActive={textToolActive}
           onTextTool={handleTextTool}
+          simpleMode={simpleMode}
         />
 
         {/* Non-modal transform panel: can be used alongside gizmo controls */}

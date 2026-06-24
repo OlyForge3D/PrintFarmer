@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -50,7 +51,8 @@ public class SettingsController(
             DefaultMachineHourlyRate: dto.DefaultMachineHourlyRate,
             AveragePrinterWattage: dto.AveragePrinterWattage,
             CanWrite: isAdmin,
-            RowVersion: rowVersion));
+            RowVersion: rowVersion,
+            SlicerMode: dto.SlicerMode));
     }
 
     /// <summary>Updates farm-wide settings. Requires farm_admin role.</summary>
@@ -99,7 +101,8 @@ public class SettingsController(
                 new UpdateFarmSettingsRequest(
                     body.ElectricityRatePerKwh,
                     body.DefaultMachineHourlyRate,
-                    body.AveragePrinterWattage),
+                    body.AveragePrinterWattage,
+                    body.SlicerMode),
                 expectedRowVersion);
         }
         catch (DbUpdateConcurrencyException)
@@ -282,14 +285,16 @@ public record FarmSettingsResponse(
     decimal DefaultMachineHourlyRate,
     decimal AveragePrinterWattage,
     bool CanWrite,
-    string? RowVersion);
+    string? RowVersion,
+    SlicerMode SlicerMode = SlicerMode.Simple);
 
 /// <summary>Request body for PUT /api/settings/farm.</summary>
 public record UpdateFarmSettingsBody(
     decimal? ElectricityRatePerKwh,
     decimal? DefaultMachineHourlyRate,
     decimal? AveragePrinterWattage,
-    string? RowVersion = null);
+    string? RowVersion = null,
+    SlicerMode? SlicerMode = null);
 
 /// <summary>Response body for user settings endpoints.</summary>
 public record UserSettingsResponse(
