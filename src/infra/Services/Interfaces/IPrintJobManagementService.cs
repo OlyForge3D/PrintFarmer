@@ -17,6 +17,9 @@ public interface IPrintJobManagementService
     /// <param name="filterStatus">Optional status filter for jobs.</param>
     /// <param name="filterModel">Optional model filter for jobs.</param>
     /// <param name="filterMaterial">Optional material filter for jobs.</param>
+    /// <param name="deadlineStart">Optional inclusive minimum deadline timestamp (UTC).</param>
+    /// <param name="deadlineEnd">Optional inclusive maximum deadline timestamp (UTC).</param>
+    /// <param name="sortBy">Sort mode for queued jobs (for example: priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
@@ -72,6 +75,8 @@ public interface IPrintJobManagementService
     /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
     /// <param name="dateStart">Optional start date filter (inclusive).</param>
     /// <param name="dateEnd">Optional end date filter (inclusive).</param>
+    /// <param name="deadlineStart">Optional inclusive minimum deadline timestamp (UTC).</param>
+    /// <param name="deadlineEnd">Optional inclusive maximum deadline timestamp (UTC).</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<QueueHistoryPageDto> GetQueueHistoryAsync(
         int limit = 50,
