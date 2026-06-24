@@ -17,7 +17,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Paths
-ORCA_RESOURCES="/Applications/OrcaSlicer.app/Contents/Resources/profiles"
+# Override the source location with ORCA_RESOURCES env var (e.g. on Windows/Git Bash:
+#   ORCA_RESOURCES="/c/Program Files/OrcaSlicer/resources/profiles" ./scripts/extract-orcaslicer-assets.sh)
+ORCA_RESOURCES="${ORCA_RESOURCES:-/Applications/OrcaSlicer.app/Contents/Resources/profiles}"
 REACT_ASSETS="src/Web/ReactApp/public/assets/orcaslicer"
 MANIFEST="${REACT_ASSETS}/manifest.json"
 
@@ -28,7 +30,7 @@ echo -e "${BLUE}═════════════════════�
 # Verify OrcaSlicer installation exists
 if [ ! -d "$ORCA_RESOURCES" ]; then
     echo -e "${RED}✗ Error: OrcaSlicer not found at ${ORCA_RESOURCES}${NC}"
-    echo -e "${YELLOW}Please install OrcaSlicer from https://github.com/SoftFever/OrcaSlicer${NC}"
+    echo -e "${YELLOW}Set ORCA_RESOURCES to your OrcaSlicer resources/profiles dir, or install from https://github.com/SoftFever/OrcaSlicer${NC}"
     exit 1
 fi
 
