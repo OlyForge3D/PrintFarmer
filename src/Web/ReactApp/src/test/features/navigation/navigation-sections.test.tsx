@@ -79,14 +79,15 @@ describe('Navigation rail sections', () => {
     localStorage.clear();
   });
 
-  it('renders the new left rail sections with grouped child links', () => {
+  it('renders the new left rail sections with grouped child links', async () => {
     const { container } = renderLayout();
 
-    expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Printers').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Files').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Slicer').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Admin').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(container.querySelectorAll('section[aria-label]').length).toBeGreaterThanOrEqual(8);
+      expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBe(8);
+    });
+    expect(screen.queryByText('Dashboard', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Admin', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
 
     expect(screen.getByRole('link', { name: /overview/i })).toHaveAttribute('href', '/dashboard');
     expect(screen.getByRole('link', { name: /print queue/i })).toHaveAttribute('href', '/printQueue');
