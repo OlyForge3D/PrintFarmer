@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
@@ -172,7 +173,10 @@ public class PrintJobManagementService(
                 {
                     WorkdayStartHourUtc = settings.WorkdayStartHourUtc,
                     WorkdayEndHourUtc = settings.WorkdayEndHourUtc,
-                    BedClearMinutes = settings.BedClearMinutes
+                    BedClearMinutes = settings.BedClearMinutes,
+                    DefaultDeadlineHours = settings.DefaultDeadlineHours,
+                    RequireDeadline = settings.RequireDeadline,
+                    MinimumLeadHours = settings.MinimumLeadHours
                 }
             };
         }
@@ -471,6 +475,8 @@ public class PrintJobManagementService(
             // Create new print job
             // Status is Assigned if a printer is specified, otherwise Queued
             Guid? assignedPrinterId = string.IsNullOrEmpty(request.AssignedPrinterId) ? null : Guid.Parse(request.AssignedPrinterId);
+            QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
+            DateTime? resolvedDeadlineAtUtc = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings);
             var job = new PrintJob
             {
                 Id = Guid.NewGuid(),
@@ -484,7 +490,7 @@ public class PrintJobManagementService(
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
-                DeadlineAtUtc = NormalizeUtcDeadline(request.DeadlineAtUtc),
+                DeadlineAtUtc = resolvedDeadlineAtUtc,
                 EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
                     : null,
@@ -557,7 +563,7 @@ public class PrintJobManagementService(
 
             if (request.DeadlineAtUtc.HasValue)
             {
-                job.DeadlineAtUtc = NormalizeUtcDeadline(request.DeadlineAtUtc);
+                job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings());
             }
 
             job.UpdatedAt = DateTime.UtcNow;
@@ -1887,8 +1893,57 @@ public class PrintJobManagementService(
         }
     }
 
+    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    {
+        DateTime nowUtc = DateTime.UtcNow;
+        DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
+        if (!normalizedDeadline.HasValue)
+        {
+            if (settings.RequireDeadline)
+            {
+                throw new ValidationException("Deadline is required by queue policy.");
+            }
+
+            if (settings.DefaultDeadlineHours.HasValue)
+            {
+                normalizedDeadline = nowUtc.AddHours(settings.DefaultDeadlineHours.Value);
+            }
+        }
+
+        ValidateDeadlineLeadTime(normalizedDeadline, settings.MinimumLeadHours, nowUtc);
+        return normalizedDeadline;
+    }
+
+    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    {
+        DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
+        if (!normalized.HasValue)
+        {
+            throw new ValidationException("Deadline is required by queue policy.");
+        }
+
+        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, DateTime.UtcNow);
+        return normalized.Value;
+    }
+
+    private static void ValidateDeadlineLeadTime(DateTime? deadlineAtUtc, int minimumLeadHours, DateTime nowUtc)
+    {
+        int effectiveMinimumLeadHours = Math.Max(0, minimumLeadHours);
+        if (!deadlineAtUtc.HasValue || effectiveMinimumLeadHours == 0)
+        {
+            return;
+        }
+
+        DateTime minimumAllowedDeadline = nowUtc.AddHours(effectiveMinimumLeadHours);
+        if (deadlineAtUtc.Value < minimumAllowedDeadline)
+        {
+            throw new ValidationException(
+                $"Deadline must be at least {effectiveMinimumLeadHours} hour(s) in the future.");
+        }
+    }
+
     private static QueuePlanningProjection BuildQueuePlanningProjection(
-        IReadOnlyCollection<PrintJob> activeJobs,
+        List<PrintJob> activeJobs,
         QueuePlanningSettings settings,
         DateTime nowUtc)
     {
@@ -2387,7 +2442,7 @@ public class PrintJobManagementService(
 
             if (updates.DeadlineAtUtc.HasValue)
             {
-                job.DeadlineAtUtc = NormalizeUtcDeadline(updates.DeadlineAtUtc);
+                job.DeadlineAtUtc = ValidateProvidedDeadline(updates.DeadlineAtUtc, GetQueuePlanningSettings());
             }
 
             job.UpdatedAt = DateTime.UtcNow;

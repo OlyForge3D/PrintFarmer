@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos.PrintQueue;
+using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Webhooks;
@@ -272,6 +273,10 @@ public class JobQueueAnalyticsController(
             return CreatedAtAction("GetAllQueue", new { id = job.Id }, job);
         }
         catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (ValidationException ex)
         {
             return BadRequest(new { error = ex.Message });
         }
@@ -620,6 +625,11 @@ public class JobQueueAnalyticsController(
         catch (ArgumentException ex)
         {
             _logger.LogWarning(ex, "Invalid update request for job {JobId}", jobId);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (ValidationException ex)
+        {
+            _logger.LogWarning(ex, "Deadline policy validation failed for job {JobId}", jobId);
             return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)

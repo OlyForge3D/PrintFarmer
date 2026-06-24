@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
@@ -106,6 +107,10 @@ public class JobQueueController(
                 StatusCodes.Status403Forbidden,
                 new { error = "You do not have permission to submit jobs to this printer group." });
         }
+        catch (ValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error queueing print job for file {RequestGcodeFileId}", request.GcodeFileId);
@@ -163,6 +168,10 @@ public class JobQueueController(
             }
 
             return Ok(updated);
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {

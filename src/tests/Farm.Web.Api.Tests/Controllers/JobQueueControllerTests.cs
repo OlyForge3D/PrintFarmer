@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
@@ -193,6 +194,29 @@ public class JobQueueControllerTests
     }
 
     [Fact]
+    public async Task QueueJobAsync_WithPolicyValidationError_ReturnsBadRequest()
+    {
+        // Arrange
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = Guid.NewGuid(),
+            Priority = PrintJobPriority.Normal
+        };
+
+        _queueServiceMock
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ValidationException("Deadline is required by queue policy."));
+
+        // Act
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(request);
+
+        // Assert
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        Assert.Contains("Deadline is required by queue policy.", badRequest.Value?.ToString());
+    }
+
+    [Fact]
     public async Task GetJobAsync_WithValidId_ReturnsOk()
     {
         // Arrange
@@ -311,6 +335,29 @@ public class JobQueueControllerTests
         // Assert
         ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_WithPolicyValidationError_ReturnsBadRequest()
+    {
+        // Arrange
+        var jobId = Guid.NewGuid();
+        var request = new UpdatePrintJobStatusDto
+        {
+            DeadlineAtUtc = DateTime.UtcNow.AddMinutes(30)
+        };
+
+        _queueServiceMock
+            .Setup(s => s.UpdateJobAsync(jobId, request, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ValidationException("Deadline must be at least 2 hour(s) in the future."));
+
+        // Act
+        ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
+
+        // Assert
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        Assert.Contains("Deadline must be at least 2 hour(s) in the future.", badRequest.Value?.ToString());
     }
 
     [Fact]

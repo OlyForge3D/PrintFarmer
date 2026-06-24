@@ -379,6 +379,12 @@ public class QueuePlanningAssumptionsDto
     public int WorkdayEndHourUtc { get; set; }
 
     public int BedClearMinutes { get; set; }
+
+    public int? DefaultDeadlineHours { get; set; }
+
+    public bool RequireDeadline { get; set; }
+
+    public int MinimumLeadHours { get; set; }
 }
 
 /// <summary>

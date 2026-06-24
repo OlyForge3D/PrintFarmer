@@ -78,7 +78,10 @@ public class PrintJobManagementServiceQueuePlanningTests
             {
                 WorkdayStartHourUtc = now.Hour,
                 WorkdayEndHourUtc = (now.Hour + 1) % 24,
-                BedClearMinutes = 10
+                BedClearMinutes = 10,
+                DefaultDeadlineHours = 24,
+                RequireDeadline = true,
+                MinimumLeadHours = 4
             });
 
         PrintJobManagementService service = CreateService(repository, settingsService);
@@ -91,6 +94,9 @@ public class PrintJobManagementServiceQueuePlanningTests
         Assert.Equal(10, result.Assumptions.BedClearMinutes);
         Assert.Equal(now.Hour, result.Assumptions.WorkdayStartHourUtc);
         Assert.Equal((now.Hour + 1) % 24, result.Assumptions.WorkdayEndHourUtc);
+        Assert.Equal(24, result.Assumptions.DefaultDeadlineHours);
+        Assert.True(result.Assumptions.RequireDeadline);
+        Assert.Equal(4, result.Assumptions.MinimumLeadHours);
     }
 
     [Fact]
@@ -122,6 +128,9 @@ public class PrintJobManagementServiceQueuePlanningTests
         Assert.Equal(8, result.Assumptions.WorkdayStartHourUtc);
         Assert.Equal(17, result.Assumptions.WorkdayEndHourUtc);
         Assert.Equal(10, result.Assumptions.BedClearMinutes);
+        Assert.Null(result.Assumptions.DefaultDeadlineHours);
+        Assert.False(result.Assumptions.RequireDeadline);
+        Assert.Equal(0, result.Assumptions.MinimumLeadHours);
     }
 
     private static PrintJobManagementService CreateService(
