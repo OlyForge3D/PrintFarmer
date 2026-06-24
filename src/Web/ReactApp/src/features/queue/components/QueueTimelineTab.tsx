@@ -14,6 +14,16 @@ interface TimelineEventWithDates {
   endDate: Date;
 }
 
+interface TimelineWindow {
+  from: Date;
+  to: Date;
+}
+
+interface TimelineQueryResult {
+  events: TimelineEventDto[];
+  window: TimelineWindow;
+}
+
 const TIMELINE_LOOKBACK_HOURS = 24;
 const TIMELINE_LIMIT = 200;
 const MIN_EVENT_DURATION_SECONDS = 1;
@@ -76,18 +86,22 @@ function buildTimelineWindow() {
 }
 
 export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
-  const timelineWindow = useMemo(() => buildTimelineWindow(), []);
-
   const {
-    data: timelineEvents = [],
+    data: timelineData,
     isLoading: isTimelineLoading,
     error: timelineError,
-  } = useQuery({
-    queryKey: ["queue-timeline-events", timelineWindow.from.toISOString(), timelineWindow.to.toISOString()],
-    queryFn: () => apiClient.getAnalyticsTimeline(timelineWindow.from, timelineWindow.to, undefined, undefined, TIMELINE_LIMIT),
+  } = useQuery<TimelineQueryResult>({
+    queryKey: ["queue-timeline-events"],
+    queryFn: async () => {
+      const window = buildTimelineWindow();
+      const events = await apiClient.getAnalyticsTimeline(window.from, window.to, undefined, undefined, TIMELINE_LIMIT);
+      return { events, window };
+    },
     staleTime: 10_000,
     refetchInterval: 10_000,
   });
+  const timelineWindow = timelineData?.window ?? buildTimelineWindow();
+  const timelineEvents = timelineData?.events ?? [];
 
   const { data: queueOverview = [] } = useQuery({
     queryKey: ["queue-overview-timeline"],

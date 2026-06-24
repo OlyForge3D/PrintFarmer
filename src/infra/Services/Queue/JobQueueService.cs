@@ -790,7 +790,13 @@ public class JobQueueService : IJobQueueService
             QueuePlanningSettings? settings = _settingsService.Get<QueuePlanningSettings>();
             if (settings is null)
             {
-                return fallback;
+                _logger.LogWarning("QueuePlanning settings were missing. Enforcing strict deadline fallback policy.");
+                return new QueuePlanningSettings
+                {
+                    RequireDeadline = true,
+                    MinimumLeadHours = 0,
+                    DefaultDeadlineHours = null
+                };
             }
 
             settings.Validate();
@@ -798,8 +804,13 @@ public class JobQueueService : IJobQueueService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load QueuePlanning settings for deadline policy checks. Falling back to defaults.");
-            return fallback;
+            _logger.LogWarning(ex, "Failed to load QueuePlanning settings for deadline policy checks. Enforcing strict deadline fallback policy.");
+            return new QueuePlanningSettings
+            {
+                RequireDeadline = true,
+                MinimumLeadHours = 0,
+                DefaultDeadlineHours = null
+            };
         }
     }
 

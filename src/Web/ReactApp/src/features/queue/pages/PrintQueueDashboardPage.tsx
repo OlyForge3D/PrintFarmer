@@ -41,6 +41,7 @@ const VALID_TABS = ['print-queue', 'timeline', 'history', 'dispatch-log'] as con
 const VALID_QUEUE_VIEW_MODES: QueueViewMode[] = ["table", "list", "cards"];
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
+const RECOMMENDATIONS_POLL_INTERVAL_MS = 60_000;
 
 interface DispatchSettingsResponse {
   autoDispatchEnabled: boolean;
@@ -198,8 +199,13 @@ export function PrintQueueDashboardPage() {
   } = useQuery({
     queryKey: ['queue-recommendations'],
     queryFn: () => apiClient.getAnalyticsQueueRecommendations(5) as Promise<QueueRecommendationDto[]>,
-    staleTime: 10_000,
-    refetchInterval: 10_000,
+    staleTime: 30_000,
+    refetchInterval: () => (
+      typeof document !== 'undefined' && document.visibilityState === 'visible'
+        ? RECOMMENDATIONS_POLL_INTERVAL_MS
+        : false
+    ),
+    refetchIntervalInBackground: false,
   });
 
   const invalidateQueue = useCallback(() => {

@@ -44,7 +44,7 @@ public class PrintJobManagementServiceQueueRecommendationsTests
                 null,
                 null,
                 "priority",
-                500,
+                100,
                 0,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([materialJobA, materialJobB, nozzleJob, bedClearJob, idleOpportunityJob]);

@@ -747,6 +747,44 @@ public class JobQueueServiceTests
     }
 
     [Fact]
+    public async Task AddJobToQueueAsync_WithMissingQueuePlanningSettingsAndNoDeadline_ThrowsValidationException()
+    {
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "missing-settings.gcode",
+            FileName = "missing-settings.gcode"
+        };
+
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            Priority = PrintJobPriority.Normal
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>())
+            .Returns((QueuePlanningSettings?)null);
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object);
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { new PrinterBuilder().WithId(Guid.NewGuid()).AsOnlineAndReady().Build() });
+
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>()
+            .WithMessage("*Deadline is required by queue policy.*");
+        _mockRepo.Verify(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task AddJobToQueueAsync_WithDefaultDeadlineHoursAndNoDeadline_AppliesDefaultDeadline()
     {
         // Arrange

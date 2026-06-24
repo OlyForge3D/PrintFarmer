@@ -133,6 +133,41 @@ public class PrintJobManagementServiceQueuePlanningTests
         Assert.Equal(0, result.Assumptions.MinimumLeadHours);
     }
 
+    [Fact]
+    public async Task GetQueueStatsAsync_WhenQueuePlanningSettingsMissing_UsesStrictDeadlineFallback()
+    {
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetQueueStatsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((queued: 0, printing: 0, paused: 0, completed: 0, failed: 0));
+        repository.Setup(r => r.GetAverageWaitTimeMinutesAsync(null, 30, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                null,
+                null,
+                null,
+                null,
+                null,
+                "priority",
+                5000,
+                0,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(s => s.Get<QueuePlanningSettings>())
+            .Returns((QueuePlanningSettings?)null);
+
+        PrintJobManagementService service = CreateService(repository, settingsService);
+
+        var result = await service.GetQueueStatsAsync();
+
+        Assert.Null(result.EstimatedQueueCompletionUtc);
+        Assert.Null(result.StaffedCompletionUtc);
+        Assert.True(result.Assumptions.RequireDeadline);
+        Assert.Null(result.Assumptions.DefaultDeadlineHours);
+        Assert.Equal(0, result.Assumptions.MinimumLeadHours);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         Mock<ISettingsService>? settingsService)

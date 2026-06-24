@@ -17,6 +17,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Api.Services.PrintQueue;
@@ -40,7 +41,8 @@ public class PrintJobManagementService(
     ICameraSnapshotService? cameraSnapshotService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     IDispatchScorer? dispatchScorer = null,
-    ISettingsService? settingsService = null) : IPrintJobManagementService
+    ISettingsService? settingsService = null,
+    IMemoryCache? memoryCache = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -57,9 +59,14 @@ public class PrintJobManagementService(
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly IDispatchScorer? _dispatchScorer = dispatchScorer;
     private readonly ISettingsService? _settingsService = settingsService;
+    private readonly IMemoryCache? _memoryCache = memoryCache;
     private const int QueuePlanningMaxJobs = 5000;
     private const int DefaultEstimatedPrintMinutes = 90;
     private const int MinimumRemainingPrintMinutes = 5;
+    private const int RecommendationCandidateMultiplier = 20;
+    private const int RecommendationMinScoredJobs = 25;
+    private const int RecommendationMaxScoredJobs = 150;
+    private static readonly TimeSpan RecommendationCacheDuration = TimeSpan.FromSeconds(45);
 
     // ============= QUERY OPERATIONS =============
 
@@ -240,8 +247,21 @@ public class PrintJobManagementService(
             return [];
         }
 
+        string cacheKey = $"queue:recommendations:v1:{limit}";
+        if (_memoryCache is not null
+            && _memoryCache.TryGetValue(cacheKey, out List<QueueRecommendationDto>? cachedRecommendations)
+            && cachedRecommendations is not null)
+        {
+            return cachedRecommendations;
+        }
+
         try
         {
+            int maxScoredJobs = Math.Clamp(
+                limit * RecommendationCandidateMultiplier,
+                RecommendationMinScoredJobs,
+                RecommendationMaxScoredJobs);
+
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
                 filterStatus: null,
                 filterModel: null,
@@ -249,7 +269,7 @@ public class PrintJobManagementService(
                 deadlineStartUtc: null,
                 deadlineEndUtc: null,
                 sortBy: "priority",
-                limit: 500,
+                limit: maxScoredJobs,
                 offset: 0,
                 ct: cancellationToken);
 
@@ -330,12 +350,22 @@ public class PrintJobManagementService(
                 }
             }
 
-            return BuildQueueRecommendations(affectedJobsByCategory)
+            List<QueueRecommendationDto> recommendations = BuildQueueRecommendations(affectedJobsByCategory)
                 .Where(r => r.EstimatedUnlockedJobCount > 0)
                 .OrderByDescending(r => r.PriorityScore)
                 .ThenBy(r => r.Category, StringComparer.Ordinal)
                 .Take(limit)
                 .ToList();
+
+            _memoryCache?.Set(
+                cacheKey,
+                recommendations,
+                new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = RecommendationCacheDuration
+                });
+
+            return recommendations;
         }
         catch (Exception ex)
         {
@@ -1880,7 +1910,13 @@ public class PrintJobManagementService(
             QueuePlanningSettings? settings = _settingsService.Get<QueuePlanningSettings>();
             if (settings is null)
             {
-                return fallback;
+                _logger.LogWarning("QueuePlanning settings were missing. Enforcing strict deadline fallback policy.");
+                return new QueuePlanningSettings
+                {
+                    RequireDeadline = true,
+                    MinimumLeadHours = 0,
+                    DefaultDeadlineHours = null
+                };
             }
 
             settings.Validate();
@@ -1888,8 +1924,13 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load QueuePlanning settings. Falling back to defaults.");
-            return fallback;
+            _logger.LogWarning(ex, "Failed to load QueuePlanning settings. Enforcing strict deadline fallback policy.");
+            return new QueuePlanningSettings
+            {
+                RequireDeadline = true,
+                MinimumLeadHours = 0,
+                DefaultDeadlineHours = null
+            };
         }
     }
 
