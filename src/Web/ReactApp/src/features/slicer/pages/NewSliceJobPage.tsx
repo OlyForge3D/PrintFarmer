@@ -26,6 +26,7 @@ import {
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
 import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
+import { useFarmSettings } from '@/features/settings/hooks/useFarmSettings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
@@ -185,6 +186,8 @@ export const NewSliceJobPage: React.FC = () => {
 
   const { user } = useAuth();
   const slicerMode = useSlicerMode();
+  const { data: farmSettingsData } = useFarmSettings();
+  const canWrite = farmSettingsData?.canWrite ?? false;
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -2328,6 +2331,20 @@ export const NewSliceJobPage: React.FC = () => {
               onSettingsChange={handleSimpleSettingsChange}
               simpleMode
             />
+          )}
+
+          {/* Admin escape-hatch: quiet hint visible only to admins in Simple mode */}
+          {slicerMode === 'Simple' && canWrite && (
+            <p className="px-1 text-xs text-pf-text-muted">
+              Need more control?{' '}
+              <button
+                type="button"
+                className="underline decoration-pf-border underline-offset-2 transition-colors hover:text-pf-text-primary"
+                onClick={() => navigate('/admin/settings?tab=general&sub=farm')}
+              >
+                Switch to Advanced in Settings.
+              </button>
+            </p>
           )}
 
           {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
