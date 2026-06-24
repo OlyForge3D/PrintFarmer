@@ -345,6 +345,115 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     }
 
     /// <inheritdoc/>
+    public async Task<SpoolmanPagedResult<SpoolmanFilamentDto>> ListFilamentsPagedAsync(SpoolmanFilamentQueryParams queryParams, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(queryParams);
+
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – returning empty filament list");
+            return new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0);
+        }
+
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string url = BuildFilamentQueryUrl(baseUrl, queryParams);
+
+        try
+        {
+            using HttpRequestMessage req = new(HttpMethod.Get, url);
+            req.Headers.Accept.ParseAdd("application/json");
+            using HttpResponseMessage resp = await http.SendAsync(req, ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Spoolman filament listing returned {StatusCode}", resp.StatusCode);
+                return new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0);
+            }
+
+            // Read total count from Spoolman's X-Total-Count header
+            int totalCount = 0;
+            if (resp.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? values))
+            {
+                string? headerValue = values.FirstOrDefault();
+                if (!string.IsNullOrEmpty(headerValue))
+                {
+                    _ = int.TryParse(headerValue, CultureInfo.InvariantCulture, out totalCount);
+                }
+            }
+
+            using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
+            if (doc is null)
+            {
+                logger.LogWarning("Spoolman filament listing returned invalid JSON");
+                return new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0);
+            }
+
+            List<SpoolmanFilamentDto> items = new();
+            foreach (JsonElement item in SpoolmanJsonParser.EnumerateItems(doc.RootElement))
+            {
+                ct.ThrowIfCancellationRequested();
+                items.Add(SpoolmanJsonParser.ParseFilament(item));
+            }
+
+            // If Spoolman didn't return an X-Total-Count header, fall back to item count
+            if (totalCount == 0 && items.Count > 0)
+            {
+                totalCount = items.Count;
+            }
+
+            logger.LogDebug("Retrieved {Count} filaments (total {TotalCount})", items.Count, totalCount);
+            return new SpoolmanPagedResult<SpoolmanFilamentDto>(items, totalCount);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch filaments from Spoolman");
+            return new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0);
+        }
+    }
+
+    /// <summary>
+    /// Builds the Spoolman /api/v1/filament URL with query parameters for server-side pagination, filtering, and sorting.
+    /// </summary>
+    internal static string BuildFilamentQueryUrl(string baseUrl, SpoolmanFilamentQueryParams queryParams)
+    {
+        List<string> parts = new();
+
+        if (queryParams.Limit.HasValue)
+        {
+            parts.Add($"limit={queryParams.Limit.Value}");
+        }
+
+        if (queryParams.Offset.HasValue && queryParams.Offset.Value > 0)
+        {
+            parts.Add($"offset={queryParams.Offset.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Sort))
+        {
+            parts.Add($"sort={Uri.EscapeDataString(queryParams.Sort)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Search))
+        {
+            parts.Add($"name={Uri.EscapeDataString(queryParams.Search)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Material))
+        {
+            parts.Add($"material={Uri.EscapeDataString(queryParams.Material)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Vendor))
+        {
+            parts.Add($"vendor.name={Uri.EscapeDataString(queryParams.Vendor)}");
+        }
+
+        string url = $"{baseUrl}/api/v1/filament";
+        return parts.Count > 0 ? $"{url}?{string.Join('&', parts)}" : url;
+    }
+
+    /// <inheritdoc/>
     public async Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
@@ -812,6 +921,34 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             allSpools.Count, materials.Count, vendors.Count, locations.Count);
 
         return new SpoolFilterOptionsDto(materials, vendors, locations);
+    }
+
+    /// <inheritdoc />
+    public async Task<FilamentFilterOptionsDto> GetFilamentFilterOptionsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<SpoolmanFilamentDto> filaments = await ListFilamentsAsync(ct);
+
+        var materials = filaments
+            .Where(f => !string.IsNullOrWhiteSpace(f.Material))
+            .Select(f => f.Material!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+
+        var vendors = filaments
+            .Where(f => !string.IsNullOrWhiteSpace(f.Vendor))
+            .Select(f => f.Vendor!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+
+        logger.LogDebug(
+            "Computed filament filter options from {Count} filaments: {Materials} materials, {Vendors} vendors",
+            filaments.Count, materials.Count, vendors.Count);
+
+        return new FilamentFilterOptionsDto(materials, vendors);
     }
 
     private async Task<MaterialPageFetchResult> FetchAllMaterialPagesAsync(string initialUrl, CancellationToken ct)

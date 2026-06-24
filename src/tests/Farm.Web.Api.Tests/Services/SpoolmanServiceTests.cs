@@ -281,4 +281,146 @@ public class SpoolmanServiceTests
         Assert.Empty(result.Items);
         Assert.Equal(0, result.TotalCount);
     }
+
+    // -------------------------------------------------------------------------
+    // BuildFilamentQueryUrl tests
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithNoParams_ReturnsBaseUrl()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl("http://spoolman.local", new SpoolmanFilamentQueryParams());
+        Assert.Equal("http://spoolman.local/api/v1/filament", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithLimitAndOffset_AppendsQueryString()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Limit = 25, Offset = 50 });
+
+        Assert.Contains("limit=25", url);
+        Assert.Contains("offset=50", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithZeroOffset_OmitsOffsetParam()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Limit = 10, Offset = 0 });
+
+        Assert.DoesNotContain("offset", url);
+        Assert.Contains("limit=10", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithSearch_AppendsNameParam()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Search = "PLA" });
+
+        Assert.Contains("name=PLA", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithMaterial_AppendsMaterialParam()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Material = "PETG" });
+
+        Assert.Contains("material=PETG", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithVendor_AppendsVendorNameParam()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Vendor = "Polymaker" });
+
+        Assert.Contains("vendor.name=Polymaker", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithSort_AppendsSortParam()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Sort = "name:asc" });
+
+        Assert.Contains("sort=name%3Aasc", url);
+    }
+
+    [Fact]
+    public void BuildFilamentQueryUrl_WithSearchContainingSpaces_UrlEncodesParam()
+    {
+        string url = SpoolmanService.BuildFilamentQueryUrl(
+            "http://spoolman.local",
+            new SpoolmanFilamentQueryParams { Search = "PolyTerra PLA" });
+
+        Assert.Contains("name=PolyTerra%20PLA", url);
+    }
+
+    [Fact]
+    public async Task ListFilamentsPagedAsync_ReturnsEmpty_WhenNotConfigured()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+#pragma warning disable CS8603
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(() => (SpoolmanSettings?)null);
+#pragma warning restore CS8603
+
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler();
+        using HttpClient http = new HttpClient(handler);
+
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanPagedResult<SpoolmanFilamentDto> result =
+            await svc.ListFilamentsPagedAsync(new SpoolmanFilamentQueryParams(), CancellationToken.None);
+
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListFilamentsPagedAsync_ReturnsItemsWithTotalCount()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+        {
+            if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/filament"))
+            {
+                string json = JsonSerializer.Serialize(new[]
+                {
+                    new { id = 1, name = "PolyTerra PLA", material = "PLA" },
+                    new { id = 2, name = "PolyTerra PETG", material = "PETG" },
+                });
+                HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                response.Headers.Add("X-Total-Count", "100");
+                return response;
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanPagedResult<SpoolmanFilamentDto> result =
+            await svc.ListFilamentsPagedAsync(new SpoolmanFilamentQueryParams { Limit = 50 }, CancellationToken.None);
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(100, result.TotalCount);
+        Assert.Contains(result.Items, i => i.Id == 1);
+        Assert.Contains(result.Items, i => i.Id == 2);
+    }
 }
