@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useTransition, useCallback, useRef, useDeferredValue } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
   FilterIcon,
@@ -37,24 +37,29 @@ import type { SpoolmanFilament } from '@/types/api';
 import type { FilamentTableColumn } from '@/features/filamentManagement/types';
 import { toast } from 'sonner';
 
-interface FilterState {
-  material: string;
-  vendor: string;
-  color: string;
-  search: string;
-}
-
 type SortField = 'name' | 'vendor' | 'material' | 'diameter' | 'weight' | 'extruderTemp' | 'bedTemp' | 'price';
+
+/** Maps frontend sort field IDs to Spoolman API sort parameter names. */
+const FILAMENT_SORT_FIELD_MAP: Record<SortField, string> = {
+  name: 'name',
+  vendor: 'vendor.name',
+  material: 'material',
+  diameter: 'diameter',
+  weight: 'weight',
+  extruderTemp: 'settings_extruder_temp',
+  bedTemp: 'settings_bed_temp',
+  price: 'price',
+};
 
 /**
  * FilamentsTab — Displays Spoolman filament product definitions (not physical spools).
- * Supports card/table views, search, and filtering by material/vendor.
+ * Supports card/table views, search, and server-side filtering/sorting/paging.
  */
 export function FilamentsTab() {
   const [filaments, setFilaments] = useState<SpoolmanFilament[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
   const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
     const saved = localStorage.getItem('filaments-view-mode');
     return saved === 'table' ? 'table' : 'cards';
@@ -87,23 +92,10 @@ export function FilamentsTab() {
     page: { key: 'page', type: 'number', defaultValue: 1, filterable: false },
   });
 
-  const deferredSearch = useDeferredValue(urlSearch);
-  const deferredMaterial = useDeferredValue(urlMaterial);
-  const deferredVendor = useDeferredValue(urlVendor);
   const deferredColor = useDeferredValue(urlColor);
 
-  const filters: FilterState = {
-    material: urlMaterial,
-    vendor: urlVendor,
-    color: urlColor,
-    search: urlSearch,
-  };
-  const deferredFilters = useMemo<FilterState>(() => ({
-    material: deferredMaterial,
-    vendor: deferredVendor,
-    color: deferredColor,
-    search: deferredSearch,
-  }), [deferredMaterial, deferredVendor, deferredColor, deferredSearch]);
+  // Only color is filtered client-side; server handles search, material, vendor, sort
+  const deferredFilters = useMemo(() => ({ color: deferredColor }), [deferredColor]);
   const sortField = urlSortField as SortField;
   const sortDir = urlSortDir as 'asc' | 'desc';
   const page = urlPage as number;
@@ -225,31 +217,92 @@ export function FilamentsTab() {
   const hasActiveFilters = urlHasActiveFilters;
   const resetFilters = () => resetAll();
 
-  // Load filaments on mount
-  const loadFilaments = useCallback(async () => {
-    startTransition(async () => {
-      try {
-        setError(null);
-        const data = await apiClient.getFilaments();
-        setFilaments(data);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        setError(`Failed to load filaments: ${message}`);
-        setFilaments([]);
-      } finally {
-        setLoading(false);
-      }
-    });
-  }, [startTransition]);
+  // Filter dropdown options — loaded once from dedicated endpoint, supplemented by page data
+  const [materialOptions, setMaterialOptions] = useState<string[]>([]);
+  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const filterOptionsLoaded = useRef(false);
 
   useEffect(() => {
-    loadFilaments();
+    if (filterOptionsLoaded.current) return;
+    filterOptionsLoaded.current = true;
+    (async () => {
+      try {
+        const opts = await apiClient.getFilamentFilterOptions();
+        setMaterialOptions(opts.materials ?? []);
+        setVendorOptions(opts.vendors ?? []);
+      } catch {
+        // Endpoint unavailable — fall back to accumulation in loadFilaments
+      }
+    })();
+  }, []);
+
+  // AbortController ref so rapid filter/page changes cancel in-flight requests
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Load a page of filaments with server-side params
+  const loadFilaments = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setError(null);
+      const spoolmanSortField = FILAMENT_SORT_FIELD_MAP[sortField as SortField];
+      const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
+      const offset = pageSize > 0 ? (page - 1) * pageSize : 0;
+
+      const result = await apiClient.getFilamentsPaged({
+        limit: pageSize > 0 ? pageSize : undefined,
+        offset: offset > 0 ? offset : undefined,
+        sort,
+        search: urlSearch || undefined,
+        material: urlMaterial || undefined,
+        vendor: urlVendor || undefined,
+        signal,
+      });
+
+      if (signal?.aborted) return;
+
+      setFilaments(result.items);
+      setTotalCount(result.totalCount);
+
+      // Supplement filter dropdown options from returned page data
+      setMaterialOptions(prev => {
+        const combined = new Set(prev);
+        for (const f of result.items) {
+          if (f.material) combined.add(f.material);
+        }
+        return [...combined].sort();
+      });
+      setVendorOptions(prev => {
+        const combined = new Set(prev);
+        for (const f of result.items) {
+          if (f.vendor) combined.add(f.vendor);
+        }
+        return [...combined].sort();
+      });
+    } catch (err) {
+      if (signal?.aborted) return;
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to load filaments: ${message}`);
+      setFilaments([]);
+      setTotalCount(0);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [page, pageSize, sortField, sortDir, urlSearch, urlMaterial, urlVendor]);
+
+  useEffect(() => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    void loadFilaments(controller.signal);
+    return () => { controller.abort(); };
   }, [loadFilaments]);
 
   const reload = () => {
     setLoading(true);
     setSelectedIds(new Set());
-    loadFilaments();
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    void loadFilaments(controller.signal);
   };
 
   const toggleSelect = useCallback((id: number) => {
@@ -266,77 +319,22 @@ export function FilamentsTab() {
   const handleCardDelete = useCallback((f: SpoolmanFilament) => setDeleteConfirm({ type: 'single', filament: f }), []);
 
 
-  const materialOptions = useMemo(() =>
-    [...new Set(filaments.map(f => f.material).filter((m): m is string => !!m))].sort(),
-    [filaments]
-  );
-
-  const vendorOptions = useMemo(() =>
-    [...new Set(filaments.map(f => f.vendor).filter((v): v is string => !!v))].sort(),
-    [filaments]
-  );
-
   const colorFamilyOptions = useMemo(() =>
     [...new Set(filaments.map(f => classifyColor(f.colorHex)).filter(Boolean))].sort(),
     [filaments]
   );
 
-  const filteredFilaments = useMemo(() => {
-    let result = filaments;
-    if (deferredFilters.material) {
-      result = result.filter(f => f.material?.toLowerCase() === deferredFilters.material.toLowerCase());
-    }
-    if (deferredFilters.vendor) {
-      result = result.filter(f => f.vendor?.toLowerCase() === deferredFilters.vendor.toLowerCase());
-    }
-    if (deferredFilters.color) {
-      result = result.filter(f => classifyColor(f.colorHex) === deferredFilters.color);
-    }
-    if (deferredFilters.search) {
-      const q = deferredFilters.search.toLowerCase();
-      result = result.filter(f =>
-        (f.name || '').toLowerCase().includes(q) ||
-        (f.vendor || '').toLowerCase().includes(q) ||
-        (f.material || '').toLowerCase().includes(q) ||
-        (f.articleNumber || '').toLowerCase().includes(q)
-      );
-    }
-    return result;
-  }, [filaments, deferredFilters]);
-
-  const sortedFilaments = useMemo(() => {
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return [...filteredFilaments].sort((a, b) => {
-      const val = (f: SpoolmanFilament): string | number => {
-        switch (sortField) {
-          case 'name': return (f.name || '').toLowerCase();
-          case 'vendor': return (f.vendor || '').toLowerCase();
-          case 'material': return (f.material || '').toLowerCase();
-          case 'diameter': return f.diameter ?? -Infinity;
-          case 'weight': return f.weight ?? -Infinity;
-          case 'extruderTemp': return f.settingsExtruderTemp ?? -Infinity;
-          case 'bedTemp': return f.settingsBedTemp ?? -Infinity;
-          case 'price': return f.price ?? -Infinity;
-        }
-      };
-      const av = val(a);
-      const bv = val(b);
-      if (av < bv) return -1 * dir;
-      if (av > bv) return 1 * dir;
-      return 0;
-    });
-  }, [filteredFilaments, sortField, sortDir]);
-
-  // Pagination
-  const totalPages = pageSize > 0 ? Math.ceil(sortedFilaments.length / pageSize) : 1;
+  // Color filter is the only filter applied client-side (server doesn't support it)
   const pagedFilaments = useMemo(() => {
-    if (pageSize <= 0) return sortedFilaments; // "All"
-    const start = (page - 1) * pageSize;
-    return sortedFilaments.slice(start, start + pageSize);
-  }, [sortedFilaments, page, pageSize]);
+    if (!deferredFilters.color) return filaments;
+    return filaments.filter(f => classifyColor(f.colorHex) === deferredFilters.color);
+  }, [filaments, deferredFilters.color]);
 
-  // Reset page when filters or sort change
-  const filterKey = `${urlSearch}|${urlMaterial}|${urlVendor}|${urlColor}|${sortField}|${sortDir}`;
+  // Pagination — driven by server totalCount, not local array length
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
+
+  // Reset page to 1 when server-side params change (excludes color which is client-side)
+  const filterKey = `${urlSearch}|${urlMaterial}|${urlVendor}|${sortField}|${sortDir}`;
   const prevFilterKey = useRef(filterKey);
   useEffect(() => {
     if (prevFilterKey.current !== filterKey) {
@@ -348,7 +346,7 @@ export function FilamentsTab() {
   // Persist page size preference
   useEffect(() => { localStorage.setItem('filaments-page-size', String(pageSize)); }, [pageSize]);
 
-  // These MUST be defined after sortedFilaments to avoid TDZ errors in production builds
+  // These MUST be defined after pagedFilaments to avoid TDZ errors in production builds
   const toggleSelectAll = () => {
     if (selectedIds.size === pagedFilaments.length) {
       setSelectedIds(new Set());
@@ -439,7 +437,7 @@ export function FilamentsTab() {
       />
 
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold text-pf-text-primary">Filaments ({sortedFilaments.length})</h2>
+        <h2 className="text-xl font-bold text-pf-text-primary">Filaments ({totalCount})</h2>
         <div className="flex gap-2 items-center">
           <Button
             variant="secondary"
@@ -619,7 +617,7 @@ export function FilamentsTab() {
               <input
                 id="filament-search"
                 type="search"
-                value={filters.search}
+                value={urlSearch}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Name, vendor, material..."
                 className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
@@ -630,7 +628,7 @@ export function FilamentsTab() {
               <label className="text-xs text-pf-text-secondary">Material</label>
               <Select
                 aria-label="Filter by material"
-                value={filters.material}
+                value={urlMaterial}
                 onChange={e => setMany({ material: e.target.value, page: 1 })}
                 className="w-40"
               >
@@ -644,7 +642,7 @@ export function FilamentsTab() {
               <label className="text-xs text-pf-text-secondary">Vendor</label>
               <Select
                 aria-label="Filter by vendor"
-                value={filters.vendor}
+                value={urlVendor}
                 onChange={e => setMany({ vendor: e.target.value, page: 1 })}
                 className="w-40"
               >
@@ -657,7 +655,7 @@ export function FilamentsTab() {
             <div className="flex flex-col gap-1">
               <label className="text-xs text-pf-text-secondary">Color</label>
               <ColorFamilySelect
-                value={filters.color}
+                value={urlColor}
                 onChange={val => setMany({ color: val, page: 1 })}
                 options={colorFamilyOptions}
                 placeholder="All Colors"
@@ -711,7 +709,7 @@ export function FilamentsTab() {
                 </Select>
               </div>
               <span className="text-sm text-pf-text-secondary">
-                Showing {pagedFilaments.length} of {sortedFilaments.length}{sortedFilaments.length !== filaments.length ? ` (${filaments.length} total)` : ''}
+                Showing {pagedFilaments.length} of {totalCount}
               </span>
             </div>
           </div>
@@ -756,7 +754,7 @@ export function FilamentsTab() {
       )}
 
       {/* Card view */}
-      {viewMode === 'cards' && sortedFilaments.length > 0 && (
+      {viewMode === 'cards' && pagedFilaments.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {pagedFilaments.map(f => (
             <FilamentCard
@@ -773,7 +771,7 @@ export function FilamentsTab() {
       )}
 
       {/* Table view */}
-      {viewMode === 'table' && sortedFilaments.length > 0 && (
+      {viewMode === 'table' && pagedFilaments.length > 0 && (
         <FilamentTableView
           filaments={pagedFilaments}
           selectedIds={selectedIds}
@@ -817,7 +815,7 @@ export function FilamentsTab() {
         </div>
       )}
 
-      {sortedFilaments.length === 0 && filaments.length > 0 && (
+      {pagedFilaments.length === 0 && totalCount > 0 && (
         <div className="text-center py-8 text-pf-text-secondary">
           No filaments match the current filters.
         </div>
