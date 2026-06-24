@@ -81,7 +81,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             config.AddInMemoryCollection(testConfig);
         });
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureServices((context, services) =>
         {
             // Remove only the DbContext configuration, not the whole service
             ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
@@ -128,6 +128,23 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Re-configure SlicerDbContext to use the same test SQLite database.
             // AddSlicerModule registered it with production defaults; override here.
             // Skip when slicer is disabled (no SlicerDbContext will be registered).
+            //
+            // Determinism guard: AddSlicerIntegration discovers the slicer module via a runtime
+            // assembly scan (SlicerIntegrationExtensions). Under parallel host builds that scan can
+            // transiently fail — concurrent Assembly.GetTypes() throws ReflectionTypeLoadException,
+            // which the discovery code swallows — leaving the slicer module (and SlicerDbContext)
+            // unregistered for that host. This produced intermittent
+            // "No service for type 'SlicerDbContext' has been registered" failures. Re-run the
+            // idempotent AddSlicerModule so registration is deterministic unless the slicer is
+            // explicitly disabled for this factory.
+            bool slicerDisabled = string.Equals(
+                context.Configuration["Slicer:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
+            if (!slicerDisabled && !services.Any(d =>
+                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)))
+            {
+                Farm.Slicer.Module.SlicerModuleExtensions.AddSlicerModule(services, context.Configuration);
+            }
+
             bool slicerRegistered = services.Any(d =>
                 d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
 
