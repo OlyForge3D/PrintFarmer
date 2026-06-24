@@ -123,6 +123,8 @@ export interface SlicerToolbarProps {
   fuzzySkinPaintActive?: boolean;
   textToolActive?: boolean;
   sequentialActive?: boolean;
+  /** When true, hides cut plane and text tool buttons (Simple slicer mode). */
+  simpleMode?: boolean;
 }
 
 /** Hamburger icon for sidebar toggle */
@@ -177,6 +179,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   fuzzySkinPaintActive = false,
   textToolActive = false,
   sequentialActive = false,
+  simpleMode = false,
 }) => {
   return (
     <div className="flex items-center gap-0.5 px-2 py-1 bg-pf-bg-1 border-b border-pf-border shrink-0">
@@ -247,13 +250,15 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         onClick={onSplit}
         disabled={!hasSelection}
       />
-      <ToolbarButton
-        icon={<CutIcon />}
-        title="Cut Model (C)"
-        onClick={onCut}
-        disabled={!hasSelection}
-        active={cutActive}
-      />
+      {!simpleMode && (
+        <ToolbarButton
+          icon={<CutIcon />}
+          title="Cut Model (C)"
+          onClick={onCut}
+          disabled={!hasSelection}
+          active={cutActive}
+        />
+      )}
       <ToolbarButton
         icon={<MeshBooleanIcon />}
         title="Mesh Boolean (Coming Soon)"
@@ -298,12 +303,14 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!hasSelection}
         active={fuzzySkinPaintActive}
       />
-      <ToolbarButton
-        icon={<TextToolSvgIcon />}
-        title="Text Tool"
-        onClick={onTextTool}
-        active={textToolActive}
-      />
+      {!simpleMode && (
+        <ToolbarButton
+          icon={<TextToolSvgIcon />}
+          title="Text Tool"
+          onClick={onTextTool}
+          active={textToolActive}
+        />
+      )}
       <ToolbarButton
         icon={<MeasureIcon />}
         title="Measure (M)"

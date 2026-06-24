@@ -5,6 +5,8 @@ export interface FarmSettingsResponse {
   averagePrinterWattage: number;
   canWrite: boolean;
   rowVersion: string | null;
+  /** Controls browser slicer UI complexity. Defaults to 'Simple'. Added by backend in slicerMode feature. */
+  slicerMode?: 'Simple' | 'Advanced';
   slicerMode: 'Simple' | 'Advanced';
 }
 
@@ -14,6 +16,7 @@ export interface UpdateFarmSettingsRequest {
   defaultMachineHourlyRate?: number;
   averagePrinterWattage?: number;
   rowVersion?: string | null;
+  slicerMode?: 'Simple' | 'Advanced';
   slicerMode?: 'Simple' | 'Advanced';
 }
 

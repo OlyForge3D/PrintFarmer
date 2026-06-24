@@ -13,6 +13,11 @@ interface SlicerSettingsPanelProps {
   settings: SlicerSettings;
   /** Callback when settings change */
   onSettingsChange: (settings: SlicerSettings) => void;
+  /**
+   * When true, hides layer height and infill sliders.
+   * Only supports toggle and bed adhesion are shown.
+   */
+  simpleMode?: boolean;
   /** Optional CSS class name */
   className?: string;
 }
@@ -31,6 +36,7 @@ const BED_ADHESION_OPTIONS: { value: SlicerSettings['bedAdhesionType']; label: s
 export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   settings,
   onSettingsChange,
+  simpleMode = false,
   className
 }) => {
   const updateSetting = <K extends keyof SlicerSettings>(
@@ -44,35 +50,39 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-4 ${className ?? ''}`}>
       <h3 className="text-sm font-semibold text-pf-text-primary">Print Settings</h3>
       
-      {/* Layer Height */}
-      <div>
-        <label className="block text-sm text-pf-text-muted mb-1">
-          Layer Height: {settings.layerHeight}mm
-        </label>
-        <Slider
-          min={0.05}
-          max={0.4}
-          step={0.05}
-          value={settings.layerHeight}
-          onChange={(value) => updateSetting('layerHeight', value)}
-          aria-label="Layer height"
-        />
-      </div>
+      {/* Layer Height — hidden in Simple mode (encoded in process profile) */}
+      {!simpleMode && (
+        <div>
+          <label className="block text-sm text-pf-text-muted mb-1">
+            Layer Height: {settings.layerHeight}mm
+          </label>
+          <Slider
+            min={0.05}
+            max={0.4}
+            step={0.05}
+            value={settings.layerHeight}
+            onChange={(value) => updateSetting('layerHeight', value)}
+            aria-label="Layer height"
+          />
+        </div>
+      )}
       
-      {/* Infill Percentage */}
-      <div>
-        <label className="block text-sm text-pf-text-muted mb-1">
-          Infill: {settings.infillPercent}%
-        </label>
-        <Slider
-          min={0}
-          max={100}
-          step={5}
-          value={settings.infillPercent}
-          onChange={(value) => updateSetting('infillPercent', value)}
-          aria-label="Infill percentage"
-        />
-      </div>
+      {/* Infill Percentage — hidden in Simple mode (encoded in process profile) */}
+      {!simpleMode && (
+        <div>
+          <label className="block text-sm text-pf-text-muted mb-1">
+            Infill: {settings.infillPercent}%
+          </label>
+          <Slider
+            min={0}
+            max={100}
+            step={5}
+            value={settings.infillPercent}
+            onChange={(value) => updateSetting('infillPercent', value)}
+            aria-label="Infill percentage"
+          />
+        </div>
+      )}
       
       {/* Support Enabled */}
       <div className="flex items-center gap-2">

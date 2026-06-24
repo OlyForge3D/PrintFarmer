@@ -24,7 +24,8 @@ import {
   BED_TYPE_OPTIONS,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
-import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
+import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
+import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
@@ -183,6 +184,7 @@ export const NewSliceJobPage: React.FC = () => {
   } as const;
 
   const { user } = useAuth();
+  const slicerMode = useSlicerMode();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -253,6 +255,27 @@ export const NewSliceJobPage: React.FC = () => {
   // Callback for settings panel changes
   const handleSlicerSettingsChange = useCallback((newSettings: OrcaProcessSettings) => {
     setSlicerSettings((prev) => ({ ...prev, ...newSettings }));
+  }, []);
+
+  // Simple mode: derive SlicerSettings view from OrcaProcessSettings for supports + bed adhesion overrides
+  const simpleSlicerSettings = useMemo<SlicerSettings>(() => {
+    const bt = slicerSettings.brim_type;
+    const bedAdhesionType: SlicerSettings['bedAdhesionType'] =
+      bt === 'brim' || bt === 'raft' || bt === 'skirt' ? bt : 'none';
+    return {
+      layerHeight: typeof slicerSettings.layer_height === 'number' ? slicerSettings.layer_height : 0.2,
+      infillPercent: typeof slicerSettings.sparse_infill_density === 'number' ? slicerSettings.sparse_infill_density : 15,
+      supportEnabled: slicerSettings.enable_support === true,
+      bedAdhesionType,
+    };
+  }, [slicerSettings]);
+
+  const handleSimpleSettingsChange = useCallback((settings: SlicerSettings) => {
+    setSlicerSettings((prev) => ({
+      ...prev,
+      enable_support: settings.supportEnabled,
+      brim_type: settings.bedAdhesionType === 'none' ? undefined : settings.bedAdhesionType,
+    }));
   }, []);
 
   // === Process Profile Management handlers ===
@@ -2298,21 +2321,32 @@ export const NewSliceJobPage: React.FC = () => {
             </Select>
           </div>
 
-          {/* ORCASLICER-STYLE SETTINGS PANEL — behind Advanced disclosure */}
-          <AdvancedSettingsDisclosure
-            currentSettings={slicerSettings as unknown as Record<string, unknown>}
-            originalSettings={originalProcessSettings}
-          >
-            <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
-              <SlicerSettingsPanel
-                settings={slicerSettings}
-                onChange={handleSlicerSettingsChange}
-                advancedSettings={advancedProcessSettings}
-                onAdvancedSettingsChange={setAdvancedProcessSettings}
-                originalSettings={originalProcessSettings}
-              />
-            </div>
-          </AdvancedSettingsDisclosure>
+          {/* SIMPLE MODE: supports + bed adhesion overrides (layer height and infill hidden) */}
+          {slicerMode === 'Simple' && (
+            <SimpleSlicerSettingsPanel
+              settings={simpleSlicerSettings}
+              onSettingsChange={handleSimpleSettingsChange}
+              simpleMode
+            />
+          )}
+
+          {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
+          {slicerMode === 'Advanced' && (
+            <AdvancedSettingsDisclosure
+              currentSettings={slicerSettings as unknown as Record<string, unknown>}
+              originalSettings={originalProcessSettings}
+            >
+              <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
+                <SlicerSettingsPanel
+                  settings={slicerSettings}
+                  onChange={handleSlicerSettingsChange}
+                  advancedSettings={advancedProcessSettings}
+                  onAdvancedSettingsChange={setAdvancedProcessSettings}
+                  originalSettings={originalProcessSettings}
+                />
+              </div>
+            </AdvancedSettingsDisclosure>
+          )}
 
           {/* Model picker modal — opened by workspace "+" button */}
           <SearchablePickerModal<Model3DBasic>
@@ -2383,6 +2417,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
                 onModelsReplace={handleWorkspaceModelsReplace}
+                simpleMode={slicerMode === 'Simple'}
                 className="h-full"
               />
             ) : (
