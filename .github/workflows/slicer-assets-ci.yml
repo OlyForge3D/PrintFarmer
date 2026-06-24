@@ -39,7 +39,7 @@ jobs:
           set -e
           mkdir -p orca_assets
           # TODO: implement robust download + extraction for Orca AppImage
-          # Example (placeholder): curl -L -o orca.AppImage "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/OrcaSlicer_Linux_V${ORCA_VERSION}.AppImage"
+          # Example (placeholder): curl -L -o orca.AppImage "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCA_VERSION}/OrcaSlicer_Linux_V${ORCA_VERSION}.AppImage"
           # then extract using unsquashfs/7z/--appimage-extract into orca_assets/
           echo "placeholder" > orca_assets/README.txt
 

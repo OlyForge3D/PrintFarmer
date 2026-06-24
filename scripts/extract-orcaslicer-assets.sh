@@ -30,7 +30,7 @@ echo -e "${BLUE}═════════════════════�
 # Verify OrcaSlicer installation exists
 if [ ! -d "$ORCA_RESOURCES" ]; then
     echo -e "${RED}✗ Error: OrcaSlicer not found at ${ORCA_RESOURCES}${NC}"
-    echo -e "${YELLOW}Set ORCA_RESOURCES to your OrcaSlicer resources/profiles dir, or install from https://github.com/SoftFever/OrcaSlicer${NC}"
+    echo -e "${YELLOW}Set ORCA_RESOURCES to your OrcaSlicer resources/profiles dir, or install from https://github.com/OrcaSlicer/OrcaSlicer${NC}"
     exit 1
 fi
 

@@ -1,6 +1,6 @@
 /**
  * Slicer Toolbar Icons — Official OrcaSlicer SVG assets
- * Source: https://github.com/SoftFever/OrcaSlicer/tree/main/resources/images
+ * Source: https://github.com/OrcaSlicer/OrcaSlicer/tree/main/resources/images
  */
 import React from 'react';
 import clsx from 'clsx';

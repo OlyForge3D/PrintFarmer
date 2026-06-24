@@ -1441,9 +1441,9 @@ cache_orcaslicer() {
     # Construct the GitHub API URL
     local release_url
     if [ "$version" = "latest" ]; then
-        release_url="https://api.github.com/repos/SoftFever/OrcaSlicer/releases/latest"
+        release_url="https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/latest"
     else
-        release_url="https://api.github.com/repos/SoftFever/OrcaSlicer/releases/tags/v${version}"
+        release_url="https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v${version}"
     fi
     
     print_info "Fetching release info from GitHub API..."
@@ -1488,7 +1488,7 @@ cache_orcaslicer() {
         print_error "Could not find AppImage asset for Linux in release"
         print_info "Alternative solutions:"
         print_info "1. Manual download from GitHub releases:"
-        print_info "   https://github.com/SoftFever/OrcaSlicer/releases"
+        print_info "   https://github.com/OrcaSlicer/OrcaSlicer/releases"
         print_info ""
         print_info "2. Download using browser and save to:"
         print_info "   $target_dir/"

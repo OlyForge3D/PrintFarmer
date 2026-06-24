@@ -956,9 +956,9 @@ function Cache-OrcaSlicer {
         # Get release information
         Write-Info "Fetching release info from GitHub API..."
         $releaseUrl = if ($Version -eq "latest") {
-            "https://api.github.com/repos/SoftFever/OrcaSlicer/releases/latest"
+            "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/latest"
         } else {
-            "https://api.github.com/repos/SoftFever/OrcaSlicer/releases/tags/v${Version}"
+            "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v${Version}"
         }
         
         $response = $client.GetAsync($releaseUrl).Result
@@ -974,9 +974,9 @@ function Cache-OrcaSlicer {
         } | Select-Object -First 1
         
         if (-not $appImageAsset) {
-            # Try any AppImage
+            # Try any non-ARM Linux AppImage (the x86_64 Ubuntu asset carries no arch token)
             $appImageAsset = $json.assets | Where-Object { 
-                $_.name -match 'AppImage' -and $_.name -match 'Linux'
+                $_.name -match 'AppImage' -and $_.name -match 'Linux' -and $_.name -notmatch 'aarch64|arm64'
             } | Select-Object -First 1
         }
         
@@ -1083,7 +1083,7 @@ function Cache-OrcaSlicer {
         Write-Info ""
         Write-Info "Alternative solutions:"
         Write-Info "1. Manual download from GitHub releases:"
-        Write-Info "   https://github.com/SoftFever/OrcaSlicer/releases"
+        Write-Info "   https://github.com/OrcaSlicer/OrcaSlicer/releases"
         Write-Info ""
         Write-Info "2. Download using browser and save to:"
         Write-Info "   $TargetDir/"

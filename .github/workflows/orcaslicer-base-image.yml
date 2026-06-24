@@ -96,8 +96,8 @@ jobs:
           DOWNLOAD_URL=$(curl -fsSL \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/SoftFever/OrcaSlicer/releases/tags/v${VERSION}" | \
-            jq -r '.assets[] | select(.name | test("Linux.*AppImage$"; "i")) | .browser_download_url' | head -n1)
+            "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v${VERSION}" | \
+            jq -r '.assets[] | select((.name | test("Linux.*AppImage$"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1)
           
           if [ -z "$DOWNLOAD_URL" ]; then
             echo "ERROR: Could not find Linux AppImage for v${VERSION}"
@@ -216,7 +216,7 @@ jobs:
               /opt/orcaslicer/bin/orca-slicer --help 2>&1 | head -5 || echo "Binary check complete"
           
           LABEL org.opencontainers.image.description="OrcaSlicer base image with extracted binaries"
-          LABEL org.opencontainers.image.source="https://github.com/SoftFever/OrcaSlicer"
+          LABEL org.opencontainers.image.source="https://github.com/OrcaSlicer/OrcaSlicer"
           EOF
 
       - name: Extract metadata

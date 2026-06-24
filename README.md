@@ -365,7 +365,7 @@ This project is licensed under the MIT License - see [LICENSE](./LICENSE) file f
 
 PrintFarmer builds on amazing open-source projects:
 - [Moonraker](https://github.com/mainsail-crew/moonraker) - Klipper firmware
-- [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) - Advanced slicing
+- [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) - Advanced slicing
 - [PrusaLink](https://github.com/prusa3d/PrusaLink) - Prusa integration
 - React, ASP.NET Core, and the broader .NET/JavaScript ecosystems
 

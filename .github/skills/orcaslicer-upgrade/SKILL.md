@@ -33,7 +33,7 @@ DEPLOY_API_URL="<http://host:5245>"
 
 # ── 1. Pre-flight ─────────────────────────────────────────────────────────
 # Confirm stable release exists on GitHub
-open "https://github.com/SoftFever/OrcaSlicer/releases/tag/v${NEW}"
+open "https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/v${NEW}"
 # Check out matching OrcaSlicer source tag
 cd "$ORCA_SRC" && git fetch --tags && git checkout "v${NEW}"
 
@@ -86,7 +86,7 @@ ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && \
 
 ## Prerequisites
 
-- **macOS**: OrcaSlicer.app installed at `/Applications/OrcaSlicer.app` — download the target version from [OrcaSlicer releases](https://github.com/SoftFever/OrcaSlicer/releases)
+- **macOS**: OrcaSlicer.app installed at `/Applications/OrcaSlicer.app` — download the target version from [OrcaSlicer releases](https://github.com/OrcaSlicer/OrcaSlicer/releases)
 - **OrcaSlicer source** checked out locally (`ORCA_SRC=<OrcaSlicer source checkout>`) — must be checked out to the target version tag
 - **Python 3.8+** with standard library (no extra packages)
 - **Server**: SSH access via `DEPLOY_HOST`, the deployed PrintFarmer root in `DEPLOY_ROOT`, and the API base URL in `DEPLOY_API_URL`
@@ -109,7 +109,7 @@ DEPLOY_API_URL="<http://host:5245>"
 
 Before starting, confirm:
 
-1. **Stable release**: The target version is a stable release (not beta/rc). Check [OrcaSlicer releases](https://github.com/SoftFever/OrcaSlicer/releases).
+1. **Stable release**: The target version is a stable release (not beta/rc). Check [OrcaSlicer releases](https://github.com/OrcaSlicer/OrcaSlicer/releases).
 2. **Source checkout matches**: The local OrcaSlicer source is checked out to the matching tag:
    ```bash
   cd "$ORCA_SRC"
