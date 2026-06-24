@@ -194,7 +194,15 @@ function StatCard({ label, value, colorClass, headline, tooltip, delay }: StatCa
   return (
     <div
       title={tooltip}
-      style={{ animationDelay: `${delay}ms` }}
+      style={{
+        animationDelay: `${delay}ms`,
+        ...(headline && {
+          borderLeftColor: "var(--pf-accent)",
+          borderLeftWidth: "2px",
+          backgroundImage:
+            "linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 8%, transparent) 0%, transparent 55%)",
+        }),
+      }}
       className="pf-card-in bg-pf-bg-1/95 backdrop-blur-sm border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)]"
     >
       <p className="text-sm font-medium text-pf-text-secondary">{label}</p>
@@ -498,14 +506,14 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
             type="button"
             onClick={() => step(-1)}
             aria-label="Previous period"
-            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary transition-colors text-lg leading-none"
+            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors text-lg leading-none"
           >
             ‹
           </button>
           <button
             type="button"
             onClick={goToday}
-            className="px-3 h-8 text-sm bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary transition-colors"
+            className="px-3 h-8 text-sm bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors"
           >
             Today
           </button>
@@ -513,7 +521,7 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
             type="button"
             onClick={() => step(1)}
             aria-label="Next period"
-            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary transition-colors text-lg leading-none"
+            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors text-lg leading-none"
           >
             ›
           </button>
@@ -561,13 +569,56 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
             .join(" ")}
         >
           {isLoading && lanes.length === 0 ? (
-            <div className="p-10 text-center text-pf-text-secondary" role="status" aria-live="polite">
-              <span className="animate-pulse">Loading timeline…</span>
+            <div role="status" aria-live="polite" aria-label="Loading timeline">
+              <div className="flex">
+                <div className="flex-shrink-0 bg-pf-bg-0 border-r border-pf-border" style={{ width: LABEL_W }}>
+                  <div style={{ height: AXIS_H }} className="border-b border-pf-border" />
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      style={{ height: LANE_H }}
+                      className={`border-b border-pf-border flex items-center px-3 ${i % 2 === 0 ? "bg-pf-bg-0" : "bg-pf-bg-1/30"}`}
+                    >
+                      <div className="h-3 rounded animate-pulse bg-pf-bg-2" style={{ width: `${50 + i * 15}%` }} />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <div style={{ height: AXIS_H }} className="border-b border-pf-border bg-pf-bg-0" />
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      style={{ height: LANE_H }}
+                      className={`border-b border-pf-border flex items-center px-4 gap-3 ${i % 2 === 0 ? "bg-pf-bg-0" : "bg-pf-bg-1/30"}`}
+                    >
+                      <div className="h-6 rounded-md animate-pulse bg-pf-bg-2" style={{ width: `${18 + i * 12}%` }} />
+                      <div className="h-6 rounded-md animate-pulse bg-pf-bg-2 opacity-60" style={{ width: `${14 + i * 7}%` }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : lanes.length === 0 ? (
-            <div className="p-12 text-center space-y-1">
-              <p className="text-base font-semibold text-pf-text-primary">No events in this window</p>
-              <p className="text-sm text-pf-text-secondary">Navigate to find activity, or try the Week zoom.</p>
+            <div className="p-14 flex flex-col items-center gap-3 text-center">
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 40 40"
+                fill="none"
+                aria-hidden="true"
+                className="opacity-30 text-pf-text-secondary"
+              >
+                <rect x="4" y="10" width="32" height="22" rx="3" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M4 16h32" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 4v6M27 4v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M12 24h16M12 29h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <div>
+                <p className="text-base font-semibold text-pf-text-primary">No activity in this window</p>
+                <p className="text-sm text-pf-text-secondary mt-0.5">
+                  Navigate forward or back, or switch to Week zoom.
+                </p>
+              </div>
             </div>
           ) : (
             <div className={`flex ${isFullscreen ? "flex-1 min-h-0 overflow-hidden" : ""}`}>
@@ -641,12 +692,25 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
                     {/* "Now" label on axis */}
                     {nowVisible && (
                       <div
-                        className="absolute top-0 z-30 pointer-events-none"
-                        style={{ left: nowPx }}
+                        className="absolute top-0 z-30 pointer-events-none flex flex-col items-center"
+                        style={{ left: nowPx - 16, width: 34 }}
                         aria-hidden="true"
                       >
-                        <span className="animate-pulse text-[9px] font-bold text-pf-accent whitespace-nowrap pl-0.5 pt-0.5 leading-none block">
-                          ▶ Now
+                        <span className="relative flex h-2 w-2 mt-1 mx-auto">
+                          <span
+                            className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+                            style={{ background: "var(--pf-accent)" }}
+                          />
+                          <span
+                            className="relative inline-flex h-2 w-2 rounded-full"
+                            style={{ background: "var(--pf-accent)" }}
+                          />
+                        </span>
+                        <span
+                          className="text-[9px] font-bold whitespace-nowrap mt-0.5 leading-none"
+                          style={{ color: "var(--pf-accent)" }}
+                        >
+                          Now
                         </span>
                       </div>
                     )}
@@ -697,14 +761,23 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
                       <div
                         aria-hidden="true"
                         className="absolute top-0 bottom-0 pointer-events-none"
-                        style={{
-                          left: nowPx,
-                          width: 2,
-                          background: "var(--pf-accent)",
-                          opacity: 0.8,
-                          zIndex: 14,
-                        }}
-                      />
+                        style={{ left: nowPx - 5, width: 12, zIndex: 14 }}
+                      >
+                        <div
+                          className="absolute top-0 bottom-0"
+                          style={{ left: 5, width: 2, background: "var(--pf-accent)", opacity: 0.85 }}
+                        />
+                        <div className="absolute top-0 left-0 w-3 h-3 flex items-center justify-center">
+                          <div
+                            className="absolute inset-0 animate-ping rounded-full opacity-40"
+                            style={{ background: "var(--pf-accent)" }}
+                          />
+                          <div
+                            className="relative w-2.5 h-2.5 rounded-full"
+                            style={{ background: "var(--pf-accent)" }}
+                          />
+                        </div>
+                      </div>
                     )}
 
                     {/* Lane rows */}
@@ -738,6 +811,11 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
 
                           const ariaLbl = `${pe.event.jobName}, ${pe.event.state}, ${fmtAbs(new Date(pe.startMs))} to ${pe.event.exitedAtUtc ? fmtAbs(new Date(pe.endMs)) : "now"}, ${fmtDur(pe.endMs - pe.startMs)}`;
 
+                          const bs = barStyle(pe.event.state);
+                          const showLabel =
+                            bw > 40 &&
+                            bs.background !== "transparent" &&
+                            bs.background !== "var(--pf-bg-2)";
                           return (
                             <div
                               key={`${pe.event.jobId}-${pe.event.enteredAtUtc}-${pe.event.state}`}
@@ -752,10 +830,16 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
                                 height: 28,
                                 zIndex: 10,
                                 animationDelay: `${laneIdx * STAGGER + 60}ms`,
-                                ...barStyle(pe.event.state),
+                                ...bs,
                               }}
-                              className="pf-bar-in rounded-md cursor-default hover:scale-y-110 hover:z-20 transition-transform duration-150 origin-center"
-                            />
+                              className="pf-bar-in rounded-md cursor-default hover:scale-y-110 hover:z-20 transition-transform duration-150 origin-center flex items-center overflow-hidden"
+                            >
+                              {showLabel && (
+                                <span className="truncate text-xs font-medium px-1.5 text-white/90 pointer-events-none select-none drop-shadow-sm">
+                                  {pe.event.jobName}
+                                </span>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
