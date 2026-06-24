@@ -14,7 +14,7 @@ on:
       orca_version:
         description: 'OrcaSlicer version to build'
         required: false
-        default: '2.3.2'
+        default: '2.4.0'
       force_rebuild:
         description: 'Force rebuild even if image exists'
         required: false
@@ -24,13 +24,13 @@ on:
     inputs:
       orca_version:
         type: string
-        default: '2.3.2'
+        default: '2.4.0'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_OWNER: ${{ github.repository_owner }}
   BASE_IMAGE_NAME: orcaslicer-base
-  ORCA_VERSION: ${{ inputs.orca_version || '2.3.2' }}
+  ORCA_VERSION: ${{ inputs.orca_version || '2.4.0' }}
 
 jobs:
   build-base:

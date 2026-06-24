@@ -114,7 +114,7 @@ ENABLE_DISTRIBUTED_SLICING=true
 ORCA_WORKER_COUNT=1
 ENABLE_ORCA_WORKER=yes
 ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.3.2
+ORCASLICER_VERSION=2.4.0
 EOF
     
     # Run deployment test in dry-run mode (focus on process success)
@@ -156,7 +156,7 @@ ENABLE_DISTRIBUTED_SLICING=true
 ORCA_WORKER_COUNT=2
 ENABLE_ORCA_WORKER=yes
 ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.3.2
+ORCASLICER_VERSION=2.4.0
 EOF
     
     # Run deployment test in dry-run mode (focus on process success)

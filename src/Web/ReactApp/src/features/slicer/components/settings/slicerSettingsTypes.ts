@@ -392,11 +392,14 @@ export interface OrcaProcessSettings {
   wipe_tower_fillet_wall?: boolean;
   wipe_tower_no_sparse_layers?: boolean;
 
-  // Multimaterial tab — Filament assignment
+  // Multimaterial tab — Filament for Features (per-feature filament assignment, OrcaSlicer 2.4.0+)
 
-  wall_filament?: string;
-  sparse_infill_filament?: string;
-  solid_infill_filament?: string;
+  outer_wall_filament_id?: number;
+  inner_wall_filament_id?: number;
+  sparse_infill_filament_id?: number;
+  internal_solid_filament_id?: number;
+  top_surface_filament_id?: number;
+  bottom_surface_filament_id?: number;
 
   // Multimaterial tab — Other
 
