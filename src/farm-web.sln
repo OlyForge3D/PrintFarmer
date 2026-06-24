@@ -49,7 +49,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Migrations.SqlServer",
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Slicers", "Slicers", "{6CE7513A-3D9F-5C79-287C-470F53A81C6E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicers.OrcaSlicer.v2_3_1", "Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj", "{5B243D1E-E62B-4BD3-A2E4-8C77F17F8B5E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicers.OrcaSlicer.v2_4_0", "Slicers\Farm.Slicers.OrcaSlicer.v2_4_0\Farm.Slicers.OrcaSlicer.v2_4_0.csproj", "{5B243D1E-E62B-4BD3-A2E4-8C77F17F8B5E}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "slicer", "slicer", "{E34191D6-EE5B-7B1D-025F-EDB47609777D}"
 EndProject

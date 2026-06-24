@@ -87,7 +87,7 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
     </ProjectReference>
-    <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj">
+    <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_4_0\Farm.Slicers.OrcaSlicer.v2_4_0.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
     </ProjectReference>
@@ -159,7 +159,7 @@
     <MakeDir Directories="$(_SlicerPluginsOutputDir)" />
     <ItemGroup>
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\slicer\Farm.Slicer.Module.Api\bin\$(Configuration)\$(TargetFramework)\*.dll" />
-      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\Slicers\Farm.Slicers.OrcaSlicer.v2_4_0\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.PostgreSQL\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.SqlServer\bin\$(Configuration)\$(TargetFramework)\*.dll" />
     </ItemGroup>

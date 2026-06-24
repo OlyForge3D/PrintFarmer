@@ -146,7 +146,7 @@ Original builds downloaded 200MB+ OrcaSlicer AppImage on every rebuild, taking 8
 
 ```dockerfile
 FROM ubuntu:24.04 AS orcaslicer-binaries-base
-ARG ORCASLICER_VERSION=2.3.2
+ARG ORCASLICER_VERSION=2.4.0
 ARG GITHUB_TOKEN
 
 # Install extraction tools
@@ -175,7 +175,7 @@ LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSIO
 ./scripts/build-orcaslicer-optimized.sh
 
 # With specific version
-ORCASLICER_VERSION=2.3.2 ./scripts/build-orcaslicer-optimized.sh
+ORCASLICER_VERSION=2.4.0 ./scripts/build-orcaslicer-optimized.sh
 
 # With GitHub token (avoid rate limits)
 GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
@@ -183,15 +183,15 @@ GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
 # Option 2: Manual two-stage build
 # Step 1: Build binary layer (slow first time, cached after)
 docker build -f scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries \
-  -t orcaslicer-binaries:2.3.2 \
-  --build-arg ORCASLICER_VERSION=2.3.2 \
+  -t orcaslicer-binaries:2.4.0 \
+  --build-arg ORCASLICER_VERSION=2.4.0 \
   .
 
 # Step 2: Build worker (fast, uses cached binaries)
 docker build -f Dockerfile.multistage \
   --target orcaslicer-worker \
   -t printfarmer-orcaslicer-worker \
-  --build-arg ORCASLICER_VERSION=2.3.2 \
+  --build-arg ORCASLICER_VERSION=2.4.0 \
   .
 
 # Option 3: Docker Compose
@@ -203,7 +203,7 @@ docker compose --profile orca build orcaslicer-worker
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `ORCASLICER_VERSION` | 2.3.2 | OrcaSlicer release version to download |
+| `ORCASLICER_VERSION` | 2.4.0 | OrcaSlicer release version to download |
 | `ORCASLICER_URL` | (auto-discovered) | Override download URL |
 | `ALLOW_STUB` | true | Create stub binary if download fails |
 | `GITHUB_TOKEN` | (optional) | Avoid GitHub API rate limits |
@@ -266,7 +266,7 @@ Each manufacturer has a JSON bundle at `/opt/orcaslicer/resources/profiles/{manu
 - **compatible_printers** array contains exact machine_list names
 - **compatible_printers_condition** is an expression evaluated against machine properties
 
-### Profile Counts (OrcaSlicer 2.3.x)
+### Profile Counts (OrcaSlicer 2.4.x)
 
 - ~200 machine profiles (variants across manufacturers)
 - ~2000 filament profiles
@@ -543,7 +543,7 @@ Allows users to import their own OrcaSlicer config bundle JSON files.
 
 ### Components
 
-**Wizard UI**: `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx`
+**Wizard UI**: `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx`
 
 ```
 Step 1: Upload
@@ -790,7 +790,7 @@ To load bed STL models:
 | `src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx` | Settings UI |
 | `src/Web/ReactApp/src/features/models3d/components/3d/ModelViewer3D.tsx` | 3D viewer |
 | `src/Web/ReactApp/src/contexts/SlicerContext.tsx` | Slicer availability state |
-| `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx` | Import wizard |
+| `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx` | Import wizard |
 
 ### Docker
 

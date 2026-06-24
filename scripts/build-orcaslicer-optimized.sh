@@ -4,7 +4,7 @@
 
 set -e
 
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.2}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)

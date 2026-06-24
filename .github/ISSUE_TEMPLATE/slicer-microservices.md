@@ -92,7 +92,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and install OrcaSlicer
-RUN wget -O orcaslicer.AppImage https://github.com/SoftFever/OrcaSlicer/releases/download/v1.8.0/OrcaSlicer_V1.8.0_Linux_x86_64.AppImage \
+RUN wget -O orcaslicer.AppImage https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v1.8.0/OrcaSlicer_V1.8.0_Linux_x86_64.AppImage \
     && chmod +x orcaslicer.AppImage \
     && ./orcaslicer.AppImage --appimage-extract \
     && mv squashfs-root /opt/orcaslicer

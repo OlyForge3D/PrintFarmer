@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <WarningsNotAsErrors>nullable</WarningsNotAsErrors>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <Title>Farm.Slicers.OrcaSlicer.v2_4_0</Title>
+    <Description>OrcaSlicer v2.4.0 slicer library for PrintFarmer. Contains profiles, assets, and UI components.</Description>
+    <Version>2.4.0</Version>
+    <Authors>PrintFarmer</Authors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../slicer/Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Embed assets as resources -->
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+    <EmbeddedResource Include="lib/Assets/**/*" Exclude="lib/Assets/**/*.cs">
+      <LogicalName>OrcaSlicer_v2_4_0_Assets_%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

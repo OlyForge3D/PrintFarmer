@@ -605,7 +605,7 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   # No separate build needed - docker compose or manual build will handle it automatically
   
   # Build optimized binary layer first (cached for future builds) using consolidated Dockerfile.multistage
-  ORCA_VERSION="${ORCASLICER_VERSION:-2.3.2}"
+  ORCA_VERSION="${ORCASLICER_VERSION:-2.4.0}"
   info "Building orcaslicer-binaries:${ORCA_VERSION} (cached binary layer via Dockerfile.multistage)..."
   
   # Verify Dockerfile.multistage exists

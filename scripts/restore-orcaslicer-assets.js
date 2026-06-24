@@ -10,6 +10,18 @@
  * 
  * Usage:
  *   node scripts/restore-orcaslicer-assets.js
+ *
+ * Source location resolution (first match wins):
+ *   1. ORCA_PROFILES_PATH environment variable
+ *   2. First CLI argument
+ *   3. Platform default:
+ *        macOS   -> /Applications/OrcaSlicer.app/Contents/Resources/profiles
+ *        Windows -> C:\Program Files\OrcaSlicer\resources\profiles
+ *        Linux   -> /usr/share/OrcaSlicer/resources/profiles
+ *
+ * Example (Windows PowerShell):
+ *   $env:ORCA_PROFILES_PATH = 'C:\Program Files\OrcaSlicer\resources\profiles'
+ *   node scripts/restore-orcaslicer-assets.js
  * 
  * The script will:
  * 1. Read manufacturer profiles from OrcaSlicer.app
@@ -23,16 +35,33 @@ const fs = require('fs');
 const path = require('path');
 
 // Configuration
-const ORCA_PATH = '/Applications/OrcaSlicer.app/Contents/Resources/profiles';
+function defaultOrcaProfilesPath() {
+  switch (process.platform) {
+    case 'win32':
+      return 'C:\\Program Files\\OrcaSlicer\\resources\\profiles';
+    case 'linux':
+      return '/usr/share/OrcaSlicer/resources/profiles';
+    case 'darwin':
+    default:
+      return '/Applications/OrcaSlicer.app/Contents/Resources/profiles';
+  }
+}
+
+const ORCA_PATH = process.env.ORCA_PROFILES_PATH || process.argv[2] || defaultOrcaProfilesPath();
 const ASSET_BASE = path.resolve(__dirname, '../src/Web/ReactApp/public/assets/orcaslicer');
 const MANIFEST_PATH = path.join(ASSET_BASE, 'manifest.json');
 
 // Validate OrcaSlicer installation
 if (!fs.existsSync(ORCA_PATH)) {
-  console.error(`❌ OrcaSlicer not found at ${ORCA_PATH}`);
-  console.error('Please install OrcaSlicer.app to /Applications/');
+  console.error(`❌ OrcaSlicer profiles not found at ${ORCA_PATH}`);
+  console.error('Set ORCA_PROFILES_PATH (or pass the path as the first argument) to your OrcaSlicer resources/profiles directory.');
+  console.error('  macOS:   /Applications/OrcaSlicer.app/Contents/Resources/profiles');
+  console.error('  Windows: C:\\Program Files\\OrcaSlicer\\resources\\profiles');
+  console.error('  Linux:   /usr/share/OrcaSlicer/resources/profiles');
   process.exit(1);
 }
+
+console.log(`Using OrcaSlicer profiles: ${ORCA_PATH}`);
 
 // Validate manifest exists
 if (!fs.existsSync(MANIFEST_PATH)) {

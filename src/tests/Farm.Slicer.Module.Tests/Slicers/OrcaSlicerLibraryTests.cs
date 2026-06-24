@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Contracts.Libraries;
-using Farm.Slicers.OrcaSlicer.v2_3_1;
+using Farm.Slicers.OrcaSlicer.v2_4_0;
 using FluentAssertions;
 using Xunit;
 
@@ -65,7 +65,7 @@ public class OrcaSlicerProfilesProviderTests
 
         string version = provider.GetProfilesVersion();
 
-        version.Should().Be("2.3.1");
+        version.Should().Be("2.4.0");
     }
 
     [Fact]
@@ -413,10 +413,10 @@ public class OrcaSlicerLibraryTests
     [Fact]
     public async Task LibraryExposesProvidersAndValidatesConfig()
     {
-        var library = new OrcaSlicerLibrary_v2_3_1();
+        var library = new OrcaSlicerLibrary_v2_4_0();
 
         library.SlicerName.Should().Be("OrcaSlicer");
-        library.SlicerVersion.Should().Be("2.3.1");
+        library.SlicerVersion.Should().Be("2.4.0");
         library.SlicerType.Should().Be("OrcaSlicer");
 
         library.ProfilesProvider.Should().NotBeNull();
@@ -432,13 +432,13 @@ public class OrcaSlicerUiProviderTests
     [Fact]
     public void UiProviderExposesMetadata()
     {
-        var ui = new OrcaSlicerUIProvider_v2_3_1();
+        var ui = new OrcaSlicerUIProvider_v2_4_0();
 
         ui.SlicerName.Should().Be("OrcaSlicer");
-        ui.SlicerVersion.Should().Be("2.3.1");
+        ui.SlicerVersion.Should().Be("2.4.0");
         ui.HasBundleSupport.Should().BeTrue();
         ui.HasAssetCustomization.Should().BeTrue();
         ui.HasEngineSpecificSettings.Should().BeTrue();
-        ui.GetDescription().Should().Contain("OrcaSlicer v2.3.1");
+        ui.GetDescription().Should().Contain("OrcaSlicer v2.4.0");
     }
 }

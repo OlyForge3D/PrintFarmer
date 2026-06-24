@@ -250,6 +250,13 @@ export interface OrcaFilamentSettings {
   filament_ramming_parameters?: string;
   filament_self_index?: number;
   filament_settings_id?: string;
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  activate_air_filtration_during_print?: boolean;
+  activate_air_filtration_on_completion?: boolean;
+  filament_change_extrusion_role_gcode?: string;
+  filament_cooling_before_tower?: number;
+
 }
 
 // =============================================================================
@@ -403,6 +410,13 @@ export const FILAMENT_SETTINGS_MODE_MAP: Record<OrcaFilamentSettingKey, Filament
   filament_ramming_parameters: 'advanced',
   filament_self_index: 'advanced',
   filament_settings_id: 'advanced',
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  activate_air_filtration_during_print: 'simple',
+  activate_air_filtration_on_completion: 'simple',
+  filament_change_extrusion_role_gcode: 'advanced',
+  filament_cooling_before_tower: 'advanced',
+
 };
 
 // =============================================================================
@@ -543,6 +557,13 @@ export const FILAMENT_SETTINGS_CATEGORY_MAP: Record<OrcaFilamentSettingKey, Fila
   filament_ramming_parameters: 'multimaterial',
   filament_self_index: 'filament',
   filament_settings_id: 'filament',
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  activate_air_filtration_during_print: 'cooling',
+  activate_air_filtration_on_completion: 'cooling',
+  filament_change_extrusion_role_gcode: 'advanced',
+  filament_cooling_before_tower: 'advanced',
+
 };
 
 // =============================================================================

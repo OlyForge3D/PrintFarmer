@@ -250,6 +250,19 @@ export interface OrcaMachineSettings {
   wipe_tower_wall_type?: string;
   wipe_tower_x?: number;
   wipe_tower_y?: number;
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  input_shaping_damp_x?: number;
+  input_shaping_damp_y?: number;
+  input_shaping_emit?: boolean;
+  input_shaping_freq_x?: number;
+  input_shaping_freq_y?: number;
+  input_shaping_type?: string;
+  parallel_printheads_count?: number;
+  part_cooling_fan_min_pwm?: number;
+  tool_change_on_wipe_tower?: boolean;
+  use_3mf?: boolean;
+
 }
 
 // =============================================================================
@@ -450,6 +463,19 @@ export const MACHINE_SETTINGS_MODE_MAP: Record<keyof OrcaMachineSettings, Machin
   wipe_tower_wall_type: 'advanced',
   wipe_tower_x: 'advanced',
   wipe_tower_y: 'advanced',
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  input_shaping_damp_x: 'advanced',
+  input_shaping_damp_y: 'advanced',
+  input_shaping_emit: 'advanced',
+  input_shaping_freq_x: 'advanced',
+  input_shaping_freq_y: 'advanced',
+  input_shaping_type: 'advanced',
+  parallel_printheads_count: 'advanced',
+  part_cooling_fan_min_pwm: 'advanced',
+  tool_change_on_wipe_tower: 'advanced',
+  use_3mf: 'advanced',
+
 };
 
 // =============================================================================
@@ -596,6 +622,19 @@ export const MACHINE_SETTINGS_CATEGORY_MAP: Record<keyof OrcaMachineSettings, Ma
   wipe_tower_wall_type: 'multimaterial',
   wipe_tower_x: 'multimaterial',
   wipe_tower_y: 'multimaterial',
+
+  // --- OrcaSlicer 2.4.0 additions ---
+  input_shaping_damp_x: 'motion_ability',
+  input_shaping_damp_y: 'motion_ability',
+  input_shaping_emit: 'motion_ability',
+  input_shaping_freq_x: 'motion_ability',
+  input_shaping_freq_y: 'motion_ability',
+  input_shaping_type: 'motion_ability',
+  parallel_printheads_count: 'basic_information',
+  part_cooling_fan_min_pwm: 'basic_information',
+  tool_change_on_wipe_tower: 'multimaterial',
+  use_3mf: 'basic_information',
+
 };
 
 // =============================================================================

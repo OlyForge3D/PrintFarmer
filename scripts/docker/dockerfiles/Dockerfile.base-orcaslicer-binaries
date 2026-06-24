@@ -5,12 +5,12 @@
 ############################################################
 
 # Global ARG - must be declared before first FROM to be available across stages
-ARG ORCASLICER_VERSION=2.3.2
+ARG ORCASLICER_VERSION=2.4.0
 
 FROM ubuntu:24.04 AS orcaslicer-binaries-base
 # Re-declare ARG to use in this stage (inherits value from global or --build-arg)
 ARG ORCASLICER_VERSION
-ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
+ARG ORCASLICER_URL=https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage
 ARG GITHUB_TOKEN
 ARG CACHE_BUST=latest
 WORKDIR /tmp
@@ -29,13 +29,23 @@ RUN set -e; \
     \
     echo "[orcaslicer-binaries] ALLOW_STUB=true, will create stub if download fails"; \
     \
+    # Determine target architecture for asset selection (2.4.0+ ships both x86_64 and aarch64 AppImages) \
+    target_arch="$(uname -m)"; \
+    case "$target_arch" in aarch64|arm64) arch_is_arm=1;; *) arch_is_arm=0;; esac; \
+    echo "[orcaslicer-binaries] Target arch=${target_arch} (arm=${arch_is_arm})"; \
+    \
     # Try to find the correct download URL dynamically \
-    dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
+    all_appimages=$(curl -H "Accept: application/vnd.github+json" \
                       -H "User-Agent: OrcaSlicerWorker/1.0" \
-                      -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
+                      -fsSL "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases" | \
                   jq -r --arg ver "v${ORCASLICER_VERSION}" \
-                     '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
-                  head -n1 || true); \
+                     '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)AppImage$")) | .browser_download_url' || true); \
+    if [ "$arch_is_arm" = "1" ]; then \
+        dynamic_url=$(printf '%s\n' "$all_appimages" | grep -iE 'aarch64|arm64' | head -n1 || true); \
+    else \
+        dynamic_url=$(printf '%s\n' "$all_appimages" | grep -ivE 'aarch64|arm64' | head -n1 || true); \
+    fi; \
+    [ -z "$dynamic_url" ] && dynamic_url=$(printf '%s\n' "$all_appimages" | head -n1 || true); \
     \
     if [ -n "$dynamic_url" ]; then \
         echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
@@ -60,11 +70,20 @@ RUN set -e; \
         return 1; \
     }; \
     \
-    # Try multiple URL patterns \
-    try_download "${ORCASLICER_URL}" \
-    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
-    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
-    || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+    # Try multiple URL patterns (architecture-aware) \
+    if [ "$arch_is_arm" = "1" ]; then \
+        # Try the aarch64 asset first: ORCASLICER_URL defaults to the x86_64 AppImage, \
+        # so if dynamic discovery failed we must NOT fall through to it on ARM. \
+        try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCASLICER_VERSION}.AppImage" \
+        || try_download "${ORCASLICER_URL}" \
+        || echo "[orcaslicer-binaries] WARNING: All ARM download attempts failed"; \
+    else \
+        try_download "${ORCASLICER_URL}" \
+        || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage" \
+        || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
+        || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
+        || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+    fi; \
     \
     # Extract AppImage if available \
     if [ -f orcaslicer.AppImage ]; then \

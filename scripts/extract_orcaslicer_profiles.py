@@ -221,7 +221,7 @@ def merge_into_library(extracted_data: Dict[str, Any], library_path: Path, is_in
                                if p.get("printer") == extracted_machine["name"]]
             
             machine_profile = {
-                "version": "2.3.1",
+                "version": "2.4.0",
                 "id": machine_id,
                 "name": extracted_machine["name"],
                 "manufacturer": extracted_machine["manufacturer"],
@@ -394,8 +394,8 @@ def main():
     
     # Build output
     output = {
-        "version": "2.3.1",
-        "description": "OrcaSlicer v2.3.1 Official Profiles - Extracted with inheritance resolved",
+        "version": "2.4.0",
+        "description": "OrcaSlicer v2.4.0 Official Profiles - Extracted with inheritance resolved",
         "lastUpdated": __import__('datetime').datetime.now().isoformat(),
         "source": str(args.profiles_path),
         "machines": all_machines,
@@ -417,8 +417,8 @@ def main():
         
         # Create index with machine metadata
         index = {
-            "version": "2.3.1",
-            "description": "OrcaSlicer v2.3.1 Official Profiles Index",
+            "version": "2.4.0",
+            "description": "OrcaSlicer v2.4.0 Official Profiles Index",
             "lastUpdated": __import__('datetime').datetime.now().isoformat(),
             "source": str(args.profiles_path),
             "machines": [
@@ -446,7 +446,7 @@ def main():
             machine_filaments = all_filaments.get(machine["manufacturer"], [])
             
             machine_profile = {
-                "version": "2.3.1",
+                "version": "2.4.0",
                 "id": machine_id,
                 "name": machine["name"],
                 "manufacturer": machine["manufacturer"],
