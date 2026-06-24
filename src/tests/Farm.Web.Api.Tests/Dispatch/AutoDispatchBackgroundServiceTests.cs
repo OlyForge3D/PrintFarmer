@@ -645,8 +645,15 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedQueuedJob();
         _trigger.NotifyPrinterIdle(printerId);
 
-        // Cancel the pending dispatch after 500ms (before 2s threshold elapses)
-        await Task.Delay(500, cts.Token);
+        // Wait until the service has actually registered the pending idle-wait, then
+        // cancel it. Polling for registration (rather than a fixed delay) makes this
+        // deterministic: the service registers the per-printer CTS only after a
+        // DB-bound settings read, which can take longer than a fixed delay under load.
+        while (!_trigger.HasPendingDispatch(printerId))
+        {
+            await Task.Delay(20, cts.Token);
+        }
+
         _trigger.CancelPendingDispatch(printerId);
 
         await Task.Delay(3000, cts.Token);

@@ -96,6 +96,16 @@ public sealed class AutoDispatchTrigger : IAutoDispatchTrigger, IAutoDispatchTri
     }
 
     /// <summary>
+    /// Returns whether a pending idle-wait CTS is currently registered for the printer.
+    /// Intended for tests to deterministically await registration before issuing a cancel,
+    /// avoiding a race against the (DB-bound) registration step under load.
+    /// </summary>
+    public bool HasPendingDispatch(Guid printerId)
+    {
+        return _pendingCancellations.IsRegistered(printerId);
+    }
+
+    /// <summary>
     /// Thread-safe map of per-printer CancellationTokenSources for pending idle waits.
     /// </summary>
     private sealed class ConcurrentCancellationMap
@@ -125,6 +135,11 @@ public sealed class AutoDispatchTrigger : IAutoDispatchTrigger, IAutoDispatchTri
             {
                 cts.Dispose();
             }
+        }
+
+        public bool IsRegistered(Guid key)
+        {
+            return _map.ContainsKey(key);
         }
     }
 }
