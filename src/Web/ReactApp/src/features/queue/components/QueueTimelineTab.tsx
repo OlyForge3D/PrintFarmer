@@ -126,7 +126,7 @@ function buildTicks(startMs: number, endMs: number, zoom: ZoomLevel): Tick[] {
   let t = Math.ceil(startMs / interval) * interval;
   while (t <= endMs) {
     const d = new Date(t);
-    const major = zoom === "week" && d.getUTCHours() === 0;
+    const major = zoom === "week" && d.getHours() === 0 && d.getMinutes() === 0;
     ticks.push({
       ms: t,
       label: major
@@ -237,6 +237,7 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
+          aria-pressed={active === opt.value}
           className={[
             "px-3 py-1.5 text-sm font-medium transition-colors",
             i > 0 ? "border-l border-pf-border" : "",
@@ -255,11 +256,16 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
+export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimelineTabProps) {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<ViewMode>("printers");
   const [zoom, setZoom] = useState<ZoomLevel>("day");
-  const [winStart, setWinStart] = useState<number>(() => Date.now() - 12 * MS_PER_HOUR);
+  const [winStart, setWinStart] = useState<number>(() =>
+    dateFrom ? dateFrom.getTime() : Date.now() - 12 * MS_PER_HOUR,
+  );
+  const [winEnd, setWinEnd] = useState<number>(() =>
+    dateTo ? dateTo.getTime() : Date.now() + 12 * MS_PER_HOUR,
+  );
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [chartW, setChartW] = useState(0);
@@ -270,21 +276,9 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
 
   // ── Window metrics ──────────────────────────────────────────────────────────
   const winDur = zoom === "day" ? MS_PER_DAY : MS_PER_WEEK;
-  const winEnd = winStart + winDur;
   const minChartPx = (winDur / MS_PER_HOUR) * MIN_PX_PER_H[zoom];
   const totalChartPx = Math.max(chartW || minChartPx, minChartPx);
   const pxPerMs = totalChartPx / winDur;
-
-  // ── Measure scrollable area width ───────────────────────────────────────────
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setChartW(entry.contentRect.width);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   // ── Clock tick ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -299,12 +293,18 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
     return () => document.removeEventListener("fullscreenchange", fn);
   }, []);
 
+  // ── Sync window from parent date range ──────────────────────────────────────
+  useEffect(() => {
+    if (dateFrom) setWinStart(dateFrom.getTime());
+    if (dateTo) setWinEnd(dateTo.getTime());
+  }, [dateFrom, dateTo]);
+
   // ── Data: timeline events ───────────────────────────────────────────────────
   // Fetch a 10% wider window so bars at window edges render complete
   const fetchFrom = useMemo(() => new Date(winStart - winDur * 0.1), [winStart, winDur]);
   const fetchTo = useMemo(() => new Date(winEnd + winDur * 0.1), [winEnd, winDur]);
 
-  const { data: rawEvents = [], isLoading } = useQuery<TimelineEventDto[]>({
+  const { data: rawEvents = [], isLoading, isError, error } = useQuery<TimelineEventDto[]>({
     queryKey: ["gantt-timeline", fetchFrom.toISOString(), fetchTo.toISOString()],
     queryFn: () => apiClient.getAnalyticsTimeline(fetchFrom, fetchTo, undefined, undefined, TIMELINE_LIMIT),
     staleTime: REFRESH_MS,
@@ -320,16 +320,15 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
 
   // ── Parse events ─────────────────────────────────────────────────────────────
   const parsed = useMemo<ParsedEvent[]>(() => {
-    const fallback = Date.now();
     return rawEvents
       .map((ev): ParsedEvent | null => {
         const s = new Date(ev.enteredAtUtc).getTime();
         if (Number.isNaN(s)) return null;
-        const rawE = ev.exitedAtUtc ? new Date(ev.exitedAtUtc).getTime() : fallback;
+        const rawE = ev.exitedAtUtc ? new Date(ev.exitedAtUtc).getTime() : nowMs;
         return { event: ev, startMs: s, endMs: Math.max(rawE, s + 60_000) };
       })
       .filter((x): x is ParsedEvent => x !== null);
-  }, [rawEvents]);
+  }, [rawEvents, nowMs]);
 
   // ── Build lanes ───────────────────────────────────────────────────────────────
   const lanes = useMemo<Lane[]>(() => {
@@ -357,6 +356,18 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, events]) => ({ key, label: key, events }));
   }, [mode, parsed, overview]);
+
+  // ── Measure scrollable area width (placed after lanes so dep signal is in scope) ──
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setChartW(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lanes.length > 0 ? 1 : 0]);
 
   // ── Stats summary ─────────────────────────────────────────────────────────────
   const summary = useMemo(() => {
@@ -397,19 +408,35 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
   // ── Navigation handlers ───────────────────────────────────────────────────
   const goToday = useCallback(() => {
     const half = zoom === "day" ? 12 * MS_PER_HOUR : 3.5 * MS_PER_DAY;
-    setWinStart(Date.now() - half);
-  }, [zoom]);
+    const now = Date.now();
+    setWinStart(now - half);
+    setWinEnd(now - half + winDur);
+  }, [zoom, winDur]);
 
-  const step = useCallback((dir: -1 | 1) => setWinStart((p) => p + dir * winDur), [winDur]);
+  const step = useCallback(
+    (dir: -1 | 1) => {
+      setWinStart((p) => p + dir * winDur);
+      setWinEnd((p) => p + dir * winDur);
+    },
+    [winDur],
+  );
 
   const applyZoom = useCallback(
     (z: ZoomLevel) => {
       setZoom(z);
+      const dur = z === "day" ? MS_PER_DAY : MS_PER_WEEK;
       const half = z === "day" ? 12 * MS_PER_HOUR : 3.5 * MS_PER_DAY;
-      setWinStart(Date.now() - half);
+      const now = Date.now();
+      setWinStart(now - half);
+      setWinEnd(now - half + dur);
     },
     [],
   );
+
+  const handleModeChange = useCallback((newMode: ViewMode) => {
+    setMode(newMode);
+    scrollRef.current?.scrollTo({ left: 0 });
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -424,9 +451,11 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         setWinStart((p) => p - winDur);
+        setWinEnd((p) => p - winDur);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         setWinStart((p) => p + winDur);
+        setWinEnd((p) => p + winDur);
       }
     },
     [winDur],
@@ -468,7 +497,7 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
           />
           <StatCard
             label="Until All Done"
-            value={summary.doneMs ? fmtRelative(summary.doneMs, nowMs) : "—"}
+            value={summary.doneMs != null ? fmtRelative(summary.doneMs, nowMs) : "—"}
             colorClass="text-pf-accent"
             headline
             tooltip={summary.doneTooltip}
@@ -488,7 +517,7 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
               { value: "queue-items" as ViewMode, label: "Queue Items" },
             ]}
             active={mode}
-            onChange={setMode}
+            onChange={handleModeChange}
             ariaLabel="View mode"
           />
 
@@ -529,13 +558,19 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
           <span className="flex-1" aria-hidden="true" />
 
           {/* Live pulse indicator */}
-          <span className="flex items-center gap-1.5 text-xs text-pf-text-secondary select-none">
-            <span className="relative flex h-2 w-2" aria-hidden="true">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pf-success opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-pf-success" />
-            </span>
-            Live
-          </span>
+          {(() => {
+            const indicatorColor = isError ? 'bg-pf-error' : 'bg-pf-success';
+            const indicatorLabel = isError ? 'Error' : 'Live';
+            return (
+              <span className="flex items-center gap-1.5 text-xs text-pf-text-secondary select-none">
+                <span className="relative flex h-2 w-2" aria-hidden="true">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${indicatorColor} opacity-75`} />
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${indicatorColor}`} />
+                </span>
+                {indicatorLabel}
+              </span>
+            );
+          })()}
 
           {/* Fullscreen toggle */}
           <button
@@ -568,7 +603,14 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
             .filter(Boolean)
             .join(" ")}
         >
-          {isLoading && lanes.length === 0 ? (
+          {isError ? (
+            <div role="alert" className="p-10 text-center">
+              <p className="font-semibold text-pf-error">Failed to load timeline</p>
+              <p className="text-sm text-pf-text-secondary mt-1">
+                {(error as Error)?.message ?? 'Unknown error'}
+              </p>
+            </div>
+          ) : isLoading && lanes.length === 0 ? (
             <div role="status" aria-live="polite" aria-label="Loading timeline">
               <div className="flex">
                 <div className="flex-shrink-0 bg-pf-bg-0 border-r border-pf-border" style={{ width: LABEL_W }}>
@@ -800,16 +842,27 @@ export default function QueueTimelineTab({ stats }: QueueTimelineTabProps) {
                         ].join(" ")}
                       >
                         {lane.events.map((pe) => {
-                          const bx = toX(pe.startMs);
-                          const bw = Math.max((pe.endMs - pe.startMs) * pxPerMs, MIN_BAR_PX);
-                          if (bx + bw < 0 || bx > totalChartPx) return null;
+                          const rawLeft = toX(pe.startMs);
+                          const rawRight = rawLeft + Math.max((pe.endMs - pe.startMs) * pxPerMs, MIN_BAR_PX);
+                          if (rawRight < 0 || rawLeft > totalChartPx) return null;
+                          const bx = Math.max(0, rawLeft);
+                          const bw = Math.max(MIN_BAR_PX, rawRight - bx);
 
                           const tooltip =
                             mode === "printers"
                               ? `${pe.event.jobName} · ${pe.event.state}\n${fmtAbs(new Date(pe.startMs))} → ${pe.event.exitedAtUtc ? fmtAbs(new Date(pe.endMs)) : "Now"} · ${fmtDur(pe.endMs - pe.startMs)}`
                               : `${pe.event.jobName} · ${pe.event.printerName}\n${pe.event.state} · ${fmtAbs(new Date(pe.startMs))} → ${pe.event.exitedAtUtc ? fmtAbs(new Date(pe.endMs)) : "Now"} · ${fmtDur(pe.endMs - pe.startMs)}`;
 
-                          const ariaLbl = `${pe.event.jobName}, ${pe.event.state}, ${fmtAbs(new Date(pe.startMs))} to ${pe.event.exitedAtUtc ? fmtAbs(new Date(pe.endMs)) : "now"}, ${fmtDur(pe.endMs - pe.startMs)}`;
+                          const ariaLbl =
+                            mode === "printers"
+                              ? `${pe.event.jobName} on ${lane.label}, ${pe.event.state}, ` +
+                                `${fmtAbs(new Date(pe.startMs))} to ` +
+                                `${pe.event.exitedAtUtc ? fmtAbs(new Date(pe.endMs)) : "now"}, ` +
+                                `${fmtDur(pe.endMs - pe.startMs)}`
+                              : `${lane.label} — ${pe.event.printerName ?? "Unassigned"}, ` +
+                                `${pe.event.state}, ${fmtAbs(new Date(pe.startMs))} to ` +
+                                `${pe.event.exitedAtUtc ? fmtAbs(new Date(pe.endMs)) : "now"}, ` +
+                                `${fmtDur(pe.endMs - pe.startMs)}`;
 
                           const bs = barStyle(pe.event.state);
                           const showLabel =

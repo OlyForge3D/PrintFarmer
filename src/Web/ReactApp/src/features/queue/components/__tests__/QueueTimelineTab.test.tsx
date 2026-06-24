@@ -82,7 +82,7 @@ function renderTimeline() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <QueueTimelineTab stats={stats} />
+      <QueueTimelineTab stats={stats} dateFrom={null} dateTo={null} />
     </QueryClientProvider>
   );
 }
@@ -99,7 +99,7 @@ describe("QueueTimelineTab", () => {
 
     renderTimeline();
 
-    expect(screen.getByText("Loading timeline...")).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading timeline' })).toBeInTheDocument();
   });
 
   it("renders summary cards and timeline lanes", async () => {
@@ -109,19 +109,16 @@ describe("QueueTimelineTab", () => {
     renderTimeline();
 
     expect(await screen.findByText("RocketVase.gcode")).toBeInTheDocument();
-    expect(screen.getByText("Queued Jobs")).toBeInTheDocument();
-    expect(screen.getByText("Currently Printing")).toBeInTheDocument();
-    expect(screen.getByText("Active Printers")).toBeInTheDocument();
-    expect(screen.getByText("Next Estimated Completion")).toBeInTheDocument();
-    expect(screen.getByText("Queue Completion (Continuous)")).toBeInTheDocument();
-    expect(screen.getByText("Queue Completion (Staffed Hours)")).toBeInTheDocument();
-    expect(screen.getByText(/Adjusted for non-working hours/i)).toBeInTheDocument();
+    expect(screen.getByText("Prints Queued")).toBeInTheDocument();
+    expect(screen.getByText("Printing Now")).toBeInTheDocument();
+    expect(screen.getByText("Printers Active")).toBeInTheDocument();
+    expect(screen.getByText("Until All Done")).toBeInTheDocument();
     expect(screen.getByText("6")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("Core One A")).toBeInTheDocument();
     expect(screen.getByText("Core One B")).toBeInTheDocument();
-    expect(screen.getByText("CaseTop.gcode")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /RocketVase.gcode on Core One A/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /CaseTop\.gcode/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /RocketVase\.gcode on Core One A/i })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(getAnalyticsTimelineMock).toHaveBeenCalledTimes(1);
@@ -131,12 +128,12 @@ describe("QueueTimelineTab", () => {
 
   it("renders empty state when no timeline events exist", async () => {
     getAnalyticsTimelineMock.mockResolvedValue([]);
-    getQueueOverviewMock.mockResolvedValue(queueOverview);
+    getQueueOverviewMock.mockResolvedValue([]);
 
     renderTimeline();
 
-    expect(await screen.findByText("No timeline events")).toBeInTheDocument();
-    expect(screen.getByText("Timeline data will appear after jobs move through queue states.")).toBeInTheDocument();
+    expect(await screen.findByText("No activity in this window")).toBeInTheDocument();
+    expect(screen.getByText("Navigate forward or back, or switch to Week zoom.")).toBeInTheDocument();
   });
 
   it("renders error state when timeline request fails", async () => {
