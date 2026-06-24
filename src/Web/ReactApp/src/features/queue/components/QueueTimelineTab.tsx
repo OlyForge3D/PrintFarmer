@@ -125,8 +125,8 @@ function buildTicks(startMs: number, endMs: number, zoom: ZoomLevel): Tick[] {
   const ticks: Tick[] = [];
   // Snap first tick to a local-timezone-aligned boundary
   const localOffsetMs = new Date(startMs).getTimezoneOffset() * -60_000;
-  const aligned = startMs - localOffsetMs;
-  let t = Math.ceil(aligned / interval) * interval + localOffsetMs;
+  const aligned = startMs + localOffsetMs;
+  let t = Math.ceil(aligned / interval) * interval - localOffsetMs;
   if (t < startMs) t += interval;
   while (t <= endMs) {
     const d = new Date(t);
@@ -264,12 +264,17 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   // ── UI state ────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<ViewMode>("printers");
   const [zoom, setZoom] = useState<ZoomLevel>("day");
-  const [winStart, setWinStart] = useState<number>(() =>
-    dateFrom ? dateFrom.getTime() : Date.now() - 12 * MS_PER_HOUR,
-  );
-  const [winEnd, setWinEnd] = useState<number>(() =>
-    dateTo ? dateTo.getTime() : Date.now() + 12 * MS_PER_HOUR,
-  );
+  const dateFromMs = dateFrom?.getTime() ?? null;
+  const dateToMs = dateTo?.getTime() ?? null;
+  const externalWindowKey = `${dateFromMs ?? "auto"}:${dateToMs ?? "auto"}`;
+  const [manualWindow, setManualWindow] = useState(() => {
+    const now = Date.now();
+    return {
+      start: dateFromMs ?? now - 12 * MS_PER_HOUR,
+      end: dateToMs ?? now + 12 * MS_PER_HOUR,
+      externalWindowKey: null as string | null,
+    };
+  });
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [chartW, setChartW] = useState(0);
@@ -279,6 +284,9 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── Window metrics ──────────────────────────────────────────────────────────
+  const isManualWindow = manualWindow.externalWindowKey === externalWindowKey;
+  const winStart = isManualWindow ? manualWindow.start : dateFromMs ?? manualWindow.start;
+  const winEnd = isManualWindow ? manualWindow.end : dateToMs ?? manualWindow.end;
   const winDur = zoom === "day" ? MS_PER_DAY : MS_PER_WEEK;
   const minChartPx = (winDur / MS_PER_HOUR) * MIN_PX_PER_H[zoom];
   const totalChartPx = Math.max(chartW || minChartPx, minChartPx);
@@ -296,12 +304,6 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
     document.addEventListener("fullscreenchange", fn);
     return () => document.removeEventListener("fullscreenchange", fn);
   }, []);
-
-  // ── Sync window from parent date range ──────────────────────────────────────
-  useEffect(() => {
-    if (dateFrom) setWinStart(dateFrom.getTime());
-    if (dateTo) setWinEnd(dateTo.getTime());
-  }, [dateFrom, dateTo]);
 
   // ── Data: timeline events ───────────────────────────────────────────────────
   // Fetch a 10% wider window so bars at window edges render complete
@@ -413,16 +415,22 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   const goToday = useCallback(() => {
     const half = zoom === "day" ? 12 * MS_PER_HOUR : 3.5 * MS_PER_DAY;
     const now = Date.now();
-    setWinStart(now - half);
-    setWinEnd(now - half + winDur);
-  }, [zoom, winDur]);
+    setManualWindow({
+      start: now - half,
+      end: now - half + winDur,
+      externalWindowKey,
+    });
+  }, [externalWindowKey, zoom, winDur]);
 
   const step = useCallback(
     (dir: -1 | 1) => {
-      setWinStart((p) => p + dir * winDur);
-      setWinEnd((p) => p + dir * winDur);
+      setManualWindow({
+        start: winStart + dir * winDur,
+        end: winEnd + dir * winDur,
+        externalWindowKey,
+      });
     },
-    [winDur],
+    [externalWindowKey, winDur, winEnd, winStart],
   );
 
   const applyZoom = useCallback(
@@ -431,10 +439,13 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
       const dur = z === "day" ? MS_PER_DAY : MS_PER_WEEK;
       const half = z === "day" ? 12 * MS_PER_HOUR : 3.5 * MS_PER_DAY;
       const now = Date.now();
-      setWinStart(now - half);
-      setWinEnd(now - half + dur);
+      setManualWindow({
+        start: now - half,
+        end: now - half + dur,
+        externalWindowKey,
+      });
     },
-    [],
+    [externalWindowKey],
   );
 
   const handleModeChange = useCallback((newMode: ViewMode) => {
@@ -454,15 +465,21 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setWinStart((p) => p - winDur);
-        setWinEnd((p) => p - winDur);
+        setManualWindow({
+          start: winStart - winDur,
+          end: winEnd - winDur,
+          externalWindowKey,
+        });
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setWinStart((p) => p + winDur);
-        setWinEnd((p) => p + winDur);
+        setManualWindow({
+          start: winStart + winDur,
+          end: winEnd + winDur,
+          externalWindowKey,
+        });
       }
     },
-    [winDur],
+    [externalWindowKey, winDur, winEnd, winStart],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
