@@ -83,6 +83,7 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
 vi.mock('@/features/slicer/components/job', () => ({
   PrinterSlicerSelector: () => <div data-testid="printer-slicer-selector">PrinterSelector</div>,
   SlicerSelector: () => <div data-testid="slicer-selector">SlicerSelector</div>,
+  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings</div>,
 }));
 
 vi.mock('@/features/models3d/components/3d/ModelViewer3D', () => ({

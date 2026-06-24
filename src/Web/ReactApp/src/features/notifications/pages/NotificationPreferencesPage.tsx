@@ -94,6 +94,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
 
     if (!preferences) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server preferences into local form state
       setFormState(DEFAULT_PREFERENCES);
       setIsDirty(false);
       return;

@@ -28,7 +28,7 @@ describe('resolveSettingsNavigationTarget', () => {
     expect(resolveSettingsNavigationTarget('not-real', undefined, 'system')).toEqual({
       scopeId: 'system',
       categoryId: 'general',
-      subPageId: undefined,
+      subPageId: 'farm',
     });
   });
 

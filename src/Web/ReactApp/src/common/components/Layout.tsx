@@ -24,9 +24,6 @@ import {
   PlayIcon,
   CalendarIcon,
   LocationIcon,
-  KeyIcon,
-  NetworkIcon,
-  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';

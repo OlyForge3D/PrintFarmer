@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Badge } from "@/common/components/ui";
 import { apiClient } from "@/services/api";
@@ -88,8 +88,9 @@ function buildTimelineWindow() {
 }
 
 export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimelineTabProps) {
-  const from = dateFrom ?? new Date(Date.now() - TIMELINE_LOOKBACK_HOURS * 3600 * 1000);
-  const to = dateTo ?? new Date();
+  const [defaultWindow] = useState(buildTimelineWindow);
+  const from = dateFrom ?? defaultWindow.from;
+  const to = dateTo ?? defaultWindow.to;
 
   const {
     data: timelineData,

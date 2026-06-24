@@ -26,6 +26,7 @@ export function PrintablesOAuthCallbackPage() {
     const oauthState = searchParams.get('state')?.trim();
 
     if (!code || !oauthState) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time OAuth callback validation on mount
       setState('error');
       setErrorMessage('Missing OAuth callback parameters. Retry connecting your Printables account.');
       return;

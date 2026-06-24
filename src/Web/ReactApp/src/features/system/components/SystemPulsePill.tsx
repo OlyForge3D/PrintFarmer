@@ -217,6 +217,7 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
     staleTime: SYSTEM_INFO_STALE_TIME_MS,
   });
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- stable empty-dep callback the compiler cannot verify
   const closePanel = useCallback(() => {
     setIsOpen(false);
     window.requestAnimationFrame(() => {

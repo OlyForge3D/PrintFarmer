@@ -244,6 +244,7 @@ vi.mock('../../components/job', () => ({
       </select>
     </div>
   ),
+  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
 }));
 
 const slicerWorkspaceSpy = vi.fn();

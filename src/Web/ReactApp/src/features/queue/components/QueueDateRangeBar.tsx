@@ -182,6 +182,7 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
 }
 
 /** Returns the default date range (last 7 days). */
+// eslint-disable-next-line react-refresh/only-export-components -- small shared default consumed by the queue dashboard
 export function defaultDateRange(): DateRange {
   return buildRange(24 * 7);
 }
