@@ -145,10 +145,21 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 Farm.Slicer.Module.SlicerModuleExtensions.AddSlicerModule(services, context.Configuration);
             }
 
-            bool slicerRegistered = services.Any(d =>
-                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
-
-            if (slicerRegistered)
+            // Deterministically (re)register SlicerDbContext against the test SQLite database.
+            // This intentionally does NOT depend on whether discovery / AddSlicerModule already
+            // registered it. Two independent races could otherwise leave it unregistered:
+            //   1. The runtime assembly scan in AddSlicerIntegration can transiently miss the slicer
+            //      module under parallel host builds (ReflectionTypeLoadException), so nothing is
+            //      registered.
+            //   2. AddSlicerModule is idempotent on a SlicerModuleMarker and skips the DbContext in
+            //      microservices DEPLOYMENT_MODE — so the safety-net AddSlicerModule call above can be
+            //      a no-op that leaves SlicerDbContext unregistered while the marker is present.
+            // Either case previously fell through the old `if (slicerRegistered)` gate, causing
+            // ResetDatabaseAsync to throw "No service for type 'SlicerDbContext' has been registered".
+            // Registering unconditionally (unless slicer is explicitly disabled for this factory)
+            // makes the test host deterministic. The Remove calls below are null-safe when nothing
+            // was registered, so a fresh registration is added in that case.
+            if (!slicerDisabled)
             {
                 ServiceDescriptor? slicerDbDescriptor = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
