@@ -128,6 +128,7 @@ export function PrintQueueDashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState<string | null>(null);
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"priority" | "deadline" | "deadline_desc">("priority");
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
@@ -158,11 +159,12 @@ export function PrintQueueDashboardPage() {
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
-    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter],
+    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy],
     queryFn: () => apiClient.getAnalyticsQueueJobs(
       statusFilter || undefined,
       modelFilter || undefined,
       materialFilter || undefined,
+      sortBy,
       100,
       0
     ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
@@ -510,6 +512,7 @@ export function PrintQueueDashboardPage() {
                       onStatusChange={setStatusFilter}
                       onModelChange={setModelFilter}
                       onMaterialChange={setMaterialFilter}
+                      onSortChange={setSortBy}
                       onRefresh={invalidateQueue}
                       isLoading={loading || isRefreshing}
                     />

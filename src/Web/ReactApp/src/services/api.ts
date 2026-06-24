@@ -3702,6 +3702,7 @@ export class ApiClient {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy: "priority" | "deadline" | "deadline_desc" = "priority",
     limit: number = 50,
     offset: number = 0
   ): Promise<unknown[]> {
@@ -3709,6 +3710,7 @@ export class ApiClient {
     if (filterStatus) params.append("filterStatus", filterStatus);
     if (filterModel) params.append("filterModel", filterModel);
     if (filterMaterial) params.append("filterMaterial", filterMaterial);
+    params.append("sortBy", sortBy);
     params.append("limit", limit.toString());
     params.append("offset", offset.toString());
 

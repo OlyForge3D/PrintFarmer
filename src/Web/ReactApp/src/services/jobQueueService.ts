@@ -112,10 +112,11 @@ export const jobQueueService = {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy?: "priority" | "deadline" | "deadline_desc",
     limit?: number,
     offset?: number
   ): Promise<unknown[]> {
-    return apiClient.getAnalyticsQueueJobs(filterStatus, filterModel, filterMaterial, limit, offset);
+    return apiClient.getAnalyticsQueueJobs(filterStatus, filterModel, filterMaterial, sortBy, limit, offset);
   },
 
   async getAnalyticsPrinterQueue(printerId: string, limit?: number): Promise<unknown[]> {

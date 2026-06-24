@@ -104,6 +104,7 @@ export interface JobDetails {
   createdAtUtc?: string;
   queuedAt?: string;
   queuedAtUtc?: string;
+  deadlineAtUtc?: string;
   startedAt?: string;
   completedAt?: string;
   // Spoolman filament assignment
@@ -127,5 +128,4 @@ export interface JobDetails {
   // Multi-toolhead filament tracking
   toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
 }
-
 

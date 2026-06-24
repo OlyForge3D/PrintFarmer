@@ -2259,6 +2259,7 @@ export interface QueuedPrintJobDto {
   createdAtUtc: string;
   updatedAtUtc: string;
   queuedAtUtc: string;
+  deadlineAtUtc?: string;
   wasSeededFromHistory?: boolean;
   notes?: string;
   tags?: string[];

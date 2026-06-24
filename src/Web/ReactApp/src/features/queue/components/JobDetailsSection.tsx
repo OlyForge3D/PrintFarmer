@@ -25,6 +25,7 @@ export interface JobDetailsSectionProps {
     // Multi-copy support
     copies?: number;
     completedCopies?: number;
+    deadlineAtUtc?: string;
   };
   isEditing: boolean;
   onFieldChange: (field: keyof JobDetailsSectionProps['jobDetails'], value: string | number | undefined) => void;
@@ -36,6 +37,22 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
   onFieldChange,
 }) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const toDateTimeLocalInputValue = useCallback((isoDate: string | undefined): string => {
+    if (!isoDate) return '';
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  }, []);
+
+  const toUtcIsoFromLocal = useCallback((localDateTime: string): string | undefined => {
+    if (!localDateTime) return undefined;
+    const localDate = new Date(localDateTime);
+    if (Number.isNaN(localDate.getTime())) return undefined;
+    return localDate.toISOString();
+  }, []);
 
   const validatePriority = useCallback((value: number) => {
     if (value < 0 || value > 100) {
@@ -110,6 +127,14 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
       }
     },
     [onFieldChange]
+  );
+
+  const handleDeadlineChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const utcIso = toUtcIsoFromLocal(e.target.value);
+      onFieldChange('deadlineAtUtc', utcIso);
+    },
+    [onFieldChange, toUtcIsoFromLocal]
   );
 
   // Filament picker state (edit mode)
@@ -269,6 +294,20 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
             )}
           </div>
 
+          <div className="space-y-1.5">
+            <label htmlFor="job-deadline" className="block text-sm font-medium text-pf-text-secondary">
+              Deadline
+            </label>
+            <input
+              id="job-deadline"
+              type="datetime-local"
+              value={toDateTimeLocalInputValue(jobDetails.deadlineAtUtc)}
+              onChange={handleDeadlineChange}
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+            />
+            <span className="text-xs text-pf-text-tertiary">Stored in UTC</span>
+          </div>
+
 
         </fieldset>
       </div>
@@ -339,6 +378,12 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Nozzle Diameter</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="text-pf-text-muted italic">Not specified</span>}</dd>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Deadline</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">
+            {jobDetails.deadlineAtUtc ? new Date(jobDetails.deadlineAtUtc).toLocaleString() : <span className="text-pf-text-muted italic">Not set</span>}
+          </dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Copies</dt>

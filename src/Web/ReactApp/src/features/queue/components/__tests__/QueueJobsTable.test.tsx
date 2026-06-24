@@ -49,6 +49,7 @@ describe("QueueJobsTable Component", () => {
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
         queuedAtUtc: new Date().toISOString(),
+        deadlineAtUtc: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
         wasSeededFromHistory: false,
       },
       gcodeFile: {
@@ -71,6 +72,7 @@ describe("QueueJobsTable Component", () => {
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
         queuedAtUtc: new Date().toISOString(),
+        deadlineAtUtc: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
         wasSeededFromHistory: true,
       },
       gcodeFile: {
@@ -122,6 +124,38 @@ describe("QueueJobsTable Component", () => {
     expect(screen.getByText("test-print.gcode")).toBeInTheDocument();
     expect(screen.getByText("another-print.gcode")).toBeInTheDocument();
     expect(screen.getByLabelText("Imported")).toBeInTheDocument();
+    expect(screen.getByText("Deadline")).toBeInTheDocument();
+  });
+
+  it("should render deadline urgency states", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    const dueSoonJob = createMockJob({
+      id: "job-due-soon",
+      job: {
+        id: "job-due-soon",
+        name: "due-soon-print",
+        gcodeFileId: "file-3",
+        status: "Queued",
+        priority: 0,
+        queuePosition: 2,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+        queuedAtUtc: new Date().toISOString(),
+        deadlineAtUtc: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+        wasSeededFromHistory: false,
+      },
+    });
+
+    render(<QueueJobsTable jobs={[mockJobs[1], dueSoonJob]} {...mockHandlers} />);
+
+    expect(screen.getByText("Overdue")).toBeInTheDocument();
+    expect(screen.getByText("Due soon")).toBeInTheDocument();
   });
 
   it("should show pause button for printing jobs", () => {
@@ -186,4 +220,3 @@ describe("QueueJobsTable Component", () => {
     });
   });
 });
-
