@@ -123,7 +123,11 @@ function fmtDur(ms: number): string {
 function buildTicks(startMs: number, endMs: number, zoom: ZoomLevel): Tick[] {
   const interval = zoom === "day" ? MS_PER_HOUR : 4 * MS_PER_HOUR;
   const ticks: Tick[] = [];
-  let t = Math.ceil(startMs / interval) * interval;
+  // Snap first tick to a local-timezone-aligned boundary
+  const localOffsetMs = new Date(startMs).getTimezoneOffset() * -60_000;
+  const aligned = startMs - localOffsetMs;
+  let t = Math.ceil(aligned / interval) * interval + localOffsetMs;
+  if (t < startMs) t += interval;
   while (t <= endMs) {
     const d = new Date(t);
     const major = zoom === "week" && d.getHours() === 0 && d.getMinutes() === 0;
@@ -358,6 +362,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   }, [mode, parsed, overview]);
 
   // ── Measure scrollable area width (placed after lanes so dep signal is in scope) ──
+  const hasLanes = lanes.length > 0;
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -366,8 +371,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
     });
     ro.observe(el);
     return () => ro.disconnect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lanes.length > 0 ? 1 : 0]);
+  }, [hasLanes]);
 
   // ── Stats summary ─────────────────────────────────────────────────────────────
   const summary = useMemo(() => {

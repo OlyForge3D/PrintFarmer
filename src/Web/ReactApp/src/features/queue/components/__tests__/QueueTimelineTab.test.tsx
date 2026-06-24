@@ -72,6 +72,9 @@ const queueOverview: QueueOverviewDto[] = [
   },
 ];
 
+const TEST_DATE_FROM = new Date("2026-06-24T00:00:00.000Z");
+const TEST_DATE_TO = new Date("2026-06-25T00:00:00.000Z");
+
 function renderTimeline() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -82,15 +85,30 @@ function renderTimeline() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <QueueTimelineTab stats={stats} dateFrom={null} dateTo={null} />
+      <QueueTimelineTab
+        stats={stats}
+        dateFrom={TEST_DATE_FROM}
+        dateTo={TEST_DATE_TO}
+      />
     </QueryClientProvider>
   );
 }
 
 describe("QueueTimelineTab", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-24T12:00:00.000Z"));
+    global.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
     getAnalyticsTimelineMock.mockReset();
     getQueueOverviewMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows loading state while timeline is fetching", () => {
