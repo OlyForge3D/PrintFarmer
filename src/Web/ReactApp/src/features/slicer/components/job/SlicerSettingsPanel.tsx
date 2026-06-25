@@ -65,6 +65,8 @@ function InfillPatternDropdown({
   onChange: (pattern: string) => void;
 }) {
   const dropdownId = React.useId();
+  const labelId = `${dropdownId}-label`;
+  const selectedValueId = `${dropdownId}-value`;
   const listboxId = `${dropdownId}-listbox`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -170,7 +172,7 @@ function InfillPatternDropdown({
         aria-controls={listboxId}
         aria-haspopup="listbox"
         aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
-        aria-label={`Infill pattern ${selectedPattern.label}`}
+        aria-labelledby={`${labelId} ${selectedValueId}`}
         className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
         onClick={(event) => {
           if (event.detail === 0) {
@@ -185,10 +187,12 @@ function InfillPatternDropdown({
           <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-xs font-medium uppercase tracking-wide text-pf-text-muted">Pattern</span>
-          <span className="block truncate text-base font-medium text-pf-text-primary">{selectedPattern.label}</span>
+          <span id={labelId} className="block text-xs font-medium uppercase tracking-wide text-pf-text-muted">Infill Pattern</span>
+          <span id={selectedValueId} className="block truncate text-base font-medium text-pf-text-primary">{selectedPattern.label}</span>
         </span>
-        <ChevronDownIcon className="h-5 w-5 shrink-0 text-pf-text-muted" ariaLabel="Open infill pattern menu" />
+        <span aria-hidden="true" className="flex shrink-0 items-center justify-center">
+          <ChevronDownIcon className="h-5 w-5 text-pf-text-muted" ariaLabel="" />
+        </span>
       </button>
 
       {isOpen && (
