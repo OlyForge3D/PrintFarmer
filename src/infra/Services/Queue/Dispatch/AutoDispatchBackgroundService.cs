@@ -61,6 +61,7 @@ public sealed class AutoDispatchBackgroundService(
 
     private async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
     {
+        DateTime startupAt = DateTime.UtcNow;
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -84,6 +85,7 @@ public sealed class AutoDispatchBackgroundService(
                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
                 && db.PrintJobs.Any(j =>
                     j.Status == PrintJobStatus.Queued
+                    && j.QueuedAt <= startupAt
                     && (j.AssignedPrinterId == null || j.AssignedPrinterId == p.Id)))
             .Select(p => p.Id)
             .ToListAsync(ct);

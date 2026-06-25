@@ -22,6 +22,12 @@ describe('orcaToSimpleSettings — defaults', () => {
     expect(result.bedAdhesionType).toBe('none');
   });
 
+  it('normalizes loaded support types to the auto variants used by Simple mode', () => {
+    expect(orcaToSimpleSettings({ ...EMPTY_ORCA, support_type: 'normal(manual)' }).supportType).toBe('normal(auto)');
+    expect(orcaToSimpleSettings({ ...EMPTY_ORCA, support_type: 'tree(manual)' }).supportType).toBe('tree(auto)');
+    expect(orcaToSimpleSettings({ ...EMPTY_ORCA, support_type: 'tree(auto)' }).supportType).toBe('tree(auto)');
+  });
+
   it('maps numeric orca fields directly', () => {
     const orca: OrcaProcessSettings = {
       ...EMPTY_ORCA,

@@ -49,6 +49,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
             <Button
               key={opt.value}
               variant="unstyled"
+              type="button"
               onClick={() => onSlicerChange(opt.value)}
               aria-pressed={isSelected}
               className={clsx(

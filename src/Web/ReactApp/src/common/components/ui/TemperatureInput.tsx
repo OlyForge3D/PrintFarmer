@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { Input, InputProps } from './Input';
 
 export interface TemperatureInputProps extends Omit<InputProps, 'type'> {
@@ -34,12 +34,13 @@ export function TemperatureInput({
   currentTemp,
   ...props
 }: TemperatureInputProps) {
+  const inputId = useId();
   return (
     <div className="flex items-center">
       {label && (
-        <span className="absolute left-2 text-pf-text-secondary text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
+        <label htmlFor={inputId} className="absolute left-2 text-pf-text-secondary text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
           {label}
-        </span>
+        </label>
       )}
       <div className={`relative inline-block w-20 ${currentTemp != null ? 'pt-2' : ''} ${className ?? ''}`}>
         {currentTemp != null && (
@@ -48,12 +49,14 @@ export function TemperatureInput({
           </span>
         )}
         <Input
+          id={inputId}
           type="number"
           step={step}
           value={value}
           onChange={onChange}
           onKeyDown={onKeyDown}
           disabled={disabled}
+          aria-label={label}
           placeholder="Temp"
           className={`h-9 ${label ? 'pl-10' : 'pl-2'} pr-8 text-xs [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0`}
           {...props}

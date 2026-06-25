@@ -191,6 +191,11 @@ export const NewSliceJobPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
+  const slicerModeOptions = ['Simple', 'Advanced'] as const;
+  const slicerModeRefs = React.useRef<Record<(typeof slicerModeOptions)[number], HTMLButtonElement | null>>({
+    Simple: null,
+    Advanced: null,
+  });
 
   // Check if ANY machine profiles exist in the system (for onboarding detection)
   const { data: profilesSummary, isLoading: isProfilesSummaryLoading } = useQuery({
@@ -202,7 +207,13 @@ export const NewSliceJobPage: React.FC = () => {
 
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
-  const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.printerId) ?? '';
+    } catch {
+      return '';
+    }
+  });
   // Material type filter for filament profile selection
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<string>('');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
@@ -599,7 +610,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Auto-clear submittedJobId (and snapshot) when the job reaches a terminal state
   useEffect(() => {
-    if (jobProgress.status === 'completed' || jobProgress.status === 'failed') {
+    if (jobProgress.status === 'Completed' || jobProgress.status === 'Failed') {
       const timer = setTimeout(() => {
         setSubmittedJobId(prev => prev ? null : prev);
         setSliceSnapshot(null);
@@ -1478,6 +1489,25 @@ export const NewSliceJobPage: React.FC = () => {
     return null;
   }, [effectiveSpoolId, spoolCostData, effectiveFilamentCostPerKg]);
 
+  const typedSlicerSettings = useMemo(() => {
+    if (selectedProcessProfile) {
+      return convertOrcaProcessProfileToSettings(selectedProcessProfile);
+    }
+
+    const customRawJson = selectedCustomProcessProfile?.rawJson;
+    if (customRawJson) {
+      try {
+        const parsed = JSON.parse(customRawJson);
+        if (parsed && typeof parsed === 'object') {
+          return convertOrcaProcessProfileToSettings(parsed as OrcaProcessProfile);
+        }
+      } catch {
+        // Ignore parse errors and fall through to the empty default.
+      }
+    }
+    return {} as OrcaProcessSettings;
+  }, [selectedCustomProcessProfile, selectedProcessProfile]);
+
   // Hydrate dynamic advanced settings from selected Orca process profile.
   useEffect(() => {
     queueMicrotask(() => {
@@ -1508,11 +1538,10 @@ export const NewSliceJobPage: React.FC = () => {
   // Uses queueMicrotask to avoid the "setState in effect" lint warning.
   useEffect(() => {
     queueMicrotask(() => {
-      const typedSettings = convertOrcaProcessProfileToSettings(selectedProcessProfile ?? undefined);
-      setSlicerSettings(typedSettings);
-      setOriginalProcessSettings(typedSettings as unknown as Record<string, unknown>);
+      setSlicerSettings(typedSlicerSettings);
+      setOriginalProcessSettings(typedSlicerSettings as unknown as Record<string, unknown>);
     });
-  }, [selectedProcessProfile]);
+  }, [typedSlicerSettings]);
 
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
@@ -1578,8 +1607,8 @@ export const NewSliceJobPage: React.FC = () => {
               ? selectedProcessPresetId.slice('custom:'.length)
               : selectedProcessPresetId,
             overrides: {
-              ...slicerSettings,
               ...advancedProcessSettings,
+              ...slicerSettings,
               ...(slicerMode === 'Advanced' && selectedBedType ? { curr_bed_type: selectedBedType } : {}),
             },
           }),
@@ -1839,15 +1868,41 @@ export const NewSliceJobPage: React.FC = () => {
               role="radiogroup"
               aria-label="Slicer mode"
             >
-              {(['Simple', 'Advanced'] as const).map((m) => {
+              {slicerModeOptions.map((m, index) => {
                 const active = slicerMode === m;
                 return (
                   <Button
                     key={m}
+                    ref={(element) => {
+                      slicerModeRefs.current[m] = element;
+                    }}
                     type="button"
                     variant="unstyled"
                     role="radio"
                     aria-checked={active}
+                    tabIndex={active ? 0 : -1}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        const next = slicerModeOptions[(index + 1) % slicerModeOptions.length];
+                        setSlicerMode(next);
+                        slicerModeRefs.current[next]?.focus();
+                        return;
+                      }
+
+                      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        const next = slicerModeOptions[(index - 1 + slicerModeOptions.length) % slicerModeOptions.length];
+                        setSlicerMode(next);
+                        slicerModeRefs.current[next]?.focus();
+                        return;
+                      }
+
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSlicerMode(m);
+                      }
+                    }}
                     onClick={() => setSlicerMode(m)}
                     className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
                       active
