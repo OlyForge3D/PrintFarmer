@@ -185,7 +185,7 @@ function InfillPatternDropdown({
       </button>
 
       {isOpen && (
-        <div
+        <ul
           id={listboxId}
           role="listbox"
           aria-label="Infill pattern options"
@@ -195,7 +195,7 @@ function InfillPatternDropdown({
             const active = pattern.value === selectedPattern.value;
             const highlighted = index === highlightIndex;
             return (
-              <div
+              <li
                 key={pattern.value}
                 id={`${listboxId}-option-${index}`}
                 role="option"
@@ -215,10 +215,10 @@ function InfillPatternDropdown({
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{pattern.label}</span>
                 {active && <span className="text-xs font-semibold uppercase tracking-wide text-pf-accent">Selected</span>}
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </div>
   );
