@@ -25,6 +25,7 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
+import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
@@ -257,26 +258,14 @@ export const NewSliceJobPage: React.FC = () => {
     setSlicerSettings((prev) => ({ ...prev, ...newSettings }));
   }, []);
 
-  // Simple mode: derive SlicerSettings view from OrcaProcessSettings for supports + bed adhesion overrides
-  const simpleSlicerSettings = useMemo<SlicerSettings>(() => {
-    const bt = slicerSettings.brim_type;
-    const bedAdhesionType: SlicerSettings['bedAdhesionType'] =
-      bt === 'brim' || bt === 'raft' || bt === 'skirt' ? bt : 'none';
-    return {
-      layerHeight: typeof slicerSettings.layer_height === 'number' ? slicerSettings.layer_height : 0.2,
-      infillPercent: typeof slicerSettings.sparse_infill_density === 'number' ? slicerSettings.sparse_infill_density : 15,
-      supportEnabled: slicerSettings.enable_support === true,
-      bedAdhesionType,
-    };
-  }, [slicerSettings]);
+  // Simple mode: derive SlicerSettings view from OrcaProcessSettings
+  const simpleSlicerSettings = useMemo<SlicerSettings>(
+    () => orcaToSimpleSettings(slicerSettings),
+    [slicerSettings]
+  );
 
   const handleSimpleSettingsChange = useCallback((settings: SlicerSettings) => {
-    setSlicerSettings((prev) => ({
-      ...prev,
-      sparse_infill_density: settings.infillPercent,
-      enable_support: settings.supportEnabled,
-      brim_type: settings.bedAdhesionType === 'none' ? undefined : settings.bedAdhesionType,
-    }));
+    setSlicerSettings((prev) => simpleToOrcaSettings(settings, prev));
   }, []);
 
   // === Process Profile Management handlers ===
