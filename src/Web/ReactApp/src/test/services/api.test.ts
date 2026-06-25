@@ -572,5 +572,67 @@ describe("ApiClient", () => {
       const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
       expect(callArgs?.params?.offset).toBeUndefined();
     });
+
+    it("returns totalCount 0 when paginated response omits totalCount field", async () => {
+      // Simulates a server that returns { items: [...] } without totalCount
+      const serverItems = [{ id: 1, name: "PLA" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: serverItems } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual(serverItems);
+      // totalCount should fall back to 0 (not crash) when field is missing
+      expect(result.totalCount).toBe(0);
+    });
+
+    it("returns empty items array when paginated response items field is not an array", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: null, totalCount: 5 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual([]);
+      expect(result.totalCount).toBe(5);
+    });
   });
-});
+
+  describe("getSpools", () => {
+    it("falls back to plain array response for backward compatibility", async () => {
+      const serverItems = [
+        { id: 1, name: "Spool A", material: "PLA", remainingWeightG: 800 },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools();
+
+      expect(result.items).toEqual(serverItems);
+      // totalCount falls back to array length for legacy responses
+      expect(result.totalCount).toBe(1);
+    });
+
+    it("returns items and totalCount from paginated server response", async () => {
+      const serverItems = [{ id: 1, name: "Spool A", material: "PLA" }];
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: serverItems, totalCount: 99 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools({ limit: 1 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(99);
+    });
+
+    it("returns totalCount 0 when paginated response omits totalCount field", async () => {
+      const serverItems = [{ id: 2, name: "Spool B" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: serverItems } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools();
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(0);
+    });
+  });

@@ -3209,6 +3209,7 @@ export class ApiClient {
     vendor?: string;
     location?: string;
     allowArchived?: boolean;
+    signal?: AbortSignal;
   }): Promise<{ items: SpoolmanSpool[]; totalCount: number }> {
     const queryParams: Record<string, string | number | boolean> = {};
     if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
@@ -3222,6 +3223,7 @@ export class ApiClient {
 
     const response = await this.client.get('/spoolman/spools', {
       params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
     });
     const data = response.data;
 

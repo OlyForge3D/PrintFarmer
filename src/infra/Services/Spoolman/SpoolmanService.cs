@@ -227,10 +227,12 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 items.Add(SpoolmanJsonParser.ParseSpool(item));
             }
 
-            // If Spoolman didn't return an X-Total-Count header, fall back to item count
+            // If Spoolman didn't return an X-Total-Count header, use offset + item count as a
+            // lower-bound so callers know there are at least that many items total, preventing
+            // premature pagination cutoff on non-zero-offset pages.
             if (totalCount == 0 && items.Count > 0)
             {
-                totalCount = items.Count;
+                totalCount = Math.Max(totalCount, (queryParams.Offset ?? 0) + items.Count);
             }
 
             logger.LogDebug("Retrieved {Count} spools (total {TotalCount})", items.Count, totalCount);
@@ -396,10 +398,12 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 items.Add(SpoolmanJsonParser.ParseFilament(item));
             }
 
-            // If Spoolman didn't return an X-Total-Count header, fall back to item count
+            // If Spoolman didn't return an X-Total-Count header, use offset + item count as a
+            // lower-bound so callers know there are at least that many items total, preventing
+            // premature pagination cutoff on non-zero-offset pages.
             if (totalCount == 0 && items.Count > 0)
             {
-                totalCount = items.Count;
+                totalCount = Math.Max(totalCount, (queryParams.Offset ?? 0) + items.Count);
             }
 
             logger.LogDebug("Retrieved {Count} filaments (total {TotalCount})", items.Count, totalCount);

@@ -245,7 +245,9 @@ export function FilamentsTab() {
       setError(null);
       const spoolmanSortField = FILAMENT_SORT_FIELD_MAP[sortField as SortField];
       const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
-      const offset = pageSize > 0 ? (page - 1) * pageSize : 0;
+      // Clamp page to ≥ 1 before computing offset (guards against stale/invalid URL values)
+      const safePage = Math.max(1, page);
+      const offset = pageSize > 0 ? (safePage - 1) * pageSize : 0;
 
       const result = await apiClient.getFilamentsPaged({
         limit: pageSize > 0 ? pageSize : undefined,
@@ -324,14 +326,29 @@ export function FilamentsTab() {
     [filaments]
   );
 
-  // Color filter is the only filter applied client-side (server doesn't support it)
-  const pagedFilaments = useMemo(() => {
-    if (!deferredFilters.color) return filaments;
-    return filaments.filter(f => classifyColor(f.colorHex) === deferredFilters.color);
-  }, [filaments, deferredFilters.color]);
-
   // Pagination — driven by server totalCount, not local array length
   const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
+
+  // In server-paged mode (> 1 page) the color filter only covers the current page,
+  // which gives misleading results. Disable and clear it automatically.
+  const isPaginated = totalPages > 1;
+
+  // Clamp invalid URL page values to the valid range [1, totalPages]
+  useEffect(() => {
+    if (page < 1) { setMany({ page: 1 }); return; }
+    if (totalPages > 0 && page > totalPages) { setMany({ page: totalPages }); }
+  }, [page, totalPages, setMany]);
+
+  useEffect(() => {
+    if (isPaginated && urlColor) setMany({ color: '' });
+  }, [isPaginated, urlColor, setMany]);
+
+  // Color filter is applied client-side only when all results fit on one page.
+  // In paginated mode it is disabled so results stay accurate.
+  const pagedFilaments = useMemo(() => {
+    if (!deferredFilters.color || isPaginated) return filaments;
+    return filaments.filter(f => classifyColor(f.colorHex) === deferredFilters.color);
+  }, [filaments, deferredFilters.color, isPaginated]);
 
   // Reset page to 1 when server-side params change (excludes color which is client-side)
   const filterKey = `${urlSearch}|${urlMaterial}|${urlVendor}|${sortField}|${sortDir}`;
@@ -652,13 +669,14 @@ export function FilamentsTab() {
                 ))}
               </Select>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-pf-text-secondary">Color</label>
+            <div className="flex flex-col gap-1" title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
+              <label className={`text-xs ${isPaginated ? 'text-pf-text-secondary/40' : 'text-pf-text-secondary'}`}>Color</label>
               <ColorFamilySelect
-                value={urlColor}
+                value={isPaginated ? '' : urlColor}
                 onChange={val => setMany({ color: val, page: 1 })}
                 options={colorFamilyOptions}
-                placeholder="All Colors"
+                placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
+                disabled={isPaginated}
               />
             </div>
             {viewMode === 'cards' && (

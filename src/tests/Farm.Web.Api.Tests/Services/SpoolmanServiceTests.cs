@@ -423,4 +423,81 @@ public class SpoolmanServiceTests
         Assert.Contains(result.Items, i => i.Id == 1);
         Assert.Contains(result.Items, i => i.Id == 2);
     }
+
+    [Fact]
+    public async Task ListFilamentsPagedAsync_FallbackTotalCount_AccountsForOffset_WhenHeaderMissing()
+    {
+        // When the X-Total-Count header is absent and offset=50, the fallback must return
+        // at least offset + items.Count (not just items.Count) so that callers on page 2+
+        // know there are more items than the current page alone implies.
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+        {
+            if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/filament"))
+            {
+                string json = JsonSerializer.Serialize(new[]
+                {
+                    new { id = 51, name = "Filament A" },
+                    new { id = 52, name = "Filament B" },
+                    new { id = 53, name = "Filament C" },
+                });
+                // No X-Total-Count header — simulates a Spoolman version that omits it.
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanPagedResult<SpoolmanFilamentDto> result =
+            await svc.ListFilamentsPagedAsync(new SpoolmanFilamentQueryParams { Limit = 50, Offset = 50 }, CancellationToken.None);
+
+        Assert.Equal(3, result.Items.Count);
+        // Lower bound: 50 (offset) + 3 (items on this page) = 53, not just 3.
+        Assert.Equal(53, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListSpoolsAsync_FallbackTotalCount_AccountsForOffset_WhenHeaderMissing()
+    {
+        // Mirrors the filament test above but for the spool endpoint.
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+        {
+            if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool"))
+            {
+                string json = JsonSerializer.Serialize(new[]
+                {
+                    new { id = 101, name = "Spool A" },
+                    new { id = 102, name = "Spool B" },
+                });
+                // No X-Total-Count header.
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanPagedResult<SpoolmanSpoolDto> result =
+            await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 100, Offset = 100 }, CancellationToken.None);
+
+        Assert.Equal(2, result.Items.Count);
+        // Lower bound: 100 (offset) + 2 (items on this page) = 102, not just 2.
+        Assert.Equal(102, result.TotalCount);
+    }
 }

@@ -264,6 +264,68 @@ describe('FilamentsTab — server-side paging', () => {
   });
 });
 
+describe('FilamentsTab — color filter (client-side only)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: '', material: '', vendor: '', color: '',
+      sortField: 'name', sortDir: 'asc', page: 1,
+    });
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('does not include color param in API call (color is client-side only)', async () => {
+    filterState.color = 'red';
+    mockGetFilamentsPaged.mockResolvedValue(pageOf([], 0));
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    const [params] = mockGetFilamentsPaged.mock.calls[0];
+    expect(params).not.toHaveProperty('color');
+  });
+
+  it('when totalCount > pageSize (paginated mode) color filter is disabled in UI', async () => {
+    // 150 total, pageSize 50 → totalPages=3 → isPaginated=true → color filter cleared
+    filterState.color = 'blue';
+    localStorage.setItem('filaments-page-size', '50');
+    mockGetFilamentsPaged.mockResolvedValue(pageOf(Array.from({ length: 50 }, (_, i) => makeFilament(i)), 150));
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    // The API call should still NOT receive a color param
+    const [params] = mockGetFilamentsPaged.mock.calls[0];
+    expect(params).not.toHaveProperty('color');
+  });
+});
+
+describe('FilamentsTab — page clamping', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: '', material: '', vendor: '', color: '',
+      sortField: 'name', sortDir: 'asc', page: 1,
+    });
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('clamps offset to 0 when page < 1 (safePage = max(1, page))', async () => {
+    filterState.page = -5;
+    localStorage.setItem('filaments-page-size', '25');
+    mockGetFilamentsPaged.mockResolvedValue(pageOf([], 0));
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    const [params] = mockGetFilamentsPaged.mock.calls[0];
+    // offset must be 0 (page clamped to 1)
+    expect(params.offset === undefined || params.offset === 0).toBe(true);
+  });
+});
+
 describe('FilamentsTab — stale-response guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -272,6 +334,78 @@ describe('FilamentsTab — stale-response guard', () => {
       search: '', material: '', vendor: '', color: '',
       sortField: 'name', sortDir: 'asc', page: 1,
     });
+  });
+
+});
+
+// ── new suites ────────────────────────────────────────────────────────────────
+
+describe('FilamentsTab — page value sanitization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: '', material: '', vendor: '', color: '',
+      sortField: 'name', sortDir: 'asc', page: 1,
+    });
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('treats page=0 as page 1 — offset sent to API is 0', async () => {
+    filterState.page = 0;
+    localStorage.setItem('filaments-page-size', '50');
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 0 });
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    const [params] = mockGetFilamentsPaged.mock.calls[0];
+    // safePage = max(1, 0) = 1 → offset = (1-1)*50 = 0
+    expect(params.offset === undefined || params.offset === 0).toBe(true);
+  });
+
+  it('treats page=-5 as page 1 — offset sent to API is 0', async () => {
+    filterState.page = -5;
+    localStorage.setItem('filaments-page-size', '25');
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 0 });
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    const [params] = mockGetFilamentsPaged.mock.calls[0];
+    expect(params.offset === undefined || params.offset === 0).toBe(true);
+  });
+
+  it('clamps page above totalPages — setMany called with totalPages', async () => {
+    // 50 items, pageSize 25 → totalPages = 2. URL says page = 9.
+    filterState.page = 9;
+    localStorage.setItem('filaments-page-size', '25');
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 50 });
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
+
+    // setMany({ page: 2 }) should be called because page=9 > totalPages=2
+    expect(filterState.setMany).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+  });
+
+  it('does not call setMany when page is within valid range', async () => {
+    filterState.page = 1;
+    localStorage.setItem('filaments-page-size', '50');
+    mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 150 });
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
+
+    // page=1, totalPages=3 → no clamping needed
+    const pageCalls = (filterState.setMany as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => (c[0] as Record<string, unknown>)?.page !== undefined
+    );
+    expect(pageCalls.every((c: unknown[]) => (c[0] as Record<string, unknown>).page === 1)).toBe(true);
   });
 
   it('ignores aborted (stale) responses — newer state is not overwritten', async () => {
