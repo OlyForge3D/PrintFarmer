@@ -58,6 +58,7 @@ const FILAMENT_SORT_FIELD_MAP: Record<SortField, string> = {
 export function FilamentsTab() {
   const [filaments, setFilaments] = useState<SpoolmanFilament[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [hasLoadedTotalCount, setHasLoadedTotalCount] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
@@ -263,6 +264,7 @@ export function FilamentsTab() {
 
       setFilaments(result.items);
       setTotalCount(result.totalCount);
+      setHasLoadedTotalCount(true);
 
       // Supplement filter dropdown options from returned page data
       setMaterialOptions(prev => {
@@ -292,6 +294,7 @@ export function FilamentsTab() {
 
   useEffect(() => {
     abortRef.current?.abort();
+    setHasLoadedTotalCount(false);
     const controller = new AbortController();
     abortRef.current = controller;
     void loadFilaments(controller.signal);
@@ -336,8 +339,8 @@ export function FilamentsTab() {
   // Clamp invalid URL page values to the valid range [1, totalPages]
   useEffect(() => {
     if (page < 1) { setMany({ page: 1 }); return; }
-    if (totalPages > 0 && page > totalPages) { setMany({ page: totalPages }); }
-  }, [page, totalPages, setMany]);
+    if (hasLoadedTotalCount && totalPages > 0 && page > totalPages) { setMany({ page: totalPages }); }
+  }, [hasLoadedTotalCount, page, totalPages, setMany]);
 
   useEffect(() => {
     if (isPaginated && urlColor) setMany({ color: '' });

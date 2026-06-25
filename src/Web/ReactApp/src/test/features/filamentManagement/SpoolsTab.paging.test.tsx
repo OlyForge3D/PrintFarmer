@@ -3,7 +3,7 @@
  * guard, page-value sanitization, and showEmpty/color filter semantics.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ── URL filter state — controlled per-test ───────────────────────────────────
@@ -200,6 +200,34 @@ describe('SpoolsTab — AbortController cancellation', () => {
 
     filterState.search = '';
   });
+
+  it('aborts in-flight request when Refresh is clicked and starts a new request', async () => {
+    localStorage.setItem('spoolman-base-url', 'http://localhost:7912');
+    let firstSignal: AbortSignal | undefined;
+    let secondSignal: AbortSignal | undefined;
+    let callCount = 0;
+
+    mockGetSpools.mockImplementation(({ signal }: { signal?: AbortSignal }) => {
+      callCount++;
+      if (callCount === 1) {
+        firstSignal = signal;
+        return Promise.resolve({ items: [], totalCount: 0 });
+      }
+      secondSignal = signal;
+      return Promise.resolve({ items: [], totalCount: 0 });
+    });
+
+    render(<SpoolsTab />);
+    await waitFor(() => expect(firstSignal).toBeDefined());
+    await waitFor(() => expect(screen.getByRole('button', { name: /refresh spools/i })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh spools/i }));
+
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalledTimes(2));
+    expect(firstSignal?.aborted).toBe(true);
+    expect(secondSignal).toBeInstanceOf(AbortSignal);
+    expect(secondSignal).not.toBe(firstSignal);
+  });
 });
 
 describe('SpoolsTab — page value sanitization', () => {
@@ -223,6 +251,39 @@ describe('SpoolsTab — page value sanitization', () => {
     const [params] = mockGetSpools.mock.calls[0];
     // safePage = max(0, -3) = 0 → offset = 0 * 50 = 0
     expect(params.offset === undefined || params.offset === 0).toBe(true);
+  });
+
+  it('clamps page above totalPages-1 back into range', async () => {
+    filterState.page = 99;
+    filterState.pageSize = 10;
+    mockGetSpools.mockResolvedValue(pageOf(Array.from({ length: 10 }, (_, i) => makeSpool(i + 1)), 15)); // totalPages = 2
+
+    render(<SpoolsTab />);
+
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(filterState.setMany).toHaveBeenCalledWith({ page: 1 });
+    });
+  });
+
+  it('does not preemptively rewrite a valid deep-linked page before totals are known', async () => {
+    filterState.page = 4;
+    filterState.pageSize = 10;
+    let resolvePage!: (v: { items: ReturnType<typeof makeSpool>[]; totalCount: number }) => void;
+
+    mockGetSpools.mockImplementation(() => new Promise(res => { resolvePage = res; }));
+
+    render(<SpoolsTab />);
+
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
+    const [params] = mockGetSpools.mock.calls[0];
+    expect(params.offset).toBe(40);
+    expect(filterState.setMany).not.toHaveBeenCalledWith({ page: 0 });
+
+    await act(async () => {
+      resolvePage({ items: Array.from({ length: 10 }, (_, i) => makeSpool(i + 1)), totalCount: 100 });
+      await Promise.resolve();
+    });
   });
 });
 

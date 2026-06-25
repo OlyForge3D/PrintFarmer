@@ -550,6 +550,17 @@ describe("ApiClient", () => {
       expect(result.totalCount).toBe(1);
     });
 
+    it("uses offset-aware totalCount fallback for plain array responses", async () => {
+      const serverItems = [{ id: 1, name: "PETG Transparent", material: "PETG" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged({ offset: 100 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(101);
+    });
+
     it("passes AbortSignal through to the HTTP call", async () => {
       const controller = new AbortController();
       const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
@@ -610,6 +621,17 @@ describe("ApiClient", () => {
       expect(result.items).toEqual(serverItems);
       // totalCount falls back to array length for legacy responses
       expect(result.totalCount).toBe(1);
+    });
+
+    it("uses offset-aware totalCount fallback for plain array responses", async () => {
+      const serverItems = [{ id: 1, name: "Spool A", material: "PLA", remainingWeightG: 800 }];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools({ offset: 50 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(51);
     });
 
     it("returns items and totalCount from paginated server response", async () => {

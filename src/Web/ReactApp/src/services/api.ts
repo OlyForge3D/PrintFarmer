@@ -3238,7 +3238,8 @@ export class ApiClient {
 
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
-    return { items, totalCount: items.length };
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
   }
 
   /**
@@ -3296,7 +3297,8 @@ export class ApiClient {
 
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanFilament[]) : [];
-    return { items, totalCount: items.length };
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
   }
 
   /**

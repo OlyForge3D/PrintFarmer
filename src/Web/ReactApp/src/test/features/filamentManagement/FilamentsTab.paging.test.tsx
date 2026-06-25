@@ -324,6 +324,28 @@ describe('FilamentsTab — page clamping', () => {
     // offset must be 0 (page clamped to 1)
     expect(params.offset === undefined || params.offset === 0).toBe(true);
   });
+
+  it('does not preemptively reset a valid deep-linked page before totals are known', async () => {
+    filterState.page = 3;
+    localStorage.setItem('filaments-page-size', '25');
+    let resolvePage!: (v: { items: ReturnType<typeof makeFilament>[]; totalCount: number }) => void;
+
+    mockGetFilamentsPaged.mockImplementation(
+      () => new Promise<{ items: ReturnType<typeof makeFilament>[]; totalCount: number }>(res => { resolvePage = res; })
+    );
+
+    render(<FilamentsTab />);
+
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+    const [params] = mockGetFilamentsPaged.mock.calls[0];
+    expect(params.offset).toBe(50);
+    expect(filterState.setMany).not.toHaveBeenCalledWith({ page: 1 });
+
+    await act(async () => {
+      resolvePage({ items: Array.from({ length: 25 }, (_, i) => makeFilament(i + 1)), totalCount: 200 });
+      await Promise.resolve();
+    });
+  });
 });
 
 describe('FilamentsTab — stale-response guard', () => {
@@ -467,4 +489,3 @@ describe('FilamentsTab — page value sanitization', () => {
     expect(pageCalls.every((c: unknown[]) => (c[0] as Record<string, unknown>).page === 1)).toBe(true);
   });
 });
-

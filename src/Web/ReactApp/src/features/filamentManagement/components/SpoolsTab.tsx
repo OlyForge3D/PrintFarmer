@@ -68,6 +68,7 @@ const SORT_FIELD_MAP: Record<string, string> = {
 export function SpoolsTab() {
   const [spools, setSpools] = useState<SpoolmanSpoolDto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [hasLoadedTotalCount, setHasLoadedTotalCount] = useState(false);
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
@@ -103,7 +104,7 @@ export function SpoolsTab() {
     page: { key: 'page', type: 'number', defaultValue: 0, filterable: false },
   });
 
-  const currentPage = urlPage as number;
+  const currentPage = Number.isFinite(urlPage as number) ? Math.trunc(urlPage as number) : 0;
   const filters: FilterState = {
     search: urlSearch,
     material: urlMaterial,
@@ -292,6 +293,11 @@ export function SpoolsTab() {
     resetAll();
   };
 
+  const totalPages = filters.pageSize > 0 ? Math.max(1, Math.ceil(totalCount / filters.pageSize)) : 1;
+  const clampedPage = hasLoadedTotalCount
+    ? Math.max(0, Math.min(currentPage, totalPages - 1))
+    : Math.max(0, currentPage);
+
   const loadSpools = useCallback(async (signal?: AbortSignal) => {
     try {
       setSpoolmanError(null);
@@ -299,12 +305,12 @@ export function SpoolsTab() {
       // Build server-side sort expression
       const spoolmanSortField = SORT_FIELD_MAP[sortField];
       const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
-      // Clamp page to ≥ 0 before computing offset
-      const safePage = Math.max(0, currentPage);
+      // Clamp only the lower bound until server totalCount is known.
+      const requestPage = Math.max(0, currentPage);
 
       const result = await apiClient.getSpools({
         limit: filters.pageSize,
-        offset: safePage * filters.pageSize,
+        offset: requestPage * filters.pageSize,
         sort,
         search: filters.search || undefined,
         material: filters.material || undefined,
@@ -318,6 +324,7 @@ export function SpoolsTab() {
 
       setSpools(result.items);
       setTotalCount(result.totalCount);
+      setHasLoadedTotalCount(true);
 
       // Accumulate filter dropdown options from returned data
       setMaterialOptions(prev => {
@@ -371,11 +378,22 @@ export function SpoolsTab() {
 
   useEffect(() => {
     abortRef.current?.abort();
+    setHasLoadedTotalCount(false);
     const controller = new AbortController();
     abortRef.current = controller;
     void loadSpools(controller.signal);
     return () => { controller.abort(); };
   }, [loadSpools]);
+
+  useEffect(() => {
+    if (currentPage < 0) {
+      setMany({ page: 0 });
+      return;
+    }
+    if (hasLoadedTotalCount && currentPage !== clampedPage) {
+      setMany({ page: clampedPage });
+    }
+  }, [clampedPage, currentPage, hasLoadedTotalCount, setMany]);
 
   const reload = () => {
     setLoading(true);
@@ -394,8 +412,6 @@ export function SpoolsTab() {
       return next;
     });
   };
-
-  const totalPages = filters.pageSize > 0 ? Math.max(1, Math.ceil(totalCount / filters.pageSize)) : 1;
 
   // In server-paged mode color filter only covers the current page, which is misleading.
   // Disable and auto-clear it when multiple pages exist.
@@ -678,7 +694,7 @@ export function SpoolsTab() {
           <Button
             variant="primary"
             size="sm"
-            onClick={loadSpools}
+            onClick={reload}
             disabled={!spoolmanBaseUrl}
             aria-label="Refresh spools"
             title="Refresh spools"
@@ -857,7 +873,7 @@ export function SpoolsTab() {
                     // showEmpty=false filters client-side; show actual displayed vs page count
                     ? !filters.showEmpty && displayedSpools.length < spools.length
                       ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
-                      : `${currentPage * filters.pageSize + 1}–${Math.min((currentPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
+                      : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
                     : '0 results'}
                 </span>
 
@@ -866,19 +882,19 @@ export function SpoolsTab() {
                   <Button
                     size="sm"
                     variant="subtle"
-                    disabled={currentPage === 0}
-                    onClick={() => setMany({ page: Math.max(0, currentPage - 1) })}
+                    disabled={clampedPage === 0}
+                    onClick={() => setMany({ page: Math.max(0, clampedPage - 1) })}
                     aria-label="Previous page"
                     iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
                   />
                   <span className="text-xs text-pf-text-secondary px-1">
-                    Page {currentPage + 1} of {totalPages}
+                    Page {clampedPage + 1} of {totalPages}
                   </span>
                   <Button
                     size="sm"
                     variant="subtle"
-                    disabled={currentPage >= totalPages - 1}
-                    onClick={() => setMany({ page: Math.min(totalPages - 1, currentPage + 1) })}
+                    disabled={clampedPage >= totalPages - 1}
+                    onClick={() => setMany({ page: Math.min(totalPages - 1, clampedPage + 1) })}
                     aria-label="Next page"
                     iconLeft={<ArrowRightIcon className="h-3 w-3" />}
                   />
