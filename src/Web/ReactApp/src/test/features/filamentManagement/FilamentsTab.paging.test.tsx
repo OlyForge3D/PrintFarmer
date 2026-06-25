@@ -336,6 +336,65 @@ describe('FilamentsTab — stale-response guard', () => {
     });
   });
 
+  it('ignores aborted (stale) responses — newer state is not overwritten', async () => {
+    /**
+     * Flow:
+     *  1. Initial render → first fetch (pending, would resolve with totalCount=999)
+     *  2. Search filter changes + rerender → useEffect re-runs, aborts first controller,
+     *     starts second fetch which resolves immediately with totalCount=42.
+     *  3. First (stale) fetch resolves → signal.aborted=true → setState skipped.
+     *  4. UI must show 42, never 999.
+     */
+    let resolveStale!: (v: { items: ReturnType<typeof makeFilament>[]; totalCount: number }) => void;
+    let firstSignal: AbortSignal | undefined;
+
+    let callCount = 0;
+    mockGetFilamentsPaged.mockImplementation(
+      ({ signal }: { signal?: AbortSignal }) => {
+        callCount++;
+        if (callCount === 1) {
+          firstSignal = signal;
+          // Return a pending promise so we can resolve it after abort
+          return new Promise<{ items: ReturnType<typeof makeFilament>[]; totalCount: number }>(res => {
+            resolveStale = res;
+          });
+        }
+        // Second call: fresh result, resolves immediately
+        return Promise.resolve({ items: [makeFilament(1, 'Fresh')], totalCount: 42 });
+      },
+    );
+
+    localStorage.setItem('filaments-page-size', '50');
+    const { rerender } = render(<FilamentsTab />);
+
+    // Wait until the first call is registered and the signal is captured
+    await waitFor(() => expect(firstSignal).toBeDefined());
+
+    // Change search so loadFilaments gets a new reference → useEffect re-runs
+    filterState.search = 'trigger-refetch';
+
+    await act(async () => {
+      rerender(<FilamentsTab />);
+      // Allow microtasks (second fetch) to settle
+      await Promise.resolve();
+    });
+
+    // First signal should now be aborted by the cleanup
+    expect(firstSignal!.aborted).toBe(true);
+
+    // Resolve the stale first call — the guard should discard it
+    await act(async () => {
+      resolveStale({ items: [makeFilament(2, 'Stale')], totalCount: 999 });
+      await Promise.resolve();
+    });
+
+    // UI shows the fresh result
+    await waitFor(() => screen.getByText(/filaments \(42\)/i));
+    expect(screen.queryByText(/filaments \(999\)/i)).not.toBeInTheDocument();
+
+    // Cleanup
+    filterState.search = '';
+  });
 });
 
 // ── new suites ────────────────────────────────────────────────────────────────
@@ -401,71 +460,11 @@ describe('FilamentsTab — page value sanitization', () => {
     await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
     await act(async () => { await Promise.resolve(); });
 
-    // page=1, totalPages=3 → no clamping needed
+    // page=1, totalPages=3 → no clamping needed; any setMany calls should keep page=1
     const pageCalls = (filterState.setMany as ReturnType<typeof vi.fn>).mock.calls.filter(
       (c: unknown[]) => (c[0] as Record<string, unknown>)?.page !== undefined
     );
     expect(pageCalls.every((c: unknown[]) => (c[0] as Record<string, unknown>).page === 1)).toBe(true);
-  });
-
-  it('ignores aborted (stale) responses — newer state is not overwritten', async () => {
-    /**
-     * Flow:
-     *  1. Initial render → first fetch (pending, would resolve with totalCount=999)
-     *  2. Search filter changes + rerender → useEffect re-runs, aborts first controller,
-     *     starts second fetch which resolves immediately with totalCount=42.
-     *  3. First (stale) fetch resolves → signal.aborted=true → setState skipped.
-     *  4. UI must show 42, never 999.
-     */
-    let resolveStale!: (v: { items: ReturnType<typeof makeFilament>[]; totalCount: number }) => void;
-    let firstSignal: AbortSignal | undefined;
-
-    let callCount = 0;
-    mockGetFilamentsPaged.mockImplementation(
-      ({ signal }: { signal?: AbortSignal }) => {
-        callCount++;
-        if (callCount === 1) {
-          firstSignal = signal;
-          // Return a pending promise so we can resolve it after abort
-          return new Promise<{ items: ReturnType<typeof makeFilament>[]; totalCount: number }>(res => {
-            resolveStale = res;
-          });
-        }
-        // Second call: fresh result, resolves immediately
-        return Promise.resolve({ items: [makeFilament(1, 'Fresh')], totalCount: 42 });
-      },
-    );
-
-    localStorage.setItem('filaments-page-size', '50');
-    const { rerender } = render(<FilamentsTab />);
-
-    // Wait until the first call is registered and the signal is captured
-    await waitFor(() => expect(firstSignal).toBeDefined());
-
-    // Change search so loadFilaments gets a new reference → useEffect re-runs
-    filterState.search = 'trigger-refetch';
-
-    await act(async () => {
-      rerender(<FilamentsTab />);
-      // Allow microtasks (second fetch) to settle
-      await Promise.resolve();
-    });
-
-    // First signal should now be aborted by the cleanup
-    expect(firstSignal!.aborted).toBe(true);
-
-    // Resolve the stale first call — the guard should discard it
-    await act(async () => {
-      resolveStale({ items: [makeFilament(2, 'Stale')], totalCount: 999 });
-      await Promise.resolve();
-    });
-
-    // UI shows the fresh result
-    await waitFor(() => screen.getByText(/filaments \(42\)/i));
-    expect(screen.queryByText(/filaments \(999\)/i)).not.toBeInTheDocument();
-
-    // Cleanup
-    filterState.search = '';
   });
 });
 

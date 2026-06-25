@@ -635,4 +635,58 @@ describe("ApiClient", () => {
       expect(result.items).toEqual(serverItems);
       expect(result.totalCount).toBe(0);
     });
+
+    it("passes AbortSignal through to the HTTP call", async () => {
+      const controller = new AbortController();
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({ signal: controller.signal });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/spoolman/spools",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
+    it("sends filter params as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({
+        limit: 25,
+        offset: 50,
+        sort: "remaining_weight:desc",
+        search: "bambu",
+        material: "PLA",
+        vendor: "Bambu",
+        location: "Box 1",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/spools", {
+        params: {
+          limit: 25,
+          offset: 50,
+          sort: "remaining_weight:desc",
+          search: "bambu",
+          material: "PLA",
+          vendor: "Bambu",
+          location: "Box 1",
+        },
+        signal: undefined,
+      });
+    });
+
+    it("omits zero offset from query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({ limit: 50, offset: 0 });
+
+      const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
+      expect(callArgs?.params?.offset).toBeUndefined();
+    });
   });
+});
