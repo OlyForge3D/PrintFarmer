@@ -95,25 +95,27 @@ describe('SlicerSettingsPanel — infill', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 40 }));
   });
 
-  it('renders infill pattern dropdown', () => {
+  it('renders the infill pattern trigger with the selected icon and label', () => {
     renderPanel({ infillPattern: 'grid' });
-    const select = screen.getByLabelText(/infill pattern/i) as HTMLSelectElement;
-    expect(select.value).toBe('grid');
+    const trigger = screen.getByRole('button', { name: /infill pattern grid/i });
+    expect(trigger).toHaveTextContent('Grid');
+    expect(trigger.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_grid.svg');
   });
 
-  it('renders all INFILL_PATTERNS as options', () => {
-    renderPanel();
-    const select = screen.getByLabelText(/infill pattern/i) as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
-    expect(options).toContain('grid');
-    expect(options).toContain('gyroid');
-    expect(options).toContain('cubic');
-    expect(options).toContain('honeycomb');
+  it('opens a menu with icon-backed infill pattern choices', () => {
+    renderPanel({ infillPattern: 'grid' });
+    fireEvent.click(screen.getByRole('button', { name: /infill pattern grid/i }));
+
+    const options = screen.getAllByRole('menuitemradio');
+    expect(options).toHaveLength(4);
+    const gyroid = screen.getByRole('menuitemradio', { name: /gyroid/i });
+    expect(gyroid.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
   });
 
-  it('calls onSettingsChange with updated infillPattern', () => {
+  it('calls onSettingsChange with updated infillPattern when a menu item is selected', () => {
     const { onChange } = renderPanel({ infillPattern: 'grid' });
-    fireEvent.change(screen.getByLabelText(/infill pattern/i), { target: { value: 'gyroid' } });
+    fireEvent.click(screen.getByRole('button', { name: /infill pattern grid/i }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /gyroid/i }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
   });
 });
@@ -134,6 +136,7 @@ describe('SlicerSettingsPanel — supports', () => {
     renderPanel({ supportEnabled: true, supportType: 'tree(auto)' });
     const select = screen.getByLabelText(/support type/i) as HTMLSelectElement;
     expect(select.value).toBe('tree(auto)');
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(['Normal', 'Tree']);
   });
 
   it('calls onSettingsChange with updated supportType', () => {

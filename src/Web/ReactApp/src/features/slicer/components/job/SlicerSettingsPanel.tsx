@@ -1,6 +1,7 @@
-import React, { useId } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Checkbox, Select } from '@/common/components/ui';
 import { INFILL_PATTERNS } from '@/features/slicer/components/settings/metadataTypes';
+import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
 
 export interface SlicerSettings {
   layerHeight: number;
@@ -37,13 +38,145 @@ const BED_ADHESION_OPTIONS: { value: SlicerSettings['bedAdhesionType']; label: s
 ];
 
 const SUPPORT_TYPE_OPTIONS = [
-  { value: 'normal(auto)', label: 'Normal (auto)' },
-  { value: 'tree(auto)', label: 'Tree (auto)' },
-  { value: 'normal(manual)', label: 'Normal (manual)' },
-  { value: 'tree(manual)', label: 'Tree (manual)' },
+  { value: 'normal(auto)', label: 'Normal' },
+  { value: 'tree(auto)', label: 'Tree' },
 ];
 
 const DEFAULT_INFILL_PATTERN = 'grid';
+
+function PatternIcon({ value, className }: { value: string; className?: string }) {
+  return (
+    <img
+      src={`/icons/orca/param_${value}.svg`}
+      width={18}
+      height={18}
+      alt=""
+      aria-hidden="true"
+      className={className}
+    />
+  );
+}
+
+function InfillPatternDropdown({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (pattern: string) => void;
+}) {
+  const dropdownId = useId();
+  const menuId = `${dropdownId}-menu`;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+
+  const selectedPattern = useMemo(
+    () => INFILL_PATTERNS.find((pattern) => pattern.value === (value || DEFAULT_INFILL_PATTERN)) ?? INFILL_PATTERNS[0],
+    [value]
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && (buttonRef.current?.contains(target) || menuRef.current?.contains(target))) {
+        return;
+      }
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-label={`Infill pattern ${selectedPattern.label}`}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-controls={menuId}
+      >
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0">
+          <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium uppercase tracking-wide text-pf-text-muted">Pattern</span>
+          <span className="block truncate text-base font-medium text-pf-text-primary">{selectedPattern.label}</span>
+        </span>
+        <ChevronDownIcon className="h-5 w-5 shrink-0 text-pf-text-muted" ariaLabel="Open infill pattern menu" />
+      </button>
+
+      {isOpen && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="Infill pattern options"
+          className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0 p-2 shadow-2xl shadow-black/30"
+        >
+          {INFILL_PATTERNS.map((pattern) => {
+            const active = pattern.value === selectedPattern.value;
+            return (
+              <button
+                key={pattern.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                className={[
+                  'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors',
+                  active
+                    ? 'bg-pf-accent-bg/30 text-pf-text-primary'
+                    : 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
+                ].join(' ')}
+                onClick={() => {
+                  onChange(pattern.value);
+                  setIsOpen(false);
+                  buttonRef.current?.focus();
+                }}
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-pf-border bg-pf-bg-1">
+                  <PatternIcon value={pattern.value} className="h-[1.1rem] w-[1.1rem]" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{pattern.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BedAdhesionIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <rect x="5" y="8" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5 16h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M7 5.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M10 4.5v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M13 4v6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M16 5v5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 /**
  * Slicer settings panel for Simple mode.
@@ -57,9 +190,6 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   className,
 }) => {
   const bedAdhesionGroupName = useId();
-  const selectedPattern = INFILL_PATTERNS.find(
-    (p) => p.value === (settings.infillPattern || DEFAULT_INFILL_PATTERN)
-  );
   const updateSetting = <K extends keyof SlicerSettings>(key: K, value: SlicerSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
   };
@@ -182,37 +312,12 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         </div>
 
         {/* Infill Pattern dropdown with OrcaSlicer icons */}
-        <div>
-          <label htmlFor="simple-infill-pattern" className="block text-xs text-pf-text-muted mb-1">
-            Pattern
-          </label>
-          <select
-            id="simple-infill-pattern"
-            className="w-full px-2 py-1.5 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
+        <div className="space-y-1.5">
+          <span className="block text-xs text-pf-text-muted">Pattern</span>
+          <InfillPatternDropdown
             value={settings.infillPattern || DEFAULT_INFILL_PATTERN}
-            onChange={(e) => updateSetting('infillPattern', e.target.value)}
-            aria-label="Infill pattern"
-          >
-            {INFILL_PATTERNS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-          {/* Icon + label preview of the selected pattern */}
-          {selectedPattern && (
-            <div className="mt-1.5 flex items-center gap-2 px-2 py-1 bg-pf-bg-2 rounded border border-pf-border">
-              <img
-                src={`/icons/orca/param_${selectedPattern.value}.svg`}
-                width={18}
-                height={18}
-                alt=""
-                aria-hidden="true"
-                className="shrink-0"
-              />
-              <span className="text-xs text-pf-text-secondary">{selectedPattern.label}</span>
-            </div>
-          )}
+            onChange={(pattern) => updateSetting('infillPattern', pattern)}
+          />
         </div>
       </div>
 
@@ -251,22 +356,28 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       </div>
 
       {/* ── Bed Adhesion — radio buttons ── */}
-      <div className="space-y-2">
-        <span className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
-          Bed Adhesion
-        </span>
-        <div className="flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label="Bed adhesion type">
+      <div className="space-y-3 rounded-2xl border border-pf-border bg-pf-bg-1/40 p-4">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0 text-pf-accent">
+            <BedAdhesionIcon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h4 className="text-lg font-semibold text-pf-text-primary">Bed Adhesion</h4>
+            <p className="mt-1 text-sm text-pf-text-secondary">Choose between skirt or brim for better print adhesion</p>
+          </div>
+        </div>
+        <div className="space-y-4 pl-1" role="radiogroup" aria-label="Bed adhesion type">
           {BED_ADHESION_OPTIONS.map((opt) => (
-            <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer text-sm text-pf-text-primary">
+            <label key={opt.value} className="flex cursor-pointer items-center gap-3 text-lg text-pf-text-primary">
               <input
                 type="radio"
                 name={bedAdhesionGroupName}
                 value={opt.value}
                 checked={settings.bedAdhesionType === opt.value}
                 onChange={() => updateSetting('bedAdhesionType', opt.value)}
-                className="accent-pf-accent"
+                className="h-7 w-7 accent-pf-accent"
               />
-              {opt.label}
+              <span className="text-[1.35rem] leading-none">{opt.label}</span>
             </label>
           ))}
         </div>

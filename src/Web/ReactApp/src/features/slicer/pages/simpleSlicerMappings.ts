@@ -31,7 +31,10 @@ export function orcaToSimpleSettings(orca: OrcaProcessSettings): SlicerSettings 
     bottomShellLayers: typeof orca.bottom_shell_layers === 'number' ? orca.bottom_shell_layers : 3,
     wallLoops: typeof orca.wall_loops === 'number' ? orca.wall_loops : 2,
     supportEnabled: orca.enable_support === true,
-    supportType: typeof orca.support_type === 'string' ? orca.support_type : 'normal(auto)',
+    supportType:
+      typeof orca.support_type === 'string' && orca.support_type.startsWith('tree')
+        ? 'tree(auto)'
+        : 'normal(auto)',
     bedAdhesionType,
   };
 }
