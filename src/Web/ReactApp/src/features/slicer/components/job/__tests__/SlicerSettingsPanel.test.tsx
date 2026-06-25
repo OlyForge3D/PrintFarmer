@@ -158,6 +158,9 @@ describe('SlicerSettingsPanel — infill', () => {
 
     fireEvent.keyDown(trigger, { key: 'Enter' });
     expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+    fireEvent.click(trigger, { detail: 0 });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
   });
 });
 
