@@ -451,17 +451,65 @@ public class SpoolmanController(
     }
 
     /// <summary>
-    /// Gets all filament types (product definitions) from the connected Spoolman server.
+    /// Gets a paginated, filtered, and sorted list of filament types (product definitions) from the connected Spoolman server.
     /// Filaments represent the product class (e.g., "PolyTerra PLA Charcoal Black"),
     /// while spools represent physical instances.
     /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>List of all filament types from Spoolman</returns>
-    /// <response code="200">Returns the list of filament types</response>
+    /// <param name="limit">Maximum number of filaments per page.</param>
+    /// <param name="offset">Offset into the full result set.</param>
+    /// <param name="sort">Sort expression, e.g. "name:asc".</param>
+    /// <param name="search">Partial search term applied to filament name.</param>
+    /// <param name="material">Filter by filament material.</param>
+    /// <param name="vendor">Filter by vendor name.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Paginated result containing filaments and total count.</returns>
+    /// <response code="200">Returns the paginated list of filament types from Spoolman</response>
+    /// <response code="400">If query parameters are invalid</response>
     [HttpGet("filaments")]
-    [ProducesResponseType(typeof(IEnumerable<SpoolmanFilamentDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<SpoolmanFilamentDto>>> GetFilamentsAsync(CancellationToken ct)
-        => Ok(await spoolman.ListFilamentsAsync(ct));
+    [ProducesResponseType(typeof(SpoolmanPagedResult<SpoolmanFilamentDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanPagedResult<SpoolmanFilamentDto>>> GetFilamentsAsync(
+        [FromQuery] int? limit,
+        [FromQuery] int? offset,
+        [FromQuery] string? sort,
+        [FromQuery] string? search,
+        [FromQuery] string? material,
+        [FromQuery] string? vendor,
+        CancellationToken ct)
+    {
+        if (limit.HasValue && (limit.Value < 1 || limit.Value > 500))
+        {
+            return BadRequest(new { message = "limit must be between 1 and 500." });
+        }
+
+        if (offset.HasValue && offset.Value < 0)
+        {
+            return BadRequest(new { message = "offset must be non-negative." });
+        }
+
+        SpoolmanFilamentQueryParams queryParams = new()
+        {
+            Limit = limit,
+            Offset = offset,
+            Sort = sort,
+            Search = search,
+            Material = material,
+            Vendor = vendor,
+        };
+
+        return Ok(await spoolman.ListFilamentsPagedAsync(queryParams, ct));
+    }
+
+    /// <summary>
+    /// Returns distinct material and vendor values across all filament types.
+    /// Used to populate filter dropdowns on the Filaments tab without relying on paginated data.
+    /// </summary>
+    [HttpGet("filaments/filter-options")]
+    [ProducesResponseType(typeof(FilamentFilterOptionsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<FilamentFilterOptionsDto>> GetFilamentFilterOptionsAsync(CancellationToken ct)
+    {
+        return Ok(await spoolman.GetFilamentFilterOptionsAsync(ct));
+    }
 
     /// <summary>
     /// Gets all vendors from the connected Spoolman server.

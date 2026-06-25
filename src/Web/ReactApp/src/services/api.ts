@@ -85,6 +85,7 @@ import {
   BulkImportResponse,
   SpoolmanSpool,
   SpoolFilterOptions,
+  FilamentFilterOptions,
   SpoolmanFilament,
   SpoolmanVendor,
   SpoolmanMaterial,
@@ -3208,6 +3209,7 @@ export class ApiClient {
     vendor?: string;
     location?: string;
     allowArchived?: boolean;
+    signal?: AbortSignal;
   }): Promise<{ items: SpoolmanSpool[]; totalCount: number }> {
     const queryParams: Record<string, string | number | boolean> = {};
     if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
@@ -3221,6 +3223,7 @@ export class ApiClient {
 
     const response = await this.client.get('/spoolman/spools', {
       params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
     });
     const data = response.data;
 
@@ -3235,7 +3238,8 @@ export class ApiClient {
 
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
-    return { items, totalCount: items.length };
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
   }
 
   /**
@@ -3254,6 +3258,56 @@ export class ApiClient {
     const response = await this.client.get('/spoolman/filaments');
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanFilament[] || [];
+  }
+
+  /**
+   * Get paginated filament types/products from Spoolman with server-side filtering and sorting.
+   */
+  async getFilamentsPaged(params?: {
+    limit?: number;
+    offset?: number;
+    sort?: string;
+    search?: string;
+    material?: string;
+    vendor?: string;
+    signal?: AbortSignal;
+  }): Promise<{ items: SpoolmanFilament[]; totalCount: number }> {
+    const queryParams: Record<string, string | number> = {};
+    if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
+    if (params?.offset && params.offset > 0) queryParams.offset = params.offset;
+    if (params?.sort) queryParams.sort = params.sort;
+    if (params?.search) queryParams.search = params.search;
+    if (params?.material) queryParams.material = params.material;
+    if (params?.vendor) queryParams.vendor = params.vendor;
+
+    const response = await this.client.get('/spoolman/filaments', {
+      params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
+    });
+    const data = response.data;
+
+    // Handle paginated response format { items, totalCount }
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'items' in data) {
+      const result = data as { items: SpoolmanFilament[]; totalCount: number };
+      return {
+        items: Array.isArray(result.items) ? result.items : [],
+        totalCount: typeof result.totalCount === 'number' ? result.totalCount : 0,
+      };
+    }
+
+    // Fallback for plain array response (backward compatibility)
+    const items = Array.isArray(data) ? (data as SpoolmanFilament[]) : [];
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
+  }
+
+  /**
+   * Get distinct material and vendor values across all filament types.
+   * Used to populate filter dropdowns on the Filaments tab.
+   */
+  async getFilamentFilterOptions(): Promise<FilamentFilterOptions> {
+    const response = await this.client.get<FilamentFilterOptions>('/spoolman/filaments/filter-options');
+    return response.data;
   }
 
   /**

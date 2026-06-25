@@ -338,4 +338,126 @@ public class SpoolmanControllerTests
         // Assert
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
     }
+
+    // -------------------------------------------------------------------------
+    // GetFilamentsAsync (paged) tests
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetFilamentsAsync_WithNoParams_ReturnsPagedResult()
+    {
+        // Arrange
+        var filaments = new List<SpoolmanFilamentDto>
+        {
+            new(Id: 1, Name: "PolyTerra PLA Charcoal Black", Material: "PLA", ColorHex: "1B1B1B",
+                Vendor: "Polymaker", Density: 1.24, Diameter: 1.75, Weight: 1000, SpoolWeight: null,
+                Price: null, SettingsExtruderTemp: 200, SettingsBedTemp: 60,
+                ArticleNumber: null, Comment: null, MultiColorHexes: null, ExternalId: null),
+            new(Id: 2, Name: "PolyTerra PETG Clear", Material: "PETG", ColorHex: "FFFFFF",
+                Vendor: "Polymaker", Density: 1.27, Diameter: 1.75, Weight: 1000, SpoolWeight: null,
+                Price: null, SettingsExtruderTemp: 230, SettingsBedTemp: 70,
+                ArticleNumber: null, Comment: null, MultiColorHexes: null, ExternalId: null),
+        };
+
+        _spoolmanServiceMock
+            .Setup(s => s.ListFilamentsPagedAsync(It.IsAny<SpoolmanFilamentQueryParams>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanFilamentDto>(filaments, 2));
+
+        // Act
+        ActionResult<SpoolmanPagedResult<SpoolmanFilamentDto>> result =
+            await _controller.GetFilamentsAsync(null, null, null, null, null, null, CancellationToken.None);
+
+        // Assert
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        SpoolmanPagedResult<SpoolmanFilamentDto> pagedResult = Assert.IsType<SpoolmanPagedResult<SpoolmanFilamentDto>>(ok.Value);
+        Assert.Equal(2, pagedResult.TotalCount);
+        Assert.Equal(2, pagedResult.Items.Count);
+    }
+
+    [Fact]
+    public async Task GetFilamentsAsync_CallsServiceWithQueryParams()
+    {
+        // Arrange
+        _spoolmanServiceMock
+            .Setup(s => s.ListFilamentsPagedAsync(It.IsAny<SpoolmanFilamentQueryParams>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0));
+
+        // Act
+        await _controller.GetFilamentsAsync(
+            limit: 10, offset: 20, sort: "name:asc", search: "PLA",
+            material: "PLA", vendor: "Polymaker", CancellationToken.None);
+
+        // Assert
+        _spoolmanServiceMock.Verify(
+            s => s.ListFilamentsPagedAsync(
+                It.Is<SpoolmanFilamentQueryParams>(p =>
+                    p.Limit == 10 &&
+                    p.Offset == 20 &&
+                    p.Sort == "name:asc" &&
+                    p.Search == "PLA" &&
+                    p.Material == "PLA" &&
+                    p.Vendor == "Polymaker"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetFilamentsAsync_WithInvalidLimit_ReturnsBadRequest()
+    {
+        // Act
+        ActionResult<SpoolmanPagedResult<SpoolmanFilamentDto>> result =
+            await _controller.GetFilamentsAsync(limit: 0, null, null, null, null, null, CancellationToken.None);
+
+        // Assert
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(bad.Value);
+    }
+
+    [Fact]
+    public async Task GetFilamentsAsync_WithLimitOverMax_ReturnsBadRequest()
+    {
+        // Act
+        ActionResult<SpoolmanPagedResult<SpoolmanFilamentDto>> result =
+            await _controller.GetFilamentsAsync(limit: 501, null, null, null, null, null, CancellationToken.None);
+
+        // Assert
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(bad.Value);
+    }
+
+    [Fact]
+    public async Task GetFilamentsAsync_WithNegativeOffset_ReturnsBadRequest()
+    {
+        // Arrange
+        _spoolmanServiceMock
+            .Setup(s => s.ListFilamentsPagedAsync(It.IsAny<SpoolmanFilamentQueryParams>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0));
+
+        // Act
+        ActionResult<SpoolmanPagedResult<SpoolmanFilamentDto>> result =
+            await _controller.GetFilamentsAsync(null, offset: -1, null, null, null, null, CancellationToken.None);
+
+        // Assert
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(bad.Value);
+    }
+
+    [Fact]
+    public async Task GetFilamentsAsync_ReturnsEmptyPagedResultWhenSpoolmanNotConfigured()
+    {
+        // Arrange
+        _spoolmanServiceMock
+            .Setup(s => s.ListFilamentsPagedAsync(It.IsAny<SpoolmanFilamentQueryParams>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanFilamentDto>([], 0));
+
+        // Act
+        ActionResult<SpoolmanPagedResult<SpoolmanFilamentDto>> result =
+            await _controller.GetFilamentsAsync(null, null, null, null, null, null, CancellationToken.None);
+
+        // Assert
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        SpoolmanPagedResult<SpoolmanFilamentDto> pagedResult = Assert.IsType<SpoolmanPagedResult<SpoolmanFilamentDto>>(ok.Value);
+        Assert.Equal(0, pagedResult.TotalCount);
+        Assert.Empty(pagedResult.Items);
+    }
 }

@@ -486,4 +486,229 @@ describe("ApiClient", () => {
       });
     });
   });
+
+  describe("getFilamentsPaged", () => {
+    it("sends limit and offset as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({ limit: 50, offset: 100 });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/filaments", {
+        params: { limit: 50, offset: 100 },
+        signal: undefined,
+      });
+    });
+
+    it("sends sort, search, material, and vendor as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({
+        sort: "name:asc",
+        search: "PLA",
+        material: "PLA",
+        vendor: "Bambu",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/filaments", {
+        params: { sort: "name:asc", search: "PLA", material: "PLA", vendor: "Bambu" },
+        signal: undefined,
+      });
+    });
+
+    it("returns items and totalCount from paginated server response", async () => {
+      const serverItems = [
+        { id: 1, name: "PLA Basic White", material: "PLA", vendor: "Bambu" },
+        { id: 2, name: "PLA Basic Black", material: "PLA", vendor: "Bambu" },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: serverItems, totalCount: 250 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged({ limit: 2, offset: 0 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(250);
+    });
+
+    it("falls back to plain array response for backward compatibility", async () => {
+      const serverItems = [
+        { id: 1, name: "PETG Transparent", material: "PETG" },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(1);
+    });
+
+    it("uses offset-aware totalCount fallback for plain array responses", async () => {
+      const serverItems = [{ id: 1, name: "PETG Transparent", material: "PETG" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged({ offset: 100 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(101);
+    });
+
+    it("passes AbortSignal through to the HTTP call", async () => {
+      const controller = new AbortController();
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({ signal: controller.signal });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/spoolman/filaments",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
+    it("omits zero offset from query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({ limit: 50, offset: 0 });
+
+      const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
+      expect(callArgs?.params?.offset).toBeUndefined();
+    });
+
+    it("returns totalCount 0 when paginated response omits totalCount field", async () => {
+      // Simulates a server that returns { items: [...] } without totalCount
+      const serverItems = [{ id: 1, name: "PLA" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: serverItems } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual(serverItems);
+      // totalCount should fall back to 0 (not crash) when field is missing
+      expect(result.totalCount).toBe(0);
+    });
+
+    it("returns empty items array when paginated response items field is not an array", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: null, totalCount: 5 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual([]);
+      expect(result.totalCount).toBe(5);
+    });
+  });
+
+  describe("getSpools", () => {
+    it("falls back to plain array response for backward compatibility", async () => {
+      const serverItems = [
+        { id: 1, name: "Spool A", material: "PLA", remainingWeightG: 800 },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools();
+
+      expect(result.items).toEqual(serverItems);
+      // totalCount falls back to array length for legacy responses
+      expect(result.totalCount).toBe(1);
+    });
+
+    it("uses offset-aware totalCount fallback for plain array responses", async () => {
+      const serverItems = [{ id: 1, name: "Spool A", material: "PLA", remainingWeightG: 800 }];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools({ offset: 50 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(51);
+    });
+
+    it("returns items and totalCount from paginated server response", async () => {
+      const serverItems = [{ id: 1, name: "Spool A", material: "PLA" }];
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: serverItems, totalCount: 99 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools({ limit: 1 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(99);
+    });
+
+    it("returns totalCount 0 when paginated response omits totalCount field", async () => {
+      const serverItems = [{ id: 2, name: "Spool B" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: serverItems } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools();
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(0);
+    });
+
+    it("passes AbortSignal through to the HTTP call", async () => {
+      const controller = new AbortController();
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({ signal: controller.signal });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/spoolman/spools",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
+    it("sends filter params as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({
+        limit: 25,
+        offset: 50,
+        sort: "remaining_weight:desc",
+        search: "bambu",
+        material: "PLA",
+        vendor: "Bambu",
+        location: "Box 1",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/spools", {
+        params: {
+          limit: 25,
+          offset: 50,
+          sort: "remaining_weight:desc",
+          search: "bambu",
+          material: "PLA",
+          vendor: "Bambu",
+          location: "Box 1",
+        },
+        signal: undefined,
+      });
+    });
+
+    it("omits zero offset from query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({ limit: 50, offset: 0 });
+
+      const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
+      expect(callArgs?.params?.offset).toBeUndefined();
+    });
+  });
 });

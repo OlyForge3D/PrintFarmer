@@ -1,4 +1,4 @@
-import { useState, useEffect, useTransition, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
@@ -68,12 +68,13 @@ const SORT_FIELD_MAP: Record<string, string> = {
 export function SpoolsTab() {
   const [spools, setSpools] = useState<SpoolmanSpoolDto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [hasLoadedTotalCount, setHasLoadedTotalCount] = useState(false);
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const importCsvMutation = useImportSpoolmanSpoolsCsv();
-  const [,startTransition] = useTransition();
+  const abortRef = useRef<AbortController | null>(null);
 
   const {
     search: urlSearch,
@@ -103,7 +104,7 @@ export function SpoolsTab() {
     page: { key: 'page', type: 'number', defaultValue: 0, filterable: false },
   });
 
-  const currentPage = urlPage as number;
+  const currentPage = Number.isFinite(urlPage as number) ? Math.trunc(urlPage as number) : 0;
   const filters: FilterState = {
     search: urlSearch,
     material: urlMaterial,
@@ -292,61 +293,71 @@ export function SpoolsTab() {
     resetAll();
   };
 
-  const loadSpools = useCallback(async () => {
-    startTransition(async () => {
-      try {
-        setSpoolmanError(null);
+  const totalPages = filters.pageSize > 0 ? Math.max(1, Math.ceil(totalCount / filters.pageSize)) : 1;
+  const clampedPage = hasLoadedTotalCount
+    ? Math.max(0, Math.min(currentPage, totalPages - 1))
+    : Math.max(0, currentPage);
 
-        // Build server-side sort expression
-        const spoolmanSortField = SORT_FIELD_MAP[sortField];
-        const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
+  const loadSpools = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setSpoolmanError(null);
 
-        const result = await apiClient.getSpools({
-          limit: filters.pageSize,
-          offset: currentPage * filters.pageSize,
-          sort,
-          search: filters.search || undefined,
-          material: filters.material || undefined,
-          vendor: filters.vendor || undefined,
-          location: filters.location || undefined,
-          allowArchived: filters.showEmpty ? true : undefined,
-        });
+      // Build server-side sort expression
+      const spoolmanSortField = SORT_FIELD_MAP[sortField];
+      const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
+      // Clamp only the lower bound until server totalCount is known.
+      const requestPage = Math.max(0, currentPage);
 
-        setSpools(result.items);
-        setTotalCount(result.totalCount);
+      const result = await apiClient.getSpools({
+        limit: filters.pageSize,
+        offset: requestPage * filters.pageSize,
+        sort,
+        search: filters.search || undefined,
+        material: filters.material || undefined,
+        vendor: filters.vendor || undefined,
+        location: filters.location || undefined,
+        // showEmpty is handled client-side in displayedSpools; do NOT map to allowArchived
+        signal,
+      });
 
-        // Accumulate filter dropdown options from returned data
-        setMaterialOptions(prev => {
-          const combined = new Set(prev);
-          for (const s of result.items) {
-            if (s.material) combined.add(s.material);
-          }
-          return [...combined].sort();
-        });
-        setVendorOptions(prev => {
-          const combined = new Set(prev);
-          for (const s of result.items) {
-            if (s.vendor) combined.add(s.vendor);
-          }
-          return [...combined].sort();
-        });
-        setLocationOptions(prev => {
-          const combined = new Set(prev);
-          for (const s of result.items) {
-            if (s.location) combined.add(s.location);
-          }
-          return [...combined].sort();
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        setSpoolmanError(`Failed to load spools: ${message}`);
-        setSpools([]);
-        setTotalCount(0);
-      } finally {
-        setLoading(false);
-      }
-    });
-  }, [startTransition, currentPage, filters.pageSize, filters.search, filters.material, filters.vendor, filters.location, filters.showEmpty, sortField, sortDir]);
+      if (signal?.aborted) return;
+
+      setSpools(result.items);
+      setTotalCount(result.totalCount);
+      setHasLoadedTotalCount(true);
+
+      // Accumulate filter dropdown options from returned data
+      setMaterialOptions(prev => {
+        const combined = new Set(prev);
+        for (const s of result.items) {
+          if (s.material) combined.add(s.material);
+        }
+        return [...combined].sort();
+      });
+      setVendorOptions(prev => {
+        const combined = new Set(prev);
+        for (const s of result.items) {
+          if (s.vendor) combined.add(s.vendor);
+        }
+        return [...combined].sort();
+      });
+      setLocationOptions(prev => {
+        const combined = new Set(prev);
+        for (const s of result.items) {
+          if (s.location) combined.add(s.location);
+        }
+        return [...combined].sort();
+      });
+    } catch (err) {
+      if (signal?.aborted) return;
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setSpoolmanError(`Failed to load spools: ${message}`);
+      setSpools([]);
+      setTotalCount(0);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [currentPage, filters.pageSize, filters.search, filters.material, filters.vendor, filters.location, sortField, sortDir]);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -366,13 +377,31 @@ export function SpoolsTab() {
   }, []);
 
   useEffect(() => {
-    void loadSpools();
+    abortRef.current?.abort();
+    setHasLoadedTotalCount(false);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    void loadSpools(controller.signal);
+    return () => { controller.abort(); };
   }, [loadSpools]);
+
+  useEffect(() => {
+    if (currentPage < 0) {
+      setMany({ page: 0 });
+      return;
+    }
+    if (hasLoadedTotalCount && currentPage !== clampedPage) {
+      setMany({ page: clampedPage });
+    }
+  }, [clampedPage, currentPage, hasLoadedTotalCount, setMany]);
 
   const reload = () => {
     setLoading(true);
     setSelectedIds(new Set());
-    loadSpools();
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    void loadSpools(controller.signal);
   };
 
   const toggleSelect = (id: number) => {
@@ -384,11 +413,20 @@ export function SpoolsTab() {
     });
   };
 
-  // Client-side filters that Spoolman doesn't support natively (color family, empty weight)
+  // In server-paged mode color filter only covers the current page, which is misleading.
+  // Disable and auto-clear it when multiple pages exist.
+  const isPaginated = totalPages > 1;
+  useEffect(() => {
+    if (isPaginated && filters.color) setMany({ color: '' });
+  }, [isPaginated, filters.color, setMany]);
+
+  // Client-side filters that Spoolman doesn't support natively (color family, empty weight).
+  // Color is only applied when not in paginated mode to avoid per-page scope confusion.
   const displayedSpools = useMemo((): SpoolmanSpoolDto[] => {
     return spools.filter(spool => {
-      // Color filter is client-side only (Spoolman has no color family concept)
-      if (filters.color && classifyColor(spool.colorHex) !== filters.color) return false;
+      // Color filter is client-side only (Spoolman has no color family concept);
+      // disabled in paginated mode — only safe when all results are on one page.
+      if (!isPaginated && filters.color && classifyColor(spool.colorHex) !== filters.color) return false;
       // showEmpty=false: hide spools with 0 remaining weight (client-side, Spoolman doesn't support this)
       if (!filters.showEmpty) {
         const remaining = typeof spool.remainingWeightG === 'number' ? spool.remainingWeightG : (spool.initialWeightG != null && spool.usedWeightG != null ? (spool.initialWeightG - spool.usedWeightG) : null);
@@ -397,9 +435,7 @@ export function SpoolsTab() {
       }
       return true;
     });
-  }, [spools, filters.color, filters.showEmpty]);
-
-  const totalPages = filters.pageSize > 0 ? Math.max(1, Math.ceil(totalCount / filters.pageSize)) : 1;
+  }, [spools, filters.color, filters.showEmpty, isPaginated]);
   const getColorFamilyOptions = (): string[] => [...new Set(spools.map(s => classifyColor(s.colorHex)))]
     .filter(f => f && f !== 'Unknown')
     .sort();
@@ -658,7 +694,7 @@ export function SpoolsTab() {
           <Button
             variant="primary"
             size="sm"
-            onClick={loadSpools}
+            onClick={reload}
             disabled={!spoolmanBaseUrl}
             aria-label="Refresh spools"
             title="Refresh spools"
@@ -761,13 +797,14 @@ export function SpoolsTab() {
                 </Select>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-pf-text-secondary">Color</label>
+              <div className="flex flex-col gap-1" title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
+                <label className={`text-xs ${isPaginated ? 'text-pf-text-secondary/40' : 'text-pf-text-secondary'}`}>Color</label>
                 <ColorFamilySelect
-                  value={filters.color}
+                  value={isPaginated ? '' : filters.color}
                   onChange={(val) => setMany({ color: val, page: 0 })}
                   options={getColorFamilyOptions()}
-                  placeholder="All Colors"
+                  placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
+                  disabled={isPaginated}
                 />
               </div>
 
@@ -833,7 +870,10 @@ export function SpoolsTab() {
                 </div>
                 <span className="text-pf-text-secondary">
                   {totalCount > 0
-                    ? `${currentPage * filters.pageSize + 1}–${Math.min((currentPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
+                    // showEmpty=false filters client-side; show actual displayed vs page count
+                    ? !filters.showEmpty && displayedSpools.length < spools.length
+                      ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
+                      : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
                     : '0 results'}
                 </span>
 
@@ -842,19 +882,19 @@ export function SpoolsTab() {
                   <Button
                     size="sm"
                     variant="subtle"
-                    disabled={currentPage === 0}
-                    onClick={() => setMany({ page: Math.max(0, currentPage - 1) })}
+                    disabled={clampedPage === 0}
+                    onClick={() => setMany({ page: Math.max(0, clampedPage - 1) })}
                     aria-label="Previous page"
                     iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
                   />
                   <span className="text-xs text-pf-text-secondary px-1">
-                    Page {currentPage + 1} of {totalPages}
+                    Page {clampedPage + 1} of {totalPages}
                   </span>
                   <Button
                     size="sm"
                     variant="subtle"
-                    disabled={currentPage >= totalPages - 1}
-                    onClick={() => setMany({ page: Math.min(totalPages - 1, currentPage + 1) })}
+                    disabled={clampedPage >= totalPages - 1}
+                    onClick={() => setMany({ page: Math.min(totalPages - 1, clampedPage + 1) })}
                     aria-label="Next page"
                     iconLeft={<ArrowRightIcon className="h-3 w-3" />}
                   />
