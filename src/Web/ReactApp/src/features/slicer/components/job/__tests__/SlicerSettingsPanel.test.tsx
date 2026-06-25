@@ -100,6 +100,8 @@ describe('SlicerSettingsPanel — infill', () => {
     const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
     expect(trigger).toBeInTheDocument();
     expect(trigger.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_grid.svg');
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-activedescendant')).toContain('-option-');
   });
 
   it('opens an icon-backed listbox of infill patterns', () => {
@@ -138,6 +140,15 @@ describe('SlicerSettingsPanel — infill', () => {
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
     expect(screen.getByRole('listbox')).toBeInTheDocument();
     fireEvent.keyDown(trigger, { key: 'Tab' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('closes the listbox when the trigger loses focus', () => {
+    renderPanel();
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    fireEvent.click(trigger);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.blur(trigger);
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });

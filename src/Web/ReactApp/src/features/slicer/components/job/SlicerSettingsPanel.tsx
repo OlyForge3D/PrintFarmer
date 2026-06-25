@@ -172,6 +172,7 @@ function InfillPatternDropdown({
         className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
         onClick={() => setIsOpen((current) => !current)}
         onKeyDown={handleKeyDown}
+        onBlur={() => setIsOpen(false)}
       >
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0">
           <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
