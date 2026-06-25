@@ -2,7 +2,6 @@
 
 namespace Farm.Infrastructure.Services;
 
-
 /// <summary>
 /// Exposes farm-wide configuration as a single consolidated DTO.
 /// Farm settings are shared across all users; writes are admin-only.
@@ -30,11 +29,13 @@ public record FarmSettingsDto(
     decimal DefaultMachineHourlyRate,
     decimal AveragePrinterWattage,
     bool CanWrite,
-    SlicerMode SlicerMode);
+    SlicerMode SlicerMode,
+    IReadOnlyList<SlicerMode> EnabledModes);
 
 /// <summary>Payload for PUT /api/settings/farm.</summary>
 public record UpdateFarmSettingsRequest(
     decimal? ElectricityRatePerKwh,
     decimal? DefaultMachineHourlyRate,
     decimal? AveragePrinterWattage,
-    SlicerMode? SlicerMode = null);
+    SlicerMode? SlicerMode = null,
+    IReadOnlyList<SlicerMode>? EnabledModes = null);

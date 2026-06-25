@@ -32,7 +32,7 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
   const hasSliceInfo = slicesRemaining !== undefined && slicesTotal !== undefined;
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-pf-bg-1 border-t border-pf-border">
+    <div className="flex items-center justify-between px-4 py-2 bg-pf-bg-1 border-t border-pf-border shrink-0">
       {/* Left side: Object info and bed dimensions */}
       <div className="flex items-center gap-6 text-sm text-pf-text-secondary">
         <span className="font-medium">

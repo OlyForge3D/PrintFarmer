@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
@@ -52,7 +53,8 @@ public class SettingsController(
             AveragePrinterWattage: dto.AveragePrinterWattage,
             CanWrite: isAdmin,
             RowVersion: rowVersion,
-            SlicerMode: dto.SlicerMode));
+            SlicerMode: dto.SlicerMode,
+            EnabledModes: dto.EnabledModes));
     }
 
     /// <summary>Updates farm-wide settings. Requires farm_admin role.</summary>
@@ -79,6 +81,11 @@ public class SettingsController(
             return BadRequest("averagePrinterWattage must be between 0 and 5000.");
         }
 
+        if (body.EnabledModes is not null && body.EnabledModes.Count == 0)
+        {
+            return BadRequest("At least one slicer mode must be enabled.");
+        }
+
         string? existingRowVersion = _farmSettings.GetFarmSettingsRowVersion();
         string? expectedRowVersion = null;
         if (!string.IsNullOrWhiteSpace(existingRowVersion))
@@ -102,12 +109,17 @@ public class SettingsController(
                     body.ElectricityRatePerKwh,
                     body.DefaultMachineHourlyRate,
                     body.AveragePrinterWattage,
-                    body.SlicerMode),
+                    body.SlicerMode,
+                    body.EnabledModes),
                 expectedRowVersion);
         }
         catch (DbUpdateConcurrencyException)
         {
             return Conflict(new { message = "The farm settings were modified by another request. Please reload and retry." });
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         _logger.LogInformation("Farm settings updated by user {UserId}", GetUserId());
@@ -286,7 +298,8 @@ public record FarmSettingsResponse(
     decimal AveragePrinterWattage,
     bool CanWrite,
     string? RowVersion,
-    SlicerMode SlicerMode = SlicerMode.Simple);
+    SlicerMode SlicerMode = SlicerMode.Simple,
+    IReadOnlyList<SlicerMode>? EnabledModes = null);
 
 /// <summary>Request body for PUT /api/settings/farm.</summary>
 public record UpdateFarmSettingsBody(
@@ -294,7 +307,8 @@ public record UpdateFarmSettingsBody(
     decimal? DefaultMachineHourlyRate,
     decimal? AveragePrinterWattage,
     string? RowVersion = null,
-    SlicerMode? SlicerMode = null);
+    SlicerMode? SlicerMode = null,
+    IReadOnlyList<SlicerMode>? EnabledModes = null);
 
 /// <summary>Response body for user settings endpoints.</summary>
 public record UserSettingsResponse(

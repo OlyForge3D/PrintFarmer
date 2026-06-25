@@ -25,7 +25,6 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
-import { useFarmSettings } from '@/features/settings/hooks/useFarmSettings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
@@ -41,6 +40,7 @@ import { NozzleTypeLabels, NozzleTypeStringLabels } from '@/types/api';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
+import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
 import { SliceProgressOverlay } from '@/features/slicer/components/SliceProgressOverlay';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
 import * as THREE from 'three';
@@ -184,9 +184,7 @@ export const NewSliceJobPage: React.FC = () => {
   } as const;
 
   const { user } = useAuth();
-  const { data: farmSettingsData } = useFarmSettings();
-  const slicerMode = farmSettingsData === undefined ? null : (farmSettingsData.slicerMode ?? 'Simple');
-  const canWrite = farmSettingsData?.canWrite ?? false;
+  const { mode: slicerMode, canToggle: canToggleSlicerMode, setMode: setSlicerMode } = useSlicerMode();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -275,6 +273,7 @@ export const NewSliceJobPage: React.FC = () => {
   const handleSimpleSettingsChange = useCallback((settings: SlicerSettings) => {
     setSlicerSettings((prev) => ({
       ...prev,
+      sparse_infill_density: settings.infillPercent,
       enable_support: settings.supportEnabled,
       brim_type: settings.bedAdhesionType === 'none' ? undefined : settings.bedAdhesionType,
     }));
@@ -1406,6 +1405,12 @@ export const NewSliceJobPage: React.FC = () => {
     return allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId]);
 
+  // Per-kg filament cost from the selected profile, for best-effort material cost.
+  const filamentCostPerKg = useMemo(
+    () => sliceJobService.parseOrcaNumeric(selectedFilamentProfile?.settings?.filament_cost),
+    [selectedFilamentProfile],
+  );
+
   // Hydrate dynamic advanced settings from selected Orca process profile.
   useEffect(() => {
     queueMicrotask(() => {
@@ -1508,7 +1513,7 @@ export const NewSliceJobPage: React.FC = () => {
             overrides: {
               ...slicerSettings,
               ...advancedProcessSettings,
-              ...(selectedBedType ? { curr_bed_type: selectedBedType } : {}),
+              ...(slicerMode === 'Advanced' && selectedBedType ? { curr_bed_type: selectedBedType } : {}),
             },
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
@@ -1546,6 +1551,7 @@ export const NewSliceJobPage: React.FC = () => {
     selectedMachineProfileId,
     selectedProcessPresetId,
     slicerInfo.engine,
+    slicerMode,
     slicerSettings,
     submitMutation,
     user?.id,
@@ -1737,12 +1743,42 @@ export const NewSliceJobPage: React.FC = () => {
   ) : undefined;
 
   return (
-    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-2 pb-2 pt-4 lg:pt-20">
-      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-2 overflow-hidden lg:h-[calc(100dvh-12rem)] lg:flex-row">
+    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-2 pb-2">
+      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-2 overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-row">
         {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden on narrow viewports, toggled via hamburger.
              On lg+ screens: inline beside visualizer unless explicitly toggled off.
              On narrow screens: slides over as fixed-width panel when toggled open. */}
         <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
+
+          {/* PER-USER MODE TOGGLE — only when the admin has enabled both modes */}
+          {canToggleSlicerMode && slicerMode && (
+            <div
+              className="flex items-center gap-1 rounded-lg border border-pf-border bg-pf-panel p-1"
+              role="radiogroup"
+              aria-label="Slicer mode"
+            >
+              {(['Simple', 'Advanced'] as const).map((m) => {
+                const active = slicerMode === m;
+                return (
+                  <Button
+                    key={m}
+                    type="button"
+                    variant="unstyled"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setSlicerMode(m)}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
+                      active
+                        ? 'bg-pf-accent text-pf-bg-1'
+                        : 'text-pf-text-secondary hover:text-pf-text-primary'
+                    }`}
+                  >
+                    {m}
+                  </Button>
+                );
+              })}
+            </div>
+          )}
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
@@ -2306,22 +2342,24 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* BED TYPE OVERRIDE */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-            <label htmlFor="nsj-bed-type" className="block text-sm font-semibold text-pf-text-primary">
-              Bed Type
-            </label>
-            <Select
-              id="nsj-bed-type"
-              value={selectedBedType}
-              onChange={(e) => setSelectedBedType(e.target.value)}
-            >
-              <option value="">Inherit from profile</option>
-              {BED_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </Select>
-          </div>
+          {/* BED TYPE OVERRIDE (Advanced only — hidden in Simple mode per EasyPrint) */}
+          {slicerMode === 'Advanced' && (
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
+              <label htmlFor="nsj-bed-type" className="block text-sm font-semibold text-pf-text-primary">
+                Bed Type
+              </label>
+              <Select
+                id="nsj-bed-type"
+                value={selectedBedType}
+                onChange={(e) => setSelectedBedType(e.target.value)}
+              >
+                <option value="">Inherit from profile</option>
+                {BED_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </Select>
+            </div>
+          )}
 
           {/* SIMPLE MODE: supports + bed adhesion overrides (layer height and infill hidden) */}
           {slicerMode !== 'Advanced' && (
@@ -2330,20 +2368,6 @@ export const NewSliceJobPage: React.FC = () => {
               onSettingsChange={handleSimpleSettingsChange}
               simpleMode
             />
-          )}
-
-          {/* Admin escape-hatch: quiet hint visible only to admins in Simple mode */}
-          {slicerMode !== 'Advanced' && canWrite && (
-            <p className="px-1 text-xs text-pf-text-muted">
-              Need more control?{' '}
-              <button
-                type="button"
-                className="underline decoration-pf-border underline-offset-2 transition-colors hover:text-pf-text-primary"
-                onClick={() => navigate('/admin/settings?tab=general&sub=farm')}
-              >
-                Switch to Advanced in Settings.
-              </button>
-            </p>
           )}
 
           {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
@@ -2449,6 +2473,7 @@ export const NewSliceJobPage: React.FC = () => {
               <SliceProgressOverlay
                 jobId={submittedJobId}
                 progress={jobProgress}
+                filamentCostPerKg={filamentCostPerKg}
                 onNewJob={() => {
                   setSubmittedJobId(null);
                   setMessage(null);
