@@ -12,6 +12,10 @@ import { apiClient } from '../../../../services/api';
 import { slicerProfilesService } from '../../../../services/slicerProfilesService';
 import { slicerRegistry } from '../../../../services/slicerRegistry';
 
+// Mutable slicer-mode ref so individual describes can opt into Advanced mode.
+// Hoisted because vi.mock factories run before module-body initialization.
+const slicerModeRef = vi.hoisted(() => ({ value: 'Simple' as 'Simple' | 'Advanced' }));
+
 // === Mock Data ===
 const mockPrinters = [
   {
@@ -187,7 +191,19 @@ vi.mock('@/services/slicerRegistry', () => ({
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
     submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
+    parseOrcaNumeric: vi.fn(() => undefined),
   }
+}));
+
+// Force Advanced mode so the full feature set (incl. Bed Type) renders in tests.
+vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
+  useSlicerMode: () => ({
+    mode: slicerModeRef.value,
+    enabledModes: ['Simple', 'Advanced'],
+    canToggle: false,
+    setMode: vi.fn(),
+  }),
+  SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
 }));
 
 // Mock asset service
@@ -708,6 +724,13 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed Type Override', () => {
+    beforeEach(() => {
+      slicerModeRef.value = 'Advanced';
+    });
+    afterEach(() => {
+      slicerModeRef.value = 'Simple';
+    });
+
     it('renders bed type dropdown with inherit as default', async () => {
       renderWithProviders(<NewSliceJobPage />);
 

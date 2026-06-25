@@ -7,6 +7,8 @@ export interface FarmSettingsResponse {
   rowVersion: string | null;
   /** Controls browser slicer UI complexity. Defaults to 'Simple'. */
   slicerMode: 'Simple' | 'Advanced';
+  /** Slicer modes an admin has enabled. When more than one is enabled, users get a per-user toggle. */
+  enabledModes?: ('Simple' | 'Advanced')[];
 }
 
 /** Request body for PUT /api/settings/farm */
@@ -16,6 +18,7 @@ export interface UpdateFarmSettingsRequest {
   averagePrinterWattage?: number;
   rowVersion?: string | null;
   slicerMode?: 'Simple' | 'Advanced';
+  enabledModes?: ('Simple' | 'Advanced')[];
 }
 
 /** Response from GET /api/settings/user */

@@ -261,6 +261,47 @@ export class SliceJobService {
   }
 
   /**
+   * Parse an OrcaSlicer numeric setting that may be a number, a numeric
+   * string, or an array of such values (Orca stores many settings as
+   * per-extruder string arrays, e.g. `filament_cost: ["29.99"]`).
+   * Returns null when no finite number can be derived.
+   */
+  parseOrcaNumeric(value: unknown): number | null {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (raw == null) return null;
+    const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Best-effort material cost = grams/1000 × per-kg filament cost.
+   * Returns null when either input is missing or non-positive so callers
+   * can omit the value gracefully.
+   */
+  computeMaterialCost(
+    grams: number | null | undefined,
+    costPerKg: number | null | undefined,
+  ): number | null {
+    if (grams == null || costPerKg == null) return null;
+    if (!(grams > 0) || !(costPerKg > 0)) return null;
+    return (grams / 1000) * costPerKg;
+  }
+
+  /**
+   * Format a best-effort material cost as a currency string, or null when no
+   * cost could be computed.
+   */
+  formatMaterialCost(
+    grams: number | null | undefined,
+    costPerKg: number | null | undefined,
+    currency = '$',
+  ): string | null {
+    const cost = this.computeMaterialCost(grams, costPerKg);
+    if (cost == null) return null;
+    return `${currency}${cost.toFixed(2)}`;
+  }
+
+  /**
    * Format file size in human-readable format
    */
   formatFileSize(bytes: number): string {

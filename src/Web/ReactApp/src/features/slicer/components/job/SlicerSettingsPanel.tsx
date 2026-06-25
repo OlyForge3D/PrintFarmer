@@ -14,8 +14,9 @@ interface SlicerSettingsPanelProps {
   /** Callback when settings change */
   onSettingsChange: (settings: SlicerSettings) => void;
   /**
-   * When true, hides layer height and infill sliders.
-   * Only supports toggle and bed adhesion are shown.
+   * When true, hides the raw layer-height slider (encoded in the selected
+   * quality/process profile preset). Infill, supports, and bed adhesion remain
+   * visible to match Prusa EasyPrint's Simple controls.
    */
   simpleMode?: boolean;
   /** Optional CSS class name */
@@ -67,22 +68,20 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         </div>
       )}
       
-      {/* Infill Percentage — hidden in Simple mode (encoded in process profile) */}
-      {!simpleMode && (
-        <div>
-          <label className="block text-sm text-pf-text-muted mb-1">
-            Infill: {settings.infillPercent}%
-          </label>
-          <Slider
-            min={0}
-            max={100}
-            step={5}
-            value={settings.infillPercent}
-            onChange={(value) => updateSetting('infillPercent', value)}
-            aria-label="Infill percentage"
-          />
-        </div>
-      )}
+      {/* Infill Percentage — shown in Simple (EasyPrint exposes infill) */}
+      <div>
+        <label className="block text-sm text-pf-text-muted mb-1">
+          Infill: {settings.infillPercent}%
+        </label>
+        <Slider
+          min={0}
+          max={100}
+          step={5}
+          value={settings.infillPercent}
+          onChange={(value) => updateSetting('infillPercent', value)}
+          aria-label="Infill percentage"
+        />
+      </div>
       
       {/* Support Enabled */}
       <div className="flex items-center gap-2">

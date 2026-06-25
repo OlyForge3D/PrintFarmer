@@ -56,6 +56,7 @@ vi.mock('@/services/slicerRegistry', () => ({
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
     submit: vi.fn(),
+    parseOrcaNumeric: vi.fn(() => undefined),
   },
   SubmitSliceJobRequest: {},
 }));

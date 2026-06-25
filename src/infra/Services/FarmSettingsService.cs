@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,7 +26,8 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
             DefaultMachineHourlyRate: cost.DefaultMachineHourlyRate,
             AveragePrinterWattage: cost.AveragePrinterWattage,
             CanWrite: false,
-            SlicerMode: slicer.SlicerMode);
+            SlicerMode: slicer.SlicerMode,
+            EnabledModes: slicer.GetEnabledModes());
     }
 
     /// <inheritdoc />
@@ -67,15 +69,44 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
         if (costChanged)
         {
             if (expectedRowVersion is not null)
+            {
                 SaveWithConcurrencyCheck(cost, expectedRowVersion);
+            }
             else
+            {
                 _settings.Save(cost);
+            }
         }
 
         SlicerSettings slicer = _settings.Get<SlicerSettings>();
-        if (request.SlicerMode.HasValue)
+        bool slicerChanged = false;
+
+        if (request.EnabledModes is not null)
+        {
+            // Distinct, order-preserving set of enabled modes.
+            List<SlicerMode> enabled = request.EnabledModes.Distinct().ToList();
+            if (enabled.Count == 0)
+            {
+                throw new ValidationException("At least one slicer mode must be enabled.");
+            }
+
+            slicer.EnabledModes = enabled;
+
+            // Keep the default mode within the enabled set: prefer an explicit request value,
+            // else the existing default if still enabled, else the first enabled mode.
+            SlicerMode desiredDefault = request.SlicerMode ?? slicer.SlicerMode;
+            slicer.SlicerMode = enabled.Contains(desiredDefault) ? desiredDefault : enabled[0];
+            slicerChanged = true;
+        }
+        else if (request.SlicerMode.HasValue)
         {
             slicer.SlicerMode = request.SlicerMode.Value;
+            slicerChanged = true;
+        }
+
+        if (slicerChanged)
+        {
+            slicer.Validate();
             _settings.Save(slicer);
         }
     }

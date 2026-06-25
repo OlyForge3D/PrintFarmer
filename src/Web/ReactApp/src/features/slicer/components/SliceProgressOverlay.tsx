@@ -1,8 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Button } from '@/common/components/ui';
 import { DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { sliceJobService } from '@/services/sliceJobService';
+import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
+import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import type { SliceJobProgressState } from '@/features/slicer/hooks/useSliceJobProgress';
 
 interface SliceProgressOverlayProps {
@@ -10,6 +12,12 @@ interface SliceProgressOverlayProps {
   progress: SliceJobProgressState;
   onNewJob: () => void;
   onRetry: () => void;
+  /**
+   * Per-kg filament cost (from the selected OrcaSlicer filament profile's
+   * `filament_cost`). Used for a best-effort material cost estimate. When
+   * unavailable the material cost is omitted.
+   */
+  filamentCostPerKg?: number | null;
 }
 
 /**
@@ -17,16 +25,21 @@ interface SliceProgressOverlayProps {
  * Inspired by OrcaSlicer's progress dialog — prominent, centered, 
  * with real-time progress ring and status details.
  */
-export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry }: SliceProgressOverlayProps) {
+export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg }: SliceProgressOverlayProps) {
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
   const isCancelled = progress.status === 'Cancelled';
   const isTerminal = isCompleted || isFailed || isCancelled;
   const percent = isCompleted ? 100 : progress.progressPercent;
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+
   const handleDownload = useCallback(() => {
     window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank');
   }, [jobId]);
+
+  const materialCost = sliceJobService.formatMaterialCost(progress.filamentUsedGrams, filamentCostPerKg);
 
   // SVG progress ring dimensions
   const size = 160;
@@ -117,6 +130,11 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry }: Sli
                 🧵 {sliceJobService.formatFilamentUsed(progress.filamentUsedGrams)}
               </span>
             )}
+            {materialCost && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-xs text-white/80">
+                💰 {materialCost}
+              </span>
+            )}
           </div>
         )}
 
@@ -129,10 +147,16 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry }: Sli
 
         {/* Terminal actions */}
         {isCompleted && (
-          <div className="flex items-center gap-3 mt-2">
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+            <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+              Preview
+            </Button>
+            <Button variant="success" size="sm" onClick={() => setSendOpen(true)}>
+              Send to Printer
+            </Button>
             {progress.resultFileUrl && (
               <Button
-                variant="success"
+                variant="secondary"
                 size="sm"
                 iconLeft={<DownloadIcon className="w-4 h-4" />}
                 onClick={handleDownload}
@@ -162,6 +186,10 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry }: Sli
           {jobId.substring(0, 8)}
         </span>
       </div>
+
+      {/* Post-slice modals */}
+      <GcodePreviewModal isOpen={previewOpen} onClose={() => setPreviewOpen(false)} jobId={jobId} />
+      <SendToPrinterModal isOpen={sendOpen} onClose={() => setSendOpen(false)} jobId={jobId} />
     </div>
   );
 }

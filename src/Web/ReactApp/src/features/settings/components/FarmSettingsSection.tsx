@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { AlertCircleIcon, LockIcon } from '@/common/components/icons/MdiIcons';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
-import { Alert, Button, Card, FormField, Input } from '@/common/components/ui';
+import { Alert, Button, Card, Checkbox, FormField, Input } from '@/common/components/ui';
 import { useFarmSettings, useUpdateFarmSettings } from '@/features/settings/hooks/useFarmSettings';
 import type { FarmSettingsResponse } from '@/features/settings/types';
 
@@ -75,17 +75,44 @@ function FarmSettingsForm({
   const [electricityRate, setElectricityRate] = useState(String(data.electricityRatePerKwh));
   const [hourlyRate, setHourlyRate] = useState(String(data.defaultMachineHourlyRate));
   const [wattage, setWattage] = useState(String(data.averagePrinterWattage));
-  const [slicerMode, setSlicerMode] = useState<'Simple' | 'Advanced'>(data.slicerMode ?? 'Simple');
+  const initialEnabled: ('Simple' | 'Advanced')[] =
+    data.enabledModes && data.enabledModes.length > 0
+      ? data.enabledModes
+      : [data.slicerMode ?? 'Simple'];
+  const [enabledModes, setEnabledModes] = useState<('Simple' | 'Advanced')[]>(initialEnabled);
+  const [defaultMode, setDefaultMode] = useState<'Simple' | 'Advanced'>(data.slicerMode ?? 'Simple');
 
   const canWrite = data.canWrite;
 
+  const toggleEnabledMode = (mode: 'Simple' | 'Advanced') => {
+    if (!canWrite) return;
+    setEnabledModes((prev) => {
+      const next = prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode];
+      // Keep the default mode within the enabled set.
+      if (next.length > 0 && !next.includes(defaultMode)) {
+        setDefaultMode(next[0]);
+      }
+      return next;
+    });
+  };
+
   const handleSave = () => {
+    if (enabledModes.length === 0) {
+      toast.error('At least one slicer mode must be enabled.');
+      return;
+    }
+
+    // Preserve the canonical Simple-before-Advanced order regardless of toggle sequence.
+    const orderedEnabled = (['Simple', 'Advanced'] as const).filter((m) => enabledModes.includes(m));
+    const effectiveDefault = orderedEnabled.includes(defaultMode) ? defaultMode : orderedEnabled[0];
+
     const payload = {
       electricityRatePerKwh: Number(electricityRate),
       defaultMachineHourlyRate: Number(hourlyRate),
       averagePrinterWattage: Number(wattage),
       rowVersion: data.rowVersion,
-      slicerMode,
+      slicerMode: effectiveDefault,
+      enabledModes: orderedEnabled,
     };
 
     if (payload.electricityRatePerKwh < 0 || payload.electricityRatePerKwh > 10) {
@@ -167,30 +194,74 @@ function FarmSettingsForm({
 
         <div className="mt-4 border-t border-pf-border pt-4">
           <FormField
-            label="Browser Slicer Mode"
-            helper="Simple exposes only profile selection and basic print overrides. Advanced unlocks the full OrcaSlicer parameter editor."
+            label="Browser Slicer Modes"
+            helper="Choose which slicer modes users can access. Simple exposes only profile selection and basic print overrides; Advanced unlocks the full OrcaSlicer parameter editor. Enable both to let users switch per-session."
           >
-            <div className="flex gap-2">
-              {(['Simple', 'Advanced'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  disabled={!canWrite}
-                  onClick={() => canWrite && setSlicerMode(mode)}
-                  className={[
-                    'flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
-                    slicerMode === mode
-                      ? 'border-pf-accent bg-pf-accent/10 text-pf-accent'
-                      : 'border-pf-border bg-pf-bg-2 text-pf-text-secondary hover:border-pf-accent/50 hover:text-pf-text-primary',
-                    !canWrite && 'cursor-not-allowed opacity-50',
-                  ].join(' ')}
-                  aria-pressed={slicerMode === mode}
-                >
-                  {mode}
-                </button>
-              ))}
+            <div className="flex flex-col gap-2">
+              {(['Simple', 'Advanced'] as const).map((mode) => {
+                const checked = enabledModes.includes(mode);
+                return (
+                  <label
+                    key={mode}
+                    className={[
+                      'flex items-center gap-3 rounded-md border px-3 py-2 text-sm transition-colors',
+                      checked
+                        ? 'border-pf-accent bg-pf-accent/10 text-pf-text-primary'
+                        : 'border-pf-border bg-pf-bg-2 text-pf-text-secondary',
+                      canWrite ? 'cursor-pointer hover:border-pf-accent/50' : 'cursor-not-allowed opacity-60',
+                    ].join(' ')}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      disabled={!canWrite}
+                      onChange={() => toggleEnabledMode(mode)}
+                      aria-label={`Enable ${mode} slicer mode`}
+                    />
+                    <span className="font-medium">{mode}</span>
+                    <span className="text-xs text-pf-text-secondary">
+                      {mode === 'Simple'
+                        ? 'Guided, EasyPrint-style controls'
+                        : 'Full OrcaSlicer parameter editor'}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
+            {enabledModes.length === 0 && (
+              <p className="mt-2 text-xs text-pf-error">At least one slicer mode must be enabled.</p>
+            )}
           </FormField>
+
+          {enabledModes.length > 1 && (
+            <FormField
+              label="Default Slicer Mode"
+              helper="The mode users start in. They can switch to any other enabled mode."
+            >
+              <div className="flex gap-2">
+                {(['Simple', 'Advanced'] as const)
+                  .filter((mode) => enabledModes.includes(mode))
+                  .map((mode) => (
+                    <Button
+                      key={mode}
+                      type="button"
+                      variant="unstyled"
+                      disabled={!canWrite}
+                      onClick={() => canWrite && setDefaultMode(mode)}
+                      className={[
+                        'flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                        defaultMode === mode
+                          ? 'border-pf-accent bg-pf-accent/10 text-pf-accent'
+                          : 'border-pf-border bg-pf-bg-2 text-pf-text-secondary hover:border-pf-accent/50 hover:text-pf-text-primary',
+                        !canWrite && 'cursor-not-allowed opacity-50',
+                      ].join(' ')}
+                      aria-pressed={defaultMode === mode}
+                    >
+                      {mode}
+                    </Button>
+                  ))}
+              </div>
+            </FormField>
+          )}
         </div>
       </Card.Body>
       {canWrite ? (

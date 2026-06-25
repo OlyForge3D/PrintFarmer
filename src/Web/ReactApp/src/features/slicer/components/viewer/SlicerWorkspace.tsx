@@ -179,6 +179,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [textPlacementMode, setTextPlacementMode] = useState(false);
   const [textToolConfig, setTextToolConfig] = useState<TextToolConfig | null>(null);
   const [sequentialMode, setSequentialMode] = useState(false);
+
+  // Adjusting state during render (React's documented pattern): when switching to
+  // Simple mode, exit advanced-only paint modes (support/seam) that Simple mode does
+  // not expose, so they can't remain silently active after a mode toggle.
+  const [prevSimpleMode, setPrevSimpleMode] = useState(simpleMode);
+  if (simpleMode !== prevSimpleMode) {
+    setPrevSimpleMode(simpleMode);
+    if (simpleMode && (supportPaintMode || seamPaintMode)) {
+      setSupportPaintMode(false);
+      setSeamPaintMode(false);
+    }
+  }
+
   const [modelMetricsMap, setModelMetricsMap] = useState<Map<string, { baseSize: [number, number, number] }>>(new Map());
   const [printheadClearance, setPrintheadClearance] = useState<PrintheadClearance>(DEFAULT_PRINTHEAD_CLEARANCE);
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
@@ -671,6 +684,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [measureMode]);
 
   const handleSupportPaint = useCallback(() => {
+    if (simpleMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to paint supports');
       return;
@@ -682,9 +696,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setSupportPaintMode(true);
     toast.info('Support paint: left-click to paint, right-click to erase, Escape to exit');
-  }, [hasSelection, supportPaintMode, exitAllToolModes]);
+  }, [simpleMode, hasSelection, supportPaintMode, exitAllToolModes]);
 
   const handleSeamPaint = useCallback(() => {
+    if (simpleMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to paint seam');
       return;
@@ -696,7 +711,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setSeamPaintMode(true);
     toast.info('Seam paint: left-click to paint, right-click to erase, Escape to exit');
-  }, [hasSelection, seamPaintMode, exitAllToolModes]);
+  }, [simpleMode, hasSelection, seamPaintMode, exitAllToolModes]);
 
   const handleColorPaint = useCallback(() => {
     if (!hasSelection) {
@@ -1142,17 +1157,27 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
       const key = event.key.toLowerCase();
 
-      // P — cycle through paint tools
+      // P — cycle through paint tools (Simple mode excludes support/seam)
       if (key === 'p') {
         event.preventDefault();
-        const tools: Array<() => void> = [handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint];
-        const activeIndex = colorPaintMode ? 0 : supportPaintMode ? 1 : seamPaintMode ? 2 : fuzzySkinPaintMode ? 3 : -1;
+        const cycle: Array<{ active: boolean; activate: () => void }> = simpleMode
+          ? [
+              { active: colorPaintMode, activate: handleColorPaint },
+              { active: fuzzySkinPaintMode, activate: handleFuzzySkinPaint },
+            ]
+          : [
+              { active: colorPaintMode, activate: handleColorPaint },
+              { active: supportPaintMode, activate: handleSupportPaint },
+              { active: seamPaintMode, activate: handleSeamPaint },
+              { active: fuzzySkinPaintMode, activate: handleFuzzySkinPaint },
+            ];
+        const activeIndex = cycle.findIndex(c => c.active);
         if (activeIndex === -1) {
-          handleColorPaint();
-        } else if (activeIndex === 3) {
+          cycle[0].activate();
+        } else if (activeIndex === cycle.length - 1) {
           exitAllToolModes();
         } else {
-          tools[activeIndex + 1]();
+          cycle[activeIndex + 1].activate();
         }
         return;
       }
@@ -1171,7 +1196,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint]);
+  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint, simpleMode]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
@@ -1279,7 +1304,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       />
 
       {/* Main content area with 3D bed and left tools */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative overflow-hidden min-h-0">
         {/* 3D Bed Visualization */}
         <SlicerBedVisualization
           bedConfig={bedConfig}

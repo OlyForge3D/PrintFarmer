@@ -183,7 +183,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
 }) => {
   return (
     <div className="flex items-center gap-0.5 px-2 py-1 bg-pf-bg-1 border-b border-pf-border shrink-0">
-      {/* Hamburger toggle */}
+      {/* Hamburger toggle — pinned left, never scrolls off */}
       {onToggleSidebar && (
         <ToolbarButton
           icon={<HamburgerIcon />}
@@ -193,186 +193,195 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         />
       )}
 
-      {/* ── Group 1: Object Operations ── */}
-      <ToolbarButton
-        icon={<AddModelIcon />}
-        title="Add Model (Ctrl+O)"
-        onClick={onAddModel}
-      />
-      <ToolbarButton
-        icon={<AddPlateIcon />}
-        title="Add Plate"
-        onClick={onAddPlate}
-      />
-      <ToolbarButton
-        icon={<ArrangeIcon />}
-        title="Auto Arrange (A)"
-        onClick={onArrange}
-        disabled={!hasModels}
-      />
-      <ToolbarButton
-        icon={<OrientIcon />}
-        title="Auto-Orient"
-        onClick={onOrient}
-        disabled={!hasSelection}
-      />
-      <ToolbarButton
-        icon={<LayFlatIcon />}
-        title="Lay Flat (F)"
-        onClick={onLayFlat}
-        disabled={!hasSelection}
-      />
-
-      <ToolbarDivider />
-
-      {/* ── Group 2: Transform & Tools ── */}
-      <ToolbarButton
-        icon={<MoveToolIcon />}
-        title="Move"
-        onClick={onMove}
-        active={moveActive}
-      />
-      <ToolbarButton
-        icon={<RotateToolIcon />}
-        title="Rotate"
-        onClick={onRotate}
-        active={rotateActive}
-      />
-      <ToolbarButton
-        icon={<ScaleToolIcon />}
-        title="Scale"
-        onClick={onScale}
-        active={scaleActive}
-      />
-      <ToolbarButton
-        icon={<SplitIcon />}
-        title="Split Model"
-        onClick={onSplit}
-        disabled={!hasSelection}
-      />
-      {!simpleMode && (
+      {/* Scrollable tool region — flexes to fill, scrolls horizontally so tools
+          never run off the visible area at any width. Scrollbar hidden visually. */}
+      <div className="flex items-center gap-0.5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {/* ── Group 1: Object Operations ── */}
         <ToolbarButton
-          icon={<CutIcon />}
-          title="Cut Model (C)"
-          onClick={onCut}
+          icon={<AddModelIcon />}
+          title="Add Model (Ctrl+O)"
+          onClick={onAddModel}
+        />
+        <ToolbarButton
+          icon={<AddPlateIcon />}
+          title="Add Plate"
+          onClick={onAddPlate}
+        />
+        <ToolbarButton
+          icon={<ArrangeIcon />}
+          title="Auto Arrange (A)"
+          onClick={onArrange}
+          disabled={!hasModels}
+        />
+        <ToolbarButton
+          icon={<OrientIcon />}
+          title="Auto-Orient"
+          onClick={onOrient}
           disabled={!hasSelection}
-          active={cutActive}
         />
-      )}
-      <ToolbarButton
-        icon={<MeshBooleanIcon />}
-        title="Mesh Boolean (Coming Soon)"
-        onClick={onMeshBoolean}
-        disabled
-      />
-      <ToolbarButton
-        icon={<LayersViewIcon />}
-        title="Variable Layer Height (Coming Soon)"
-        onClick={onVariableLayerHeight}
-        disabled
-      />
-
-      <ToolbarDivider />
-
-      {/* ── Group 3: Paint & Inspection Tools ── */}
-      <ToolbarButton
-        icon={<ColorPaintIcon />}
-        title="Color Painting (P)"
-        onClick={onColorPaint}
-        disabled={!hasSelection}
-        active={colorPaintActive}
-      />
-      <ToolbarButton
-        icon={<SupportPaintIcon />}
-        title="Support Painting"
-        onClick={onSupportPaint}
-        disabled={!hasSelection}
-        active={supportPaintActive}
-      />
-      <ToolbarButton
-        icon={<SeamPaintIcon />}
-        title="Seam Painting"
-        onClick={onSeamPaint}
-        disabled={!hasSelection}
-        active={seamPaintActive}
-      />
-      <ToolbarButton
-        icon={<FuzzySkinPaintIcon />}
-        title="Fuzzy Skin Painting"
-        onClick={onFuzzySkinPaint}
-        disabled={!hasSelection}
-        active={fuzzySkinPaintActive}
-      />
-      {!simpleMode && (
         <ToolbarButton
-          icon={<TextToolSvgIcon />}
-          title="Text Tool"
-          onClick={onTextTool}
-          active={textToolActive}
+          icon={<LayFlatIcon />}
+          title="Lay Flat (F)"
+          onClick={onLayFlat}
+          disabled={!hasSelection}
         />
-      )}
-      <ToolbarButton
-        icon={<MeasureIcon />}
-        title="Measure (M)"
-        onClick={onMeasure}
-        disabled={!hasSelection}
-        active={measureActive}
-      />
-      <ToolbarButton
-        icon={<AssemblyIcon />}
-        title="Assembly View"
-        onClick={onAssemblyView}
-        disabled={!hasModels}
-        active={assemblyActive}
-      />
-      <ToolbarButton
-        icon={<SequentialIcon />}
-        title="Sequential Printing (by object)"
-        onClick={onSequentialToggle}
-        disabled={!hasModels}
-        active={sequentialActive}
-      />
 
-      {/* Spacer to push right-side items */}
-      <div className="flex-1 min-w-1" />
+        <ToolbarDivider />
 
-      {/* ── Right side ── */}
-      <ToolbarButton
-        icon={<UndoIcon />}
-        title="Undo (Ctrl+Z)"
-        onClick={onUndo}
-        disabled={!canUndo}
-      />
-      <ToolbarButton
-        icon={<RedoIcon />}
-        title="Redo (Ctrl+Y)"
-        onClick={onRedo}
-        disabled={!canRedo}
-      />
+        {/* ── Group 2: Transform & Tools ── */}
+        <ToolbarButton
+          icon={<MoveToolIcon />}
+          title="Move"
+          onClick={onMove}
+          active={moveActive}
+        />
+        <ToolbarButton
+          icon={<RotateToolIcon />}
+          title="Rotate"
+          onClick={onRotate}
+          active={rotateActive}
+        />
+        <ToolbarButton
+          icon={<ScaleToolIcon />}
+          title="Scale"
+          onClick={onScale}
+          active={scaleActive}
+        />
+        {/* Advanced-only mesh-editing tools (hidden in Simple per EasyPrint) */}
+        {!simpleMode && (
+          <>
+            <ToolbarButton
+              icon={<SplitIcon />}
+              title="Split Model"
+              onClick={onSplit}
+              disabled={!hasSelection}
+            />
+            <ToolbarButton
+              icon={<CutIcon />}
+              title="Cut Model (C)"
+              onClick={onCut}
+              disabled={!hasSelection}
+              active={cutActive}
+            />
+            <ToolbarButton
+              icon={<MeshBooleanIcon />}
+              title="Mesh Boolean (Coming Soon)"
+              onClick={onMeshBoolean}
+              disabled
+            />
+            <ToolbarButton
+              icon={<LayersViewIcon />}
+              title="Variable Layer Height (Coming Soon)"
+              onClick={onVariableLayerHeight}
+              disabled
+            />
+          </>
+        )}
 
-      <ToolbarDivider />
+        <ToolbarDivider />
 
-      {/* Settings & Profiles button */}
-      <Button
-        variant="primary"
-        onClick={onSettingsProfiles}
-        className="px-3 py-1.5"
-        iconLeft={<SettingsProfilesIcon className="w-4 h-4" />}
-      >
-        <span className="text-sm font-medium">SETTINGS & PROFILES</span>
-      </Button>
+        {/* ── Group 3: Paint & Inspection Tools ── */}
+        {/* Simple keeps color paint + fuzzy skin (EasyPrint); rest are Advanced-only. */}
+        <ToolbarButton
+          icon={<ColorPaintIcon />}
+          title="Color Painting (P)"
+          onClick={onColorPaint}
+          disabled={!hasSelection}
+          active={colorPaintActive}
+        />
+        <ToolbarButton
+          icon={<FuzzySkinPaintIcon />}
+          title="Fuzzy Skin Painting"
+          onClick={onFuzzySkinPaint}
+          disabled={!hasSelection}
+          active={fuzzySkinPaintActive}
+        />
+        {!simpleMode && (
+          <>
+            <ToolbarButton
+              icon={<SupportPaintIcon />}
+              title="Support Painting"
+              onClick={onSupportPaint}
+              disabled={!hasSelection}
+              active={supportPaintActive}
+            />
+            <ToolbarButton
+              icon={<SeamPaintIcon />}
+              title="Seam Painting"
+              onClick={onSeamPaint}
+              disabled={!hasSelection}
+              active={seamPaintActive}
+            />
+            <ToolbarButton
+              icon={<TextToolSvgIcon />}
+              title="Text Tool"
+              onClick={onTextTool}
+              active={textToolActive}
+            />
+            <ToolbarButton
+              icon={<MeasureIcon />}
+              title="Measure (M)"
+              onClick={onMeasure}
+              disabled={!hasSelection}
+              active={measureActive}
+            />
+            <ToolbarButton
+              icon={<AssemblyIcon />}
+              title="Assembly View"
+              onClick={onAssemblyView}
+              disabled={!hasModels}
+              active={assemblyActive}
+            />
+            <ToolbarButton
+              icon={<SequentialIcon />}
+              title="Sequential Printing (by object)"
+              onClick={onSequentialToggle}
+              disabled={!hasModels}
+              active={sequentialActive}
+            />
+          </>
+        )}
+      </div>
 
-      {/* Keyboard shortcuts */}
-      <ToolbarButton
-        icon={<KeyboardIcon />}
-        title="Keyboard Shortcuts"
-        onClick={onKeyboardShortcuts}
-      />
+      {/* ── Right side — pinned, never scrolls off ── */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <ToolbarButton
+          icon={<UndoIcon />}
+          title="Undo (Ctrl+Z)"
+          onClick={onUndo}
+          disabled={!canUndo}
+        />
+        <ToolbarButton
+          icon={<RedoIcon />}
+          title="Redo (Ctrl+Y)"
+          onClick={onRedo}
+          disabled={!canRedo}
+        />
 
-      {/* Beta badge */}
-      <span className="ml-2 px-2 py-0.5 text-xs font-semibold rounded-sm bg-pf-accent-bg text-white">
-        Beta
-      </span>
+        <ToolbarDivider />
+
+        {/* Settings & Profiles button */}
+        <Button
+          variant="primary"
+          onClick={onSettingsProfiles}
+          className="px-3 py-1.5"
+          iconLeft={<SettingsProfilesIcon className="w-4 h-4" />}
+        >
+          <span className="text-sm font-medium hidden lg:inline">SETTINGS &amp; PROFILES</span>
+        </Button>
+
+        {/* Keyboard shortcuts */}
+        <ToolbarButton
+          icon={<KeyboardIcon />}
+          title="Keyboard Shortcuts"
+          onClick={onKeyboardShortcuts}
+        />
+
+        {/* Beta badge */}
+        <span className="ml-1 px-2 py-0.5 text-xs font-semibold rounded-sm bg-pf-accent-bg text-white">
+          Beta
+        </span>
+      </div>
     </div>
   );
 };
