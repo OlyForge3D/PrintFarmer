@@ -100,13 +100,13 @@ describe('SlicerSettingsPanel — infill', () => {
     const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
     expect(trigger).toBeInTheDocument();
     expect(trigger.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_grid.svg');
-    fireEvent.click(trigger);
-    expect(trigger.getAttribute('aria-activedescendant')).toContain('-option-');
+    fireEvent.click(trigger, { detail: 1 });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
   });
 
   it('opens an icon-backed listbox of infill patterns', () => {
     renderPanel();
-    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }));
+    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }), { detail: 1 });
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(4);
     expect(options[1].querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
@@ -115,8 +115,8 @@ describe('SlicerSettingsPanel — infill', () => {
 
   it('calls onSettingsChange with updated infillPattern', () => {
     const { onChange } = renderPanel({ infillPattern: 'grid' });
-    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }));
-    fireEvent.click(screen.getByRole('option', { name: /gyroid/i }));
+    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }), { detail: 1 });
+    fireEvent.click(screen.getByRole('option', { name: /gyroid/i }), { detail: 1 });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
   });
 
@@ -146,10 +146,18 @@ describe('SlicerSettingsPanel — infill', () => {
   it('closes the listbox when the trigger loses focus', () => {
     renderPanel();
     const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
-    fireEvent.click(trigger);
+    fireEvent.click(trigger, { detail: 1 });
     expect(screen.getByRole('listbox')).toBeInTheDocument();
     fireEvent.blur(trigger);
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('opens the listbox with Enter and Space without double toggling', () => {
+    renderPanel();
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
   });
 });
 

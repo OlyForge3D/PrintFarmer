@@ -108,8 +108,10 @@ function InfillPatternDropdown({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const isSpaceKey = event.key === ' ' || event.key === 'Space' || event.key === 'Spacebar';
+
     if (!isOpen) {
-      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (event.key === 'Enter' || isSpaceKey || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         setIsOpen(true);
       }
@@ -152,7 +154,7 @@ function InfillPatternDropdown({
       return;
     }
 
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (event.key === 'Enter' || isSpaceKey) {
       event.preventDefault();
       commitSelection(patterns[highlightIndex]?.value ?? selectedPattern.value);
     }
@@ -170,7 +172,12 @@ function InfillPatternDropdown({
         aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
         aria-label={`Infill pattern ${selectedPattern.label}`}
         className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={(event) => {
+          if (event.detail === 0) {
+            return;
+          }
+          setIsOpen((current) => !current);
+        }}
         onKeyDown={handleKeyDown}
         onBlur={() => setIsOpen(false)}
       >
