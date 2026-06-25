@@ -108,6 +108,7 @@ describe('SlicerSettingsPanel — infill', () => {
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(4);
     expect(options[1].querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
+    expect(screen.queryByRole('button', { name: /gyroid/i })).not.toBeInTheDocument();
   });
 
   it('calls onSettingsChange with updated infillPattern', () => {
@@ -115,6 +116,29 @@ describe('SlicerSettingsPanel — infill', () => {
     fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }));
     fireEvent.click(screen.getByRole('option', { name: /gyroid/i }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
+  });
+
+  it('supports keyboard selection with arrow keys and enter', () => {
+    const { onChange } = renderPanel({ infillPattern: 'grid' });
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
+  });
+
+  it('closes the listbox on escape and tab', () => {
+    renderPanel();
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'Tab' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
 
