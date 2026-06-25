@@ -629,6 +629,7 @@ public static class ServiceCollectionExtensions
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<Services.Gcode.IGcodeFilesService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.ISliceGcodeImportService, Farm.Infrastructure.Services.Gcode.SliceGcodeImportService>();
 
         // Gcode harvest queue (async processing)
         _ = services.AddScoped<Farm.Infrastructure.Services.GcodeHarvest.IGcodeHarvestQueue, Farm.Infrastructure.Services.GcodeHarvest.EfGcodeHarvestQueue>();

@@ -181,6 +181,7 @@ export const NewSliceJobPage: React.FC = () => {
     machineProfileId: 'sliceJob.selectedMachineProfileId',
     filamentProfileId: 'sliceJob.selectedFilamentProfileId',
     processProfileId: 'sliceJob.selectedProcessProfileId',
+    spoolId: 'pf.sliceSpoolId',
   } as const;
 
   const { user } = useAuth();
@@ -204,6 +205,8 @@ export const NewSliceJobPage: React.FC = () => {
   // Material type filter for filament profile selection
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<string>('');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
+  // Optional Spoolman spool for cost estimation and queue routing
+  const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
 
   // === Cascading Profile Selection (OrcaSlicer-style) ===
   // Flow: Manufacturer → Printer Model → Machine Profile → Filament/Process filtered by machine
@@ -1300,15 +1303,20 @@ export const NewSliceJobPage: React.FC = () => {
       const savedMachineProfileId = localStorage.getItem(STORAGE_KEYS.machineProfileId);
       const savedFilamentProfileId = localStorage.getItem(STORAGE_KEYS.filamentProfileId);
       const savedProcessProfileId = localStorage.getItem(STORAGE_KEYS.processProfileId);
+      const savedSpoolId = localStorage.getItem(STORAGE_KEYS.spoolId);
 
       queueMicrotask(() => {
         if (savedPrinterId) setSelectedPrinterId(savedPrinterId);
         if (savedMachineProfileId) setSelectedMachineProfileId(savedMachineProfileId);
         if (savedFilamentProfileId) setSelectedFilamentProfileId(savedFilamentProfileId);
         if (savedProcessProfileId) setSelectedProcessPresetId(savedProcessProfileId);
+        if (savedSpoolId) {
+          const parsed = parseInt(savedSpoolId, 10);
+          if (Number.isFinite(parsed)) setSelectedSpoolId(parsed);
+        }
       });
     } catch { /* ignore */ }
-  }, [STORAGE_KEYS.filamentProfileId, STORAGE_KEYS.machineProfileId, STORAGE_KEYS.printerId, STORAGE_KEYS.processProfileId]);
+  }, [STORAGE_KEYS.filamentProfileId, STORAGE_KEYS.machineProfileId, STORAGE_KEYS.printerId, STORAGE_KEYS.processProfileId, STORAGE_KEYS.spoolId]);
 
   // First use fallback: default to first available printer.
   useEffect(() => {
@@ -1349,6 +1357,13 @@ export const NewSliceJobPage: React.FC = () => {
       else localStorage.removeItem(STORAGE_KEYS.processProfileId);
     } catch { /* ignore */ }
   }, [STORAGE_KEYS.processProfileId, selectedProcessPresetId]);
+
+  useEffect(() => {
+    try {
+      if (selectedSpoolId != null) localStorage.setItem(STORAGE_KEYS.spoolId, String(selectedSpoolId));
+      else localStorage.removeItem(STORAGE_KEYS.spoolId);
+    } catch { /* ignore */ }
+  }, [STORAGE_KEYS.spoolId, selectedSpoolId]);
 
   // Derive model file URL when selected and add to bed
   useEffect(() => {
@@ -1409,6 +1424,50 @@ export const NewSliceJobPage: React.FC = () => {
   const filamentCostPerKg = useMemo(
     () => sliceJobService.parseOrcaNumeric(selectedFilamentProfile?.settings?.filament_cost),
     [selectedFilamentProfile],
+  );
+
+  // Spools list for the spool picker (up to 500 non-archived spools).
+  const { data: spoolsResponse } = useQuery({
+    queryKey: ['spools-for-slice-picker'],
+    queryFn: () => apiClient.getSpools({ limit: 500 }),
+    staleTime: 60_000,
+  });
+  const availableSpools = spoolsResponse?.items ?? [];
+
+  // Fetch per-gram cost from Spoolman when a spool is selected.
+  const { data: spoolCostData } = useQuery({
+    queryKey: ['spool-cost-per-gram', selectedSpoolId],
+    queryFn: () => sliceJobService.getSpoolCostPerGram(selectedSpoolId!),
+    enabled: selectedSpoolId != null,
+    staleTime: 60_000,
+  });
+
+  // Resolved per-gram cost: Spoolman spool takes precedence over profile cost.
+  const resolvedCostPerGram = useMemo((): number | null => {
+    if (selectedSpoolId != null && spoolCostData?.costPerGram != null) {
+      return spoolCostData.costPerGram;
+    }
+    if (filamentCostPerKg != null) {
+      return filamentCostPerKg / 1000;
+    }
+    return null;
+  }, [selectedSpoolId, spoolCostData, filamentCostPerKg]);
+
+  const costSource = useMemo((): 'spoolman' | 'profile' | null => {
+    if (selectedSpoolId != null && spoolCostData?.costPerGram != null) return 'spoolman';
+    if (filamentCostPerKg != null) return 'profile';
+    return null;
+  }, [selectedSpoolId, spoolCostData, filamentCostPerKg]);
+
+  // Derive queue routing requirements from current slice selections.
+  const requiredPrinterModel = useMemo(
+    () => selectedPrinterForSlicing?.modelName ?? undefined,
+    [selectedPrinterForSlicing],
+  );
+  const requiredMaterialType = selectedFilamentMaterial || undefined;
+  const requiredNozzleDiameter = useMemo(
+    () => selectedPrinterForSlicing?.nozzleDiameter ?? undefined,
+    [selectedPrinterForSlicing],
   );
 
   // Hydrate dynamic advanced settings from selected Orca process profile.
@@ -2160,6 +2219,40 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
           )}
 
+          {/* SPOOL PICKER - Optional Spoolman spool for cost estimation and queue routing */}
+          {availableSpools.length > 0 && (
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-1.5">
+              <label htmlFor="slice-spool-select" className="block text-sm font-semibold text-pf-text-primary">
+                Spool <span className="font-normal text-pf-text-muted">(optional)</span>
+              </label>
+              <Select
+                id="slice-spool-select"
+                value={selectedSpoolId ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedSpoolId(val === '' ? null : parseInt(val, 10));
+                }}
+                aria-label="Select spool"
+              >
+                <option value="">— None —</option>
+                {availableSpools.filter(s => !s.archived).map(s => {
+                  const parts = [s.vendor, s.filamentName || s.name, s.material, s.colorHex ? `#${s.colorHex}` : null].filter(Boolean);
+                  const remaining = s.remainingWeightG != null ? ` (${Math.round(s.remainingWeightG)}g)` : '';
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {parts.join(' · ')}{remaining}
+                    </option>
+                  );
+                })}
+              </Select>
+              {selectedSpoolId != null && spoolCostData?.costPerGram != null && (
+                <p className="text-xs text-pf-text-muted">
+                  Cost: {spoolCostData.currency || '$'}{spoolCostData.costPerGram.toFixed(4)}/g <span className="text-pf-accent">(Spoolman)</span>
+                </p>
+              )}
+            </div>
+          )}
+
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             {/* Header: label + ⋮ options menu */}
@@ -2474,6 +2567,12 @@ export const NewSliceJobPage: React.FC = () => {
                 jobId={submittedJobId}
                 progress={jobProgress}
                 filamentCostPerKg={filamentCostPerKg}
+                resolvedCostPerGram={resolvedCostPerGram}
+                costSource={costSource}
+                selectedSpoolId={selectedSpoolId}
+                requiredPrinterModel={requiredPrinterModel}
+                requiredMaterialType={requiredMaterialType}
+                requiredNozzleDiameter={requiredNozzleDiameter}
                 onNewJob={() => {
                   setSubmittedJobId(null);
                   setMessage(null);
