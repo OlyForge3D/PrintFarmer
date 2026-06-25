@@ -95,27 +95,25 @@ describe('SlicerSettingsPanel — infill', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 40 }));
   });
 
-  it('renders the infill pattern trigger with the selected icon and label', () => {
+  it('renders the infill pattern select and preview icon', () => {
     renderPanel({ infillPattern: 'grid' });
-    const trigger = screen.getByRole('button', { name: /infill pattern grid/i });
-    expect(trigger).toHaveTextContent('Grid');
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    expect(trigger).toBeInTheDocument();
     expect(trigger.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_grid.svg');
   });
 
-  it('opens a menu with icon-backed infill pattern choices', () => {
-    renderPanel({ infillPattern: 'grid' });
-    fireEvent.click(screen.getByRole('button', { name: /infill pattern grid/i }));
-
-    const options = screen.getAllByRole('menuitemradio');
+  it('opens an icon-backed listbox of infill patterns', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }));
+    const options = screen.getAllByRole('option');
     expect(options).toHaveLength(4);
-    const gyroid = screen.getByRole('menuitemradio', { name: /gyroid/i });
-    expect(gyroid.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
+    expect(options[1].querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
   });
 
-  it('calls onSettingsChange with updated infillPattern when a menu item is selected', () => {
+  it('calls onSettingsChange with updated infillPattern', () => {
     const { onChange } = renderPanel({ infillPattern: 'grid' });
-    fireEvent.click(screen.getByRole('button', { name: /infill pattern grid/i }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /gyroid/i }));
+    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }));
+    fireEvent.click(screen.getByRole('option', { name: /gyroid/i }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
   });
 });

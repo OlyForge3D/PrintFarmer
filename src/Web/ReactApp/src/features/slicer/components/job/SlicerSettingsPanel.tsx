@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Checkbox, Select } from '@/common/components/ui';
 import { INFILL_PATTERNS } from '@/features/slicer/components/settings/metadataTypes';
 import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
@@ -64,15 +64,17 @@ function InfillPatternDropdown({
   value: string;
   onChange: (pattern: string) => void;
 }) {
-  const dropdownId = useId();
-  const menuId = `${dropdownId}-menu`;
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const dropdownId = React.useId();
+  const listboxId = `${dropdownId}-listbox`;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(0);
 
+  const patterns = INFILL_PATTERNS;
   const selectedPattern = useMemo(
-    () => INFILL_PATTERNS.find((pattern) => pattern.value === (value || DEFAULT_INFILL_PATTERN)) ?? INFILL_PATTERNS[0],
-    [value]
+    () => patterns.find((pattern) => pattern.value === (value || DEFAULT_INFILL_PATTERN)) ?? patterns[0],
+    [patterns, value]
   );
 
   useEffect(() => {
@@ -81,39 +83,95 @@ function InfillPatternDropdown({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (target && (buttonRef.current?.contains(target) || menuRef.current?.contains(target))) {
-        return;
-      }
-      setIsOpen(false);
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
         setIsOpen(false);
-        buttonRef.current?.focus();
       }
     };
 
     document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const selectedIndex = patterns.findIndex((pattern) => pattern.value === selectedPattern.value);
+    setHighlightIndex(selectedIndex >= 0 ? selectedIndex : 0);
+  }, [isOpen, patterns, selectedPattern.value]);
+
+  const commitSelection = (patternValue: string) => {
+    onChange(patternValue);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!isOpen) {
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setIsOpen(true);
+      }
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      setIsOpen(false);
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHighlightIndex((current) => Math.min(current + 1, patterns.length - 1));
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlightIndex((current) => Math.max(current - 1, 0));
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setHighlightIndex(0);
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      setHighlightIndex(patterns.length - 1);
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      commitSelection(patterns[highlightIndex]?.value ?? selectedPattern.value);
+    }
+  };
+
   return (
-    <div className="relative" ref={menuRef}>
+    <div ref={rootRef} className="relative">
       <button
-        ref={buttonRef}
+        ref={triggerRef}
         type="button"
+        role="combobox"
+        aria-expanded={isOpen}
+        aria-controls={listboxId}
+        aria-haspopup="listbox"
+        aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
+        aria-label={`Infill pattern ${selectedPattern.label}`}
         className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
         onClick={() => setIsOpen((current) => !current)}
-        aria-label={`Infill pattern ${selectedPattern.label}`}
-        aria-haspopup="menu"
-        aria-expanded={isOpen}
-        aria-controls={menuId}
+        onKeyDown={handleKeyDown}
       >
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0">
           <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
@@ -127,35 +185,36 @@ function InfillPatternDropdown({
 
       {isOpen && (
         <div
-          id={menuId}
-          role="menu"
+          id={listboxId}
+          role="listbox"
           aria-label="Infill pattern options"
           className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0 p-2 shadow-2xl shadow-black/30"
         >
-          {INFILL_PATTERNS.map((pattern) => {
+          {patterns.map((pattern, index) => {
             const active = pattern.value === selectedPattern.value;
+            const highlighted = index === highlightIndex;
             return (
               <button
                 key={pattern.value}
+                id={`${listboxId}-option-${index}`}
                 type="button"
-                role="menuitemradio"
-                aria-checked={active}
+                role="option"
+                aria-selected={active}
                 className={[
                   'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors',
-                  active
-                    ? 'bg-pf-accent-bg/30 text-pf-text-primary'
+                  highlighted
+                    ? 'bg-pf-accent-bg/20 text-pf-text-primary'
                     : 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
                 ].join(' ')}
-                onClick={() => {
-                  onChange(pattern.value);
-                  setIsOpen(false);
-                  buttonRef.current?.focus();
-                }}
+                onMouseEnter={() => setHighlightIndex(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => commitSelection(pattern.value)}
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-pf-border bg-pf-bg-1">
                   <PatternIcon value={pattern.value} className="h-[1.1rem] w-[1.1rem]" />
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{pattern.label}</span>
+                {active && <span className="text-xs font-semibold uppercase tracking-wide text-pf-accent">Selected</span>}
               </button>
             );
           })}
@@ -189,7 +248,6 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   simpleMode = false,
   className,
 }) => {
-  const bedAdhesionGroupName = useId();
   const updateSetting = <K extends keyof SlicerSettings>(key: K, value: SlicerSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
   };
@@ -227,6 +285,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <label htmlFor="simple-wall-loops" className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Perimeters
           </label>
+          <p className="text-xs text-pf-text-secondary">Outer walls that define part strength and surface finish.</p>
           <input
             id="simple-wall-loops"
             type="number"
@@ -245,6 +304,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <label htmlFor="simple-top-layers" className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Top Layers
           </label>
+          <p className="text-xs text-pf-text-secondary">Solid layers on the top surface of the print.</p>
           <input
             id="simple-top-layers"
             type="number"
@@ -263,6 +323,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <label htmlFor="simple-bottom-layers" className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Bottom Layers
           </label>
+          <p className="text-xs text-pf-text-secondary">Solid layers on the build-plate side of the print.</p>
           <input
             id="simple-bottom-layers"
             type="number"
@@ -280,8 +341,9 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       {/* ── Infill ── */}
       <div className="space-y-3">
         <span className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
-          Infill
+          Infill Density
         </span>
+        <p className="text-xs text-pf-text-secondary">How much material fills the inside of the print.</p>
 
         {/* Infill % */}
         <div className="flex items-center gap-3">
@@ -313,7 +375,8 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
         {/* Infill Pattern dropdown with OrcaSlicer icons */}
         <div className="space-y-1.5">
-          <span className="block text-xs text-pf-text-muted">Pattern</span>
+          <span className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">Infill Pattern</span>
+          <p className="text-xs text-pf-text-secondary">Choose the shape pattern used to fill the print.</p>
           <InfillPatternDropdown
             value={settings.infillPattern || DEFAULT_INFILL_PATTERN}
             onChange={(pattern) => updateSetting('infillPattern', pattern)}
@@ -333,12 +396,14 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             Enable Supports
           </label>
         </div>
+        <p className="pl-8 text-xs text-pf-text-secondary">Adds support structures for overhanging parts.</p>
 
         {settings.supportEnabled && (
           <div className="pl-6">
             <label htmlFor="simple-support-type" className="block text-xs text-pf-text-muted mb-1">
               Support Type
             </label>
+            <p className="mb-1 text-xs text-pf-text-secondary">Choose the type of support structure.</p>
             <Select
               id="simple-support-type"
               value={settings.supportType}
@@ -371,7 +436,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             <label key={opt.value} className="flex cursor-pointer items-center gap-3 text-lg text-pf-text-primary">
               <input
                 type="radio"
-                name={bedAdhesionGroupName}
+                name="bed-adhesion"
                 value={opt.value}
                 checked={settings.bedAdhesionType === opt.value}
                 onChange={() => updateSetting('bedAdhesionType', opt.value)}
