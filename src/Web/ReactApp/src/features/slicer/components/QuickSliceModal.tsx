@@ -220,7 +220,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
             value={effectivePrinterId}
             onChange={(e) => handlePrinterChange(e.target.value)}
           >
-            <option value="">Select printer…</option>
+            {printers.length === 0 && <option value="">Select printer…</option>}
             {printers.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
@@ -234,9 +234,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
             onChange={(e) => handleMachineChange(e.target.value)}
             disabled={machineProfiles.length === 0}
           >
-            <option value="">
-              {machineProfiles.length === 0 ? 'No profiles available' : 'Select machine profile…'}
-            </option>
+            {machineProfiles.length === 0 && (
+              <option value="">No profiles available</option>
+            )}
             {machineProfiles.map((p) => (
               <option key={p.name} value={p.name}>{p.name}</option>
             ))}
@@ -250,9 +250,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
             onChange={(e) => setSelectedProcessProfileId(e.target.value)}
             disabled={processProfiles.length === 0}
           >
-            <option value="">
-              {processProfiles.length === 0 ? 'No profiles available' : 'Select process profile…'}
-            </option>
+            {processProfiles.length === 0 && (
+              <option value="">No profiles available</option>
+            )}
             {processProfiles.map((p) => (
               <option key={p.name} value={p.name}>
                 {p.name}{p.layerHeight ? ` (${p.layerHeight}mm)` : ''}
@@ -268,9 +268,9 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
             onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
             disabled={filamentProfiles.length === 0}
           >
-            <option value="">
-              {filamentProfiles.length === 0 ? 'No profiles available' : 'Select filament profile…'}
-            </option>
+            {filamentProfiles.length === 0 && (
+              <option value="">No profiles available</option>
+            )}
             {filamentProfiles.map((p) => (
               <option key={p.name} value={p.name}>{p.name}</option>
             ))}

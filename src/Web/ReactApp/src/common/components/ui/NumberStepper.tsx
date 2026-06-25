@@ -49,7 +49,10 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
         type="number"
         className="w-12 text-center text-sm bg-pf-bg-0 text-pf-text-primary border-x border-pf-border py-1.5 focus:outline-hidden focus:ring-1 focus:ring-pf-accent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         value={value}
-        onChange={e => onChange(clamp(parseInt(e.target.value) || min))}
+        onChange={(e) => {
+          const parsed = Number(e.target.value);
+          onChange(clamp(Number.isFinite(parsed) ? parsed : min));
+        }}
         min={min}
         max={max}
         step={step}

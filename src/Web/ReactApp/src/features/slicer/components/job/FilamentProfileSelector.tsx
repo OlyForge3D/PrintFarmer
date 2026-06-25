@@ -34,16 +34,21 @@ export const FilamentProfileSelector: React.FC<FilamentProfileSelectorProps> = (
   onMaterialChange,
   className
 }) => {
+  const selectId = React.useId();
   const hasSlicerProfiles = availableFilamentProfiles.length > 0;
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Filament Profile</label>
+      <label htmlFor={selectId} className="block text-sm font-semibold text-pf-text-primary mb-2">
+        Filament Profile
+      </label>
       {hasSlicerProfiles ? (
         <Select
+          id={selectId}
           value={selectedFilamentProfileId}
           onChange={e => onFilamentProfileChange(e.target.value)}
           className="w-full"
+          aria-label="Filament Profile"
         >
           <option value="">-- Select Filament Profile --</option>
           {availableFilamentProfiles.map(profile => (
@@ -55,9 +60,11 @@ export const FilamentProfileSelector: React.FC<FilamentProfileSelectorProps> = (
       ) : (
         <>
           <Select
+            id={selectId}
             value={selectedFilamentMaterial}
             onChange={e => onMaterialChange(e.target.value as MaterialType)}
             className="w-full"
+            aria-label="Filament Profile"
           >
             {Object.keys(MATERIAL_PRESETS).map(m => (
               <option key={m} value={m}>{m}</option>

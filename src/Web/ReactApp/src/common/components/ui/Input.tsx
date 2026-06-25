@@ -3,10 +3,12 @@ import clsx from 'clsx';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
-  ref?: React.Ref<HTMLInputElement>;
 }
 
-export const Input: React.FC<InputProps> = ({ invalid, className, ref, ...rest }) => {
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input(
+  { invalid, className, ...rest },
+  ref
+) {
   return (
     <input
       ref={ref}
@@ -18,6 +20,6 @@ export const Input: React.FC<InputProps> = ({ invalid, className, ref, ...rest }
       {...rest}
     />
   );
-};
+});
 
 export default Input;

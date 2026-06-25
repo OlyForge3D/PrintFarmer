@@ -49,6 +49,7 @@ export function ProcessProfileEditorModal({
   onApply,
 }: ProcessProfileEditorModalProps) {
   const queryClient = useQueryClient();
+  const profileNameId = React.useId();
 
   const [profileName, setProfileName] = useState('');
   const [showSaveForm, setShowSaveForm] = useState(false);
@@ -165,10 +166,11 @@ export function ProcessProfileEditorModal({
       {/* Save-as form */}
       {showSaveForm && (
         <div className="mb-4 p-4 bg-pf-panel-secondary rounded-lg border border-pf-border">
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">
+          <label htmlFor={profileNameId} className="block text-sm font-medium text-pf-text-primary mb-2">
             Custom Profile Name
           </label>
           <Input
+            id={profileNameId}
             type="text"
             value={profileName}
             onChange={(e) => setProfileName(e.target.value)}

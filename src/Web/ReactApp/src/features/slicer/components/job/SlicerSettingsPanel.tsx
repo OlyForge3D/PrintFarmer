@@ -60,9 +60,11 @@ function PatternIcon({ value, className }: { value: string; className?: string }
 function InfillPatternDropdown({
   value,
   onChange,
+  ariaDescribedBy,
 }: {
   value: string;
   onChange: (pattern: string) => void;
+  ariaDescribedBy?: string;
 }) {
   const dropdownId = React.useId();
   const labelId = `${dropdownId}-label`;
@@ -99,14 +101,19 @@ function InfillPatternDropdown({
       return;
     }
 
-    const selectedIndex = patterns.findIndex((pattern) => pattern.value === selectedPattern.value);
-    setHighlightIndex(selectedIndex >= 0 ? selectedIndex : 0);
-  }, [isOpen, patterns, selectedPattern.value]);
+    document.getElementById(`${listboxId}-option-${highlightIndex}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlightIndex, isOpen, listboxId]);
 
   const commitSelection = (patternValue: string) => {
     onChange(patternValue);
     setIsOpen(false);
     triggerRef.current?.focus();
+  };
+
+  const openDropdown = () => {
+    const selectedIndex = patterns.findIndex((pattern) => pattern.value === selectedPattern.value);
+    setHighlightIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    setIsOpen(true);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -115,7 +122,7 @@ function InfillPatternDropdown({
     if (!isOpen) {
       if (event.key === 'Enter' || isSpaceKey || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        setIsOpen(true);
+        openDropdown();
       }
       return;
     }
@@ -173,15 +180,16 @@ function InfillPatternDropdown({
         aria-haspopup="listbox"
         aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
         aria-labelledby={`${labelId} ${selectedValueId}`}
+        aria-describedby={ariaDescribedBy}
         className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
-        onClick={(event) => {
-          if (event.detail === 0) {
+        onClick={() => {
+          if (isOpen) {
+            setIsOpen(false);
             return;
           }
-          setIsOpen((current) => !current);
+          openDropdown();
         }}
         onKeyDown={handleKeyDown}
-        onBlur={() => setIsOpen(false)}
       >
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0">
           <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
@@ -191,7 +199,7 @@ function InfillPatternDropdown({
           <span id={selectedValueId} className="block truncate text-base font-medium text-pf-text-primary">{selectedPattern.label}</span>
         </span>
         <span aria-hidden="true" className="flex shrink-0 items-center justify-center">
-          <ChevronDownIcon className="h-5 w-5 text-pf-text-muted" ariaLabel="" />
+          <ChevronDownIcon className="h-5 w-5 text-pf-text-muted" />
         </span>
       </button>
 
@@ -210,7 +218,7 @@ function InfillPatternDropdown({
                 key={pattern.value}
                 id={`${listboxId}-option-${index}`}
                 role="option"
-                aria-selected={active}
+                aria-selected={highlighted}
                 className={[
                   'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors',
                   highlighted
@@ -248,6 +256,63 @@ function BedAdhesionIcon({ className }: { className?: string }) {
   );
 }
 
+function DeferredNumberInput({
+  value,
+  min,
+  max,
+  step,
+  className,
+  onCommit,
+  normalize,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange' | 'min' | 'max' | 'step' | 'className'> & {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  className: string;
+  onCommit: (value: number) => void;
+  normalize?: (value: number) => number;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commitValue = () => {
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+
+    const nextValue = normalize ? normalize(parsed) : Math.min(max, Math.max(min, parsed));
+    setDraft(String(nextValue));
+    onCommit(nextValue);
+  };
+
+  return (
+    <input
+      {...rest}
+      type="number"
+      value={draft}
+      min={min}
+      max={max}
+      step={step}
+      className={className}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commitValue}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 /**
  * Slicer settings panel for Simple mode.
  * Exposes: infill %, infill pattern, top/bottom layers, perimeters (wall loops),
@@ -259,6 +324,22 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   simpleMode = false,
   className,
 }) => {
+  const panelId = React.useId();
+  const layerHeightId = `${panelId}-layer-height`;
+  const layerHeightDescId = `${panelId}-layer-height-desc`;
+  const wallLoopsId = `${panelId}-wall-loops`;
+  const wallLoopsDescId = `${panelId}-wall-loops-desc`;
+  const topLayersId = `${panelId}-top-layers`;
+  const topLayersDescId = `${panelId}-top-layers-desc`;
+  const bottomLayersId = `${panelId}-bottom-layers`;
+  const bottomLayersDescId = `${panelId}-bottom-layers-desc`;
+  const infillDensityId = `${panelId}-infill-density`;
+  const infillDensityDescId = `${panelId}-infill-density-desc`;
+  const infillPatternDescId = `${panelId}-infill-pattern-desc`;
+  const supportTypeId = `${panelId}-support-type`;
+  const supportTypeDescId = `${panelId}-support-type-desc`;
+  const bedAdhesionGroupId = `${panelId}-bed-adhesion-group`;
+  const bedAdhesionDescId = `${panelId}-bed-adhesion-desc`;
   const updateSetting = <K extends keyof SlicerSettings>(key: K, value: SlicerSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
   };
@@ -270,19 +351,23 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       {/* Layer Height — hidden in Simple mode (encoded in process profile preset) */}
       {!simpleMode && (
         <div className="space-y-1">
-          <span className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+          <label htmlFor={layerHeightId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Layer Height
-          </span>
+          </label>
+          <p id={layerHeightDescId} className="text-xs text-pf-text-secondary">
+            Encoded in the selected process profile preset.
+          </p>
           <div className="flex items-center gap-2">
-            <input
-              type="number"
+            <DeferredNumberInput
+              id={layerHeightId}
               className="w-20 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
               min={0.05}
               max={0.4}
               step={0.05}
               value={settings.layerHeight}
-              onChange={(e) => updateSetting('layerHeight', Number(e.target.value))}
-              aria-label="Layer height in mm"
+              normalize={(nextValue) => Math.min(0.4, Math.max(0.05, nextValue))}
+              onCommit={(nextValue) => updateSetting('layerHeight', nextValue)}
+              aria-describedby={layerHeightDescId}
             />
             <span className="text-xs text-pf-text-muted">mm</span>
           </div>
@@ -293,73 +378,73 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       <div className="grid grid-cols-3 gap-3">
         {/* Wall Loops (perimeters) */}
         <div className="space-y-1">
-          <label htmlFor="simple-wall-loops" className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+          <label htmlFor={wallLoopsId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Perimeters
           </label>
-          <p className="text-xs text-pf-text-secondary">Outer walls that define part strength and surface finish.</p>
-          <input
-            id="simple-wall-loops"
-            type="number"
+          <p id={wallLoopsDescId} className="text-xs text-pf-text-secondary">Outer walls that define part strength and surface finish.</p>
+          <DeferredNumberInput
+            id={wallLoopsId}
             className="w-full px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
             min={1}
             max={20}
             step={1}
             value={settings.wallLoops}
-            onChange={(e) => updateSetting('wallLoops', Math.max(1, Math.round(Number(e.target.value))))}
-            aria-label="Number of perimeters (wall loops)"
+            normalize={(nextValue) => Math.max(1, Math.round(nextValue))}
+            onCommit={(nextValue) => updateSetting('wallLoops', nextValue)}
+            aria-describedby={wallLoopsDescId}
           />
         </div>
 
         {/* Top Layers */}
         <div className="space-y-1">
-          <label htmlFor="simple-top-layers" className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+          <label htmlFor={topLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Top Layers
           </label>
-          <p className="text-xs text-pf-text-secondary">Solid layers on the top surface of the print.</p>
-          <input
-            id="simple-top-layers"
-            type="number"
+          <p id={topLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the top surface of the print.</p>
+          <DeferredNumberInput
+            id={topLayersId}
             className="w-full px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
             min={0}
             max={30}
             step={1}
             value={settings.topShellLayers}
-            onChange={(e) => updateSetting('topShellLayers', Math.max(0, Math.round(Number(e.target.value))))}
-            aria-label="Number of top solid layers"
+            normalize={(nextValue) => Math.max(0, Math.round(nextValue))}
+            onCommit={(nextValue) => updateSetting('topShellLayers', nextValue)}
+            aria-describedby={topLayersDescId}
           />
         </div>
 
         {/* Bottom Layers */}
         <div className="space-y-1">
-          <label htmlFor="simple-bottom-layers" className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+          <label htmlFor={bottomLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Bottom Layers
           </label>
-          <p className="text-xs text-pf-text-secondary">Solid layers on the build-plate side of the print.</p>
-          <input
-            id="simple-bottom-layers"
-            type="number"
+          <p id={bottomLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the build-plate side of the print.</p>
+          <DeferredNumberInput
+            id={bottomLayersId}
             className="w-full px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
             min={0}
             max={30}
             step={1}
             value={settings.bottomShellLayers}
-            onChange={(e) => updateSetting('bottomShellLayers', Math.max(0, Math.round(Number(e.target.value))))}
-            aria-label="Number of bottom solid layers"
+            normalize={(nextValue) => Math.max(0, Math.round(nextValue))}
+            onCommit={(nextValue) => updateSetting('bottomShellLayers', nextValue)}
+            aria-describedby={bottomLayersDescId}
           />
         </div>
       </div>
 
       {/* ── Infill ── */}
       <div className="space-y-3">
-        <span className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+        <span id={infillDensityId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
           Infill Density
         </span>
-        <p className="text-xs text-pf-text-secondary">How much material fills the inside of the print.</p>
+        <p id={infillDensityDescId} className="text-xs text-pf-text-secondary">How much material fills the inside of the print.</p>
 
         {/* Infill % */}
         <div className="flex items-center gap-3">
           <input
-            id="simple-infill-pct"
+            id={`${panelId}-simple-infill-pct`}
             type="range"
             className="flex-1 accent-pf-accent"
             min={0}
@@ -367,18 +452,21 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             step={5}
             value={settings.infillPercent}
             onChange={(e) => updateSetting('infillPercent', Number(e.target.value))}
-            aria-label="Infill percentage"
+            aria-labelledby={infillDensityId}
+            aria-describedby={infillDensityDescId}
           />
           <div className="flex items-center gap-1">
-            <input
-              type="number"
+            <DeferredNumberInput
+              id={`${panelId}-infill-percent`}
               className="w-14 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary text-right"
               min={0}
               max={100}
               step={5}
               value={settings.infillPercent}
-              onChange={(e) => updateSetting('infillPercent', Math.min(100, Math.max(0, Number(e.target.value))))}
-              aria-label="Infill percentage value"
+              normalize={(nextValue) => Math.min(100, Math.max(0, Math.round(nextValue)))}
+              onCommit={(nextValue) => updateSetting('infillPercent', nextValue)}
+              aria-labelledby={infillDensityId}
+              aria-describedby={infillDensityDescId}
             />
             <span className="text-xs text-pf-text-muted">%</span>
           </div>
@@ -386,11 +474,13 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
         {/* Infill Pattern dropdown with OrcaSlicer icons */}
         <div className="space-y-1.5">
-          <span className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">Infill Pattern</span>
-          <p className="text-xs text-pf-text-secondary">Choose the shape pattern used to fill the print.</p>
+          <p id={infillPatternDescId} className="text-xs text-pf-text-secondary">
+            Choose the shape pattern used to fill the print.
+          </p>
           <InfillPatternDropdown
             value={settings.infillPattern || DEFAULT_INFILL_PATTERN}
             onChange={(pattern) => updateSetting('infillPattern', pattern)}
+            ariaDescribedBy={infillPatternDescId}
           />
         </div>
       </div>
@@ -399,11 +489,11 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <Checkbox
-            id="simple-support-enabled"
+            id={`${panelId}-simple-support-enabled`}
             checked={settings.supportEnabled}
             onChange={(e) => updateSetting('supportEnabled', e.target.checked)}
           />
-          <label htmlFor="simple-support-enabled" className="text-sm text-pf-text-primary cursor-pointer">
+          <label htmlFor={`${panelId}-simple-support-enabled`} className="text-sm text-pf-text-primary cursor-pointer">
             Enable Supports
           </label>
         </div>
@@ -411,15 +501,15 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
         {settings.supportEnabled && (
           <div className="pl-6">
-            <label htmlFor="simple-support-type" className="block text-xs text-pf-text-muted mb-1">
+            <label htmlFor={supportTypeId} className="block text-xs text-pf-text-muted mb-1">
               Support Type
             </label>
-            <p className="mb-1 text-xs text-pf-text-secondary">Choose the type of support structure.</p>
+            <p id={supportTypeDescId} className="mb-1 text-xs text-pf-text-secondary">Choose the type of support structure.</p>
             <Select
-              id="simple-support-type"
+              id={supportTypeId}
               value={settings.supportType}
               onChange={(e) => updateSetting('supportType', e.target.value)}
-              aria-label="Support type"
+              aria-describedby={supportTypeDescId}
             >
               {SUPPORT_TYPE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -438,16 +528,16 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             <BedAdhesionIcon className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <h4 className="text-lg font-semibold text-pf-text-primary">Bed Adhesion</h4>
-            <p className="mt-1 text-sm text-pf-text-secondary">Choose between skirt or brim for better print adhesion</p>
+            <h4 id={bedAdhesionGroupId} className="text-lg font-semibold text-pf-text-primary">Bed Adhesion</h4>
+            <p id={bedAdhesionDescId} className="mt-1 text-sm text-pf-text-secondary">Choose between skirt or brim for better print adhesion</p>
           </div>
         </div>
-        <div className="space-y-4 pl-1" role="radiogroup" aria-label="Bed adhesion type">
+        <div className="space-y-4 pl-1" role="radiogroup" aria-labelledby={bedAdhesionGroupId} aria-describedby={bedAdhesionDescId}>
           {BED_ADHESION_OPTIONS.map((opt) => (
             <label key={opt.value} className="flex cursor-pointer items-center gap-3 text-lg text-pf-text-primary">
               <input
                 type="radio"
-                name="bed-adhesion"
+                name={`${panelId}-bed-adhesion`}
                 value={opt.value}
                 checked={settings.bedAdhesionType === opt.value}
                 onChange={() => updateSetting('bedAdhesionType', opt.value)}
