@@ -146,7 +146,145 @@ describe('Cost source precedence in SliceProgressOverlay', () => {
   });
 });
 
-// ── Spool Picker Tests (via NewSliceJobPage spool select component) ──────────
+// ── Slice Snapshot Tests ────────────────────────────────────────────────────
+// Verifies that cost/spool/requirements are frozen at submit time and do NOT
+// change when the sidebar picker is updated while a job is in flight.
+
+interface SnapshotState {
+  spoolId: number | null;
+  filamentCostPerKg: number | null;
+  requiredPrinterModel: string | undefined;
+  requiredMaterialType: string | undefined;
+  requiredNozzleDiameter: number | undefined;
+}
+
+function SliceSnapshotStub() {
+  const [selectedSpoolId, setSelectedSpoolId] = React.useState<number | null>(1);
+  const [filamentCostPerKg] = React.useState<number | null>(20);
+  const [requiredPrinterModel] = React.useState<string | undefined>('MK4');
+  const [requiredMaterialType] = React.useState<string | undefined>('PLA');
+  const [requiredNozzleDiameter] = React.useState<number | undefined>(0.4);
+
+  const [submittedJobId, setSubmittedJobId] = React.useState<string | null>(null);
+  const [sliceSnapshot, setSliceSnapshot] = React.useState<SnapshotState | null>(null);
+
+  const isSubmitted = submittedJobId != null && sliceSnapshot != null;
+  const effectiveSpoolId = isSubmitted ? sliceSnapshot.spoolId : selectedSpoolId;
+  const effectiveFilamentCostPerKg = isSubmitted ? sliceSnapshot.filamentCostPerKg : filamentCostPerKg;
+  const effectivePrinterModel = isSubmitted ? sliceSnapshot.requiredPrinterModel : requiredPrinterModel;
+  const effectiveMaterialType = isSubmitted ? sliceSnapshot.requiredMaterialType : requiredMaterialType;
+  const effectiveNozzle = isSubmitted ? sliceSnapshot.requiredNozzleDiameter : requiredNozzleDiameter;
+
+  function handleSubmit() {
+    setSliceSnapshot({
+      spoolId: selectedSpoolId,
+      filamentCostPerKg,
+      requiredPrinterModel,
+      requiredMaterialType,
+      requiredNozzleDiameter,
+    });
+    setSubmittedJobId('job-snap-test');
+  }
+
+  function handleClear() {
+    setSubmittedJobId(null);
+    setSliceSnapshot(null);
+  }
+
+  return (
+    <div>
+      <select
+        aria-label="Select spool"
+        value={selectedSpoolId ?? ''}
+        onChange={(e) => {
+          const val = e.target.value;
+          setSelectedSpoolId(val === '' ? null : parseInt(val, 10));
+        }}
+        data-testid="spool-select"
+      >
+        <option value="">— None —</option>
+        <option value="1">Spool A</option>
+        <option value="2">Spool B</option>
+      </select>
+      <button onClick={handleSubmit} data-testid="submit-btn">Slice</button>
+      <button onClick={handleClear} data-testid="clear-btn">Clear</button>
+      <div data-testid="live-spool">{selectedSpoolId ?? 'none'}</div>
+      <div data-testid="effective-spool">{effectiveSpoolId ?? 'none'}</div>
+      <div data-testid="effective-cost">{effectiveFilamentCostPerKg ?? 'none'}</div>
+      <div data-testid="effective-model">{effectivePrinterModel ?? 'none'}</div>
+      <div data-testid="effective-material">{effectiveMaterialType ?? 'none'}</div>
+      <div data-testid="effective-nozzle">{effectiveNozzle ?? 'none'}</div>
+      <div data-testid="is-submitted">{isSubmitted ? 'yes' : 'no'}</div>
+    </div>
+  );
+}
+
+describe('Slice snapshot — cost/spool/requirements frozen at submit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('effective values match live selection before any submission', () => {
+    render(<SliceSnapshotStub />);
+    expect(screen.getByTestId('effective-spool')).toHaveTextContent('1');
+    expect(screen.getByTestId('effective-cost')).toHaveTextContent('20');
+    expect(screen.getByTestId('effective-model')).toHaveTextContent('MK4');
+    expect(screen.getByTestId('effective-material')).toHaveTextContent('PLA');
+    expect(screen.getByTestId('effective-nozzle')).toHaveTextContent('0.4');
+    expect(screen.getByTestId('is-submitted')).toHaveTextContent('no');
+  });
+
+  it('after submit with spool A, switching picker to spool B keeps effective spool as A', async () => {
+    render(<SliceSnapshotStub />);
+
+    // Submit while spool A (id=1) is selected
+    fireEvent.click(screen.getByTestId('submit-btn'));
+    expect(screen.getByTestId('is-submitted')).toHaveTextContent('yes');
+    expect(screen.getByTestId('effective-spool')).toHaveTextContent('1');
+
+    // User changes sidebar picker to spool B while job is in flight
+    fireEvent.change(screen.getByTestId('spool-select'), { target: { value: '2' } });
+
+    // Live picker reflects the change
+    expect(screen.getByTestId('live-spool')).toHaveTextContent('2');
+
+    // Effective spool (used by overlay/queue) is still frozen to spool A
+    expect(screen.getByTestId('effective-spool')).toHaveTextContent('1');
+    expect(screen.getByTestId('effective-cost')).toHaveTextContent('20');
+    expect(screen.getByTestId('effective-model')).toHaveTextContent('MK4');
+    expect(screen.getByTestId('effective-material')).toHaveTextContent('PLA');
+    expect(screen.getByTestId('effective-nozzle')).toHaveTextContent('0.4');
+  });
+
+  it('after submit, clearing the spool picker does not clear effective spool', async () => {
+    render(<SliceSnapshotStub />);
+
+    fireEvent.click(screen.getByTestId('submit-btn'));
+    fireEvent.change(screen.getByTestId('spool-select'), { target: { value: '' } });
+
+    expect(screen.getByTestId('live-spool')).toHaveTextContent('none');
+    expect(screen.getByTestId('effective-spool')).toHaveTextContent('1');
+  });
+
+  it('snapshot is cleared when the job is cleared, restoring live values', async () => {
+    render(<SliceSnapshotStub />);
+
+    fireEvent.click(screen.getByTestId('submit-btn'));
+    // Switch to spool B while submitted
+    fireEvent.change(screen.getByTestId('spool-select'), { target: { value: '2' } });
+    expect(screen.getByTestId('effective-spool')).toHaveTextContent('1');
+
+    // Clear / new-job resets snapshot
+    fireEvent.click(screen.getByTestId('clear-btn'));
+    await waitFor(() => {
+      expect(screen.getByTestId('is-submitted')).toHaveTextContent('no');
+    });
+
+    // Effective spool now follows the live picker (spool B)
+    expect(screen.getByTestId('effective-spool')).toHaveTextContent('2');
+  });
+});
+
 // These tests exercise the spool picker state + localStorage integration
 // via a lightweight stub component that mirrors the page's picker logic.
 

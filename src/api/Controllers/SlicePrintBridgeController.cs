@@ -9,6 +9,7 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
+using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -37,7 +38,8 @@ public class SlicePrintBridgeController(
     IArtifactsService? artifactsService = null,
     IJobQueueService? jobQueueService = null,
     ISliceGcodeImportService? importService = null,
-    ISpoolmanService? spoolmanService = null) : ControllerBase
+    ISpoolmanService? spoolmanService = null,
+    IGcodeFilesService? gcodeFilesService = null) : ControllerBase
 {
     /// <summary>
     /// Send the completed gcode from a slice job to a printer.
@@ -177,6 +179,16 @@ public class SlicePrintBridgeController(
                 new { error = "Queue services are unavailable.", code = "QUEUE_UNAVAILABLE" });
         }
 
+        // Validate copies range before performing any expensive operations.
+        if (request.Copies is < 1 or > 99)
+        {
+            return BadRequest(new
+            {
+                error = "Copies must be between 1 and 99.",
+                jobId = id
+            });
+        }
+
         // 1. Validate the slice job exists and belongs to the current user
         SliceJob? job = await jobRepository.GetByIdAsync(id, ct);
         if (job is null)
@@ -221,14 +233,14 @@ public class SlicePrintBridgeController(
         }
 
         // 5. Import the gcode into the GcodeFile library
-        Guid gcodeFileId = await importService.ImportAsync(
+        SliceGcodeImportResult importResult = await importService.ImportAsync(
             pathResult.Value.Artifact.FileName,
             pathResult.Value.FullPath,
             ct);
 
         logger.LogInformation(
-            "Imported slice gcode from job {JobId} as GcodeFile {GcodeFileId}",
-            id, gcodeFileId);
+            "Imported slice gcode from job {JobId} as GcodeFile {GcodeFileId} (isNew={IsNewFile})",
+            id, importResult.FileId, importResult.IsNewFile);
 
         // 6. Optionally resolve Spoolman spool into denormalized filament fields
         int? spoolmanFilamentId = null;
@@ -263,7 +275,7 @@ public class SlicePrintBridgeController(
         // so we only need to forward what the caller explicitly provided.
         var queueDto = new QueuePrintJobDto
         {
-            GcodeFileId = gcodeFileId,
+            GcodeFileId = importResult.FileId,
             AssignedPrinterId = null, // auto-dispatch
             Priority = request.Priority ?? PrintJobPriority.Normal,
             Copies = request.Copies ?? 1,
@@ -279,11 +291,43 @@ public class SlicePrintBridgeController(
         JobQueuePrintJobDto? printJob = await jobQueueService.AddJobToQueueAsync(queueDto, userId, ct);
         if (printJob is null)
         {
+            // Attempt to clean up a newly-imported GcodeFile that is now orphaned.
+            // A reused file (IsNewFile=false) must not be deleted — other jobs may reference it.
+            bool cleanedUp = false;
+            if (importResult.IsNewFile && gcodeFilesService is not null)
+            {
+                try
+                {
+                    cleanedUp = await gcodeFilesService.DeleteFileAsync(importResult.FileId, ct);
+                    if (!cleanedUp)
+                    {
+                        logger.LogWarning(
+                            "Could not clean up orphaned GcodeFile {GcodeFileId} after no compatible printer found for slice job {JobId}",
+                            importResult.FileId, id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Failed to clean up orphaned GcodeFile {GcodeFileId} after no compatible printer found for slice job {JobId}",
+                        importResult.FileId, id);
+                }
+            }
+
+            const string noCompatiblePrinterError =
+                "No compatible printer is available for this job. Adjust the compatibility requirements or add a suitable printer.";
+
+            if (cleanedUp)
+            {
+                return BadRequest(new { error = noCompatiblePrinterError, jobId = id });
+            }
+
             return BadRequest(new
             {
-                error = "No compatible printer is available for this job. Adjust the compatibility requirements or add a suitable printer.",
+                error = noCompatiblePrinterError,
                 jobId = id,
-                gcodeFileId
+                gcodeFileId = importResult.FileId
             });
         }
 

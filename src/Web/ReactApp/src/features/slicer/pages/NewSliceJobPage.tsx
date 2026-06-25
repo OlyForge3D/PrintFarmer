@@ -598,11 +598,22 @@ export const NewSliceJobPage: React.FC = () => {
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const jobProgress = useSliceJobProgress(submittedJobId);
 
-  // Auto-clear submittedJobId when the job reaches a terminal state
+  // Snapshot of spool/cost/routing values captured at slice-submit time.
+  // Keeps cost display and queue routing stable while sidebar stays editable.
+  const [sliceSnapshot, setSliceSnapshot] = useState<{
+    spoolId: number | null;
+    filamentCostPerKg: number | null;
+    requiredPrinterModel: string | undefined;
+    requiredMaterialType: string | undefined;
+    requiredNozzleDiameter: number | undefined;
+  } | null>(null);
+
+  // Auto-clear submittedJobId (and snapshot) when the job reaches a terminal state
   useEffect(() => {
     if (jobProgress.status === 'completed' || jobProgress.status === 'failed') {
       const timer = setTimeout(() => {
         setSubmittedJobId(prev => prev ? null : prev);
+        setSliceSnapshot(null);
       }, 3000);
       return () => clearTimeout(timer);
     }
@@ -1434,31 +1445,6 @@ export const NewSliceJobPage: React.FC = () => {
   });
   const availableSpools = spoolsResponse?.items ?? [];
 
-  // Fetch per-gram cost from Spoolman when a spool is selected.
-  const { data: spoolCostData } = useQuery({
-    queryKey: ['spool-cost-per-gram', selectedSpoolId],
-    queryFn: () => sliceJobService.getSpoolCostPerGram(selectedSpoolId!),
-    enabled: selectedSpoolId != null,
-    staleTime: 60_000,
-  });
-
-  // Resolved per-gram cost: Spoolman spool takes precedence over profile cost.
-  const resolvedCostPerGram = useMemo((): number | null => {
-    if (selectedSpoolId != null && spoolCostData?.costPerGram != null) {
-      return spoolCostData.costPerGram;
-    }
-    if (filamentCostPerKg != null) {
-      return filamentCostPerKg / 1000;
-    }
-    return null;
-  }, [selectedSpoolId, spoolCostData, filamentCostPerKg]);
-
-  const costSource = useMemo((): 'spoolman' | 'profile' | null => {
-    if (selectedSpoolId != null && spoolCostData?.costPerGram != null) return 'spoolman';
-    if (filamentCostPerKg != null) return 'profile';
-    return null;
-  }, [selectedSpoolId, spoolCostData, filamentCostPerKg]);
-
   // Derive queue routing requirements from current slice selections.
   const requiredPrinterModel = useMemo(
     () => selectedPrinterForSlicing?.modelName ?? undefined,
@@ -1469,6 +1455,39 @@ export const NewSliceJobPage: React.FC = () => {
     () => selectedPrinterForSlicing?.nozzleDiameter ?? undefined,
     [selectedPrinterForSlicing],
   );
+
+  // When a job is in flight, freeze cost/spool/routing to the snapshot captured at submit time.
+  const isSubmitted = submittedJobId != null && sliceSnapshot != null;
+  const effectiveSpoolId = isSubmitted ? sliceSnapshot.spoolId : selectedSpoolId;
+  const effectiveFilamentCostPerKg = isSubmitted ? sliceSnapshot.filamentCostPerKg : filamentCostPerKg;
+  const effectiveRequiredPrinterModel = isSubmitted ? sliceSnapshot.requiredPrinterModel : requiredPrinterModel;
+  const effectiveRequiredMaterialType = isSubmitted ? sliceSnapshot.requiredMaterialType : requiredMaterialType;
+  const effectiveRequiredNozzleDiameter = isSubmitted ? sliceSnapshot.requiredNozzleDiameter : requiredNozzleDiameter;
+
+  // Fetch per-gram cost from Spoolman for the effective spool (snapshot when in-flight, live otherwise).
+  const { data: spoolCostData } = useQuery({
+    queryKey: ['spool-cost-per-gram', effectiveSpoolId],
+    queryFn: () => sliceJobService.getSpoolCostPerGram(effectiveSpoolId!),
+    enabled: effectiveSpoolId != null,
+    staleTime: 60_000,
+  });
+
+  // Resolved per-gram cost: Spoolman spool takes precedence over profile cost.
+  const resolvedCostPerGram = useMemo((): number | null => {
+    if (effectiveSpoolId != null && spoolCostData?.costPerGram != null) {
+      return spoolCostData.costPerGram;
+    }
+    if (effectiveFilamentCostPerKg != null) {
+      return effectiveFilamentCostPerKg / 1000;
+    }
+    return null;
+  }, [effectiveSpoolId, spoolCostData, effectiveFilamentCostPerKg]);
+
+  const costSource = useMemo((): 'spoolman' | 'profile' | null => {
+    if (effectiveSpoolId != null && spoolCostData?.costPerGram != null) return 'spoolman';
+    if (effectiveFilamentCostPerKg != null) return 'profile';
+    return null;
+  }, [effectiveSpoolId, spoolCostData, effectiveFilamentCostPerKg]);
 
   // Hydrate dynamic advanced settings from selected Orca process profile.
   useEffect(() => {
@@ -1596,19 +1615,34 @@ export const NewSliceJobPage: React.FC = () => {
         : undefined,
     };
 
+    // Freeze spool/cost/routing at submit time so the overlay and queue call
+    // reflect what was actually sliced, regardless of later sidebar edits.
+    setSliceSnapshot({
+      spoolId: selectedSpoolId,
+      filamentCostPerKg: filamentCostPerKg,
+      requiredPrinterModel: requiredPrinterModel,
+      requiredMaterialType: requiredMaterialType,
+      requiredNozzleDiameter: requiredNozzleDiameter,
+    });
+
     submitMutation.mutate(request);
   }, [
     advancedProcessSettings,
     bedModels,
     extruderFilamentProfileIds,
+    filamentCostPerKg,
     modelFileName,
     modelFileUrl,
     physicalToolheads,
     printerIsMultiToolhead,
+    requiredMaterialType,
+    requiredNozzleDiameter,
+    requiredPrinterModel,
     selectedBedType,
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
+    selectedSpoolId,
     slicerInfo.engine,
     slicerMode,
     slicerSettings,
@@ -2517,6 +2551,7 @@ export const NewSliceJobPage: React.FC = () => {
               progress={jobProgress}
               onNewJob={() => {
                 setSubmittedJobId(null);
+                setSliceSnapshot(null);
                 setMessage(null);
                 setModelFileUrl('');
                 setModelFileName('');
@@ -2524,6 +2559,7 @@ export const NewSliceJobPage: React.FC = () => {
               }}
               onRetry={() => {
                 setSubmittedJobId(null);
+                setSliceSnapshot(null);
                 setError(null);
                 setMessage(null);
               }}
@@ -2566,15 +2602,16 @@ export const NewSliceJobPage: React.FC = () => {
               <SliceProgressOverlay
                 jobId={submittedJobId}
                 progress={jobProgress}
-                filamentCostPerKg={filamentCostPerKg}
+                filamentCostPerKg={effectiveFilamentCostPerKg}
                 resolvedCostPerGram={resolvedCostPerGram}
                 costSource={costSource}
-                selectedSpoolId={selectedSpoolId}
-                requiredPrinterModel={requiredPrinterModel}
-                requiredMaterialType={requiredMaterialType}
-                requiredNozzleDiameter={requiredNozzleDiameter}
+                selectedSpoolId={effectiveSpoolId}
+                requiredPrinterModel={effectiveRequiredPrinterModel}
+                requiredMaterialType={effectiveRequiredMaterialType}
+                requiredNozzleDiameter={effectiveRequiredNozzleDiameter}
                 onNewJob={() => {
                   setSubmittedJobId(null);
+                  setSliceSnapshot(null);
                   setMessage(null);
                   setModelFileUrl('');
                   setModelFileName('');
@@ -2582,6 +2619,7 @@ export const NewSliceJobPage: React.FC = () => {
                 }}
                 onRetry={() => {
                   setSubmittedJobId(null);
+                  setSliceSnapshot(null);
                   setError(null);
                   setMessage(null);
                 }}

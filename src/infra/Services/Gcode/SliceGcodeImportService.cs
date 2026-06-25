@@ -28,7 +28,7 @@ public sealed class SliceGcodeImportService(
         logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
-    public async Task<Guid> ImportAsync(string fileName, string fullPath, CancellationToken ct)
+    public async Task<SliceGcodeImportResult> ImportAsync(string fileName, string fullPath, CancellationToken ct)
     {
         // Read the artifact bytes from disk.
         byte[] bytes = await File.ReadAllBytesAsync(fullPath, ct);
@@ -53,7 +53,7 @@ public sealed class SliceGcodeImportService(
                 "Imported slice gcode {FileName} as GcodeFile {GcodeFileId} ({Bytes} bytes)",
                 fileName, gcodeFile.Id, bytes.Length);
 
-            return gcodeFile.Id;
+            return new SliceGcodeImportResult(gcodeFile.Id, IsNewFile: true);
         }
         catch (DuplicateFileException ex) when (
             ex.ExistingFileId is not null
@@ -63,7 +63,7 @@ public sealed class SliceGcodeImportService(
             _logger.LogInformation(
                 "Slice gcode {FileName} already exists as GcodeFile {ExistingId}; reusing",
                 fileName, existingId);
-            return existingId;
+            return new SliceGcodeImportResult(existingId, IsNewFile: false);
         }
     }
 }
