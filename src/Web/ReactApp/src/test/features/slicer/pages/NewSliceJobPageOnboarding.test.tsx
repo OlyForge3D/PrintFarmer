@@ -42,6 +42,7 @@ vi.mock('@/services/api', () => ({
     delete: vi.fn(),
     getPrinters: vi.fn(() => Promise.resolve([])),
     getPrinterDetails: vi.fn(() => Promise.resolve(null)),
+    getSpools: vi.fn(() => Promise.resolve({ items: [], totalCount: 0 })),
   },
 }));
 
@@ -57,6 +58,8 @@ vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
     submit: vi.fn(),
     parseOrcaNumeric: vi.fn(() => undefined),
+    getSpoolCostPerGram: vi.fn(() => Promise.resolve({ costPerGram: null, currency: '$', source: null })),
+    addSliceToQueue: vi.fn(() => Promise.resolve({ printJobId: 'pj-1', queuePosition: null, message: 'Queued' })),
   },
   SubmitSliceJobRequest: {},
 }));

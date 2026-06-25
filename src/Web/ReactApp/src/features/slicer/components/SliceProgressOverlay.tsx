@@ -18,6 +18,18 @@ interface SliceProgressOverlayProps {
    * unavailable the material cost is omitted.
    */
   filamentCostPerKg?: number | null;
+  /** Resolved per-gram cost — takes precedence over filamentCostPerKg when set. */
+  resolvedCostPerGram?: number | null;
+  /** Source of the resolved cost, shown as a small indicator on the cost chip. */
+  costSource?: 'spoolman' | 'profile' | null;
+  /** Selected Spoolman spool ID — forwarded to the queue submission. */
+  selectedSpoolId?: number | null;
+  /** Required printer model derived from slice selections — forwarded to the queue form. */
+  requiredPrinterModel?: string;
+  /** Required material type derived from slice selections — forwarded to the queue form. */
+  requiredMaterialType?: string;
+  /** Required nozzle diameter derived from slice selections — forwarded to the queue form. */
+  requiredNozzleDiameter?: number;
 }
 
 /**
@@ -25,7 +37,7 @@ interface SliceProgressOverlayProps {
  * Inspired by OrcaSlicer's progress dialog — prominent, centered, 
  * with real-time progress ring and status details.
  */
-export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg }: SliceProgressOverlayProps) {
+export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SliceProgressOverlayProps) {
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
   const isCancelled = progress.status === 'Cancelled';
@@ -39,7 +51,10 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
     window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank');
   }, [jobId]);
 
-  const materialCost = sliceJobService.formatMaterialCost(progress.filamentUsedGrams, filamentCostPerKg);
+  const materialCost = resolvedCostPerGram != null
+    ? sliceJobService.computeMaterialCostPerGram(progress.filamentUsedGrams, resolvedCostPerGram)
+    : sliceJobService.computeMaterialCost(progress.filamentUsedGrams, filamentCostPerKg);
+  const materialCostFormatted = materialCost != null ? `$${materialCost.toFixed(2)}` : null;
 
   // SVG progress ring dimensions
   const size = 160;
@@ -130,9 +145,14 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
                 🧵 {sliceJobService.formatFilamentUsed(progress.filamentUsedGrams)}
               </span>
             )}
-            {materialCost && (
+            {materialCostFormatted && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-xs text-white/80">
-                💰 {materialCost}
+                💰 {materialCostFormatted}
+                {costSource && (
+                  <span className="text-[10px] opacity-60">
+                    ({costSource === 'spoolman' ? 'Spoolman' : 'Profile'})
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -189,7 +209,15 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
       {/* Post-slice modals */}
       <GcodePreviewModal isOpen={previewOpen} onClose={() => setPreviewOpen(false)} jobId={jobId} />
-      <SendToPrinterModal isOpen={sendOpen} onClose={() => setSendOpen(false)} jobId={jobId} />
+      <SendToPrinterModal
+        isOpen={sendOpen}
+        onClose={() => setSendOpen(false)}
+        jobId={jobId}
+        selectedSpoolId={selectedSpoolId}
+        requiredPrinterModel={requiredPrinterModel}
+        requiredMaterialType={requiredMaterialType}
+        requiredNozzleDiameter={requiredNozzleDiameter}
+      />
     </div>
   );
 }

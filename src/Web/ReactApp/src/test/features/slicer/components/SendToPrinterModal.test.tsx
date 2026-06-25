@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import React from 'react';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import { toast } from 'sonner';
 
@@ -13,10 +14,12 @@ vi.mock('sonner', () => ({
 }));
 
 const mockSendToPrinter = vi.fn();
+const mockAddSliceToQueue = vi.fn();
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
     sendToPrinter: (...args: unknown[]) => mockSendToPrinter(...args),
+    addSliceToQueue: (...args: unknown[]) => mockAddSliceToQueue(...args),
   },
 }));
 
@@ -155,5 +158,105 @@ describe('SendToPrinterModal', () => {
     renderModal({ isOpen: false });
 
     expect(screen.queryByText('Send to Printer')).not.toBeInTheDocument();
+  });
+
+  describe('mode chooser', () => {
+    it('shows both Send to Printer and Add to Queue mode buttons', () => {
+      renderModal();
+      expect(screen.getByRole('radio', { name: /send to printer/i })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /add to queue/i })).toBeInTheDocument();
+    });
+
+    it('defaults to Send to Printer mode', () => {
+      renderModal();
+      const directBtn = screen.getByRole('radio', { name: /send to printer/i });
+      expect(directBtn).toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
+  describe('Add to Queue mode', () => {
+    it('calls addSliceToQueue with correct payload on submit', async () => {
+      mockAddSliceToQueue.mockResolvedValue({
+        printJobId: 'pj-1',
+        queuePosition: 3,
+        message: 'Queued',
+      });
+
+      renderModal({ selectedSpoolId: 42, requiredPrinterModel: 'MK4', requiredMaterialType: 'PLA', requiredNozzleDiameter: 0.4 });
+
+      fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
+
+      fireEvent.click(screen.getByRole('button', { name: /add to queue/i }));
+
+      await waitFor(() => {
+        expect(mockAddSliceToQueue).toHaveBeenCalledWith('job-123', expect.objectContaining({
+          priority: 'Normal',
+          copies: 1,
+          spoolId: 42,
+          requiredPrinterModel: 'MK4',
+          requiredMaterialType: 'PLA',
+          requiredNozzleDiameter: 0.4,
+        }));
+      });
+    });
+
+    it('shows success toast with queue position on success', async () => {
+      const onClose = vi.fn();
+      mockAddSliceToQueue.mockResolvedValue({
+        printJobId: 'pj-1',
+        queuePosition: 2,
+        message: 'Queued',
+      });
+
+      renderModal({ onClose });
+
+      fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
+      fireEvent.click(screen.getByRole('button', { name: /add to queue/i }));
+
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalledWith('Queued — position 2');
+        expect(onClose).toHaveBeenCalled();
+      });
+    });
+
+    it('shows success toast without position when queuePosition is null', async () => {
+      mockAddSliceToQueue.mockResolvedValue({
+        printJobId: 'pj-1',
+        queuePosition: null,
+        message: 'Queued',
+      });
+
+      renderModal();
+
+      fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
+      fireEvent.click(screen.getByRole('button', { name: /add to queue/i }));
+
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalledWith('Queued');
+      });
+    });
+
+    it('shows error toast on queue failure', async () => {
+      mockAddSliceToQueue.mockRejectedValue(new Error('Queue full'));
+
+      renderModal();
+
+      fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
+      fireEvent.click(screen.getByRole('button', { name: /add to queue/i }));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Failed to add to queue: Queue full');
+      });
+    });
+
+    it('renders requirement chips when requirements are provided', () => {
+      renderModal({ requiredPrinterModel: 'MK4', requiredMaterialType: 'PETG', requiredNozzleDiameter: 0.6 });
+
+      fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
+
+      expect(screen.getByText(/MK4/)).toBeInTheDocument();
+      expect(screen.getByText(/PETG/)).toBeInTheDocument();
+      expect(screen.getByText(/0.6mm nozzle/)).toBeInTheDocument();
+    });
   });
 });

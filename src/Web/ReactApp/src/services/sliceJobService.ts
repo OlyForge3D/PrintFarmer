@@ -98,6 +98,27 @@ export interface SendToPrinterResponse {
   message: string;
 }
 
+export interface SpoolCostResponse {
+  costPerGram: number | null;
+  currency: string;
+  source: 'spool' | 'filament' | null;
+}
+
+export interface AddSliceToQueueRequest {
+  priority?: string;
+  spoolId?: number;
+  copies?: number;
+  requiredPrinterModel?: string;
+  requiredMaterialType?: string;
+  requiredNozzleDiameter?: number;
+}
+
+export interface AddSliceToQueueResponse {
+  printJobId: string;
+  queuePosition: number | null;
+  message: string;
+}
+
 export class SliceJobService {
   /**
    * Submit a new slicing job
@@ -107,6 +128,43 @@ export class SliceJobService {
       url: '/slice/',
       method: 'POST',
       data: request
+    });
+    return response;
+  }
+
+  /**
+   * Fetch cost-per-gram for a given Spoolman spool (or filament).
+   * Supply either spoolId or filamentId; the backend uses whichever is present.
+   */
+  async getSpoolCostPerGram(spoolId: number): Promise<SpoolCostResponse> {
+    const response = await apiClient.request<SpoolCostResponse>({
+      url: `/slice-cost/per-gram?spoolId=${spoolId}`,
+      method: 'GET',
+    });
+    return response;
+  }
+
+  /**
+   * Best-effort material cost = grams × per-gram cost.
+   * Returns null when either input is missing or non-positive.
+   */
+  computeMaterialCostPerGram(
+    grams: number | null | undefined,
+    costPerGram: number | null | undefined,
+  ): number | null {
+    if (grams == null || costPerGram == null) return null;
+    if (!(grams > 0) || !(costPerGram > 0)) return null;
+    return grams * costPerGram;
+  }
+
+  /**
+   * Add a completed slice job to the print queue.
+   */
+  async addSliceToQueue(jobId: string, payload: AddSliceToQueueRequest): Promise<AddSliceToQueueResponse> {
+    const response = await apiClient.request<AddSliceToQueueResponse>({
+      url: `/slice/${jobId}/add-to-queue`,
+      method: 'POST',
+      data: payload,
     });
     return response;
   }
