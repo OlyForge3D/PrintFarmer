@@ -21,7 +21,6 @@ import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessP
 import { AdvancedSettingsDisclosure } from '@/features/slicer/components/AdvancedSettingsDisclosure';
 import {
   SlicerSettingsPanel,
-  BED_TYPE_OPTIONS,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
@@ -245,9 +244,6 @@ export const NewSliceJobPage: React.FC = () => {
   // === Multi-extruder filament selection (for multi-toolhead printers) ===
   // Maps extruder index → filament profile name. Only used when printer has >1 physical toolhead.
   const [extruderFilamentProfileIds, setExtruderFilamentProfileIds] = useState<Record<number, string>>({});
-
-  // === Bed Type Override ===
-  const [selectedBedType, setSelectedBedType] = useState<string>('');
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
@@ -1658,7 +1654,6 @@ export const NewSliceJobPage: React.FC = () => {
             overrides: {
               ...advancedProcessSettings,
               ...slicerSettings,
-              ...(slicerMode === 'Advanced' && selectedBedType ? { curr_bed_type: selectedBedType } : {}),
             },
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
@@ -1705,13 +1700,11 @@ export const NewSliceJobPage: React.FC = () => {
     requiredMaterialType,
     requiredNozzleDiameter,
     requiredPrinterModel,
-    selectedBedType,
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
     selectedSpoolId,
     slicerInfo.engine,
-    slicerMode,
     slicerSettings,
     submitMutation,
     user?.id,
@@ -1910,62 +1903,6 @@ export const NewSliceJobPage: React.FC = () => {
              On narrow screens: slides over as fixed-width panel when toggled open. */}
         <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
 
-          {/* PER-USER MODE TOGGLE — only when the admin has enabled both modes */}
-          {canToggleSlicerMode && slicerMode && (
-            <div
-              className="flex items-center gap-1 rounded-lg border border-pf-border bg-pf-panel p-1"
-              role="radiogroup"
-              aria-label="Slicer mode"
-            >
-              {slicerModeOptions.map((m, index) => {
-                const active = slicerMode === m;
-                return (
-                  <Button
-                    key={m}
-                    ref={(element) => {
-                      slicerModeRefs.current[m] = element;
-                    }}
-                    type="button"
-                    variant="unstyled"
-                    role="radio"
-                    aria-checked={active}
-                    tabIndex={active ? 0 : -1}
-                    onKeyDown={(event) => {
-                      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-                        event.preventDefault();
-                        const next = slicerModeOptions[(index + 1) % slicerModeOptions.length];
-                        setSlicerMode(next);
-                        slicerModeRefs.current[next]?.focus();
-                        return;
-                      }
-
-                      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-                        event.preventDefault();
-                        const next = slicerModeOptions[(index - 1 + slicerModeOptions.length) % slicerModeOptions.length];
-                        setSlicerMode(next);
-                        slicerModeRefs.current[next]?.focus();
-                        return;
-                      }
-
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSlicerMode(m);
-                      }
-                    }}
-                    onClick={() => setSlicerMode(m)}
-                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
-                      active
-                        ? 'bg-pf-accent text-pf-bg-1'
-                        : 'text-pf-text-secondary hover:text-pf-text-primary'
-                    }`}
-                  >
-                    {m}
-                  </Button>
-                );
-              })}
-            </div>
-          )}
-
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
             selectedSlicerId={selectedSlicerId}
@@ -1973,34 +1910,34 @@ export const NewSliceJobPage: React.FC = () => {
             engineOptions={engineOptions}
           />
 
-          {/* PRINTER SELECTION - Select from registered printers first */}
-          <PrinterSlicerSelector
-            printers={printers}
-            isLoading={isPrintersLoading}
-            selectedPrinterId={selectedPrinterId}
-            accessory={nozzleFilterControl}
-            onPrinterChange={(printerId) => {
-              setSelectedPrinterId(printerId);
-              // Cascade reset: printer change resets all profile selections
-              setSelectedMachineProfileId('');
-              setSelectedNozzleFilter('');
-              setSelectedFilamentProfileId('');
-              setSelectedFilamentMaterial('');
-              setSelectedProcessPresetId('');
-              setExtruderFilamentProfileIds({});
-              // Machine profile auto-select will happen via the effect
-            }}
-            className="bg-pf-panel border border-pf-border rounded-lg p-3"
-          />
+          {/* PRINTER + MACHINE SELECTION - one compact flow */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-3">
+            <PrinterSlicerSelector
+              printers={printers}
+              isLoading={isPrintersLoading}
+              selectedPrinterId={selectedPrinterId}
+              accessory={nozzleFilterControl}
+              onPrinterChange={(printerId) => {
+                setSelectedPrinterId(printerId);
+                // Cascade reset: printer change resets all profile selections
+                setSelectedMachineProfileId('');
+                setSelectedNozzleFilter('');
+                setSelectedFilamentProfileId('');
+                setSelectedFilamentMaterial('');
+                setSelectedProcessPresetId('');
+                setExtruderFilamentProfileIds({});
+                // Machine profile auto-select will happen via the effect
+              }}
+              className=""
+            />
 
-          {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-semibold text-pf-text-primary">
-                Machine
-                {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
-              </label>
-              <div className="relative" ref={machineMenuRef}>
+            <div className="border-t border-pf-border/70 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-semibold text-pf-text-primary">
+                  Machine
+                  {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
+                </label>
+                <div className="relative" ref={machineMenuRef}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -2053,8 +1990,8 @@ export const NewSliceJobPage: React.FC = () => {
                     </Button>
                   </div>
                 )}
+                </div>
               </div>
-            </div>
             {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
             <input
               ref={importMachineFileRef}
@@ -2122,6 +2059,7 @@ export const NewSliceJobPage: React.FC = () => {
                 No matching slicer profiles found for this printer's manufacturer
               </p>
             )}
+            </div>
           </div>
 
           {/* FILAMENT PROFILE - cascading dropdown with manufacturer groups */}
@@ -2562,22 +2500,59 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* BED TYPE OVERRIDE (Advanced only — hidden in Simple mode per EasyPrint) */}
-          {slicerMode === 'Advanced' && (
-            <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-              <label htmlFor="nsj-bed-type" className="block text-sm font-semibold text-pf-text-primary">
-                Bed Type
-              </label>
-              <Select
-                id="nsj-bed-type"
-                value={selectedBedType}
-                onChange={(e) => setSelectedBedType(e.target.value)}
-              >
-                <option value="">Inherit from profile</option>
-                {BED_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </Select>
+          {/* PER-USER MODE TOGGLE — compact and colocated with the settings it controls */}
+          {canToggleSlicerMode && slicerMode && (
+            <div
+              className="flex items-center gap-1 rounded-md border border-pf-border bg-pf-panel p-1"
+              role="radiogroup"
+              aria-label="Slicer mode"
+            >
+              {slicerModeOptions.map((m, index) => {
+                const active = slicerMode === m;
+                return (
+                  <Button
+                    key={m}
+                    ref={(element) => {
+                      slicerModeRefs.current[m] = element;
+                    }}
+                    type="button"
+                    variant="unstyled"
+                    role="radio"
+                    aria-checked={active}
+                    tabIndex={active ? 0 : -1}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        const next = slicerModeOptions[(index + 1) % slicerModeOptions.length];
+                        setSlicerMode(next);
+                        slicerModeRefs.current[next]?.focus();
+                        return;
+                      }
+
+                      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        const next = slicerModeOptions[(index - 1 + slicerModeOptions.length) % slicerModeOptions.length];
+                        setSlicerMode(next);
+                        slicerModeRefs.current[next]?.focus();
+                        return;
+                      }
+
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSlicerMode(m);
+                      }
+                    }}
+                    onClick={() => setSlicerMode(m)}
+                    className={`flex-1 rounded px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      active
+                        ? 'bg-pf-accent text-pf-bg-1'
+                        : 'text-pf-text-secondary hover:text-pf-text-primary'
+                    }`}
+                  >
+                    {m}
+                  </Button>
+                );
+              })}
             </div>
           )}
 

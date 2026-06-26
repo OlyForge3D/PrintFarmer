@@ -198,7 +198,7 @@ vi.mock('@/services/sliceJobService', () => ({
   }
 }));
 
-// Force Advanced mode so the full feature set (incl. Bed Type) renders in tests.
+// Force Advanced mode when needed so advanced-only sections render in tests.
 vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
   useSlicerMode: () => ({
     mode: slicerModeRef.value,
@@ -300,13 +300,6 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
 // Mock SlicerSettingsPanel
 vi.mock('@/features/slicer/components/settings', () => ({
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
-  BED_TYPE_OPTIONS: [
-    { value: 'Default Plate', label: 'Default Plate' },
-    { value: 'Cool Plate', label: 'Cool Plate' },
-    { value: 'Engineering Plate', label: 'Engineering Plate' },
-    { value: 'High Temp Plate', label: 'High Temp Plate' },
-    { value: 'Textured PEI Plate', label: 'Textured PEI Plate' },
-  ],
 }));
 
 // Mock useSTLFile hook
@@ -726,7 +719,7 @@ describe('NewSliceJobPage', () => {
     });
   });
 
-  describe('Bed Type Override', () => {
+  describe('Bed Type', () => {
     beforeEach(() => {
       slicerModeRef.value = 'Advanced';
     });
@@ -734,39 +727,12 @@ describe('NewSliceJobPage', () => {
       slicerModeRef.value = 'Simple';
     });
 
-    it('renders bed type dropdown with inherit as default', async () => {
+    it('does not render a bed type selector in advanced mode', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
       await waitFor(() => {
-        const bedTypeSelect = screen.getByLabelText(/bed type/i);
-        expect(bedTypeSelect).toBeInTheDocument();
-        expect(bedTypeSelect).toHaveValue('');
+        expect(screen.queryByLabelText(/bed type/i)).not.toBeInTheDocument();
       });
-    });
-
-    it('shows bed type options from OrcaSlicer metadata', async () => {
-      renderWithProviders(<NewSliceJobPage />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText(/bed type/i)).toBeInTheDocument();
-      });
-
-      const bedTypeSelect = screen.getByLabelText(/bed type/i);
-      const options = bedTypeSelect.querySelectorAll('option');
-      // First option is "Inherit from profile", plus the bed type options
-      expect(options.length).toBeGreaterThan(1);
-      expect(options[0].textContent).toBe('Inherit from profile');
-    });
-
-    it('allows user to select a bed type override', async () => {
-      renderWithProviders(<NewSliceJobPage />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText(/bed type/i)).toBeInTheDocument();
-      });
-
-      fireEvent.change(screen.getByLabelText(/bed type/i), { target: { value: 'Cool Plate' } });
-      expect(screen.getByLabelText(/bed type/i)).toHaveValue('Cool Plate');
     });
   });
 });
