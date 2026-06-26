@@ -135,15 +135,12 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                         }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
                       )}
                     </div>
-                    <div className="text-sm text-pf-text-muted flex items-center gap-1 mt-0.5">
+                    <div className="mt-0.5 text-sm text-pf-text-muted">
                       {selectedPrinter.modelName && (
-                        <span>{selectedPrinter.modelName}</span>
-                      )}
-                      {selectedPrinter.modelName && getPrimaryNozzleDiameter(selectedPrinter) && (
-                        <span className="text-pf-text-muted">•</span>
+                        <div className="truncate">{selectedPrinter.modelName}</div>
                       )}
                       {getPrimaryNozzleDiameter(selectedPrinter) && (
-                        <span>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</span>
+                        <div>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</div>
                       )}
                     </div>
                   </div>

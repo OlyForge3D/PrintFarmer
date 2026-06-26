@@ -1859,40 +1859,7 @@ export const NewSliceJobPage: React.FC = () => {
     );
   }
 
-  const selectedNozzleTypeLabel = getPrimaryNozzleTypeLabel(selectedPrinterForSlicing);
-  const nozzleFilterControl = selectedPrinterId && nozzleOptions.length > 0 ? (
-    <div className="flex h-full min-h-19 flex-col justify-center rounded-md border border-pf-border bg-pf-bg-0 px-2 py-2">
-      <label
-        htmlFor="slicer-nozzle-filter"
-        className="text-center text-xs font-semibold leading-tight text-pf-text-primary"
-      >
-        Nozzle
-      </label>
-      <Select
-        id="slicer-nozzle-filter"
-        value={selectedNozzleFilter}
-        onChange={(event) => {
-          setSelectedNozzleFilter(event.target.value);
-          setSelectedMachineProfileId('');
-        }}
-        disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
-        containerClassName="mt-1"
-        className="h-8 rounded-sm py-1 pl-2 pr-6 text-center text-sm font-semibold"
-      >
-        {nozzleOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </Select>
-      <span
-        className="mt-1 truncate text-center text-[11px] leading-tight text-pf-text-muted"
-        title={selectedNozzleTypeLabel ?? undefined}
-      >
-        {selectedNozzleTypeLabel ?? 'Machine profiles'}
-      </span>
-    </div>
-  ) : undefined;
+  const nozzleFilterControl = undefined;
 
   return (
     <div className="min-h-full overflow-hidden bg-pf-bg-2 px-1 pt-0 pb-1">
@@ -1930,7 +1897,7 @@ export const NewSliceJobPage: React.FC = () => {
               className=""
             />
 
-            <div className="border-t border-pf-border/70 pt-2 space-y-1.5">
+            <div className="hidden border-t border-pf-border/70 pt-2 space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-semibold text-pf-text-primary">
                   Machine

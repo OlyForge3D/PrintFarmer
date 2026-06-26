@@ -469,7 +469,7 @@ describe('NewSliceJobPage', () => {
       }, { timeout: 2000 });
     });
 
-    it('should filter machine profiles by selected nozzle diameter', async () => {
+    it('should auto-select a matching machine profile without showing nozzle controls', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
       await waitFor(() => {
@@ -478,25 +478,12 @@ describe('NewSliceJobPage', () => {
 
       fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
 
-      const nozzleFilter = await screen.findByLabelText('Nozzle');
-      const machineProfileSelect = await screen.findByLabelText('Machine profile');
-
       await waitFor(() => {
-        expect(nozzleFilter).toHaveValue('0.4');
-        expect(machineProfileSelect).toHaveValue('Prusa MK4 0.4 nozzle');
+        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle']);
+        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle']);
       });
 
-      expect(screen.getByRole('option', { name: /Prusa MK4 0\.4 nozzle/ })).toBeInTheDocument();
-      expect(screen.queryByRole('option', { name: /Prusa MK4 0\.6 nozzle/ })).not.toBeInTheDocument();
-
-      fireEvent.change(nozzleFilter, { target: { value: '0.6' } });
-
-      await waitFor(() => {
-        expect(machineProfileSelect).toHaveValue('Prusa MK4 0.6 nozzle');
-      });
-
-      expect(screen.getByRole('option', { name: /Prusa MK4 0\.6 nozzle/ })).toBeInTheDocument();
-      expect(screen.queryByRole('option', { name: /Prusa MK4 0\.4 nozzle/ })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Nozzle')).not.toBeInTheDocument();
     });
 
     it('should keep custom machine profiles selectable when system profiles are unavailable', async () => {
