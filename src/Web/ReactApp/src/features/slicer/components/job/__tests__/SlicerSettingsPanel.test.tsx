@@ -120,7 +120,7 @@ describe('SlicerSettingsPanel — infill', () => {
     renderPanel({ infillPattern: 'grid' });
     const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
     expect(trigger).toBeInTheDocument();
-    expect(trigger).toHaveAccessibleDescription(/choose the shape pattern used to fill the print/i);
+    expect(trigger).toHaveAccessibleDescription(/pattern used for internal fill/i);
     expect(trigger.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_grid.svg');
     fireEvent.click(trigger, { detail: 1 });
     expect(screen.getByRole('listbox')).toBeInTheDocument();

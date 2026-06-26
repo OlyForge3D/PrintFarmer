@@ -370,7 +370,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             <label htmlFor={wallLoopsId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
               Perimeters
             </label>
-            <p id={wallLoopsDescId} className="text-xs text-pf-text-secondary">Outer walls that define part strength and surface finish.</p>
+            <p id={wallLoopsDescId} className="text-xs text-pf-text-secondary">Wall count for strength and finish.</p>
           </div>
           <DeferredNumberInput
             id={wallLoopsId}
@@ -391,7 +391,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             <label htmlFor={topLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
               Top Layers
             </label>
-            <p id={topLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the top surface of the print.</p>
+            <p id={topLayersDescId} className="text-xs text-pf-text-secondary">Solid layers at the top surface.</p>
           </div>
           <DeferredNumberInput
             id={topLayersId}
@@ -412,7 +412,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             <label htmlFor={bottomLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
               Bottom Layers
             </label>
-            <p id={bottomLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the build-plate side of the print.</p>
+            <p id={bottomLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the build-plate side.</p>
           </div>
           <DeferredNumberInput
             id={bottomLayersId}
@@ -433,7 +433,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         <span id={infillDensityId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
           Infill Density
         </span>
-        <p id={infillDensityDescId} className="text-xs text-pf-text-secondary">How much material fills the inside of the print.</p>
+        <p id={infillDensityDescId} className="text-xs text-pf-text-secondary">Amount of internal fill material.</p>
 
         {/* Infill % */}
         <div className="flex items-center gap-3">
@@ -471,9 +471,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <span id={infillPatternLabelId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
             Infill Pattern
           </span>
-          <p id={infillPatternDescId} className="text-xs text-pf-text-secondary">
-            Choose the shape pattern used to fill the print.
-          </p>
+          <p id={infillPatternDescId} className="text-xs text-pf-text-secondary">Pattern used for internal fill.</p>
           <InfillPatternDropdown
             value={settings.infillPattern || DEFAULT_INFILL_PATTERN}
             onChange={(pattern) => updateSetting('infillPattern', pattern)}
@@ -495,14 +493,14 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             Enable Supports
           </label>
         </div>
-        <p className="pl-8 text-xs text-pf-text-secondary">Adds support structures for overhanging parts.</p>
+        <p className="pl-8 text-xs text-pf-text-secondary">Adds support under overhangs.</p>
 
         {settings.supportEnabled && (
           <div className="pl-6">
             <label htmlFor={supportTypeId} className="block text-xs text-pf-text-muted mb-1">
               Support Type
             </label>
-            <p id={supportTypeDescId} className="mb-1 text-xs text-pf-text-secondary">Choose the type of support structure.</p>
+            <p id={supportTypeDescId} className="mb-1 text-xs text-pf-text-secondary">Select support style.</p>
             <Select
               id={supportTypeId}
               value={settings.supportType}
@@ -524,9 +522,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         <label htmlFor={bedAdhesionId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
           Bed Adhesion
         </label>
-        <p id={bedAdhesionDescId} className="text-xs text-pf-text-secondary">
-          Adds extra lines around the print to help first-layer reliability.
-        </p>
+        <p id={bedAdhesionDescId} className="text-xs text-pf-text-secondary">Extra first-layer lines for better bed grip.</p>
         <Select
           id={bedAdhesionId}
           value={settings.bedAdhesionType}

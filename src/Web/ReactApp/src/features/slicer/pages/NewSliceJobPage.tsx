@@ -18,7 +18,6 @@ import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
-import { AdvancedSettingsDisclosure } from '@/features/slicer/components/AdvancedSettingsDisclosure';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -1896,12 +1895,12 @@ export const NewSliceJobPage: React.FC = () => {
   ) : undefined;
 
   return (
-    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-2 pb-2">
-      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-2 overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-row">
+    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-1 pt-0 pb-1">
+      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-1.5 overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-row">
         {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden on narrow viewports, toggled via hamburger.
              On lg+ screens: inline beside visualizer unless explicitly toggled off.
              On narrow screens: slides over as fixed-width panel when toggled open. */}
-        <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
+        <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
@@ -1911,7 +1910,7 @@ export const NewSliceJobPage: React.FC = () => {
           />
 
           {/* PRINTER + MACHINE SELECTION - one compact flow */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-3">
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5 space-y-2">
             <PrinterSlicerSelector
               printers={printers}
               isLoading={isPrintersLoading}
@@ -1931,7 +1930,7 @@ export const NewSliceJobPage: React.FC = () => {
               className=""
             />
 
-            <div className="border-t border-pf-border/70 pt-3 space-y-2">
+            <div className="border-t border-pf-border/70 pt-2 space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-semibold text-pf-text-primary">
                   Machine
@@ -2567,20 +2566,15 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
           {slicerMode === 'Advanced' && (
-            <AdvancedSettingsDisclosure
-              currentSettings={slicerSettings as unknown as Record<string, unknown>}
-              originalSettings={originalProcessSettings}
-            >
-              <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
-                <SlicerSettingsPanel
-                  settings={slicerSettings}
-                  onChange={handleSlicerSettingsChange}
-                  advancedSettings={advancedProcessSettings}
-                  onAdvancedSettingsChange={setAdvancedProcessSettings}
-                  originalSettings={originalProcessSettings}
-                />
-              </div>
-            </AdvancedSettingsDisclosure>
+            <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
+              <SlicerSettingsPanel
+                settings={slicerSettings}
+                onChange={handleSlicerSettingsChange}
+                advancedSettings={advancedProcessSettings}
+                onAdvancedSettingsChange={setAdvancedProcessSettings}
+                originalSettings={originalProcessSettings}
+              />
+            </div>
           )}
 
           {/* Model picker modal — opened by workspace "+" button */}

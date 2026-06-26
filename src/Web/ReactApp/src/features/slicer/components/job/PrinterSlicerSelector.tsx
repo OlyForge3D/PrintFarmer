@@ -88,7 +88,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
 
   return (
     <div className={className ?? ''}>
-      <label className="block text-sm font-semibold text-pf-text-primary mb-2">
+      <label className="block text-sm font-semibold text-pf-text-primary mb-1.5">
         Printer
       </label>
       
