@@ -60,14 +60,15 @@ function PatternIcon({ value, className }: { value: string; className?: string }
 function InfillPatternDropdown({
   value,
   onChange,
+  ariaLabelledBy,
   ariaDescribedBy,
 }: {
   value: string;
   onChange: (pattern: string) => void;
+  ariaLabelledBy?: string;
   ariaDescribedBy?: string;
 }) {
   const dropdownId = React.useId();
-  const labelId = `${dropdownId}-label`;
   const selectedValueId = `${dropdownId}-value`;
   const listboxId = `${dropdownId}-listbox`;
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -179,7 +180,7 @@ function InfillPatternDropdown({
         aria-controls={listboxId}
         aria-haspopup="listbox"
         aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
-        aria-labelledby={`${labelId} ${selectedValueId}`}
+        aria-labelledby={ariaLabelledBy ? `${ariaLabelledBy} ${selectedValueId}` : selectedValueId}
         aria-describedby={ariaDescribedBy}
         className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
         onClick={() => {
@@ -194,9 +195,8 @@ function InfillPatternDropdown({
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0">
           <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
         </span>
-        <span className="min-w-0 flex-1">
-          <span id={labelId} className="block text-xs font-medium uppercase tracking-wide text-pf-text-muted">Infill Pattern</span>
-          <span id={selectedValueId} className="block truncate text-base font-medium text-pf-text-primary">{selectedPattern.label}</span>
+        <span id={selectedValueId} className="min-w-0 flex-1 truncate text-sm font-medium text-pf-text-primary">
+          {selectedPattern.label}
         </span>
         <span aria-hidden="true" className="flex shrink-0 items-center justify-center">
           <ChevronDownIcon className="h-5 w-5 text-pf-text-muted" />
@@ -240,19 +240,6 @@ function InfillPatternDropdown({
         </ul>
       )}
     </div>
-  );
-}
-
-function BedAdhesionIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <rect x="5" y="8" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M5 16h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M7 5.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M10 4.5v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M13 4v6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M16 5v5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
   );
 }
 
@@ -335,10 +322,11 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   const bottomLayersDescId = `${panelId}-bottom-layers-desc`;
   const infillDensityId = `${panelId}-infill-density`;
   const infillDensityDescId = `${panelId}-infill-density-desc`;
+  const infillPatternLabelId = `${panelId}-infill-pattern-label`;
   const infillPatternDescId = `${panelId}-infill-pattern-desc`;
   const supportTypeId = `${panelId}-support-type`;
   const supportTypeDescId = `${panelId}-support-type-desc`;
-  const bedAdhesionGroupId = `${panelId}-bed-adhesion-group`;
+  const bedAdhesionId = `${panelId}-bed-adhesion`;
   const bedAdhesionDescId = `${panelId}-bed-adhesion-desc`;
   const updateSetting = <K extends keyof SlicerSettings>(key: K, value: SlicerSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
@@ -375,16 +363,18 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       )}
 
       {/* ── Strength section ── */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="space-y-3">
         {/* Wall Loops (perimeters) */}
-        <div className="space-y-1">
-          <label htmlFor={wallLoopsId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
-            Perimeters
-          </label>
-          <p id={wallLoopsDescId} className="text-xs text-pf-text-secondary">Outer walls that define part strength and surface finish.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
+            <label htmlFor={wallLoopsId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+              Perimeters
+            </label>
+            <p id={wallLoopsDescId} className="text-xs text-pf-text-secondary">Outer walls that define part strength and surface finish.</p>
+          </div>
           <DeferredNumberInput
             id={wallLoopsId}
-            className="w-full px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
+            className="w-20 shrink-0 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary text-right"
             min={1}
             max={20}
             step={1}
@@ -396,14 +386,16 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         </div>
 
         {/* Top Layers */}
-        <div className="space-y-1">
-          <label htmlFor={topLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
-            Top Layers
-          </label>
-          <p id={topLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the top surface of the print.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
+            <label htmlFor={topLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+              Top Layers
+            </label>
+            <p id={topLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the top surface of the print.</p>
+          </div>
           <DeferredNumberInput
             id={topLayersId}
-            className="w-full px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
+            className="w-20 shrink-0 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary text-right"
             min={0}
             max={30}
             step={1}
@@ -415,14 +407,16 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         </div>
 
         {/* Bottom Layers */}
-        <div className="space-y-1">
-          <label htmlFor={bottomLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
-            Bottom Layers
-          </label>
-          <p id={bottomLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the build-plate side of the print.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
+            <label htmlFor={bottomLayersId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+              Bottom Layers
+            </label>
+            <p id={bottomLayersDescId} className="text-xs text-pf-text-secondary">Solid layers on the build-plate side of the print.</p>
+          </div>
           <DeferredNumberInput
             id={bottomLayersId}
-            className="w-full px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
+            className="w-20 shrink-0 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary text-right"
             min={0}
             max={30}
             step={1}
@@ -474,12 +468,16 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
         {/* Infill Pattern dropdown with OrcaSlicer icons */}
         <div className="space-y-1.5">
+          <span id={infillPatternLabelId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+            Infill Pattern
+          </span>
           <p id={infillPatternDescId} className="text-xs text-pf-text-secondary">
             Choose the shape pattern used to fill the print.
           </p>
           <InfillPatternDropdown
             value={settings.infillPattern || DEFAULT_INFILL_PATTERN}
             onChange={(pattern) => updateSetting('infillPattern', pattern)}
+            ariaLabelledBy={infillPatternLabelId}
             ariaDescribedBy={infillPatternDescId}
           />
         </div>
@@ -521,32 +519,26 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         )}
       </div>
 
-      {/* ── Bed Adhesion — radio buttons ── */}
-      <div className="space-y-3 rounded-2xl border border-pf-border bg-pf-bg-1/40 p-4">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0 text-pf-accent">
-            <BedAdhesionIcon className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <h4 id={bedAdhesionGroupId} className="text-lg font-semibold text-pf-text-primary">Bed Adhesion</h4>
-            <p id={bedAdhesionDescId} className="mt-1 text-sm text-pf-text-secondary">Choose between skirt or brim for better print adhesion</p>
-          </div>
-        </div>
-        <div className="space-y-4 pl-1" role="radiogroup" aria-labelledby={bedAdhesionGroupId} aria-describedby={bedAdhesionDescId}>
+      {/* ── Bed Adhesion ── */}
+      <div className="space-y-1">
+        <label htmlFor={bedAdhesionId} className="block text-xs font-medium text-pf-text-muted uppercase tracking-wide">
+          Bed Adhesion
+        </label>
+        <p id={bedAdhesionDescId} className="text-xs text-pf-text-secondary">
+          Adds extra lines around the print to help first-layer reliability.
+        </p>
+        <Select
+          id={bedAdhesionId}
+          value={settings.bedAdhesionType}
+          onChange={(e) => updateSetting('bedAdhesionType', e.target.value as SlicerSettings['bedAdhesionType'])}
+          aria-describedby={bedAdhesionDescId}
+        >
           {BED_ADHESION_OPTIONS.map((opt) => (
-            <label key={opt.value} className="flex cursor-pointer items-center gap-3 text-lg text-pf-text-primary">
-              <input
-                type="radio"
-                name={`${panelId}-bed-adhesion`}
-                value={opt.value}
-                checked={settings.bedAdhesionType === opt.value}
-                onChange={() => updateSetting('bedAdhesionType', opt.value)}
-                className="h-7 w-7 accent-pf-accent"
-              />
-              <span className="text-[1.35rem] leading-none">{opt.label}</span>
-            </label>
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
           ))}
-        </div>
+        </Select>
       </div>
     </div>
   );

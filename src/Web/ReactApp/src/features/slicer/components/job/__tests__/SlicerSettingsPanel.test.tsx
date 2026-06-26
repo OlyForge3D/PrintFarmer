@@ -1,10 +1,10 @@
 /**
  * Unit tests for SlicerSettingsPanel (Simple mode controls).
  * Covers: infill %, infill pattern, top/bottom layers, perimeters,
- * support toggle + type, and bed adhesion radio buttons.
+ * support toggle + type, and bed adhesion dropdown.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { SlicerSettingsPanel, type SlicerSettings } from '../SlicerSettingsPanel';
@@ -129,7 +129,8 @@ describe('SlicerSettingsPanel — infill', () => {
   it('opens an icon-backed listbox of infill patterns', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }), { detail: 1 });
-    const options = screen.getAllByRole('option');
+    const listbox = screen.getByRole('listbox');
+    const options = within(listbox).getAllByRole('option');
     expect(options).toHaveLength(4);
     expect(options[1].querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
     expect(screen.queryByRole('button', { name: /gyroid/i })).not.toBeInTheDocument();
@@ -229,44 +230,42 @@ describe('SlicerSettingsPanel — supports', () => {
   });
 });
 
-describe('SlicerSettingsPanel — bed adhesion radio buttons', () => {
+describe('SlicerSettingsPanel — bed adhesion', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('renders four bed adhesion radio buttons', () => {
+  it('renders bed adhesion dropdown with all options', () => {
     renderPanel({ bedAdhesionType: 'none' });
-    const radios = screen.getAllByRole('radio');
-    expect(radios).toHaveLength(4);
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(['None', 'Skirt', 'Brim', 'Raft']);
   });
 
-  it('has the correct radio checked for current value', () => {
+  it('shows the current bed adhesion value', () => {
     renderPanel({ bedAdhesionType: 'brim' });
-    const brimRadio = screen.getByRole('radio', { name: /^brim$/i }) as HTMLInputElement;
-    expect(brimRadio.checked).toBe(true);
-    const skirtRadio = screen.getByRole('radio', { name: /^skirt$/i }) as HTMLInputElement;
-    expect(skirtRadio.checked).toBe(false);
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(select.value).toBe('brim');
   });
 
-  it('calls onSettingsChange with bedAdhesionType=skirt when skirt radio is clicked', () => {
+  it('calls onSettingsChange with bedAdhesionType=skirt when value changes', () => {
     const { onChange } = renderPanel({ bedAdhesionType: 'none' });
-    fireEvent.click(screen.getByRole('radio', { name: /^skirt$/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'skirt' } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'skirt' }));
   });
 
-  it('calls onSettingsChange with bedAdhesionType=brim when brim radio is clicked', () => {
+  it('calls onSettingsChange with bedAdhesionType=brim when value changes', () => {
     const { onChange } = renderPanel({ bedAdhesionType: 'none' });
-    fireEvent.click(screen.getByRole('radio', { name: /^brim$/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'brim' } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'brim' }));
   });
 
-  it('calls onSettingsChange with bedAdhesionType=raft when raft radio is clicked', () => {
+  it('calls onSettingsChange with bedAdhesionType=raft when value changes', () => {
     const { onChange } = renderPanel({ bedAdhesionType: 'none' });
-    fireEvent.click(screen.getByRole('radio', { name: /^raft$/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'raft' } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'raft' }));
   });
 
-  it('calls onSettingsChange with bedAdhesionType=none when none radio is clicked', () => {
+  it('calls onSettingsChange with bedAdhesionType=none when value changes', () => {
     const { onChange } = renderPanel({ bedAdhesionType: 'brim' });
-    fireEvent.click(screen.getByRole('radio', { name: /^none$/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'none' } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'none' }));
   });
 });

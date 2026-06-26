@@ -1039,6 +1039,20 @@ export const NewSliceJobPage: React.FC = () => {
     return { user, system };
   }, [processProfilesData, selectedMachineProfile]);
 
+  const defaultProcessPresetId = useMemo(() => {
+    const firstSystemPreset = processProfilesBySource.user[0] ?? processProfilesBySource.system[0];
+    if (firstSystemPreset) {
+      return `system:${firstSystemPreset.name}`;
+    }
+
+    const firstCustomPreset = customProcessProfiles[0];
+    if (firstCustomPreset) {
+      return `custom:${firstCustomPreset.id}`;
+    }
+
+    return '';
+  }, [customProcessProfiles, processProfilesBySource]);
+
   useEffect(() => {
     const optionValues = nozzleOptions.map((option) => option.value);
 
@@ -1207,6 +1221,41 @@ export const NewSliceJobPage: React.FC = () => {
   const allFilamentProfiles = useMemo(() => {
     return filamentProfilesData ?? [];
   }, [filamentProfilesData]);
+
+  // When a machine is selected, auto-fill filament/process defaults if they are empty.
+  // This keeps printer switching ergonomic while preserving valid restored selections.
+  useEffect(() => {
+    if (!selectedMachineProfileId) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (!selectedFilamentProfileId) {
+        const nextSystemFilament = allFilamentProfiles[0];
+        if (nextSystemFilament) {
+          setSelectedFilamentProfileId(nextSystemFilament.name);
+          setSelectedFilamentMaterial(nextSystemFilament.material || '');
+        } else {
+          const nextCustomFilament = customFilamentProfiles[0];
+          if (nextCustomFilament) {
+            setSelectedFilamentProfileId(nextCustomFilament.name);
+            setSelectedFilamentMaterial('');
+          }
+        }
+      }
+
+      if (!selectedProcessPresetId && defaultProcessPresetId) {
+        setSelectedProcessPresetId(defaultProcessPresetId);
+      }
+    });
+  }, [
+    allFilamentProfiles,
+    customFilamentProfiles,
+    defaultProcessPresetId,
+    selectedFilamentProfileId,
+    selectedMachineProfileId,
+    selectedProcessPresetId,
+  ]);
 
   // Selected process profile from Orca profile query
   const selectedProcessProfile = useMemo(() => {
