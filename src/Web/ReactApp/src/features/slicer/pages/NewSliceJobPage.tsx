@@ -1859,8 +1859,6 @@ export const NewSliceJobPage: React.FC = () => {
     );
   }
 
-  const nozzleFilterControl = undefined;
-
   return (
     <div className="min-h-full overflow-hidden bg-pf-bg-2 px-1 pt-0 pb-1">
       <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-1.5 overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-row">
@@ -1882,7 +1880,6 @@ export const NewSliceJobPage: React.FC = () => {
               printers={printers}
               isLoading={isPrintersLoading}
               selectedPrinterId={selectedPrinterId}
-              accessory={nozzleFilterControl}
               onPrinterChange={(printerId) => {
                 setSelectedPrinterId(printerId);
                 // Cascade reset: printer change resets all profile selections
@@ -1897,7 +1894,26 @@ export const NewSliceJobPage: React.FC = () => {
               className=""
             />
 
-            <div className="hidden border-t border-pf-border/70 pt-2 space-y-1.5">
+            <div className="border-t border-pf-border/70 pt-2 space-y-1.5">
+              {selectedPrinterId && nozzleOptions.length > 0 && (
+                <Select
+                  label="Nozzle diameter"
+                  value={selectedNozzleFilter}
+                  onChange={(event) => {
+                    setSelectedNozzleFilter(event.target.value);
+                    setSelectedMachineProfileId('');
+                  }}
+                  disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
+                  className="w-full"
+                >
+                  {nozzleOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-semibold text-pf-text-primary">
                   Machine
