@@ -888,9 +888,6 @@ export const NewSliceJobPage: React.FC = () => {
     });
   }, [customProfilesData, selectedPrinterModelId, selectedMachineProfileId]);
 
-  // Combined loading state for profile queries
-  // Combined loading state for profile queries
-  const isProfilesLoading = isMachineProfilesLoading || isFilamentProfilesLoading || isProcessProfilesLoading;
 
   // === Profile Selection Computed Values (Incremental Loading) ===
   // Machine profiles are loaded when printer is selected (via modelId query)
@@ -1865,67 +1862,6 @@ export const NewSliceJobPage: React.FC = () => {
               {selectedPrinterId ? (
                 <>
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-pf-text-muted">
-                        {isProfilesLoading ? 'Loading profiles...' : ''}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <div className="relative" ref={machineMenuRef}>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="p-1 h-auto"
-                            onClick={() => setMachineMenuOpen(v => !v)}
-                            title="Machine profile options"
-                            aria-label="Machine profile options menu"
-                            aria-expanded={machineMenuOpen}
-                            aria-haspopup="menu"
-                          >
-                            <MoreVerticalIcon className="w-4 h-4" />
-                          </Button>
-                          {machineMenuOpen && (
-                            <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                                onClick={() => {
-                                  setMachineMenuOpen(false);
-                                  setProfileEditorType('machine');
-                                  setProfileEditorOpen(true);
-                                }}
-                                disabled={!selectedMachineProfileId}
-                                iconLeft={<EditIcon className="w-3.5 h-3.5" />}
-                              >
-                                Edit settings
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                                onClick={handleImportMachine}
-                                iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
-                              >
-                                Import profile
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                                onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
-                                iconLeft={<EditIcon className="w-3.5 h-3.5" />}
-                              >
-                                Manage profiles
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
                     {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
                     <input
                       ref={importMachineFileRef}
@@ -1937,36 +1873,93 @@ export const NewSliceJobPage: React.FC = () => {
                       aria-hidden="true"
                       tabIndex={-1}
                     />
-                    <Select
-                      id="machine-profile-select"
-                      aria-label="Machine profile"
-                      value={selectedMachineProfileId}
-                      onChange={e => setSelectedMachineProfileId(e.target.value)}
-                      disabled={(availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
-                      className={isMachineProfilesLoading ? 'opacity-50' : ''}
-                    >
-                      <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
-                      {/* Custom profiles first with ★ indicator */}
-                      {filteredCustomMachineProfiles.length > 0 && (
-                        <option disabled className="text-pf-text-muted">── My Profiles ──</option>
-                      )}
-                      {filteredCustomMachineProfiles.map(profile => (
-                        <option key={`custom-${profile.id}`} value={profile.name}>
-                          ★ {profile.name}
-                        </option>
-                      ))}
-                      {/* System presets divider - only show if there are system profiles */}
-                      {availableMachineProfiles.length > 0 && (
-                        <option disabled className="text-pf-text-muted">── System Presets ──</option>
-                      )}
-                      {/* System profiles */}
-                      {availableMachineProfiles.map(profile => (
-                        <option key={profile.name} value={profile.name}>
-                          {profile.name}
-                          {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
-                        </option>
-                      ))}
-                    </Select>
+                    <div className="flex items-center gap-1">
+                      <Select
+                        id="machine-profile-select"
+                        aria-label="Machine profile"
+                        value={selectedMachineProfileId}
+                        onChange={e => setSelectedMachineProfileId(e.target.value)}
+                        disabled={(availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
+                        containerClassName="flex-1 min-w-0"
+                        className={isMachineProfilesLoading ? 'opacity-50' : ''}
+                      >
+                        <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
+                        {/* Custom profiles first with ★ indicator */}
+                        {filteredCustomMachineProfiles.length > 0 && (
+                          <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+                        )}
+                        {filteredCustomMachineProfiles.map(profile => (
+                          <option key={`custom-${profile.id}`} value={profile.name}>
+                            ★ {profile.name}
+                          </option>
+                        ))}
+                        {/* System presets divider - only show if there are system profiles */}
+                        {availableMachineProfiles.length > 0 && (
+                          <option disabled className="text-pf-text-muted">── System Presets ──</option>
+                        )}
+                        {/* System profiles */}
+                        {availableMachineProfiles.map(profile => (
+                          <option key={profile.name} value={profile.name}>
+                            {profile.name}
+                            {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
+                          </option>
+                        ))}
+                      </Select>
+                      <div className="relative shrink-0" ref={machineMenuRef}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="p-1 h-auto"
+                          onClick={() => setMachineMenuOpen(v => !v)}
+                          title="Machine profile options"
+                          aria-label="Machine profile options menu"
+                          aria-expanded={machineMenuOpen}
+                          aria-haspopup="menu"
+                        >
+                          <MoreVerticalIcon className="w-4 h-4" />
+                        </Button>
+                        {machineMenuOpen && (
+                          <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                              onClick={() => {
+                                setMachineMenuOpen(false);
+                                setProfileEditorType('machine');
+                                setProfileEditorOpen(true);
+                              }}
+                              disabled={!selectedMachineProfileId}
+                              iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                            >
+                              Edit settings
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                              onClick={handleImportMachine}
+                              iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                            >
+                              Import profile
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                              onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                              iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                            >
+                              Manage profiles
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {nozzleOptions.length > 0 && (
