@@ -220,7 +220,7 @@ function InfillPatternDropdown({
                 role="option"
                 aria-selected={highlighted}
                 className={[
-                  'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors',
+                  'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
                   highlighted
                     ? 'bg-pf-accent-bg/20 text-pf-text-primary'
                     : 'text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
@@ -229,8 +229,8 @@ function InfillPatternDropdown({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => commitSelection(pattern.value)}
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-pf-border bg-pf-bg-1">
-                  <PatternIcon value={pattern.value} className="h-[1.1rem] w-[1.1rem]" />
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center">
+                  <PatternIcon value={pattern.value} className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{pattern.label}</span>
                 {active && <span className="text-xs font-semibold uppercase tracking-wide text-pf-accent">Selected</span>}
