@@ -1870,20 +1870,6 @@ export const NewSliceJobPage: React.FC = () => {
                         {isProfilesLoading ? 'Loading profiles...' : ''}
                       </span>
                       <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2"
-                          onClick={() => {
-                            setProfileEditorType('machine');
-                            setProfileEditorOpen(true);
-                          }}
-                          disabled={!selectedMachineProfileId}
-                          iconLeft={<EditIcon className="w-3.5 h-3.5" />}
-                        >
-                          Edit
-                        </Button>
                         <div className="relative" ref={machineMenuRef}>
                           <Button
                             type="button"
@@ -1900,6 +1886,21 @@ export const NewSliceJobPage: React.FC = () => {
                           </Button>
                           {machineMenuOpen && (
                             <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                                onClick={() => {
+                                  setMachineMenuOpen(false);
+                                  setProfileEditorType('machine');
+                                  setProfileEditorOpen(true);
+                                }}
+                                disabled={!selectedMachineProfileId}
+                                iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                              >
+                                Edit settings
+                              </Button>
                               <Button
                                 type="button"
                                 variant="ghost"
