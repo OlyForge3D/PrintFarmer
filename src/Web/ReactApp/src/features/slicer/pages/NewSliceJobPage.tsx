@@ -1894,142 +1894,138 @@ export const NewSliceJobPage: React.FC = () => {
               className=""
             />
 
-            <div className="border-t border-pf-border/70 pt-2 space-y-1.5">
-              {selectedPrinterId && nozzleOptions.length > 0 && (
-                <Select
-                  label="Nozzle diameter"
-                  value={selectedNozzleFilter}
-                  onChange={(event) => {
-                    setSelectedNozzleFilter(event.target.value);
-                    setSelectedMachineProfileId('');
-                  }}
-                  disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
-                  className="w-full"
-                >
-                  {nozzleOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              )}
-
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-semibold text-pf-text-primary">
-                  Machine
-                  {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
-                </label>
-                <div className="relative" ref={machineMenuRef}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="p-1 h-auto"
-                  onClick={() => setMachineMenuOpen(v => !v)}
-                  title="Machine profile options"
-                  aria-label="Machine profile options menu"
-                  aria-expanded={machineMenuOpen}
-                  aria-haspopup="menu"
-                >
-                  <MoreVerticalIcon className="w-4 h-4" />
-                </Button>
-                {machineMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={() => {
-                        setMachineMenuOpen(false);
-                        setProfileEditorType('machine');
-                        setProfileEditorOpen(true);
-                      }}
-                      disabled={!selectedMachineProfileId}
-                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+            <div className="border-t border-pf-border/70 pt-2 space-y-2">
+              {selectedPrinterId ? (
+                <>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-pf-text-muted">
+                        {isProfilesLoading ? 'Loading profiles...' : ''}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          onClick={() => {
+                            setProfileEditorType('machine');
+                            setProfileEditorOpen(true);
+                          }}
+                          disabled={!selectedMachineProfileId}
+                          iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                        >
+                          Edit
+                        </Button>
+                        <div className="relative" ref={machineMenuRef}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="p-1 h-auto"
+                            onClick={() => setMachineMenuOpen(v => !v)}
+                            title="Machine profile options"
+                            aria-label="Machine profile options menu"
+                            aria-expanded={machineMenuOpen}
+                            aria-haspopup="menu"
+                          >
+                            <MoreVerticalIcon className="w-4 h-4" />
+                          </Button>
+                          {machineMenuOpen && (
+                            <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                                onClick={handleImportMachine}
+                                iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                              >
+                                Import profile
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                                onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                                iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                              >
+                                Manage profiles
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
+                    <input
+                      ref={importMachineFileRef}
+                      type="file"
+                      accept=".json,.orca_printer"
+                      multiple
+                      className="sr-only"
+                      onChange={handleMachineFileImport}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                    />
+                    <Select
+                      id="machine-profile-select"
+                      aria-label="Machine profile"
+                      value={selectedMachineProfileId}
+                      onChange={e => setSelectedMachineProfileId(e.target.value)}
+                      disabled={(availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
+                      className={isMachineProfilesLoading ? 'opacity-50' : ''}
                     >
-                      Edit settings
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={handleImportMachine}
-                      iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
-                    >
-                      Import profile
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
-                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
-                    >
-                      Manage profiles
-                    </Button>
+                      <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
+                      {/* Custom profiles first with ★ indicator */}
+                      {filteredCustomMachineProfiles.length > 0 && (
+                        <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+                      )}
+                      {filteredCustomMachineProfiles.map(profile => (
+                        <option key={`custom-${profile.id}`} value={profile.name}>
+                          ★ {profile.name}
+                        </option>
+                      ))}
+                      {/* System presets divider - only show if there are system profiles */}
+                      {availableMachineProfiles.length > 0 && (
+                        <option disabled className="text-pf-text-muted">── System Presets ──</option>
+                      )}
+                      {/* System profiles */}
+                      {availableMachineProfiles.map(profile => (
+                        <option key={profile.name} value={profile.name}>
+                          {profile.name}
+                          {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
-                )}
-                </div>
-              </div>
-            {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
-            <input
-              ref={importMachineFileRef}
-              type="file"
-              accept=".json,.orca_printer"
-              multiple
-              className="sr-only"
-              onChange={handleMachineFileImport}
-              aria-hidden="true"
-              tabIndex={-1}
-            />
-            
-            {/* Show printer info when selected */}
-            {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
-              <p className="text-xs text-pf-text-muted mb-2">
-                Profiles for {selectedPrinterForSlicing.manufacturerName} {selectedPrinterForSlicing.modelName}
-                {selectedPrinterForSlicing.nozzleDiameter && (
-                  <span className="text-[11px]"> • {selectedPrinterForSlicing.nozzleDiameter}mm nozzle</span>
-                )}
-              </p>
-            ) : (
-              <p className="text-xs text-pf-warning mb-2">
-                Select a printer above to see available machine profiles
-              </p>
-            )}
 
-            {/* Machine Profile Selection (nozzle variants) - Custom profiles first, then system presets */}
-            <Select
-              label="Machine profile"
-              value={selectedMachineProfileId}
-              onChange={e => setSelectedMachineProfileId(e.target.value)}
-              disabled={!selectedPrinterId || (availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
-              className={`w-full ${!selectedPrinterId || isMachineProfilesLoading ? 'opacity-50' : ''}`}
-            >
-              <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
-              {/* Custom profiles first with ★ indicator */}
-              {filteredCustomMachineProfiles.length > 0 && (
-                <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+                  {nozzleOptions.length > 0 && (
+                    <Select
+                      label="Nozzle diameter"
+                      value={selectedNozzleFilter}
+                      onChange={(event) => {
+                        setSelectedNozzleFilter(event.target.value);
+                        setSelectedMachineProfileId('');
+                      }}
+                      disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
+                      className="w-full"
+                    >
+                      {nozzleOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-pf-warning">
+                  Select a printer above to choose machine and nozzle profiles
+                </p>
               )}
-              {filteredCustomMachineProfiles.map(profile => (
-                <option key={`custom-${profile.id}`} value={profile.name}>
-                  ★ {profile.name}
-                </option>
-              ))}
-              {/* System presets divider - only show if there are system profiles */}
-              {availableMachineProfiles.length > 0 && (
-                <option disabled className="text-pf-text-muted">── System Presets ──</option>
-              )}
-              {/* System profiles */}
-              {availableMachineProfiles.map(profile => (
-                <option key={profile.name} value={profile.name}>
-                  {profile.name}
-                  {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
-                </option>
-              ))}
-            </Select>
+
             {selectedPrinterId && machineProfilesData.length > 0 && !hasVisibleMachineProfiles && selectedNozzleDiameter !== undefined && (
               <p className="text-xs text-pf-warning mt-1">No machine profiles available for the selected nozzle</p>
             )}
