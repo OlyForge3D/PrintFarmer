@@ -1901,7 +1901,6 @@ export const NewSliceJobPage: React.FC = () => {
                         {availableMachineProfiles.map(profile => (
                           <option key={profile.name} value={profile.name}>
                             {profile.name}
-                            {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
                           </option>
                         ))}
                       </Select>
