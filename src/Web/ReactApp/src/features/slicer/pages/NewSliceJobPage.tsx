@@ -27,6 +27,11 @@ import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappin
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
+import {
+  classifyCustomProfileScope,
+  legacyMachineProfileMatchesPrinter,
+  legacyProcessProfileMatchesMachine,
+} from '../utils/customProfileScoping';
 import { isZipFile, extractOrcaBundle } from '@/features/slicer/orca/utils/orcaBundleExtractor';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
@@ -35,7 +40,6 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Input, Select } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { NozzleTypeLabels, NozzleTypeStringLabels } from '@/types/api';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
@@ -134,26 +138,6 @@ function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile
   }
 
   return Math.abs(profileNozzleDiameter - selectedDiameter) < NOZZLE_MATCH_TOLERANCE;
-}
-
-function getPrimaryNozzleTypeLabel(printer: PrinterForSlicing | undefined): string | undefined {
-  const toolhead = printer?.toolheads?.find((candidate) => candidate.isPrimary) ?? printer?.toolheads?.[0];
-  const nozzleType = toolhead?.nozzleType;
-
-  if (typeof nozzleType === 'number') {
-    return NozzleTypeLabels[nozzleType as keyof typeof NozzleTypeLabels];
-  }
-
-  if (typeof nozzleType !== 'string' || !nozzleType) {
-    return undefined;
-  }
-
-  const normalizedNozzleType = nozzleType.replace(/[^a-z0-9]/gi, '').toLowerCase();
-  const matchingKey = Object.keys(NozzleTypeStringLabels).find((key) => {
-    return key.replace(/[^a-z0-9]/gi, '').toLowerCase() === normalizedNozzleType;
-  });
-
-  return matchingKey ? NozzleTypeStringLabels[matchingKey] : nozzleType;
 }
 
 function profileMentionsHighFlow(text: string): boolean {
@@ -851,40 +835,25 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 30_000
   });
 
-  // Filter custom profiles by type for each selector
-  // Machine profiles filtered by selected printer (name or rawJson metadata matching)
+  // Filter custom profiles by type for each selector.
+  // Machine profiles are scoped by the authoritative catalog PrinterModel
+  // association (printerModelId). Legacy profiles without that association fall
+  // back to fuzzy manufacturer/model matching so they remain usable.
   const customMachineProfiles = useMemo(() => {
     const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
-    if (!selectedPrinterForSlicing?.manufacturerName && !selectedPrinterForSlicing?.modelName) {
-      return allCustomMachine;
-    }
-    const mfr = selectedPrinterForSlicing.manufacturerName?.toLowerCase() ?? '';
-    const model = selectedPrinterForSlicing.modelName?.toLowerCase() ?? '';
+    if (allCustomMachine.length === 0) return allCustomMachine;
     return allCustomMachine.filter(p => {
-      // Try to extract printer_model from rawJson
-      if (p.rawJson) {
-        try {
-          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
-          const printerModel = (parsed.printer_model as string)?.toLowerCase();
-          if (printerModel) {
-            // Match if printer_model contains model name words or vice versa
-            const modelWords = model.split(/[\s\-_]+/).filter(w => w.length > 2);
-            if (modelWords.some(w => printerModel.includes(w))) return true;
-            if (printerModel.split(/[\s\-_]+/).some(w => model.includes(w))) return true;
-            return false;
-          }
-        } catch { /* fall through to name matching */ }
-      }
-      // Fall back to fuzzy name matching against manufacturer + model
-      const nameLower = p.name.toLowerCase();
-      const modelWords = model.split(/[\s\-_]+/).filter(w => w.length > 2);
-      const mfrWords = mfr.split(/[\s\-_]+/).filter(w => w.length > 2);
-      const matchesModel = modelWords.length > 0 && modelWords.some(w => nameLower.includes(w));
-      const matchesMfr = mfrWords.length > 0 && mfrWords.some(w => nameLower.includes(w));
-      // Show if name matches model, or if no matching info show it anyway
-      return matchesModel || (matchesMfr && modelWords.length === 0);
+      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
+      if (scope === 'match') return true;
+      if (scope === 'mismatch') return false;
+      // Unscoped legacy profile — fall back to fuzzy printer matching.
+      return legacyMachineProfileMatchesPrinter(
+        p,
+        selectedPrinterForSlicing?.manufacturerName,
+        selectedPrinterForSlicing?.modelName,
+      );
     });
-  }, [customProfilesData, selectedPrinterForSlicing]);
+  }, [customProfilesData, selectedPrinterForSlicing, selectedPrinterModelId]);
 
   // Filament profiles filtered by selected machine profile compatibility
   const customFilamentProfiles = useMemo(() => {
@@ -904,22 +873,20 @@ export const NewSliceJobPage: React.FC = () => {
     });
   }, [customProfilesData, selectedMachineProfileId]);
 
+  // Process profiles are scoped by the authoritative catalog PrinterModel
+  // association (printerModelId). Legacy profiles without that association fall
+  // back to compatible_printers matching against the selected machine profile.
   const customProcessProfiles = useMemo(() => {
     const allCustomProcess = customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
-    if (!selectedMachineProfileId) return allCustomProcess;
+    if (allCustomProcess.length === 0) return allCustomProcess;
     return allCustomProcess.filter(p => {
-      if (p.rawJson) {
-        try {
-          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
-          const compatible = parsed.compatible_printers as string[] | undefined;
-          if (compatible && compatible.length > 0) {
-            return compatible.some(c => c === selectedMachineProfileId);
-          }
-        } catch { /* hide profile if can't parse */ }
-      }
-      return false;
+      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
+      if (scope === 'match') return true;
+      if (scope === 'mismatch') return false;
+      // Unscoped legacy profile — fall back to compatible_printers matching.
+      return legacyProcessProfileMatchesMachine(p, selectedMachineProfileId);
     });
-  }, [customProfilesData, selectedMachineProfileId]);
+  }, [customProfilesData, selectedPrinterModelId, selectedMachineProfileId]);
 
   // Combined loading state for profile queries
   // Combined loading state for profile queries
