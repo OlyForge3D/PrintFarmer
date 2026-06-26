@@ -182,7 +182,7 @@ function InfillPatternDropdown({
         aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
         aria-labelledby={ariaLabelledBy ? `${ariaLabelledBy} ${selectedValueId}` : selectedValueId}
         aria-describedby={ariaDescribedBy}
-        className="flex w-full items-center gap-3 rounded-2xl border border-pf-border bg-pf-bg-1/70 px-3 py-3 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
+        className="flex w-full items-center gap-2.5 rounded-xl border border-pf-border bg-pf-bg-1/70 px-3 py-2 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
         onClick={() => {
           if (isOpen) {
             setIsOpen(false);
@@ -192,8 +192,8 @@ function InfillPatternDropdown({
         }}
         onKeyDown={handleKeyDown}
       >
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-pf-border bg-pf-bg-0">
-          <PatternIcon value={selectedPattern.value} className="h-5 w-5" />
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <PatternIcon value={selectedPattern.value} className="h-4 w-4" />
         </span>
         <span id={selectedValueId} className="min-w-0 flex-1 truncate text-sm font-medium text-pf-text-primary">
           {selectedPattern.label}
