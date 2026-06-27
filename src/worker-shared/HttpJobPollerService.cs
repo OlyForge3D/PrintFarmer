@@ -598,7 +598,7 @@ public abstract class HttpJobPollerService(
     /// as a <see cref="List{String}"/>. Profiles come from a shared cache, so each
     /// affected entry is cloned before mutation to avoid polluting other jobs.
     /// </summary>
-    private static void ApplyFilamentColourOverrides(SlicerProfileDto profile, JsonElement root)
+    internal static void ApplyFilamentColourOverrides(SlicerProfileDto profile, JsonElement root)
     {
         // Multi-extruder: positional colour per extruder index.
         if (profile.ExtruderFilamentProfiles is { Count: > 0 } extruders
