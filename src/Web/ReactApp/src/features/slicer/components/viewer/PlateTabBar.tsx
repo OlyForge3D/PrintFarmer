@@ -124,49 +124,52 @@ export const PlateTabBar: React.FC<PlateTabBarProps> = ({
                   : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary border-transparent',
               )}
             >
-              {/* Tab select button (its own button — action icons are siblings, never nested) */}
-              <Button
-                variant="unstyled"
-                type="button"
-                className="flex items-center gap-1.5 bg-transparent outline-none cursor-pointer"
-                onClick={() => onActivePlateChange(plate.id)}
-                onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, plate.id)}
-                aria-label={`Select ${plate.name}${count > 0 ? ` (${count} model${count === 1 ? '' : 's'})` : ''}`}
-                aria-current={isActive ? 'true' : undefined}
-              >
-                {isEditing ? (
-                  <input
-                    ref={inputRef}
-                    className="bg-transparent border-b border-pf-accent text-pf-text-primary text-xs outline-none w-20"
-                    value={editValue}
-                    onChange={e => setEditValue(e.target.value)}
-                    onBlur={commitRename}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') commitRename();
-                      if (e.key === 'Escape') {
-                        setEditingId(null);
-                        setEditValue('');
-                      }
-                    }}
-                    onClick={e => e.stopPropagation()}
-                  />
-                ) : (
+              {/* Tab select button (its own button — action icons are siblings, never nested).
+                  While renaming, the input REPLACES the button so no interactive
+                  element is ever nested inside another (a11y / HTML validity). */}
+              {isEditing ? (
+                <input
+                  ref={inputRef}
+                  className="flex items-center gap-1.5 bg-transparent border-b border-pf-accent text-pf-text-primary text-xs outline-none w-20"
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={commitRename}
+                  aria-label={`Rename ${plate.name}`}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename();
+                    if (e.key === 'Escape') {
+                      setEditingId(null);
+                      setEditValue('');
+                    }
+                  }}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (
+                <Button
+                  variant="unstyled"
+                  type="button"
+                  className="flex items-center gap-1.5 bg-transparent outline-none cursor-pointer"
+                  onClick={() => onActivePlateChange(plate.id)}
+                  onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, plate.id)}
+                  aria-label={`Select ${plate.name}${count > 0 ? ` (${count} model${count === 1 ? '' : 's'})` : ''}`}
+                  aria-current={isActive ? 'true' : undefined}
+                >
                   <span>{plate.name}</span>
-                )}
 
-                {count > 0 && !isEditing && (
-                  <span
-                    className={clsx(
-                      'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold leading-none',
-                      isActive
-                        ? 'bg-pf-accent/20 text-pf-accent'
-                        : 'bg-pf-bg-2 text-pf-text-secondary',
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
-              </Button>
+                  {count > 0 && (
+                    <span
+                      className={clsx(
+                        'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold leading-none',
+                        isActive
+                          ? 'bg-pf-accent/20 text-pf-accent'
+                          : 'bg-pf-bg-2 text-pf-text-secondary',
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </Button>
+              )}
 
               {/* Active-tab inline actions — siblings of the select button. Only the
                   active tab shows these to avoid overflow with up to 10 plates. */}

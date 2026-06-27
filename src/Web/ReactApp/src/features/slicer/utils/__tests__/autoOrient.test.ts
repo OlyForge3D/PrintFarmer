@@ -81,5 +81,28 @@ describe('autoOrient', () => {
       const empty = new THREE.BufferGeometry();
       expect(computeBedPlacementZ(empty, new THREE.Quaternion())).toBe(0);
     });
+
+    it('returns a finite Z (not -Infinity) for an empty position buffer', () => {
+      // A position attribute with zero vertices must not produce -Infinity, which
+      // would launch the model off the bed.
+      const degenerate = new THREE.BufferGeometry();
+      degenerate.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+      const z = computeBedPlacementZ(degenerate, new THREE.Quaternion());
+      expect(Number.isFinite(z)).toBe(true);
+      expect(z).toBe(0);
+    });
+  });
+
+  describe('mirrored models', () => {
+    it('produces a finite, on-bed orientation for a negatively-scaled (mirrored) box', () => {
+      const tall = new THREE.BoxGeometry(10, 10, 40).toNonIndexed();
+      const result = computeAutoOrientation(tall, [-1, 1, 1]);
+      expect(result).not.toBeNull();
+      const z = computeBedPlacementZ(tall, result!.quaternion, new THREE.Vector3(-1, 1, 1));
+      expect(Number.isFinite(z)).toBe(true);
+      // Mirrored tall box should still be laid down (height reduced from 40).
+      const height = rotatedHeight(tall, result!.quaternion, new THREE.Vector3(-1, 1, 1));
+      expect(height).toBeLessThan(40 - 1e-3);
+    });
   });
 });

@@ -117,7 +117,7 @@ export function computeBedPlacementZ(
   scale: THREE.Vector3 = new THREE.Vector3(1, 1, 1),
 ): number {
   const posAttr = geometry.getAttribute('position');
-  if (!posAttr) return 0;
+  if (!posAttr || posAttr.count === 0) return 0;
 
   const v = new THREE.Vector3();
   let minRotatedZ = Infinity;
@@ -213,6 +213,9 @@ export function computeAutoOrientation(
   const rn = new THREE.Vector3();
   const rc = new THREE.Vector3();
   const scaleVec = new THREE.Vector3(scale[0], scale[1], scale[2]);
+  // A negative scale determinant (mirrored model) flips physical surface normals,
+  // so the precomputed triNormals must be sign-corrected before the overhang test.
+  const normalSign = Math.sign(scale[0] * scale[1] * scale[2]) || 1;
   let bestQ: THREE.Quaternion | null = null;
   let bestScore = Infinity;
 
@@ -234,7 +237,7 @@ export function computeAutoOrientation(
 
     let overhangArea = 0;
     for (let i = 0; i < triCount; i++) {
-      rn.copy(triNormals[i]).applyQuaternion(candidateQ);
+      rn.copy(triNormals[i]).multiplyScalar(normalSign).applyQuaternion(candidateQ);
       if (rn.z >= OVERHANG_THRESH) continue;
 
       rc.copy(triCentroids[i]).multiply(scaleVec).applyQuaternion(candidateQ);

@@ -1580,9 +1580,14 @@ export const NewSliceJobPage: React.FC = () => {
     const payloadModels = buildSlicePayloadModels(activePlateModels);
     const primaryModel = payloadModels.primary;
 
-    // Guard: block when the active plate has no sliceable (server-hosted) models,
-    // unless the user supplied a manual model URL (legacy single-model path).
-    if (payloadModels.sliceableCount === 0 && !modelFileUrl.trim()) {
+    // Guard: block when the active plate has no sliceable (server-hosted) models.
+    // For the plate-aware path (activeModelIds provided) an empty active plate is
+    // ALWAYS blocked — a stale root modelFileUrl must never slice a model that is
+    // not on the active plate. The legacy path keeps the manual-URL escape hatch.
+    const blockEmpty = activeModelIds
+      ? payloadModels.sliceableCount === 0
+      : payloadModels.sliceableCount === 0 && !modelFileUrl.trim();
+    if (blockEmpty) {
       const msg = activeModelIds
         ? 'The active plate has no sliceable models. Add a model to this plate before slicing.'
         : 'Select a model or enter a URL';
@@ -1718,7 +1723,10 @@ export const NewSliceJobPage: React.FC = () => {
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    submitSliceJob();
+    // Slicing is driven exclusively by the workspace Slice button, which passes
+    // the active plate's model IDs to submitSliceJob(). A bare form submit (e.g.
+    // stray Enter) must NOT slice every plate's models, so it is intentionally a
+    // no-op here to preserve the plate-aware invariant.
   };
 
   const workspaceBedConfig = useMemo<BedConfig>(() => ({
