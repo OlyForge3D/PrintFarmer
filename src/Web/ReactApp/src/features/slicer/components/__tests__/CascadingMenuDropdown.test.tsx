@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FilamentProfileDropdown } from '../CascadingMenuDropdown';
 import type { OrcaFilamentProfile } from '@/services/slicerProfilesService';
@@ -55,5 +55,36 @@ describe('FilamentProfileDropdown trigger', () => {
     expect(trigger).toHaveTextContent('-- Select Filament --');
     // No material badge / no tooltip when there is no selection.
     expect(trigger).not.toHaveAttribute('title');
+  });
+
+  it('lists individual profiles by NAME (not just the material type) when expanded', () => {
+    const onSelect = vi.fn();
+    render(
+      <FilamentProfileDropdown
+        profiles={[
+          filament('Generic ABS @0.4 nozzle', 'ABS'),
+          filament('Generic ABS High Speed', 'ABS'),
+          filament('Generic PLA @0.4 nozzle', 'PLA'),
+        ].map(p => ({ ...p, manufacturer: 'Generic' }))}
+        customProfiles={[]}
+        selectedProfileName=""
+        onSelect={onSelect}
+        filterConfig={noopFilter}
+        onFilterConfigChange={vi.fn()}
+      />,
+    );
+
+    // Open the dropdown, then expand the Generic manufacturer group.
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByText('Generic'));
+
+    // Each profile is shown by its full name — including BOTH ABS profiles that
+    // previously collapsed to a single "ABS" material row.
+    expect(screen.getByText('Generic ABS @0.4 nozzle')).toBeInTheDocument();
+    expect(screen.getByText('Generic ABS High Speed')).toBeInTheDocument();
+    expect(screen.getByText('Generic PLA @0.4 nozzle')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Generic ABS High Speed'));
+    expect(onSelect).toHaveBeenCalledWith('Generic ABS High Speed', 'system');
   });
 });

@@ -364,7 +364,8 @@ export function FilamentProfileDropdown({
             {Object.keys(filteredTree).sort().map(mfr => {
               const materials = filteredTree[mfr];
               const mfrExpanded = effectiveMfrs.has(mfr);
-              const mfrCount = Object.keys(materials).length;
+              // Count individual profiles (the leaf rows now shown), not materials.
+              const mfrCount = Object.values(materials).reduce((acc, ps) => acc + ps.length, 0);
 
               return (
                 <div key={mfr}>
@@ -379,27 +380,32 @@ export function FilamentProfileDropdown({
                     <span className="text-xs text-gray-500 ml-auto">{mfrCount}</span>
                   </button>
 
-                  {/* Material rows — click to select (picks the first profile for this manufacturer+material) */}
+                  {/* Profile rows — each filament profile shown by name. */}
                   {mfrExpanded && Object.keys(materials).sort().map(mat => {
                     const matProfiles = materials[mat];
-                    const representative = matProfiles[0];
-                    const isSelected = matProfiles.some(p => p.name === selectedProfileName);
 
-                    return (
-                      <button
-                        key={`${mfr}:${mat}`}
-                        type="button"
-                        onClick={() => handleProfileClick(representative.name, 'system')}
-                        className={`w-full text-left pl-7 pr-3 py-1 text-sm flex items-center gap-2 transition-colors
-                          ${isSelected ? 'text-[#00a98f] bg-[#00a98f]/10' : 'text-gray-300 hover:bg-[#353b44]'}`}
-                      >
-                        {isSelected && checkmark}
-                        <span className="truncate">{mat}</span>
-                        <span className="text-xs text-gray-500 ml-auto shrink-0">
-                          {representative.nozzleTemperature ?? 210}°/{representative.bedTemperature ?? 60}°
-                        </span>
-                      </button>
-                    );
+                    // Render EACH profile by its full name (previously this
+                    // collapsed a material group to one row showing only the
+                    // material type, hiding the actual filament profile name).
+                    return matProfiles.map(prof => {
+                      const isSelected = prof.name === selectedProfileName;
+                      return (
+                        <button
+                          key={`${mfr}:${mat}:${prof.name}`}
+                          type="button"
+                          onClick={() => handleProfileClick(prof.name, 'system')}
+                          title={prof.name}
+                          className={`w-full text-left pl-7 pr-3 py-1 text-sm flex items-center gap-2 transition-colors
+                            ${isSelected ? 'text-[#00a98f] bg-[#00a98f]/10' : 'text-gray-300 hover:bg-[#353b44]'}`}
+                        >
+                          {isSelected && checkmark}
+                          <span className="min-w-0 flex-1 truncate">{prof.name}</span>
+                          <span className="text-xs text-gray-500 ml-auto shrink-0">
+                            {prof.nozzleTemperature ?? 210}°/{prof.bedTemperature ?? 60}°
+                          </span>
+                        </button>
+                      );
+                    });
                   })}
                 </div>
               );
