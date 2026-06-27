@@ -605,6 +605,12 @@ public abstract class HttpJobPollerService(
             && root.TryGetProperty("filamentColours", out JsonElement coloursElem)
             && coloursElem.ValueKind == JsonValueKind.Array)
         {
+            // The primary FilamentProfile may alias extruder[0] (set via `??=`). The
+            // worker's single-extruder pipeline branch (used when there is exactly one
+            // extruder) reads FilamentProfile, so re-point it at the coloured clone to
+            // avoid dropping a positional override for that case.
+            bool primaryAliasesFirstExtruder = ReferenceEquals(profile.FilamentProfile, extruders[0]);
+
             int i = 0;
             foreach (JsonElement colourElem in coloursElem.EnumerateArray())
             {
@@ -620,6 +626,11 @@ public abstract class HttpJobPollerService(
                     clone.Color = colour;
                     clone.Settings["filament_colour"] = new List<string> { colour };
                     extruders[i] = clone;
+
+                    if (i == 0 && primaryAliasesFirstExtruder)
+                    {
+                        profile.FilamentProfile = clone;
+                    }
                 }
 
                 i++;

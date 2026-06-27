@@ -94,4 +94,50 @@ public class FilamentColourInjectionTests
         profile.FilamentProfile!.Settings["filament_colour"]
             .Should().BeOfType<List<string>>().Which.Should().ContainSingle().Which.Should().Be("#000000");
     }
+
+    [Fact]
+    public void SingleExtruderMulti_PrimaryAliasingExtruderZero_GetsColour()
+    {
+        // A multi-extruder job with exactly one extruder where FilamentProfile
+        // aliases extruder[0] (as set via `??=` during resolution). The worker's
+        // single-extruder pipeline branch reads FilamentProfile, so the override
+        // must follow onto the cloned, coloured profile — not be dropped.
+        FilamentProfileDto shared = Filament("PLA A");
+        var profile = new SlicerProfileDto
+        {
+            ExtruderFilamentProfiles = [shared],
+            FilamentProfile = shared,
+        };
+
+        HttpJobPollerService.ApplyFilamentColourOverrides(
+            profile, Parse("""{ "filamentColours": ["#FF0000"] }"""));
+
+        // FilamentProfile now points at the coloured clone (reference-synced).
+        ReferenceEquals(profile.FilamentProfile, profile.ExtruderFilamentProfiles![0]).Should().BeTrue();
+        profile.FilamentProfile!.Settings["filament_colour"]
+            .Should().BeOfType<List<string>>().Which.Should().ContainSingle().Which.Should().Be("#FF0000");
+        // Original shared instance is untouched (cache safety).
+        shared.Settings["filament_colour"]
+            .Should().BeOfType<List<string>>().Which.Should().ContainSingle().Which.Should().Be("#000000");
+    }
+
+    [Fact]
+    public void Multi_PrimaryNotAliasingExtruderZero_IsNotRepointed()
+    {
+        // When FilamentProfile is a distinct profile (not extruder[0]), it must be
+        // left alone — only the extruder list slots are coloured.
+        FilamentProfileDto distinctPrimary = Filament("Primary");
+        var profile = new SlicerProfileDto
+        {
+            ExtruderFilamentProfiles = [Filament("PLA A"), Filament("PLA B")],
+            FilamentProfile = distinctPrimary,
+        };
+
+        HttpJobPollerService.ApplyFilamentColourOverrides(
+            profile, Parse("""{ "filamentColours": ["#FF0000", "#00FF00"] }"""));
+
+        ReferenceEquals(profile.FilamentProfile, distinctPrimary).Should().BeTrue();
+        profile.FilamentProfile!.Settings["filament_colour"]
+            .Should().BeOfType<List<string>>().Which.Should().ContainSingle().Which.Should().Be("#000000");
+    }
 }
