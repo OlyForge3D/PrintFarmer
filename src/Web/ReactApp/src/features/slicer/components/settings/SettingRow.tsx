@@ -194,8 +194,9 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           </div>
         )}
         
-        {/* Center: control */}
-        <div className="w-[30%] shrink-0" title={tooltip}>
+        {/* Center: control — fills the remaining width so there's no dead
+            whitespace on the right; the reset slot sits at the right edge. */}
+        <div className="flex-1 min-w-0" title={tooltip}>
           {renderControl()}
         </div>
 
