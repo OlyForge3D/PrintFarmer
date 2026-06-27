@@ -49,6 +49,7 @@ import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/sl
 import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
+import { buildSlicePayloadModels, modelTransformJson } from '@/features/slicer/utils/slicePayload';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
@@ -1567,14 +1568,39 @@ export const NewSliceJobPage: React.FC = () => {
     }
   });
 
-  const submitSliceJob = useCallback(() => {
+  const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
-    if (!selectedModelId && !modelFileUrl.trim()) {
+    // Plate-aware slicing: only the ACTIVE plate's models are sliced. The IDs
+    // are passed synchronously from the workspace's Slice button so we never
+    // depend on a (potentially stale) copy of plate state.
+    const activePlateModels = activeModelIds
+      ? bedModels.filter(m => activeModelIds.includes(m.id))
+      : bedModels;
+    const payloadModels = buildSlicePayloadModels(activePlateModels);
+    const primaryModel = payloadModels.primary;
+
+    // Guard: block when the active plate has no sliceable (server-hosted) models,
+    // unless the user supplied a manual model URL (legacy single-model path).
+    if (payloadModels.sliceableCount === 0 && !modelFileUrl.trim()) {
+      const msg = activeModelIds
+        ? 'The active plate has no sliceable models. Add a model to this plate before slicing.'
+        : 'Select a model or enter a URL';
+      setError(msg);
+      if (activeModelIds) toast.error(msg);
+      return;
+    }
+
+    // Effective single-model source: prefer the active plate's first sliceable
+    // model over root form state / bedModels[0].
+    const effectiveModelFileUrl = primaryModel ? primaryModel.url : modelFileUrl;
+    const effectiveModelFileName = primaryModel ? primaryModel.fileName : modelFileName;
+
+    if (!selectedModelId && !effectiveModelFileUrl.trim()) {
       setError('Select a model or enter a URL');
       return;
     }
-    if (!selectedModelId && modelFileUrl.trim() && !modelFileName.trim()) {
+    if (!primaryModel && !selectedModelId && modelFileUrl.trim() && !modelFileName.trim()) {
       setError('Model file name is required when using a URL');
       return;
     }
@@ -1617,8 +1643,8 @@ export const NewSliceJobPage: React.FC = () => {
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       printerId: undefined,
-      modelFileUrl: modelFileUrl,
-      modelFileName: modelFileName,
+      modelFileUrl: effectiveModelFileUrl,
+      modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
@@ -1643,21 +1669,17 @@ export const NewSliceJobPage: React.FC = () => {
             : undefined,
       requiredCapabilitiesJson: '[]',
       priority: 1,
-      modelTransformJson: bedModels[0]
+      modelTransformJson: primaryModel
+        ? modelTransformJson(primaryModel)
+        : bedModels[0]
         ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale, position: bedModels[0].position })
         : undefined,
       extruderFilamentProfileNames: extruderFilamentNames,
       extruderFilamentColours: extruderFilamentColoursPayload,
-      // Multi-model support: collect all bed model URLs that are server-hosted (non-blob)
-      modelFileUrls: bedModels.length > 1
-        ? bedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
-        : undefined,
-      // Per-model transforms: send each model's transform alongside its URL
-      modelFileTransforms: bedModels.length > 1
-        ? bedModels
-            .filter(m => m.url && !m.url.startsWith('blob:'))
-            .map(m => JSON.stringify({ rotation: m.rotation, scale: m.scale, position: m.position }))
-        : undefined,
+      // Multi-model support: only the ACTIVE plate's server-hosted models.
+      modelFileUrls: payloadModels.modelFileUrls,
+      // Per-model transforms aligned with modelFileUrls (active plate only).
+      modelFileTransforms: payloadModels.modelFileTransforms,
     };
 
     // Freeze spool/cost/routing at submit time so the overlay and queue call
@@ -1770,6 +1792,15 @@ export const NewSliceJobPage: React.FC = () => {
       setSelectedModelId('');
       toast.warning('Cut pieces could not be uploaded to server. Please retry or re-select a model to slice.');
     }
+  }, []);
+
+  // Remove one or more models from the workspace (e.g., when a non-empty plate
+  // is deleted). Clears the active single-model slice source if it was removed.
+  const handleWorkspaceDeleteModels = useCallback((modelIds: string[]) => {
+    if (modelIds.length === 0) return;
+    const removed = new Set(modelIds);
+    setBedModels(prev => prev.filter(m => !removed.has(m.id)));
+    setSelectedBedModelId(prev => (prev && removed.has(prev) ? null : prev));
   }, []);
 
   const handleWorkspaceSettingsProfiles = useCallback(() => {
@@ -2615,6 +2646,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
                 onModelsReplace={handleWorkspaceModelsReplace}
+                onDeleteModels={handleWorkspaceDeleteModels}
                 simpleMode={slicerMode !== 'Advanced'}
                 className="h-full"
               />
