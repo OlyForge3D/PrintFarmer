@@ -80,7 +80,7 @@ public class FarmSettingsServiceSlicerModeTests
     {
         var settings = new SlicerSettings { SlicerMode = SlicerMode.Advanced };
 
-        Assert.Equal(new[] { SlicerMode.Advanced }, settings.GetEnabledModes());
+        Assert.Equal(new[] { SlicerMode.Advanced }, settings.EffectiveEnabledModes);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class FarmSettingsServiceSlicerModeTests
             EnabledModes = new[] { SlicerMode.Simple, SlicerMode.Advanced },
         };
 
-        Assert.Equal(new[] { SlicerMode.Simple, SlicerMode.Advanced }, settings.GetEnabledModes());
+        Assert.Equal(new[] { SlicerMode.Simple, SlicerMode.Advanced }, settings.EffectiveEnabledModes);
     }
 
     [Fact]

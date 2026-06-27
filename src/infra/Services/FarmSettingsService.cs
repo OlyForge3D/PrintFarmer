@@ -27,7 +27,7 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
             AveragePrinterWattage: cost.AveragePrinterWattage,
             CanWrite: false,
             SlicerMode: slicer.SlicerMode,
-            EnabledModes: slicer.GetEnabledModes());
+            EnabledModes: slicer.EffectiveEnabledModes);
     }
 
     /// <inheritdoc />
