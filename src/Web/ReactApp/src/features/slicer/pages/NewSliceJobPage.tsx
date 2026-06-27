@@ -37,7 +37,7 @@ import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select } from '@/common/components/ui';
+import { Button, Alert, Input, Select, ColorPicker } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
@@ -144,6 +144,37 @@ function profileMentionsHighFlow(text: string): boolean {
   return /\bhf\b/i.test(text);
 }
 
+const DEFAULT_FILAMENT_COLOUR = '888888';
+
+/** Normalize a hex string (with/without '#', 3 or 6 digits) to a 6-digit hex without '#'. */
+function normalizeHexNoHash(input: unknown): string | undefined {
+  if (typeof input !== 'string') return undefined;
+  const clean = input.replace(/^#/, '').trim();
+  if (/^[0-9a-fA-F]{6}$/.test(clean)) return clean.toUpperCase();
+  if (/^[0-9a-fA-F]{3}$/.test(clean)) {
+    return `${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`.toUpperCase();
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a filament profile's display colour (hex, no '#'), reading the
+ * OrcaSlicer `filament_colour` / `default_filament_colour` settings. Each may be
+ * a string or a per-extruder string array. Falls back to a neutral grey.
+ */
+function getFilamentProfileColour(profile: OrcaFilamentProfile | undefined): string {
+  const settings = profile?.settings;
+  if (settings) {
+    const candidates = [settings.filament_colour, settings.default_filament_colour];
+    for (const candidate of candidates) {
+      const raw = Array.isArray(candidate) ? candidate[0] : candidate;
+      const hex = normalizeHexNoHash(raw);
+      if (hex) return hex;
+    }
+  }
+  return DEFAULT_FILAMENT_COLOUR;
+}
+
 function getProcessLayerHeight(profile: OrcaProcessProfile): number {
   if (Number.isFinite(profile.layerHeight)) {
     return profile.layerHeight;
@@ -224,6 +255,14 @@ export const NewSliceJobPage: React.FC = () => {
   // === Multi-extruder filament selection (for multi-toolhead printers) ===
   // Maps extruder index → filament profile name. Only used when printer has >1 physical toolhead.
   const [extruderFilamentProfileIds, setExtruderFilamentProfileIds] = useState<Record<number, string>>({});
+
+  // Per-slice filament colour overrides (hex, no '#'). Keyed by extruder index;
+  // index 0 doubles as the single-filament colour. Defaults from the selected
+  // filament profile's filament_colour, user-overridable via the swatch.
+  const [extruderFilamentColours, setExtruderFilamentColours] = useState<Record<number, string>>({});
+
+  // Filament profile targeted by the per-row "edit" action (multi-extruder).
+  const [filamentEditProfile, setFilamentEditProfile] = useState<OrcaFilamentProfile | null>(null);
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
@@ -1561,6 +1600,20 @@ export const NewSliceJobPage: React.FC = () => {
       ? physicalToolheads.map((_, i) => extruderFilamentProfileIds[i] ?? '')
       : undefined;
 
+    // Build per-slice filament colour overrides (hex, with '#'). Defaults come
+    // from each selected profile's filament_colour and are user-overridable.
+    const resolveExtruderColour = (idx: number, profileName: string): string => {
+      const override = extruderFilamentColours[idx];
+      const colour = override ?? getFilamentProfileColour(allFilamentProfiles.find(p => p.name === profileName));
+      return `#${colour.replace(/^#/, '')}`;
+    };
+    const extruderFilamentColoursPayload = printerIsMultiToolhead
+      ? physicalToolheads.map((_, i) => resolveExtruderColour(i, extruderFilamentProfileIds[i] ?? ''))
+      : undefined;
+    const singleFilamentColour = printerIsMultiToolhead
+      ? undefined
+      : resolveExtruderColour(0, selectedFilamentProfileId);
+
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       printerId: undefined,
@@ -1572,6 +1625,9 @@ export const NewSliceJobPage: React.FC = () => {
             filamentProfileName: selectedFilamentProfileId,
             // Include per-extruder names in profile JSON so workers can access them
             ...(extruderFilamentNames ? { filamentProfileNames: extruderFilamentNames } : {}),
+            // Per-slice filament colour overrides (preview/G-code metadata only)
+            ...(extruderFilamentColoursPayload ? { filamentColours: extruderFilamentColoursPayload } : {}),
+            ...(singleFilamentColour ? { filamentColour: singleFilamentColour } : {}),
             processProfileName: selectedProcessPresetId.startsWith('system:')
               ? selectedProcessPresetId.slice('system:'.length)
               : selectedProcessPresetId.startsWith('custom:')
@@ -1591,6 +1647,7 @@ export const NewSliceJobPage: React.FC = () => {
         ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale, position: bedModels[0].position })
         : undefined,
       extruderFilamentProfileNames: extruderFilamentNames,
+      extruderFilamentColours: extruderFilamentColoursPayload,
       // Multi-model support: collect all bed model URLs that are server-hosted (non-blob)
       modelFileUrls: bedModels.length > 1
         ? bedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
@@ -1615,7 +1672,9 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation.mutate(request);
   }, [
     advancedProcessSettings,
+    allFilamentProfiles,
     bedModels,
+    extruderFilamentColours,
     extruderFilamentProfileIds,
     filamentCostPerKg,
     modelFileName,
@@ -1814,6 +1873,7 @@ export const NewSliceJobPage: React.FC = () => {
                 setSelectedFilamentMaterial('');
                 setSelectedProcessPresetId('');
                 setExtruderFilamentProfileIds({});
+                setExtruderFilamentColours({});
                 // Machine profile auto-select will happen via the effect
               }}
               className=""
@@ -2022,45 +2082,73 @@ export const NewSliceJobPage: React.FC = () => {
               />
 
               {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
-                <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-1.5">
                   {physicalToolheads.map((toolhead, idx) => {
-                    const extruderLabel = toolhead.name || `Extruder ${idx + 1}`;
-                    const nozzleInfo = toolhead.nozzleDiameter ? ` (${toolhead.nozzleDiameter}mm)` : '';
-                    const currentMaterial = toolhead.currentMaterial ? ` • ${toolhead.currentMaterial}` : '';
                     const selectedName = extruderFilamentProfileIds[idx] ?? '';
                     const selectedProfile = allFilamentProfiles.find(p => p.name === selectedName);
+                    const swatchColour = extruderFilamentColours[idx] ?? getFilamentProfileColour(selectedProfile);
 
                     return (
-                      <div key={toolhead.id ?? idx} className="border border-pf-border/50 rounded-md p-2 space-y-1" data-testid={`extruder-filament-${idx}`}>
-                        <div className="text-xs font-medium text-pf-text-secondary">
-                          {extruderLabel}{nozzleInfo}{currentMaterial}
-                        </div>
-                        <FilamentProfileDropdown
-                          profiles={allFilamentProfiles}
-                          customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
-                          selectedProfileName={selectedName}
-                          disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
-                          filterConfig={filamentFilterConfig}
-                          onFilterConfigChange={handleFilamentFilterChange}
-                          onSelect={(name, source) => {
-                            setExtruderFilamentProfileIds(prev => ({ ...prev, [idx]: name }));
-                            // Also keep the primary filament in sync (first extruder = primary)
-                            if (idx === 0) {
-                              setSelectedFilamentProfileId(name);
-                              if (source === 'system') {
-                                const sp = allFilamentProfiles.find(p => p.name === name);
-                                setSelectedFilamentMaterial(sp?.material || '');
-                              } else {
-                                setSelectedFilamentMaterial('');
-                              }
-                            }
-                          }}
+                      <div
+                        key={toolhead.id ?? idx}
+                        className="flex items-center gap-1 border border-pf-border/50 rounded-md p-1"
+                        data-testid={`extruder-filament-${idx}`}
+                      >
+                        <span
+                          className="flex items-center justify-center w-5 h-5 rounded bg-pf-accent-2 text-white text-[11px] font-semibold shrink-0"
+                          aria-hidden="true"
+                        >
+                          {idx + 1}
+                        </span>
+                        <ColorPicker
+                          swatchOnly
+                          swatchClassName="w-6 h-6"
+                          value={swatchColour}
+                          onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, [idx]: hex }))}
+                          aria-label={`Extruder ${idx + 1} filament colour`}
                         />
-                        {selectedProfile && (
-                          <div className="text-xs text-pf-text-muted">
-                            {selectedProfile.nozzleTemperature ?? 210}°C nozzle, {selectedProfile.bedTemperature ?? 60}°C bed
-                          </div>
-                        )}
+                        <div className="flex-1 min-w-0">
+                          <FilamentProfileDropdown
+                            profiles={allFilamentProfiles}
+                            customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                            selectedProfileName={selectedName}
+                            disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                            filterConfig={filamentFilterConfig}
+                            onFilterConfigChange={handleFilamentFilterChange}
+                            className="px-2 py-1.5"
+                            onSelect={(name, source) => {
+                              setExtruderFilamentProfileIds(prev => ({ ...prev, [idx]: name }));
+                              // Default the colour swatch from the newly selected profile.
+                              const sp = allFilamentProfiles.find(p => p.name === name);
+                              setExtruderFilamentColours(prev => ({ ...prev, [idx]: getFilamentProfileColour(sp) }));
+                              // Also keep the primary filament in sync (first extruder = primary)
+                              if (idx === 0) {
+                                setSelectedFilamentProfileId(name);
+                                if (source === 'system') {
+                                  setSelectedFilamentMaterial(sp?.material || '');
+                                } else {
+                                  setSelectedFilamentMaterial('');
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="p-1 h-auto shrink-0"
+                          onClick={() => {
+                            setFilamentEditProfile(selectedProfile ?? null);
+                            setProfileEditorType('filament');
+                            setProfileEditorOpen(true);
+                          }}
+                          disabled={!selectedProfile}
+                          title="Edit filament settings"
+                          aria-label={`Edit Extruder ${idx + 1} filament settings`}
+                        >
+                          <EditIcon className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
                     );
                   })}
@@ -2101,6 +2189,7 @@ export const NewSliceJobPage: React.FC = () => {
                       className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
                       onClick={() => {
                         setFilamentMenuOpen(false);
+                        setFilamentEditProfile(null);
                         setProfileEditorType('filament');
                         setProfileEditorOpen(true);
                       }}
@@ -2147,23 +2236,35 @@ export const NewSliceJobPage: React.FC = () => {
             
             {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
               <>
-                <FilamentProfileDropdown
-                  profiles={allFilamentProfiles}
-                  customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
-                  selectedProfileName={selectedFilamentProfileId}
-                  disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
-                  filterConfig={filamentFilterConfig}
-                  onFilterConfigChange={handleFilamentFilterChange}
-                  onSelect={(name, source) => {
-                    setSelectedFilamentProfileId(name);
-                    if (source === 'system') {
-                      const sp = allFilamentProfiles.find(p => p.name === name);
-                      setSelectedFilamentMaterial(sp?.material || '');
-                    } else {
-                      setSelectedFilamentMaterial('');
-                    }
-                  }}
-                />
+                <div className="flex items-center gap-1.5">
+                  <ColorPicker
+                    swatchOnly
+                    swatchClassName="w-7 h-7"
+                    value={extruderFilamentColours[0] ?? getFilamentProfileColour(selectedFilamentProfile)}
+                    onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, 0: hex }))}
+                    aria-label="Filament colour"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <FilamentProfileDropdown
+                      profiles={allFilamentProfiles}
+                      customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                      selectedProfileName={selectedFilamentProfileId}
+                      disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                      filterConfig={filamentFilterConfig}
+                      onFilterConfigChange={handleFilamentFilterChange}
+                      onSelect={(name, source) => {
+                        setSelectedFilamentProfileId(name);
+                        const sp = allFilamentProfiles.find(p => p.name === name);
+                        setExtruderFilamentColours(prev => ({ ...prev, 0: getFilamentProfileColour(sp) }));
+                        if (source === 'system') {
+                          setSelectedFilamentMaterial(sp?.material || '');
+                        } else {
+                          setSelectedFilamentMaterial('');
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
 
                 {/* Show selected profile's temperature info */}
                 {selectedFilamentProfile && (
@@ -2596,11 +2697,11 @@ export const NewSliceJobPage: React.FC = () => {
       {/* Profile Editor Modal - for editing selected profile settings */}
       <ProfileEditorModal
         isOpen={profileEditorOpen}
-        onClose={() => setProfileEditorOpen(false)}
+        onClose={() => { setProfileEditorOpen(false); setFilamentEditProfile(null); }}
         profileType={profileEditorType}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
-          (selectedFilamentProfile ?? null)
+          (filamentEditProfile ?? selectedFilamentProfile ?? null)
         }
         onSaveSuccess={(_profileId, profileName) => {
           qc.invalidateQueries({ queryKey: ['customProfiles'] });

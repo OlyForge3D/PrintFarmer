@@ -15,6 +15,13 @@ export interface ColorPickerProps {
   placeholder?: string;
   /** Whether the field is disabled. */
   disabled?: boolean;
+  /**
+   * Compact mode: render only the color swatch (no inline hex input). The hex
+   * text input is moved inside the popover. Useful for dense rows.
+   */
+  swatchOnly?: boolean;
+  /** Optional className applied to the swatch button (e.g. to size it down). */
+  swatchClassName?: string;
 }
 
 /**
@@ -31,6 +38,8 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   'aria-label': ariaLabel = 'Color',
   placeholder = '#FF5733',
   disabled = false,
+  swatchOnly = false,
+  swatchClassName,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -83,7 +92,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   );
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={clsx('flex items-center gap-2', swatchOnly && 'inline-flex')}>
       {/* Color swatch — toggles the picker popover */}
       <div className="relative">
         {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom color swatch requires raw button for background-color styling */}
@@ -93,9 +102,10 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
           onClick={() => !disabled && setIsOpen((o) => !o)}
           disabled={disabled}
           className={clsx(
-            'w-9 h-9 rounded-md border-2 border-pf-border shrink-0 cursor-pointer transition',
+            'rounded-md border-2 border-pf-border shrink-0 cursor-pointer transition',
             'hover:border-pf-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
             disabled && 'opacity-50 cursor-not-allowed',
+            swatchClassName ?? 'w-9 h-9',
           )}
           style={{ backgroundColor: normalizedHex }}
           aria-label={`${ariaLabel} — click to ${isOpen ? 'close' : 'open'} color picker`}
@@ -116,29 +126,49 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
               color={normalizedHex}
               onChange={handlePickerChange}
             />
+            {swatchOnly && (
+              <input
+                id={id}
+                type="text"
+                value={value ? `#${value}` : ''}
+                onChange={handleTextChange}
+                placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
+                disabled={disabled}
+                maxLength={7}
+                aria-label={ariaLabel}
+                className={clsx(
+                  'mt-2 w-full border rounded-sm p-1.5 text-xs font-mono',
+                  'bg-pf-bg-0 text-pf-text-primary border-pf-border',
+                  'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition',
+                  'disabled:bg-pf-disabled disabled:cursor-not-allowed',
+                )}
+              />
+            )}
           </div>
         )}
       </div>
 
-      {/* Hex text input */}
-      <div className="flex-1">
-        <input
-          id={id}
-          type="text"
-          value={value ? `#${value}` : ''}
-          onChange={handleTextChange}
-          placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
-          disabled={disabled}
-          maxLength={7}
-          aria-label={ariaLabel}
-          className={clsx(
-            'w-full border rounded-sm p-2 text-sm font-mono',
-            'bg-pf-bg-0 text-pf-text-primary border-pf-border',
-            'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition',
-            'disabled:bg-pf-disabled disabled:cursor-not-allowed',
-          )}
-        />
-      </div>
+      {/* Hex text input (full mode only) */}
+      {!swatchOnly && (
+        <div className="flex-1">
+          <input
+            id={id}
+            type="text"
+            value={value ? `#${value}` : ''}
+            onChange={handleTextChange}
+            placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
+            disabled={disabled}
+            maxLength={7}
+            aria-label={ariaLabel}
+            className={clsx(
+              'w-full border rounded-sm p-2 text-sm font-mono',
+              'bg-pf-bg-0 text-pf-text-primary border-pf-border',
+              'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition',
+              'disabled:bg-pf-disabled disabled:cursor-not-allowed',
+            )}
+          />
+        </div>
+      )}
     </div>
   );
 };
