@@ -86,5 +86,9 @@ describe('FilamentProfileDropdown trigger', () => {
 
     fireEvent.click(screen.getByText('Generic ABS High Speed'));
     expect(onSelect).toHaveBeenCalledWith('Generic ABS High Speed', 'system');
+
+    // Nozzle/bed temperatures are NOT shown in the menu rows.
+    expect(screen.queryByText(/210°\/60°/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/°\//)).not.toBeInTheDocument();
   });
 });

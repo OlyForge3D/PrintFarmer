@@ -400,9 +400,6 @@ export function FilamentProfileDropdown({
                         >
                           {isSelected && checkmark}
                           <span className="min-w-0 flex-1 truncate">{prof.name}</span>
-                          <span className="text-xs text-gray-500 ml-auto shrink-0">
-                            {prof.nozzleTemperature ?? 210}°/{prof.bedTemperature ?? 60}°
-                          </span>
                         </button>
                       );
                     });
