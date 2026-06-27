@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services.Configuration;
+﻿namespace Farm.Slicer.Module.Services.Configuration;
 
 /// <summary>
 /// Runtime options for Printables GraphQL integration.

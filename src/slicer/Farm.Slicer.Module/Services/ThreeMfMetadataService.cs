@@ -207,6 +207,7 @@ public class ThreeMfMetadataService(ILogger<ThreeMfMetadataService> logger) : IT
                         {
                             plateIdx = parsedIdx;
                         }
+
                         string? nameStr = plateEl.Attribute("name")?.Value?.Trim();
                         string plateName = !string.IsNullOrEmpty(nameStr) ? nameStr : $"Plate {plateIdx + 1}";
 

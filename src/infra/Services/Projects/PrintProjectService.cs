@@ -364,7 +364,7 @@ public class PrintProjectService(
 
         if (request.PlateName is not null)
         {
-            projectFile.PlateName = request.PlateName == string.Empty ? null : request.PlateName;
+            projectFile.PlateName = string.IsNullOrEmpty(request.PlateName) ? null : request.PlateName;
         }
 
         projectFile.UpdatedAt = now;

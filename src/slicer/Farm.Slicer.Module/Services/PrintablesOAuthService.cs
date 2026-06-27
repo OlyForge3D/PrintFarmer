@@ -446,7 +446,8 @@ public sealed class PrintablesOAuthService(
                 ["client_secret"] = _options.ClientSecret,
                 ["redirect_uri"] = _options.RedirectUri,
                 ["code_verifier"] = codeVerifier,
-            }!)
+            }
+!)
         };
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
@@ -536,7 +537,8 @@ public sealed class PrintablesOAuthService(
                 ["refresh_token"] = refreshToken,
                 ["client_id"] = _options.ClientId,
                 ["client_secret"] = _options.ClientSecret,
-            }!)
+            }
+!)
         };
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
@@ -1046,7 +1048,7 @@ public sealed class PrintablesOAuthService(
         [JsonPropertyName("token_type")]
         public string? TokenType { get; set; }
 
-        public string? Scope { get; set; }
+        public string? Scope { get; }
 
         [JsonPropertyName("expires_in")]
         public int? ExpiresIn { get; set; }

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Contracts.Auth;
+﻿using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;

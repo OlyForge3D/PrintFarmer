@@ -42,10 +42,12 @@ public class HttpProgressReporter : IProgressReporter
         {
             request.Content = ToJsonContent(payload);
         }
+
         if (!string.IsNullOrWhiteSpace(_workerApiKey))
         {
             request.Headers.Add("X-Worker-Key", _workerApiKey);
         }
+
         return request;
     }
 

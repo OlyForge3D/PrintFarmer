@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Printers;
+﻿using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
 using Xunit;
 
@@ -12,8 +12,8 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 public class PrintersServiceRtspHostTests
 {
     [Theory]
-    [InlineData("2001:db8::1",      "[2001:db8::1]")]
-    [InlineData("::1",              "[::1]")]
+    [InlineData("2001:db8::1", "[2001:db8::1]")]
+    [InlineData("::1", "[::1]")]
     [InlineData("2001:db8:85a3::8a2e:370:7334", "[2001:db8:85a3::8a2e:370:7334]")]
     public void FormatRtspHost_BareIpv6_ReturnsBracketed(string input, string expected)
     {
@@ -50,10 +50,10 @@ public class PrintersServiceRtspHostTests
     }
 
     [Theory]
-    [InlineData("2001:db8::1",      "rtsp://[2001:db8::1]:554/live/")]
-    [InlineData("192.168.1.50",     "rtsp://192.168.1.50:554/live/")]
-    [InlineData("[2001:db8::1]",    "rtsp://[2001:db8::1]:554/live/")]
-    [InlineData("myprinter.local",  "rtsp://myprinter.local:554/live/")]
+    [InlineData("2001:db8::1", "rtsp://[2001:db8::1]:554/live/")]
+    [InlineData("192.168.1.50", "rtsp://192.168.1.50:554/live/")]
+    [InlineData("[2001:db8::1]", "rtsp://[2001:db8::1]:554/live/")]
+    [InlineData("myprinter.local", "rtsp://myprinter.local:554/live/")]
     public void FormatRtspHost_RtspUrlConstruction_ProducesValidUrl(string host, string expectedUrl)
     {
         string rtspUrl = $"rtsp://{PrintersService.FormatRtspHost(host)}:554/live/";

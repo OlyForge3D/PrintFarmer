@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services;
+﻿namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Base class for Printables OAuth access failures that need explicit HTTP mapping.
