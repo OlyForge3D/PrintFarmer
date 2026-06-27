@@ -1234,8 +1234,15 @@ function CameraController({
     camera.up.set(0, 0, 1); // Enforce Z-up for 3D printing convention
     camera.lookAt(0, 0, bedHeight / 4);
     camera.updateProjectionMatrix();
+    // Sync OrbitControls' own target to the look-at point. Without this the
+    // controls keep their previous internal target and snap the camera back on
+    // the next user interaction (visible when the grid re-frames on add/remove).
+    if (orbitRef.current) {
+      orbitRef.current.target.set(0, 0, bedHeight / 4);
+      orbitRef.current.update();
+    }
     invalidate(); // frameloop="demand": redraw after re-framing
-  }, [camera, invalidate, bedHeight, gridRadius]);
+  }, [camera, invalidate, bedHeight, gridRadius, orbitRef]);
 
   // Allow zooming out far enough to see the entire grid, with headroom.
   const maxDistance = Math.max(2000, gridRadius * 8);

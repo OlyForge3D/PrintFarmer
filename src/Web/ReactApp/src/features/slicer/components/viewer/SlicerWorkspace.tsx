@@ -331,6 +331,14 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     () => plateState.plates.some(p => p.id !== plateState.activePlateId && p.modelIds.length > 0),
     [plateState],
   );
+  // True when the ACTIVE plate is locked. Used to block every user-initiated
+  // mutation that targets the active/selected plate (numeric transform inputs,
+  // toolbar arrange/orient, split, cut, paint) — the 3D scene already blocks
+  // drag/gizmo, but these workspace-level dispatchers need the same gate.
+  const isActivePlateLocked = useMemo(
+    () => plateState.plates.find(p => p.id === plateState.activePlateId)?.locked ?? false,
+    [plateState],
+  );
   const handleSliceClick = useCallback(() => {
     onSlice?.(activePlateModels.map(m => m.id));
   }, [onSlice, activePlateModels]);
@@ -561,6 +569,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         return;
       }
 
+      // Block writes to a model that lives on a LOCKED plate. This is the
+      // fundamental chokepoint for numeric transform inputs and any future
+      // transform caller; per-plate arrange/orient already pre-check their own
+      // plate, and they only target unlocked plates, so they pass through.
+      const owningPlateId = getPlateForModel(plateState, modelId);
+      if (owningPlateId && plateState.plates.find(p => p.id === owningPlateId)?.locked) {
+        return;
+      }
+
       const recordHistory = options?.recordHistory ?? true;
       const actionLabel = options?.actionLabel ?? 'Transform';
       const historyBefore = options?.historyBefore;
@@ -653,7 +670,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         }
       }
     },
-    [activeTool, models, moveCoordinateMode, onModelTransform, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual, uniformScale],
+    [activeTool, models, moveCoordinateMode, onModelTransform, plateState, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual, uniformScale],
   );
 
   const applyHistoryEntry = useCallback((entry: TransformHistoryEntry, direction: 'before' | 'after') => {
@@ -726,8 +743,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [models, plateState]);
 
   const handleArrange = useCallback(() => {
+    if (isActivePlateLocked) return;
     arrangeModelList(visibleModels);
-  }, [arrangeModelList, visibleModels]);
+  }, [arrangeModelList, visibleModels, isActivePlateLocked]);
 
   /**
    * Auto-arrange a specific plate. Computes its model set from an explicit
@@ -819,28 +837,31 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   const handleOrient = useCallback(() => {
     if (!onModelTransform) return;
+    if (isActivePlateLocked) return;
     const selected = getSelectedModel();
     if (!selected) return;
 
     // Trigger auto-orient inside the 3D scene (needs geometry access)
     setAutoOrientTrigger((prev) => prev + 1);
-  }, [getSelectedModel, onModelTransform]);
+  }, [getSelectedModel, onModelTransform, isActivePlateLocked]);
 
   const handleLayFlat = useCallback(() => {
     if (!onModelTransform) return;
+    if (isActivePlateLocked && !layFlatMode) return;
     const selected = getSelectedModel();
     if (!selected) return;
     // Toggle lay-flat face-picking mode
     setLayFlatMode((prev) => !prev);
-  }, [getSelectedModel, onModelTransform]);
+  }, [getSelectedModel, onModelTransform, isActivePlateLocked, layFlatMode]);
 
   const handleSplit = useCallback(() => {
+    if (isActivePlateLocked) return;
     if (!hasSelection) {
       toast.info('Select a model first to split it');
       return;
     }
     setSplitTrigger((prev) => prev + 1);
-  }, [hasSelection]);
+  }, [hasSelection, isActivePlateLocked]);
 
   /** Exit all interactive tool modes */
   const exitAllToolModes = useCallback(() => {
@@ -872,6 +893,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [plateState.activePlateId, activePlateModelIds, selectedModelId, exitAllToolModes, onModelSelect]);
 
   const handleCut = useCallback(() => {
+    if (isActivePlateLocked && !cutMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to cut it');
       return;
@@ -883,7 +905,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setCutMode(true);
     toast.info('Cut mode: drag the plane to set cut height, then confirm or cancel');
-  }, [hasSelection, cutMode, exitAllToolModes]);
+  }, [hasSelection, cutMode, exitAllToolModes, isActivePlateLocked]);
 
   const handleMeasure = useCallback(() => {
     const next = !measureMode;
@@ -893,6 +915,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   const handleSupportPaint = useCallback(() => {
     if (simpleMode) return;
+    if (isActivePlateLocked && !supportPaintMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to paint supports');
       return;
@@ -904,10 +927,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setSupportPaintMode(true);
     toast.info('Support paint: left-click to paint, right-click to erase, Escape to exit');
-  }, [simpleMode, hasSelection, supportPaintMode, exitAllToolModes]);
+  }, [simpleMode, hasSelection, supportPaintMode, exitAllToolModes, isActivePlateLocked]);
 
   const handleSeamPaint = useCallback(() => {
     if (simpleMode) return;
+    if (isActivePlateLocked && !seamPaintMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to paint seam');
       return;
@@ -919,9 +943,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setSeamPaintMode(true);
     toast.info('Seam paint: left-click to paint, right-click to erase, Escape to exit');
-  }, [simpleMode, hasSelection, seamPaintMode, exitAllToolModes]);
+  }, [simpleMode, hasSelection, seamPaintMode, exitAllToolModes, isActivePlateLocked]);
 
   const handleColorPaint = useCallback(() => {
+    if (isActivePlateLocked && !colorPaintMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to paint colors');
       return;
@@ -933,9 +958,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setColorPaintMode(true);
     toast.info('Color paint: left-click to paint, right-click to erase, Escape to exit');
-  }, [hasSelection, colorPaintMode, exitAllToolModes]);
+  }, [hasSelection, colorPaintMode, exitAllToolModes, isActivePlateLocked]);
 
   const handleFuzzySkinPaint = useCallback(() => {
+    if (isActivePlateLocked && !fuzzySkinPaintMode) return;
     if (!hasSelection) {
       toast.info('Select a model first to paint fuzzy skin');
       return;
@@ -947,7 +973,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     exitAllToolModes();
     setFuzzySkinPaintMode(true);
     toast.info('Fuzzy skin paint: left-click to paint, right-click to erase, Escape to exit');
-  }, [hasSelection, fuzzySkinPaintMode, exitAllToolModes]);
+  }, [hasSelection, fuzzySkinPaintMode, exitAllToolModes, isActivePlateLocked]);
 
   const handleTextTool = useCallback(() => {
     if (textToolActive) {
@@ -1023,6 +1049,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
   ) => {
     if (!selectedModelId) return;
+    if (isActivePlateLocked) { setCutMode(false); return; }
     setCutMode(false);
     if (!onModelsReplace) {
       toast.success('Model cut into two parts');
@@ -1173,7 +1200,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     uploadAndReplace().catch(() => {
       toast.error('Failed to process cut model');
     });
-  }, [selectedModelId, models, onModelsReplace]);
+  }, [selectedModelId, models, onModelsReplace, isActivePlateLocked]);
 
   const handleCutCancel = useCallback(() => {
     setCutMode(false);
@@ -1416,6 +1443,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (!selectedModelId || !onModelTransform) {
       return;
     }
+    if (isActivePlateLocked) return;
 
     const model = models.find((m) => m.id === selectedModelId);
     if (!model) {
@@ -1433,18 +1461,20 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     // After applying absolute rotation, treat the new absolute as baseline.
     setRotateBaseAbsoluteInput(rotateAbsoluteInput);
     setRotateRelativeInput([0, 0, 0]);
-  }, [selectedModelId, handleModelTransform, onModelTransform, models, rotateAbsoluteInput]);
+  }, [selectedModelId, handleModelTransform, onModelTransform, models, rotateAbsoluteInput, isActivePlateLocked]);
 
   const applyScaleFromPercent = useCallback((percent: [number, number, number]) => {
     if (!selectedModelId || !selectedModelMetrics) return;
+    if (isActivePlateLocked) return;
     const model = models.find((m) => m.id === selectedModelId);
     if (!model) return;
     const nextScale: [number, number, number] = [percent[0] / 100, percent[1] / 100, percent[2] / 100];
     handleModelTransform(model.id, model.position, model.rotation, nextScale, { actionLabel: 'Scale Model' });
-  }, [selectedModelId, selectedModelMetrics, models, handleModelTransform]);
+  }, [selectedModelId, selectedModelMetrics, models, handleModelTransform, isActivePlateLocked]);
 
   const applyScaleFromMm = useCallback((mm: [number, number, number]) => {
     if (!selectedModelId || !selectedModelMetrics) return;
+    if (isActivePlateLocked) return;
     const model = models.find((m) => m.id === selectedModelId);
     if (!model) return;
     const nextScale: [number, number, number] = [
@@ -1453,7 +1483,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       mm[2] / selectedModelMetrics.baseSize[2],
     ];
     handleModelTransform(model.id, model.position, model.rotation, nextScale, { actionLabel: 'Scale Model' });
-  }, [selectedModelId, selectedModelMetrics, models, handleModelTransform]);
+  }, [selectedModelId, selectedModelMetrics, models, handleModelTransform, isActivePlateLocked]);
 
   // Map left-tool type to Three.js TransformControls mode
   const transformMode = activeTool === 'move'
