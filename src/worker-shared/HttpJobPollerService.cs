@@ -537,6 +537,12 @@ public abstract class HttpJobPollerService(
                 }
             }
 
+            // Apply per-slice filament colour overrides (cosmetic — affects the
+            // slice preview / G-code filament_colour metadata only, not print
+            // physics). Colours arrive as "#RRGGBB" strings from the frontend.
+            // Profiles are resolved from a shared cache, so clone before mutating.
+            ApplyFilamentColourOverrides(profile, root);
+
             // Resolve process profile by name
             if (!string.IsNullOrEmpty(processProfileName))
             {
@@ -580,6 +586,60 @@ public abstract class HttpJobPollerService(
         {
             _logger.LogError(ex, "Failed to parse SlicerProfileJson: {SlicerProfileJson}", slicerProfileJson);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Inject per-slice filament colour overrides into the resolved profile.
+    /// Multi-extruder jobs map the "filamentColours" array positionally to each
+    /// extruder; single-filament jobs apply "filamentColour" to the primary.
+    /// Colours are cosmetic (slice preview / G-code <c>filament_colour</c> only).
+    /// OrcaSlicer expects <c>filament_colour</c> as a JSON array, so it is stored
+    /// as a <see cref="List{String}"/>. Profiles come from a shared cache, so each
+    /// affected entry is cloned before mutation to avoid polluting other jobs.
+    /// </summary>
+    private static void ApplyFilamentColourOverrides(SlicerProfileDto profile, JsonElement root)
+    {
+        // Multi-extruder: positional colour per extruder index.
+        if (profile.ExtruderFilamentProfiles is { Count: > 0 } extruders
+            && root.TryGetProperty("filamentColours", out JsonElement coloursElem)
+            && coloursElem.ValueKind == JsonValueKind.Array)
+        {
+            int i = 0;
+            foreach (JsonElement colourElem in coloursElem.EnumerateArray())
+            {
+                if (i >= extruders.Count)
+                {
+                    break;
+                }
+
+                string? colour = colourElem.GetString();
+                if (!string.IsNullOrWhiteSpace(colour))
+                {
+                    FilamentProfileDto clone = extruders[i].Clone();
+                    clone.Color = colour;
+                    clone.Settings["filament_colour"] = new List<string> { colour };
+                    extruders[i] = clone;
+                }
+
+                i++;
+            }
+
+            return;
+        }
+
+        // Single filament.
+        if (profile.FilamentProfile is not null
+            && root.TryGetProperty("filamentColour", out JsonElement singleElem))
+        {
+            string? colour = singleElem.GetString();
+            if (!string.IsNullOrWhiteSpace(colour))
+            {
+                FilamentProfileDto clone = profile.FilamentProfile.Clone();
+                clone.Color = colour;
+                clone.Settings["filament_colour"] = new List<string> { colour };
+                profile.FilamentProfile = clone;
+            }
         }
     }
 }

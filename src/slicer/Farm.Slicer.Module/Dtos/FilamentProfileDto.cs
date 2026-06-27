@@ -84,4 +84,18 @@ public class FilamentProfileDto
 
     // ── Full settings bag (forward compatibility) ─────────────────────────
     public Dictionary<string, object> Settings { get; set; } = new();
+
+    /// <summary>
+    /// Shallow clone with independent <see cref="Settings"/> and
+    /// <see cref="CompatiblePrinters"/> collections. Use before mutating a
+    /// profile resolved from a shared cache (e.g. injecting a per-slice
+    /// filament colour override) so the cached instance is never polluted.
+    /// </summary>
+    public FilamentProfileDto Clone()
+    {
+        FilamentProfileDto clone = (FilamentProfileDto)MemberwiseClone();
+        clone.Settings = new Dictionary<string, object>(Settings);
+        clone.CompatiblePrinters = new List<string>(CompatiblePrinters);
+        return clone;
+    }
 }

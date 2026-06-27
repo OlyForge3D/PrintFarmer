@@ -150,6 +150,26 @@ public class SettingsSerializationTests
     }
 
     [Fact]
+    public void FilamentColourOverride_WrittenAsNativeJsonArray()
+    {
+        // Mirrors how the worker injects a per-slice filament colour override:
+        // Settings["filament_colour"] = new List<string> { "#FF8000" }.
+        // OrcaSlicer expects filament_colour as a JSON array, not a scalar string.
+        var dict = new Dictionary<string, object>
+        {
+            ["filament_colour"] = new List<string> { "#FF8000" },
+        };
+
+        string json = OrcaSlicingPipelineService.SettingsDictToNativeJson(dict);
+        using var output = JsonDocument.Parse(json);
+        JsonElement colour = output.RootElement.GetProperty("filament_colour");
+
+        colour.ValueKind.Should().Be(JsonValueKind.Array);
+        colour.GetArrayLength().Should().Be(1);
+        colour[0].GetString().Should().Be("#FF8000");
+    }
+
+    [Fact]
     public void ProcessProfile_StringValues_NotDoubleQuoted()
     {
         string json = RoundTrip(SampleProcessProfile);
