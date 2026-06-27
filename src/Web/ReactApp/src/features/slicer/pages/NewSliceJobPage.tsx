@@ -2130,7 +2130,7 @@ export const NewSliceJobPage: React.FC = () => {
                     return (
                       <div
                         key={toolhead.id ?? idx}
-                        className="flex items-center gap-1 border border-pf-border/50 rounded-md p-1"
+                        className="flex items-center gap-1 px-0.5 py-0"
                         data-testid={`extruder-filament-${idx}`}
                       >
                         <ColorPicker
