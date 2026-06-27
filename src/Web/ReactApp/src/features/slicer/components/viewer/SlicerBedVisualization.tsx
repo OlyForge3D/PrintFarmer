@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { FacePaintOverlay } from './FacePaintOverlay';
 import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
+import { PlateBedOverlay } from './PlateBedOverlay';
 import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
 import {
@@ -98,6 +99,7 @@ export interface BedConfig {
  */
 export interface ScenePlate {
   id: string;
+  name: string;
   offset: [number, number, number];
   active: boolean;
   locked: boolean;
@@ -118,6 +120,12 @@ export interface SlicerBedVisualizationProps {
   onModelSelect?: (modelId: string | null) => void;
   /** Called when a plate's bed is clicked — makes that plate the active slice target. */
   onPlateActivate?: (plateId: string) => void;
+  /** Per-plate in-scene overlay actions (rendered only when >1 plate). */
+  onPlateRename?: (plateId: string, name: string) => void;
+  onPlateDelete?: (plateId: string) => void;
+  onPlateArrange?: (plateId: string) => void;
+  onPlateOrient?: (plateId: string) => void;
+  onPlateToggleLock?: (plateId: string) => void;
   /** Active transform tool: 'translate' | 'rotate' | 'scale' */
   transformMode?: 'translate' | 'rotate' | 'scale' | null;
   /** Called when a model is moved/rotated/scaled via TransformControls */
@@ -1711,6 +1719,11 @@ function BedScene({
   selectedModelId,
   onModelSelect,
   onPlateActivate,
+  onPlateRename,
+  onPlateDelete,
+  onPlateArrange,
+  onPlateOrient,
+  onPlateToggleLock,
   transformMode,
   onModelTransform,
   onSelectedModelMetricsChange,
@@ -1785,7 +1798,7 @@ function BedScene({
     const byId = new Map(models.map(m => [m.id, m]));
     const source: ScenePlate[] = plates && plates.length > 0
       ? plates
-      : [{ id: '__single__', offset: [0, 0, 0], active: true, locked: false, modelIds: models.map(m => m.id) }];
+      : [{ id: '__single__', name: 'Plate', offset: [0, 0, 0], active: true, locked: false, modelIds: models.map(m => m.id) }];
     return source.map(p => ({
       ...p,
       models: p.modelIds.map(id => byId.get(id)).filter((m): m is LoadedModel => m != null),
@@ -2168,7 +2181,7 @@ function BedScene({
             );
           };
 
-          return renderPlates.map((plate) => (
+          return renderPlates.map((plate, plateIndex) => (
             <PlateGroup key={plate.id} offset={plate.offset} active={plate.active}>
               {/* Print bed — hidden during paint mode */}
               {!hideBed && (
@@ -2190,6 +2203,27 @@ function BedScene({
               {/* Axis indicators — only on the active plate to avoid clutter */}
               {!hideBed && showAxes && plate.active && (
                 <AxisIndicators size={Math.min(width, depth) * 0.15} />
+              )}
+
+              {/* Per-plate chrome (number / title / actions). Suppressed at n=1
+                  to preserve legacy single-plate visual parity, and while the
+                  bed is hidden (paint/cut modes). */}
+              {multiPlate && !hideBed && (
+                <PlateBedOverlay
+                  plateNumber={plateIndex + 1}
+                  name={plate.name}
+                  active={plate.active}
+                  locked={plate.locked}
+                  canDelete={renderPlates.length > 1}
+                  bedWidth={width}
+                  bedDepth={depth}
+                  onActivate={() => onPlateActivate?.(plate.id)}
+                  onRename={(name) => onPlateRename?.(plate.id, name)}
+                  onDelete={() => onPlateDelete?.(plate.id)}
+                  onArrange={() => onPlateArrange?.(plate.id)}
+                  onOrient={() => onPlateOrient?.(plate.id)}
+                  onToggleLock={() => onPlateToggleLock?.(plate.id)}
+                />
               )}
 
               {plate.models.map((model) =>
@@ -2310,6 +2344,11 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   selectedModelId,
   onModelSelect,
   onPlateActivate,
+  onPlateRename,
+  onPlateDelete,
+  onPlateArrange,
+  onPlateOrient,
+  onPlateToggleLock,
   transformMode = null,
   onModelTransform,
   onSelectedModelMetricsChange,
@@ -2384,6 +2423,11 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
               selectedModelId={selectedModelId}
               onModelSelect={onModelSelect}
               onPlateActivate={onPlateActivate}
+              onPlateRename={onPlateRename}
+              onPlateDelete={onPlateDelete}
+              onPlateArrange={onPlateArrange}
+              onPlateOrient={onPlateOrient}
+              onPlateToggleLock={onPlateToggleLock}
               transformMode={transformMode}
               onModelTransform={onModelTransform}
               onSelectedModelMetricsChange={onSelectedModelMetricsChange}

@@ -14,7 +14,6 @@ import { SlicerStatusBar } from './SlicerStatusBar';
 import { SlicerBedVisualization, type LoadedModel, type BedConfig, type ScenePlate } from './SlicerBedVisualization';
 import { TextTool, type TextToolConfig } from './TextTool';
 import { generateTextGeometry, geometryToStlBlobUrl } from '@/features/models3d/utils/textGeometry';
-import { PlateTabBar } from './PlateTabBar';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
@@ -38,11 +37,11 @@ import {
   addModelToActivePlate,
   removeModelFromPlates,
   renamePlate,
-  duplicatePlate,
   getModelsForPlate,
   replaceModelOnSamePlate,
   getPlateForModel,
   computePlateLayout,
+  togglePlateLock,
 } from '@/features/slicer/utils/plateManager';
 import { computeAutoOrientation, computeBedPlacementZ } from '@/features/slicer/utils/autoOrient';
 
@@ -222,9 +221,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [plateState, setPlateState] = useState<PlateManagerState>(() => createInitialPlateState());
 
   const handleAddPlate = useCallback(() => setPlateState(s => addPlate(s)), [setPlateState]);
-  const handleActivePlateChange = useCallback((id: string) => setPlateState(s => setActivePlate(s, id)), [setPlateState]);
   const handleRenamePlate = useCallback((id: string, name: string) => setPlateState(s => renamePlate(s, id, name)), [setPlateState]);
-  const handleDuplicatePlate = useCallback((id: string) => setPlateState(s => duplicatePlate(s, id)), [setPlateState]);
 
   // Clicking a model in the 3D scene: make its plate active (so highlight and
   // slice target never diverge), then forward the selection to the parent.
@@ -241,6 +238,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   // Clicking a bed activates that plate (selection clearing handled in-scene).
   const handlePlateActivate = useCallback((plateId: string) => {
     setPlateState(s => setActivePlate(s, plateId));
+  }, [setPlateState]);
+
+  const handleTogglePlateLock = useCallback((plateId: string) => {
+    setPlateState(s => togglePlateLock(s, plateId));
   }, [setPlateState]);
 
   // Sync plate assignments when models change (React-recommended render-time reset pattern)
@@ -308,6 +309,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const scenePlates: ScenePlate[] = useMemo(
     () => plateState.plates.map((p, i) => ({
       id: p.id,
+      name: p.name,
       offset: plateOffsets[i] ?? [0, 0, 0],
       active: p.id === plateState.activePlateId,
       locked: p.locked,
@@ -1502,18 +1504,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         canAddPlate={plateState.plates.length < 10}
       />
 
-      {/* Plate Tab Bar */}
-      <PlateTabBar
-        plates={plateState.plates}
-        activePlateId={plateState.activePlateId}
-        onActivePlateChange={handleActivePlateChange}
-        onArrangePlate={handleArrangePlate}
-        onOrientPlate={handleOrientPlate}
-        onDeletePlate={handleDeletePlate}
-        onRenamePlate={handleRenamePlate}
-        onDuplicatePlate={handleDuplicatePlate}
-      />
-
       {/* Main content area with 3D bed and left tools */}
       <div className="flex-1 relative overflow-hidden min-h-0">
         {/* 3D Bed Visualization */}
@@ -1524,6 +1514,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           selectedModelId={selectedModelId}
           onModelSelect={handleModelSelect}
           onPlateActivate={handlePlateActivate}
+          onPlateRename={handleRenamePlate}
+          onPlateDelete={handleDeletePlate}
+          onPlateArrange={handleArrangePlate}
+          onPlateOrient={handleOrientPlate}
+          onPlateToggleLock={handleTogglePlateLock}
           onModelGeometryChange={handleModelGeometryChange}
           transformMode={transformMode}
           onModelTransform={handleModelTransform}
