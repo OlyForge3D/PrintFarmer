@@ -13,12 +13,13 @@
  * The MetadataProfileEditor top-level component remains here.
  * All type exports are re-exported for backward compatibility.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
+import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
 import { MetadataTabRenderer } from '@/features/slicer/components/settings/MetadataTabRenderer';
 import metadata from '@/features/slicer/generated/orcaSettingsMetadata.json';
-import type { ProfileType, ProfileTypeMetadata } from '@/features/slicer/components/settings/metadataTypes';
+import type { ProfileType, ProfileTypeMetadata, TabLayout } from '@/features/slicer/components/settings/metadataTypes';
 
 // Re-export all types for backward compatibility
 export type {
@@ -109,27 +110,54 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   const clampedActiveTabIdx = Math.min(activeTabIdx, Math.max(0, visibleTabs.length - 1));
   const activeTab = visibleTabs[clampedActiveTabIdx] ?? visibleTabs[0];
 
+  // A tab is "dirty" when any of its fields differs from the original snapshot.
+  // Uses the same comparison as the per-field change tracking so the tab label
+  // turns the modified color (orange) whenever a contained setting is changed.
+  const isTabDirty = useCallback(
+    (tab: TabLayout): boolean => {
+      if (!originalSettings) return false;
+      return tab.sections.some((section) =>
+        section.fields.some((field) => {
+          const cur = settings[field.key];
+          const orig = originalSettings[field.key];
+          return orig !== undefined && cur !== undefined && JSON.stringify(cur) !== JSON.stringify(orig);
+        }),
+      );
+    },
+    [originalSettings, settings],
+  );
+
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border flex flex-col ${className}`}>
       {/* Tab bar + Advanced toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        <div className="flex gap-1 overflow-x-auto">
-          {visibleTabs.map((tab, idx) => (
-            <Button
-              key={tab.name}
-              variant="unstyled"
-              type="button"
-              size="sm"
-              onClick={() => setActiveTabIdx(idx)}
-              disabled={disabled}
-              className={`px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap
-                ${idx === clampedActiveTabIdx
-                  ? 'bg-pf-accent-2/15 text-pf-accent-2 ring-1 ring-pf-accent-2/40'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary'}`}
-            >
-              {tab.name}
-            </Button>
-          ))}
+        <div className="flex gap-3 overflow-x-auto">
+          {visibleTabs.map((tab, idx) => {
+            const isActive = idx === clampedActiveTabIdx;
+            const dirty = isTabDirty(tab);
+            return (
+              <Button
+                key={tab.name}
+                variant="unstyled"
+                type="button"
+                size="sm"
+                onClick={() => setActiveTabIdx(idx)}
+                disabled={disabled}
+                aria-selected={isActive}
+                className={clsx(
+                  'px-1 pb-1 -mb-2 text-xs whitespace-nowrap rounded-none border-b-2 transition-colors',
+                  isActive ? 'font-bold border-pf-accent-2' : 'font-normal border-transparent',
+                  dirty
+                    ? 'text-pf-warning'
+                    : isActive
+                      ? 'text-pf-text-primary'
+                      : 'text-pf-text-secondary hover:text-pf-text-primary',
+                )}
+              >
+                {tab.name}
+              </Button>
+            );
+          })}
         </div>
 
         {/* Advanced toggle */}
