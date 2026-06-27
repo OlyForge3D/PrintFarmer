@@ -9,6 +9,7 @@ import {
   getPlateForModel,
   duplicatePlate,
   replaceModelOnSamePlate,
+  computePlateLayout,
   type PlateManagerState,
 } from '../plateManager';
 
@@ -134,5 +135,70 @@ describe('plateManager', () => {
       const s = makePlates(2);
       expect(setActivePlate(s, 'nope')).toBe(s);
     });
+  });
+});
+
+describe('computePlateLayout', () => {
+  const W = 256;
+  const D = 256;
+  const EPS = 1e-9;
+
+  const centroid = (offs: Array<[number, number, number]>) => {
+    const sx = offs.reduce((s, o) => s + o[0], 0) / offs.length;
+    const sy = offs.reduce((s, o) => s + o[1], 0) / offs.length;
+    return [sx, sy];
+  };
+
+  it('n=1 → single zero offset (legacy single-plate parity)', () => {
+    expect(computePlateLayout(1, W, D)).toEqual([[0, 0, 0]]);
+  });
+
+  it('n<=0 is clamped to a single zero offset', () => {
+    expect(computePlateLayout(0, W, D)).toEqual([[0, 0, 0]]);
+    expect(computePlateLayout(-3, W, D)).toEqual([[0, 0, 0]]);
+  });
+
+  it('always returns translation-only offsets (z === 0)', () => {
+    for (const n of [1, 2, 4, 5, 9, 10]) {
+      for (const o of computePlateLayout(n, W, D)) {
+        expect(o[2]).toBe(0);
+      }
+    }
+  });
+
+  it('returns max(n,1) offsets', () => {
+    expect(computePlateLayout(4, W, D)).toHaveLength(4);
+    expect(computePlateLayout(10, W, D)).toHaveLength(10);
+  });
+
+  it('centroid is exactly (0,0) for full and partial grids', () => {
+    for (const n of [2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+      const [cx, cy] = centroid(computePlateLayout(n, W, D));
+      expect(Math.abs(cx)).toBeLessThan(EPS);
+      expect(Math.abs(cy)).toBeLessThan(EPS);
+    }
+  });
+
+  it('n=4 is a symmetric 2x2 grid with the expected spacing', () => {
+    const spacing = Math.max(W, D) * 1.12;
+    const offs = computePlateLayout(4, W, D);
+    const xs = offs.map(o => o[0]).sort((a, b) => a - b);
+    const ys = offs.map(o => o[1]).sort((a, b) => a - b);
+    expect(xs).toEqual([-spacing / 2, -spacing / 2, spacing / 2, spacing / 2]);
+    expect(ys).toEqual([-spacing / 2, -spacing / 2, spacing / 2, spacing / 2]);
+  });
+
+  it('uses ceil(sqrt(n)) columns', () => {
+    // n=5 → cols=3: first row spans 3 distinct x values.
+    const offs = computePlateLayout(5, W, D);
+    const firstRowX = new Set(offs.slice(0, 3).map(o => o[0]));
+    expect(firstRowX.size).toBe(3);
+  });
+
+  it('spacing scales with the larger bed dimension', () => {
+    const offs = computePlateLayout(2, 100, 300);
+    const spacing = 300 * 1.12;
+    const xs = offs.map(o => o[0]).sort((a, b) => a - b);
+    expect(xs).toEqual([-spacing / 2, spacing / 2]);
   });
 });

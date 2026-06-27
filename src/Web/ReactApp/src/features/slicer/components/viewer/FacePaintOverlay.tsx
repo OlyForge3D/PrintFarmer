@@ -297,9 +297,13 @@ export function FacePaintOverlay({
     const obj = meshRef.current;
     const overlay = overlayRef.current;
     if (!obj || !overlay) return;
-    overlay.position.copy(obj.position);
-    overlay.rotation.copy(obj.rotation);
-    overlay.scale.copy(obj.scale);
+    // Offset-safe sync: the model may live inside a translated plate group, but
+    // this overlay renders at the scene root. Copy the model's WORLD transform
+    // (not its plate-local position) so the overlay aligns regardless of plate
+    // offset. The brush indicator uses world-space hit points, so keeping the
+    // overlay at the root keeps both consistent.
+    obj.updateWorldMatrix(true, false);
+    obj.matrixWorld.decompose(overlay.position, overlay.quaternion, overlay.scale);
 
     if (!overlayGeometry) return;
 

@@ -283,9 +283,11 @@ export function ColorPaintOverlay({
     const obj = meshRef.current;
     const overlay = overlayRef.current;
     if (!obj || !overlay) return;
-    overlay.position.copy(obj.position);
-    overlay.rotation.copy(obj.rotation);
-    overlay.scale.copy(obj.scale);
+    // Offset-safe sync: copy the model's WORLD transform so the overlay aligns
+    // even when the model lives inside a translated plate group (the overlay
+    // itself renders at the scene root). See FacePaintOverlay for rationale.
+    obj.updateWorldMatrix(true, false);
+    obj.matrixWorld.decompose(overlay.position, overlay.quaternion, overlay.scale);
 
     if (!overlayGeometry) return;
 

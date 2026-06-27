@@ -19,10 +19,53 @@ import {
   computeAutoOrientation,
   computeBedPlacementZ,
 } from '@/features/slicer/utils/autoOrient';
+import { localizeDragTarget } from '@/features/slicer/utils/bedDrag';
 
 // W4: Module-level constant to avoid creating new Set on every render
 const EMPTY_FACE_SET = new Set<number>();
 const EMPTY_COLOR_FACE_MAP = new Map<number, number>();
+
+/**
+ * Walks an object's ancestry to determine whether it belongs to the active
+ * plate. Plate offset groups tag themselves with `userData.plateActive`; a mesh
+ * with no plate marker (e.g. the legacy single-plate scene) is treated as
+ * active. Used to scope measure / text raycasts to the active plate only so
+ * all-plates-visible mode doesn't produce cross-plate surprises.
+ */
+function meshIsOnActivePlate(obj: THREE.Object3D): boolean {
+  let node: THREE.Object3D | null = obj;
+  while (node) {
+    if (typeof node.userData?.plateActive === 'boolean') return node.userData.plateActive;
+    node = node.parent;
+  }
+  return true;
+}
+
+/**
+ * Offset wrapper for a single plate's bed + models. Tags itself with
+ * `userData.plateActive` so descendant model meshes can be scoped to the active
+ * plate by measure / text tools. Model positions inside stay bed-local; the
+ * group's position carries the grid offset.
+ */
+function PlateGroup({
+  offset,
+  active,
+  children,
+}: {
+  offset: [number, number, number];
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.userData.plateActive = active;
+  }, [active]);
+  return (
+    <group ref={ref} position={offset} userData={{ plateActive: active }}>
+      {children}
+    </group>
+  );
+}
 
 export interface LoadedModel {
   id: string;
@@ -47,11 +90,34 @@ export interface BedConfig {
   originCenter?: boolean; // If true, origin is at bed center; if false, at corner
 }
 
+/**
+ * Describes one build plate to render in the all-plates-visible grid. The
+ * world-space `offset` translates the plate's bed + models; model positions
+ * themselves stay bed-local. `modelIds` selects (and orders) which of the
+ * scene's `models` belong to this plate.
+ */
+export interface ScenePlate {
+  id: string;
+  offset: [number, number, number];
+  active: boolean;
+  locked: boolean;
+  modelIds: string[];
+}
+
 export interface SlicerBedVisualizationProps {
   bedConfig: BedConfig;
   models?: LoadedModel[];
+  /**
+   * Build plates to render simultaneously in the grid. Each plate's models are
+   * resolved from the scene `models` by id and wrapped in an offset group so
+   * model positions stay bed-local. When omitted, all `models` render on a
+   * single active plate at offset [0,0,0] (legacy single-plate parity).
+   */
+  plates?: ScenePlate[];
   selectedModelId?: string;
   onModelSelect?: (modelId: string | null) => void;
+  /** Called when a plate's bed is clicked — makes that plate the active slice target. */
+  onPlateActivate?: (plateId: string) => void;
   /** Active transform tool: 'translate' | 'rotate' | 'scale' */
   transformMode?: 'translate' | 'rotate' | 'scale' | null;
   /** Called when a model is moved/rotated/scaled via TransformControls */
@@ -448,18 +514,31 @@ function PrintBedPlatform({
   textureUrl, 
   textureFormat,
   showGridLines,
+  active = true,
+  highlight = false,
+  onBedClick,
 }: { 
   width: number; 
   depth: number; 
   textureUrl?: string;
   textureFormat?: 'svg' | 'png';
   showGridLines?: boolean;
+  /** Whether this plate is the active slice target. */
+  active?: boolean;
+  /** When true (multi-plate only), render the active/inactive highlight chrome. */
+  highlight?: boolean;
+  /** Click handler on the bed surface — activates the plate / deselects. */
+  onBedClick?: () => void;
 }) {
   const shouldUsePngTexture = textureUrl && textureFormat === 'png';
   const shouldUseSvgTexture = textureUrl && textureFormat === 'svg';
 
+  // Highlight chrome is only applied when multiple plates are visible, so the
+  // single-plate view stays pixel-identical to the legacy layout.
+  const edgeColor = highlight ? (active ? '#3b82f6' : '#3a3a52') : '#4a4a6a';
+
   return (
-    <group>
+    <group onClick={onBedClick ? (e) => { e.stopPropagation(); onBedClick(); } : undefined}>
       {/* Main bed surface */}
       {shouldUsePngTexture ? (
         <TextureFallbackBoundary fallback={<PlainPrintBed width={width} depth={depth} />}>
@@ -478,7 +557,7 @@ function PrintBedPlatform({
         <edgesGeometry attach="geometry">
           <planeGeometry args={[width, depth]} />
         </edgesGeometry>
-        <lineBasicMaterial color="#4a4a6a" linewidth={2} />
+        <lineBasicMaterial color={edgeColor} linewidth={2} />
       </lineSegments>
 
       {/* Grid lines — always shown when toggled on, otherwise only for plain beds */}
@@ -743,6 +822,7 @@ function STLModel({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
@@ -758,6 +838,7 @@ function STLModel({
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -873,6 +954,8 @@ function STLModel({
           color="#009688"
           metalness={0.05}
           roughness={0.7}
+          transparent={dimmed}
+          opacity={dimmed ? 0.4 : 1}
         />
         {selected && <SelectionBoundingBox geometry={geometry} outOfBounds={outOfBounds} />}
       </mesh>
@@ -893,6 +976,7 @@ function UrlModelViewer({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
@@ -909,6 +993,7 @@ function UrlModelViewer({
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -931,6 +1016,7 @@ function UrlModelViewer({
         outOfBounds={outOfBounds}
         layFlatMode={layFlatMode}
         draggable={draggable}
+        dimmed={dimmed}
         onClick={onClick}
         onDragStart={onDragStart}
         meshRef={meshRef}
@@ -957,6 +1043,7 @@ function UrlModelViewer({
       outOfBounds={outOfBounds}
       layFlatMode={layFlatMode}
       draggable={draggable}
+      dimmed={dimmed}
       onClick={onClick}
       onDragStart={onDragStart}
       meshRef={meshRef}
@@ -981,6 +1068,7 @@ function PrebuiltSTLModel({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
@@ -996,6 +1084,7 @@ function PrebuiltSTLModel({
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -1099,6 +1188,8 @@ function PrebuiltSTLModel({
           color="#009688"
           metalness={0.05}
           roughness={0.7}
+          transparent={dimmed}
+          opacity={dimmed ? 0.4 : 1}
         />
         {selected && <SelectionBoundingBox geometry={geometry} outOfBounds={outOfBounds} />}
       </mesh>
@@ -1345,10 +1436,11 @@ function useBuildPlateDrag({
       const hit = getPlaneIntersection(e.clientX, e.clientY);
       if (!hit) return;
 
-      const halfW = bedConfig.width / 2;
-      const halfD = bedConfig.depth / 2;
-      const nx = Math.max(-halfW, Math.min(halfW, hit.x + drag.offset.x));
-      const ny = Math.max(-halfD, Math.min(halfD, hit.y + drag.offset.y));
+      const [nx, ny] = localizeDragTarget(
+        { x: hit.x, y: hit.y },
+        { x: drag.offset.x, y: drag.offset.y },
+        { width: bedConfig.width, depth: bedConfig.depth },
+      );
 
       const model = modelsRef.current.find((m) => m.id === drag.modelId);
       if (!model) return;
@@ -1461,10 +1553,10 @@ function MeasureTool() {
       );
       raycaster.setFromCamera(ndc, camera);
 
-      // Raycast against all mesh children in the scene
+      // Raycast against active-plate mesh children only
       const meshes: THREE.Object3D[] = [];
       scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh) meshes.push(obj);
+        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh && meshIsOnActivePlate(obj)) meshes.push(obj);
       });
       const hits = raycaster.intersectObjects(meshes, false);
       if (hits.length === 0) return;
@@ -1590,7 +1682,7 @@ function TextPlacementTool({ onPlace }: { onPlace: (point: THREE.Vector3, normal
 
       const meshes: THREE.Object3D[] = [];
       scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh) meshes.push(obj);
+        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh && meshIsOnActivePlate(obj)) meshes.push(obj);
       });
 
       const hits = raycaster.intersectObjects(meshes, false);
@@ -1615,8 +1707,10 @@ function TextPlacementTool({ onPlace }: { onPlace: (point: THREE.Vector3, normal
 function BedScene({
   bedConfig,
   models = [],
+  plates,
   selectedModelId,
   onModelSelect,
+  onPlateActivate,
   transformMode,
   onModelTransform,
   onSelectedModelMetricsChange,
@@ -1683,6 +1777,24 @@ function BedScene({
     layFlatMode,
     transformMode,
   });
+
+  // Resolve the plate descriptors into rendered plates carrying their own
+  // models. When no plates are supplied, fall back to a single active plate
+  // holding every model at offset [0,0,0] (legacy single-plate parity).
+  const renderPlates = useMemo(() => {
+    const byId = new Map(models.map(m => [m.id, m]));
+    const source: ScenePlate[] = plates && plates.length > 0
+      ? plates
+      : [{ id: '__single__', offset: [0, 0, 0], active: true, locked: false, modelIds: models.map(m => m.id) }];
+    return source.map(p => ({
+      ...p,
+      models: p.modelIds.map(id => byId.get(id)).filter((m): m is LoadedModel => m != null),
+    }));
+  }, [plates, models]);
+
+  const multiPlate = renderPlates.length > 1;
+  const activePlate = renderPlates.find(p => p.active) ?? renderPlates[0];
+  const activePlateLocked = activePlate?.locked ?? false;
 
   const dragStartTransformRef = useRef<{
     position: [number, number, number];
@@ -1755,6 +1867,18 @@ function BedScene({
     onSelectedModelMetricsChange?.(null);
   }, [justDraggedRef, onModelSelect, onSelectedModelMetricsChange]);
 
+  // Clicking a plate's bed activates that plate (slice target) and clears the
+  // current selection — mirroring the legacy "click empty bed to deselect"
+  // behavior while also switching the active plate (requirement: highlight and
+  // slice target never diverge). For the single-plate scene this is a plain
+  // deselect, identical to before.
+  const handleBedClick = useCallback((plateId: string) => {
+    if (justDraggedRef.current) return;
+    onPlateActivate?.(plateId);
+    onModelSelect?.(null);
+    onSelectedModelMetricsChange?.(null);
+  }, [justDraggedRef, onPlateActivate, onModelSelect, onSelectedModelMetricsChange]);
+
   useEffect(() => {
     if (!selectedModelId) {
       onSelectedModelMetricsChange?.(null);
@@ -1810,23 +1934,26 @@ function BedScene({
     );
   }, [autoOrientTrigger, onModelTransform, selectedModelId]);
 
-  // Assembly view: compute radial offsets from centroid
+  // Assembly view: compute radial offsets from centroid of the ACTIVE plate's
+  // models (assembly inspection is per active plate so other plates aren't
+  // dragged into the explode).
   const assemblyPositions = useMemo(() => {
-    if (!assemblyViewActive || models.length < 2) return null;
-    const cx = models.reduce((s, m) => s + m.position[0], 0) / models.length;
-    const cy = models.reduce((s, m) => s + m.position[1], 0) / models.length;
+    const activeModels = activePlate?.models ?? models;
+    if (!assemblyViewActive || activeModels.length < 2) return null;
+    const cx = activeModels.reduce((s, m) => s + m.position[0], 0) / activeModels.length;
+    const cy = activeModels.reduce((s, m) => s + m.position[1], 0) / activeModels.length;
     const MIN_DISPLACEMENT = 30;
     const SCALE_FACTOR = 1.5;
     const map = new Map<string, [number, number, number]>();
-    for (const model of models) {
+    for (const model of activeModels) {
       const dx = model.position[0] - cx;
       const dy = model.position[1] - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
       let ox: number, oy: number;
       if (dist < 0.01) {
         // Model at centroid — push outward along arbitrary direction based on index
-        const idx = models.indexOf(model);
-        const angle = (idx / models.length) * Math.PI * 2;
+        const idx = activeModels.indexOf(model);
+        const angle = (idx / activeModels.length) * Math.PI * 2;
         ox = Math.cos(angle) * MIN_DISPLACEMENT;
         oy = Math.sin(angle) * MIN_DISPLACEMENT;
       } else {
@@ -1843,7 +1970,7 @@ function BedScene({
       ]);
     }
     return map;
-  }, [assemblyViewActive, models]);
+  }, [assemblyViewActive, activePlate, models]);
 
   // Split: connected component analysis via union-find
   const lastSplitRef = useRef(0);
@@ -1940,24 +2067,10 @@ function BedScene({
       {/* Camera controls */}
       <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
 
-      {/* Print bed — hidden during paint mode */}
-      {!hideBed && (
-        <PrintBedPlatform 
-          width={width} 
-          depth={depth} 
-          textureUrl={textureUrl}
-          textureFormat={textureFormat}
-          showGridLines={showGridLines}
-        />
-      )}
-
-      {/* Build volume wireframe */}
-      {!hideBed && <BuildVolumeWireframe width={width} depth={depth} height={height} />}
-
-      {/* Axis indicators */}
-      {!hideBed && showAxes && <AxisIndicators size={Math.min(width, depth) * 0.15} />}
-
-      {/* Loaded models */}
+      {/* Build plates — each plate's bed + models live in an offset group so
+          model positions stay bed-local (the group carries the grid offset).
+          For a single plate the offset is [0,0,0] → identical to the legacy
+          layout. */}
       <group onPointerMissed={handlePointerMissed}>
         {(() => {
           // m3: single source of truth for "any tool/mode active that should
@@ -1975,59 +2088,26 @@ function BedScene({
             textPlacementMode ||
             transformMode === 'rotate' ||
             transformMode === 'scale';
-          return models.map((model) => {
-          const displayPos = assemblyPositions?.get(model.id) ?? model.position;
-          return (
-            <Suspense key={model.id} fallback={<LoadingIndicator />}>
-              {(model.fileType === 'stl' || model.fileType === '3mf') && (
-                model.geometry ? (
-                  <PrebuiltSTLModel
-                    inputGeometry={model.geometry}
-                    position={displayPos}
-                    rotation={model.rotation}
-                    scale={model.scale}
-                    selected={model.id === selectedModelId}
-                    outOfBounds={outOfBoundsModelIds?.has(model.id)}
-                    layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={!isToolActive}
-                    onClick={() => onModelSelect?.(model.id)}
-                    onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
-                    onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
-                    meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
-                    onSelectedMetrics={model.id === selectedModelId
-                      ? (metrics) => onSelectedModelMetricsChange?.({
-                        modelId: model.id,
-                        baseSize: metrics.baseSize,
-                        currentSize: metrics.currentSize,
-                        currentScale: metrics.currentScale,
-                      })
-                      : undefined}
-                    onGeometryReady={geometryRegistrars.get(model.id)}
-                  />
-                ) : (
-                  <ModelViewerErrorBoundary
-                    resetKey={`${model.id}:${model.viewerUrl ?? model.url}`}
-                    fallback={(
-                      <Html center>
-                        <div
-                          className="max-w-xs rounded-lg border border-pf-border bg-pf-bg-1/95 px-4 py-3 text-center text-sm text-pf-text-primary shadow-lg backdrop-blur-sm"
-                          role="alert"
-                        >
-                          Failed to load this 3D model. Select another model or retry with a refreshed source.
-                        </div>
-                      </Html>
-                    )}
-                  >
-                    <UrlModelViewer
-                      fileType={model.fileType}
-                      url={model.viewerUrl ?? model.url}
+
+          const renderModel = (model: LoadedModel, dimmed: boolean, plateLocked: boolean) => {
+            const displayPos = assemblyPositions?.get(model.id) ?? model.position;
+            // Locked plates and inactive (dimmed) plates are not draggable so a
+            // stray drag can't mutate models the user isn't focused on.
+            const draggable = !isToolActive && !plateLocked && !dimmed;
+            return (
+              <Suspense key={model.id} fallback={<LoadingIndicator />}>
+                {(model.fileType === 'stl' || model.fileType === '3mf') && (
+                  model.geometry ? (
+                    <PrebuiltSTLModel
+                      inputGeometry={model.geometry}
                       position={displayPos}
                       rotation={model.rotation}
                       scale={model.scale}
                       selected={model.id === selectedModelId}
                       outOfBounds={outOfBoundsModelIds?.has(model.id)}
                       layFlatMode={model.id === selectedModelId && layFlatMode}
-                      draggable={!isToolActive}
+                      draggable={draggable}
+                      dimmed={dimmed}
                       onClick={() => onModelSelect?.(model.id)}
                       onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                       onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
@@ -2042,12 +2122,81 @@ function BedScene({
                         : undefined}
                       onGeometryReady={geometryRegistrars.get(model.id)}
                     />
-                  </ModelViewerErrorBoundary>
-                )
+                  ) : (
+                    <ModelViewerErrorBoundary
+                      resetKey={`${model.id}:${model.viewerUrl ?? model.url}`}
+                      fallback={(
+                        <Html center>
+                          <div
+                            className="max-w-xs rounded-lg border border-pf-border bg-pf-bg-1/95 px-4 py-3 text-center text-sm text-pf-text-primary shadow-lg backdrop-blur-sm"
+                            role="alert"
+                          >
+                            Failed to load this 3D model. Select another model or retry with a refreshed source.
+                          </div>
+                        </Html>
+                      )}
+                    >
+                      <UrlModelViewer
+                        fileType={model.fileType}
+                        url={model.viewerUrl ?? model.url}
+                        position={displayPos}
+                        rotation={model.rotation}
+                        scale={model.scale}
+                        selected={model.id === selectedModelId}
+                        outOfBounds={outOfBoundsModelIds?.has(model.id)}
+                        layFlatMode={model.id === selectedModelId && layFlatMode}
+                        draggable={draggable}
+                        dimmed={dimmed}
+                        onClick={() => onModelSelect?.(model.id)}
+                        onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
+                        onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
+                        meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
+                        onSelectedMetrics={model.id === selectedModelId
+                          ? (metrics) => onSelectedModelMetricsChange?.({
+                            modelId: model.id,
+                            baseSize: metrics.baseSize,
+                            currentSize: metrics.currentSize,
+                            currentScale: metrics.currentScale,
+                          })
+                          : undefined}
+                        onGeometryReady={geometryRegistrars.get(model.id)}
+                      />
+                    </ModelViewerErrorBoundary>
+                  )
+                )}
+              </Suspense>
+            );
+          };
+
+          return renderPlates.map((plate) => (
+            <PlateGroup key={plate.id} offset={plate.offset} active={plate.active}>
+              {/* Print bed — hidden during paint mode */}
+              {!hideBed && (
+                <PrintBedPlatform
+                  width={width}
+                  depth={depth}
+                  textureUrl={textureUrl}
+                  textureFormat={textureFormat}
+                  showGridLines={showGridLines}
+                  active={plate.active}
+                  highlight={multiPlate}
+                  onBedClick={() => handleBedClick(plate.id)}
+                />
               )}
-            </Suspense>
-          );
-        });
+
+              {/* Build volume wireframe */}
+              {!hideBed && <BuildVolumeWireframe width={width} depth={depth} height={height} />}
+
+              {/* Axis indicators — only on the active plate to avoid clutter */}
+              {!hideBed && showAxes && plate.active && (
+                <AxisIndicators size={Math.min(width, depth) * 0.15} />
+              )}
+
+              {plate.models.map((model) =>
+                renderModel(model, multiPlate && !plate.active, plate.locked),
+              )}
+            </PlateGroup>
+          ));
         })()}
       </group>
 
@@ -2132,8 +2281,9 @@ function BedScene({
         />
       )}
 
-      {/* TransformControls for the selected model */}
-      {selectedModelId && transformMode && (
+      {/* TransformControls for the selected model — suppressed when the active
+          plate is locked (no gizmo, no transform). */}
+      {selectedModelId && transformMode && !activePlateLocked && (
         <ModelTransformControls
           meshRef={selectedMeshRef}
           mode={transformMode}
@@ -2156,8 +2306,10 @@ function BedScene({
 export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   bedConfig,
   models = [],
+  plates,
   selectedModelId,
   onModelSelect,
+  onPlateActivate,
   transformMode = null,
   onModelTransform,
   onSelectedModelMetricsChange,
@@ -2228,8 +2380,10 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             <BedScene
               bedConfig={bedConfig}
               models={models}
+              plates={plates}
               selectedModelId={selectedModelId}
               onModelSelect={onModelSelect}
+              onPlateActivate={onPlateActivate}
               transformMode={transformMode}
               onModelTransform={onModelTransform}
               onSelectedModelMetricsChange={onSelectedModelMetricsChange}

@@ -25,6 +25,7 @@ interface SharedModelViewerProps {
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -150,6 +151,7 @@ function FallbackStlModel({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
@@ -263,7 +265,7 @@ function FallbackStlModel({
         castShadow
         receiveShadow
       >
-        <meshStandardMaterial color={DEFAULT_VIEWER_COLOR} metalness={0.05} roughness={0.7} />
+        <meshStandardMaterial color={DEFAULT_VIEWER_COLOR} metalness={0.05} roughness={0.7} transparent={dimmed} opacity={dimmed ? 0.4 : 1} />
         {selected ? renderSelectionBoundingBox(geometry, outOfBounds) : null}
       </mesh>
       {selected && layFlatMode && onLayFlatFaceClick ? renderFaceSwatches(geometry, onLayFlatFaceClick) : null}
@@ -280,6 +282,7 @@ export function ThreeMFViewer({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
@@ -405,6 +408,7 @@ export function ThreeMFViewer({
           outOfBounds={outOfBounds}
           layFlatMode={layFlatMode}
           draggable={draggable}
+          dimmed={dimmed}
           onClick={onClick}
           onDragStart={onDragStart}
           meshRef={meshRef}
@@ -476,6 +480,8 @@ export function ThreeMFViewer({
             color={getExtruderColor(mesh.extruderIndex)}
             metalness={0.05}
             roughness={0.7}
+            transparent={dimmed}
+            opacity={dimmed ? 0.4 : 1}
           />
         </mesh>
       ))}

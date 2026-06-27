@@ -174,3 +174,51 @@ export function togglePlateLock(state: PlateManagerState, plateId: string): Plat
   const plates = state.plates.map(p => (p.id === plateId ? { ...p, locked: !p.locked } : p));
   return { ...state, plates };
 }
+
+/**
+ * Derives the world-space XY offset for each plate in an all-plates-visible
+ * grid, given the number of plates and the bed footprint.
+ *
+ * Layout rules (must stay stable — drives both rendering and camera framing):
+ * - Columns = ceil(sqrt(n)); rows fill top-to-bottom.
+ * - Spacing between plate centers = max(bedW, bedD) * 1.12 (12% gutter).
+ * - The grid is centered so the centroid of all offsets is exactly (0, 0).
+ *   Each row is horizontally centered (so a partial last row stays centered),
+ *   and the rows are vertically mean-centered.
+ * - n <= 1 → a single offset of [0, 0, 0] (visual parity with the legacy
+ *   single-plate view; no translation, no extra chrome).
+ *
+ * Offsets are translation-only ([x, y, 0]); model positions remain bed-local.
+ *
+ * @returns An array of length `max(n, 1)` of [x, y, z] offsets.
+ */
+export function computePlateLayout(
+  n: number,
+  bedW: number,
+  bedD: number,
+): Array<[number, number, number]> {
+  const count = Math.max(1, Math.floor(n));
+  if (count === 1) return [[0, 0, 0]];
+
+  const cols = Math.ceil(Math.sqrt(count));
+  const spacing = Math.max(bedW, bedD) * 1.12;
+
+  // Raw Y per row (top row at 0, descending), then mean-center so centroid Y = 0.
+  const rawY: number[] = [];
+  for (let i = 0; i < count; i++) {
+    rawY.push(-Math.floor(i / cols) * spacing);
+  }
+  const meanY = rawY.reduce((s, y) => s + y, 0) / count;
+
+  const offsets: Array<[number, number, number]> = [];
+  for (let i = 0; i < count; i++) {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const itemsInRow = Math.min(cols, count - row * cols);
+    // Center each row horizontally → centroid X = 0 even for a partial last row.
+    const x = (col - (itemsInRow - 1) / 2) * spacing;
+    const y = rawY[i] - meanY;
+    offsets.push([x, y, 0]);
+  }
+  return offsets;
+}

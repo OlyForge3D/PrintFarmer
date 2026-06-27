@@ -349,11 +349,17 @@ export function CutPlaneOverlay({
       {/* OrcaSlicer-style control panel */}
       {meshRef.current && (
         <Html
-          position={[
-            meshRef.current.position.x + planeSize / 2 + 30,
-            meshRef.current.position.y,
-            meshRef.current.position.z + 50,
-          ]}
+          position={(() => {
+            // Offset-safe: the model may sit inside a translated plate group, so
+            // derive the panel anchor from the model's WORLD position rather than
+            // its plate-local position.
+            const world = meshRef.current.getWorldPosition(new THREE.Vector3());
+            return [
+              world.x + planeSize / 2 + 30,
+              world.y,
+              world.z + 50,
+            ];
+          })()}
           style={{ pointerEvents: 'auto' }}
         >
           <div className="bg-pf-bg-2/95 backdrop-blur-sm rounded-lg border border-pf-border shadow-xl p-4 text-sm text-pf-text-primary w-80 select-none">

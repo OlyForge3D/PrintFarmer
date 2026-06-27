@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
-import { SlicerBedVisualization, type LoadedModel, type BedConfig } from './SlicerBedVisualization';
+import { SlicerBedVisualization, type LoadedModel, type BedConfig, type ScenePlate } from './SlicerBedVisualization';
 import { TextTool, type TextToolConfig } from './TextTool';
 import { generateTextGeometry, geometryToStlBlobUrl } from '@/features/models3d/utils/textGeometry';
 import { PlateTabBar } from './PlateTabBar';
@@ -41,6 +41,8 @@ import {
   duplicatePlate,
   getModelsForPlate,
   replaceModelOnSamePlate,
+  getPlateForModel,
+  computePlateLayout,
 } from '@/features/slicer/utils/plateManager';
 import { computeAutoOrientation, computeBedPlacementZ } from '@/features/slicer/utils/autoOrient';
 
@@ -224,6 +226,23 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const handleRenamePlate = useCallback((id: string, name: string) => setPlateState(s => renamePlate(s, id, name)), [setPlateState]);
   const handleDuplicatePlate = useCallback((id: string) => setPlateState(s => duplicatePlate(s, id)), [setPlateState]);
 
+  // Clicking a model in the 3D scene: make its plate active (so highlight and
+  // slice target never diverge), then forward the selection to the parent.
+  const handleModelSelect = useCallback((modelId: string | null) => {
+    if (modelId) {
+      setPlateState(s => {
+        const plateId = getPlateForModel(s, modelId);
+        return plateId && plateId !== s.activePlateId ? setActivePlate(s, plateId) : s;
+      });
+    }
+    onModelSelect?.(modelId);
+  }, [setPlateState, onModelSelect]);
+
+  // Clicking a bed activates that plate (selection clearing handled in-scene).
+  const handlePlateActivate = useCallback((plateId: string) => {
+    setPlateState(s => setActivePlate(s, plateId));
+  }, [setPlateState]);
+
   // Sync plate assignments when models change (React-recommended render-time reset pattern)
   const [prevModelIdKey, setPrevModelIdKey] = useState(() => models.map(m => m.id).join(','));
   const modelIdKey = models.map(m => m.id).join(',');
@@ -274,6 +293,28 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   // Models on the active plate, in plate order — the source of truth for
   // slicing and the slice-disclosure label.
   const activePlateModels = visibleModels;
+
+  // All models across every plate — the RENDERER input for the all-plates grid.
+  // Logic (slicing, sequential, toolbar, selection, counts) keeps using
+  // activePlateModels/visibleModels; only the 3D scene sees every plate.
+  const allPlatesModels = models;
+
+  // Per-plate world offsets for the all-plates grid (derived from index, so no
+  // offset is persisted on BuildPlate). Drives both rendering and (P3) camera.
+  const plateOffsets = useMemo(
+    () => computePlateLayout(plateState.plates.length, bedConfig.width, bedConfig.depth),
+    [plateState.plates.length, bedConfig.width, bedConfig.depth],
+  );
+  const scenePlates: ScenePlate[] = useMemo(
+    () => plateState.plates.map((p, i) => ({
+      id: p.id,
+      offset: plateOffsets[i] ?? [0, 0, 0],
+      active: p.id === plateState.activePlateId,
+      locked: p.locked,
+      modelIds: p.modelIds,
+    })),
+    [plateState.plates, plateState.activePlateId, plateOffsets],
+  );
 
   // Slice-button disclosure: target plate label + whether other plates hold models.
   const activePlateName = useMemo(
@@ -692,8 +733,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
    * is immune to memo-staleness.
    */
   const handleArrangePlate = useCallback((plateId: string) => {
+    if (plateState.plates.find(p => p.id === plateId)?.locked) return;
     arrangeModelList(getModelsOnPlate(plateId));
-  }, [arrangeModelList, getModelsOnPlate]);
+  }, [arrangeModelList, getModelsOnPlate, plateState.plates]);
 
   /**
    * Auto-orient EVERY model on a specific plate, then chain an arrange pass so
@@ -703,6 +745,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
    */
   const handleOrientPlate = useCallback((plateId: string) => {
     if (!onModelTransform) return;
+    if (plateState.plates.find(p => p.id === plateId)?.locked) return;
     const list = getModelsOnPlate(plateId);
     if (list.length === 0) return;
 
@@ -747,7 +790,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (deltas.length > 0) {
       pushHistoryEntry({ action: 'Auto-Orient Plate', deltas });
     }
-  }, [computeArrangePositions, getModelsOnPlate, handleModelTransform, onModelTransform, pushHistoryEntry, triplesEqual]);
+  }, [computeArrangePositions, getModelsOnPlate, handleModelTransform, onModelTransform, plateState.plates, pushHistoryEntry, triplesEqual]);
 
   /**
    * Delete a specific plate. A non-empty plate prompts for confirmation and its
@@ -757,6 +800,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
    */
   const handleDeletePlate = useCallback((plateId: string) => {
     if (plateState.plates.length <= 1) return;
+    if (plateState.plates.find(p => p.id === plateId)?.locked) return;
     const plateModels = getModelsOnPlate(plateId);
 
     if (plateModels.length > 0) {
@@ -1475,9 +1519,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         {/* 3D Bed Visualization */}
         <SlicerBedVisualization
           bedConfig={bedConfig}
-          models={visibleModels}
+          models={allPlatesModels}
+          plates={scenePlates}
           selectedModelId={selectedModelId}
-          onModelSelect={onModelSelect}
+          onModelSelect={handleModelSelect}
+          onPlateActivate={handlePlateActivate}
           onModelGeometryChange={handleModelGeometryChange}
           transformMode={transformMode}
           onModelTransform={handleModelTransform}
