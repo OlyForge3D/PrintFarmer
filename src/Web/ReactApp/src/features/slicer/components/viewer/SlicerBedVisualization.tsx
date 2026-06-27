@@ -1213,21 +1213,32 @@ function PrebuiltSTLModel({
  * OrbitControls ref is exposed so TransformControls can disable orbiting during drag.
  */
 function CameraController({ 
-  bedWidth, bedDepth, bedHeight, orbitRef 
+  bedHeight, gridRadius, orbitRef 
 }: { 
-  bedWidth: number; bedDepth: number; bedHeight: number;
+  bedHeight: number;
+  /** Half-extent of the full plate grid (max over plates of |offset| + bed/2). */
+  gridRadius: number;
   orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
 }) {
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
 
+  // Frame the WHOLE grid. Re-runs when the grid bound changes (plate add/remove)
+  // so newly added plates fit in view. Framing is instant (no animation) — we
+  // never animate the camera on plate selection.
   useEffect(() => {
-    const maxDimension = Math.max(bedWidth, bedDepth, bedHeight);
-    const distance = maxDimension * 1.5;
+    // n=1 → gridRadius*2 == max(bedW,bedD), so span == max(bedW,bedD,bedH) and
+    // distance == maxDimension*1.5 — identical framing to the legacy single bed.
+    const span = Math.max(gridRadius * 2, bedHeight);
+    const distance = span * 1.5;
     camera.position.set(distance * 0.7, -distance * 0.7, distance * 0.6);
     camera.up.set(0, 0, 1); // Enforce Z-up for 3D printing convention
     camera.lookAt(0, 0, bedHeight / 4);
     camera.updateProjectionMatrix();
-  }, [camera, bedWidth, bedDepth, bedHeight]);
+    invalidate(); // frameloop="demand": redraw after re-framing
+  }, [camera, invalidate, bedHeight, gridRadius]);
+
+  // Allow zooming out far enough to see the entire grid, with headroom.
+  const maxDistance = Math.max(2000, gridRadius * 8);
 
   return (
     <OrbitControls
@@ -1237,7 +1248,7 @@ function CameraController({
       enableRotate={true}
       enableZoom={true}
       minDistance={50}
-      maxDistance={2000}
+      maxDistance={maxDistance}
       dampingFactor={0.05}
       rotateSpeed={0.8}
       zoomSpeed={1.2}
@@ -1809,6 +1820,16 @@ function BedScene({
   const activePlate = renderPlates.find(p => p.active) ?? renderPlates[0];
   const activePlateLocked = activePlate?.locked ?? false;
 
+  // Half-extent of the whole grid, used to frame the camera and raise the
+  // zoom-out limit. n=1 → max(width,depth)/2 (legacy single-bed framing).
+  const gridRadius = useMemo(() => {
+    let radius = Math.max(width, depth) / 2;
+    for (const p of renderPlates) {
+      radius = Math.max(radius, Math.abs(p.offset[0]) + width / 2, Math.abs(p.offset[1]) + depth / 2);
+    }
+    return radius;
+  }, [renderPlates, width, depth]);
+
   const dragStartTransformRef = useRef<{
     position: [number, number, number];
     rotation: [number, number, number];
@@ -2078,7 +2099,7 @@ function BedScene({
       <directionalLight position={[-width, depth, height]} intensity={0.18} />
 
       {/* Camera controls */}
-      <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
+      <CameraController bedHeight={height} gridRadius={gridRadius} orbitRef={orbitRef} />
 
       {/* Build plates — each plate's bed + models live in an offset group so
           model positions stay bed-local (the group carries the grid offset).
