@@ -101,6 +101,36 @@ export function removeModelFromPlates(state: PlateManagerState, modelId: string)
   return { ...state, plates };
 }
 
+/**
+ * Replaces a model on whichever plate currently holds it with one or more new
+ * model IDs, keeping the replacements on the SAME plate. Used by async cut /
+ * split operations so freshly created pieces stay where the source model was,
+ * regardless of which plate is active when the operation completes.
+ *
+ * If the removed model is not found on any plate, the new IDs are added to the
+ * active plate as a sensible fallback.
+ */
+export function replaceModelOnSamePlate(
+  state: PlateManagerState,
+  removedId: string,
+  newIds: string[],
+): PlateManagerState {
+  const sourcePlate = state.plates.find(p => p.modelIds.includes(removedId));
+  const targetPlateId = sourcePlate?.id ?? state.activePlateId;
+
+  const plates = state.plates.map(p => {
+    // Remove the old model from any plate that holds it.
+    const without = p.modelIds.filter(id => id !== removedId);
+    if (p.id === targetPlateId) {
+      const additions = newIds.filter(id => !without.includes(id));
+      return { ...p, modelIds: [...without, ...additions] };
+    }
+    return { ...p, modelIds: without };
+  });
+
+  return { ...state, plates };
+}
+
 export function getModelsForPlate(state: PlateManagerState, plateId: string): string[] {
   return state.plates.find(p => p.id === plateId)?.modelIds ?? [];
 }
