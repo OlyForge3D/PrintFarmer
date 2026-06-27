@@ -196,6 +196,9 @@ export function FilamentProfileDropdown({
 
   const selectedProfile = profiles.find(p => p.name === selectedProfileName);
   const displayLabel = selectedProfile?.name || customProfiles.find(p => p.name === selectedProfileName)?.name || '';
+  // Material/type of the selected filament (system profiles expose it; custom
+  // profiles only carry a name). Shown as a compact badge in the trigger.
+  const selectedMaterial = selectedProfile?.material || '';
   const totalFiltered = Object.values(filteredTree).reduce(
     (acc, mats) => acc + Object.values(mats).reduce((a, ps) => a + ps.length, 0), 0
   );
@@ -229,8 +232,16 @@ export function FilamentProfileDropdown({
           border-pf-border bg-pf-input text-pf-text-primary
           ${isOpen ? 'border-pf-accent ring-1 ring-pf-accent/30' : ''}
           ${className}`}
+        title={displayLabel || undefined}
       >
-        <span className={`flex-1 min-w-0 truncate text-left text-xs ${displayLabel ? '' : 'text-pf-text-muted'}`}>{displayLabel || '-- Select Filament --'}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          {selectedMaterial && (
+            <span className="shrink-0 rounded bg-pf-accent-2/15 px-1 py-0.5 text-[10px] font-semibold uppercase leading-none text-pf-accent-2">
+              {selectedMaterial}
+            </span>
+          )}
+          <span className={`min-w-0 flex-1 truncate text-left text-xs ${displayLabel ? '' : 'text-pf-text-muted'}`}>{displayLabel || '-- Select Filament --'}</span>
+        </span>
         <svg className={`w-4 h-4 ml-2 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
