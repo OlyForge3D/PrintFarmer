@@ -230,8 +230,8 @@ export function FilamentProfileDropdown({
           ${isOpen ? 'border-pf-accent ring-1 ring-pf-accent/30' : ''}
           ${className}`}
       >
-        <span className={displayLabel ? '' : 'text-pf-text-muted'}>{displayLabel || '-- Select Filament --'}</span>
-        <svg className={`w-4 h-4 ml-2 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <span className={`flex-1 min-w-0 truncate text-left text-xs ${displayLabel ? '' : 'text-pf-text-muted'}`}>{displayLabel || '-- Select Filament --'}</span>
+        <svg className={`w-4 h-4 ml-2 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>

@@ -2133,15 +2133,10 @@ export const NewSliceJobPage: React.FC = () => {
                         className="flex items-center gap-1 border border-pf-border/50 rounded-md p-1"
                         data-testid={`extruder-filament-${idx}`}
                       >
-                        <span
-                          className="flex items-center justify-center w-5 h-5 rounded bg-pf-accent-2 text-white text-[11px] font-semibold shrink-0"
-                          aria-hidden="true"
-                        >
-                          {idx + 1}
-                        </span>
                         <ColorPicker
                           swatchOnly
-                          swatchClassName="w-6 h-6"
+                          swatchClassName="w-5 h-5 text-[11px] font-semibold"
+                          swatchContent={idx + 1}
                           value={swatchColour}
                           onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, [idx]: hex }))}
                           aria-label={`Extruder ${idx + 1} filament colour`}
@@ -2154,7 +2149,7 @@ export const NewSliceJobPage: React.FC = () => {
                             disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
                             filterConfig={filamentFilterConfig}
                             onFilterConfigChange={handleFilamentFilterChange}
-                            className="px-2 py-1.5"
+                            className="px-2 py-1 text-xs whitespace-nowrap"
                             onSelect={(name, source) => {
                               setExtruderFilamentProfileIds(prev => ({ ...prev, [idx]: name }));
                               // Default the colour swatch from the newly selected profile.

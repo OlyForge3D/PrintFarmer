@@ -46,4 +46,25 @@ describe('ColorPicker', () => {
     fireEvent.change(input, { target: { value: '#abcdef' } });
     expect(onChange).toHaveBeenCalledWith('abcdef');
   });
+
+  it('renders swatchContent inside the swatch and opens the picker on click', () => {
+    render(
+      <ColorPicker value="00A98F" onChange={() => {}} swatchOnly swatchContent={1} aria-label="Extruder 1 filament colour" />,
+    );
+    const swatch = screen.getByRole('button', { name: /Extruder 1 filament colour/i });
+    // The extruder number is rendered inside the swatch (merged badge + picker).
+    expect(swatch).toHaveTextContent('1');
+    fireEvent.click(swatch);
+    expect(screen.getByRole('dialog', { name: /color picker/i })).toBeInTheDocument();
+  });
+
+  it('uses dark text on a light swatch and light text on a dark swatch for contrast', () => {
+    const { rerender } = render(
+      <ColorPicker value="FFFFFF" onChange={() => {}} swatchOnly swatchContent={1} aria-label="C" />,
+    );
+    expect(screen.getByRole('button', { name: /C/i })).toHaveStyle({ color: '#000000' });
+
+    rerender(<ColorPicker value="000000" onChange={() => {}} swatchOnly swatchContent={1} aria-label="C" />);
+    expect(screen.getByRole('button', { name: /C/i })).toHaveStyle({ color: '#FFFFFF' });
+  });
 });
