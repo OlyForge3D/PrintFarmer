@@ -111,6 +111,8 @@ export interface SlicerToolbarProps {
   canRedo?: boolean;
   hasModels?: boolean;
   hasSelection?: boolean;
+  /** Whether another plate can be added (false at the 10-plate cap). */
+  canAddPlate?: boolean;
   moveActive?: boolean;
   rotateActive?: boolean;
   scaleActive?: boolean;
@@ -167,6 +169,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   canRedo = false,
   hasModels = false,
   hasSelection = false,
+  canAddPlate = true,
   moveActive = false,
   rotateActive = false,
   scaleActive = false,
@@ -193,10 +196,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         />
       )}
 
-      {/* Scrollable tool region — flexes to fill, scrolls horizontally so tools
-          never run off the visible area at any width. Scrollbar hidden visually. */}
-      <div className="flex items-center gap-0.5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {/* ── Group 1: Object Operations ── */}
+      {/* Add Model / Add Plate — pinned left so they never scroll out of view */}
+      <div className="flex items-center gap-0.5 shrink-0">
         <ToolbarButton
           icon={<AddModelIcon />}
           title="Add Model (Ctrl+O)"
@@ -204,9 +205,17 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         />
         <ToolbarButton
           icon={<AddPlateIcon />}
-          title="Add Plate"
+          title={canAddPlate ? 'Add Plate' : 'Maximum of 10 plates reached'}
           onClick={onAddPlate}
+          disabled={!canAddPlate}
         />
+        <ToolbarDivider />
+      </div>
+
+      {/* Scrollable tool region — flexes to fill, scrolls horizontally so tools
+          never run off the visible area at any width. Scrollbar hidden visually. */}
+      <div className="flex items-center gap-0.5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {/* ── Group 1: Object Operations ── */}
         <ToolbarButton
           icon={<ArrangeIcon />}
           title="Auto Arrange (A)"

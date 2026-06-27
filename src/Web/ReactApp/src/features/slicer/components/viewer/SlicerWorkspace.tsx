@@ -40,7 +40,9 @@ import {
   renamePlate,
   duplicatePlate,
   getModelsForPlate,
+  replaceModelOnSamePlate,
 } from '@/features/slicer/utils/plateManager';
+import { computeAutoOrientation, computeBedPlacementZ } from '@/features/slicer/utils/autoOrient';
 
 export interface SlicerWorkspaceProps {
   /** Bed configuration including dimensions */
@@ -67,8 +69,8 @@ export interface SlicerWorkspaceProps {
   onAddModel?: () => void;
   /** Callback when Settings & Profiles is clicked */
   onSettingsProfiles?: () => void;
-  /** Callback when Slice is clicked */
-  onSlice?: () => void;
+  /** Callback when Slice is clicked. Receives the IDs of the active plate's models. */
+  onSlice?: (activeModelIds: string[]) => void;
   /** Whether slicing is in progress */
   slicing?: boolean;
   /** Whether the user can slice (has models, valid settings) */
@@ -83,6 +85,8 @@ export interface SlicerWorkspaceProps {
   sidebarOpen?: boolean;
   /** Callback when models need to be replaced (e.g., after cut) */
   onModelsReplace?: (removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => void;
+  /** Callback to remove one or more models from the workspace (e.g., when a plate is deleted) */
+  onDeleteModels?: (modelIds: string[]) => void;
   /** Called whenever the plate state changes so the parent can read active plate for slicing */
   onPlateStateChange?: (state: PlateManagerState) => void;
   /** Additional CSS class */
@@ -143,6 +147,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   onToggleSidebar,
   sidebarOpen = true,
   onModelsReplace,
+  onDeleteModels,
   onPlateStateChange,
   className = '',
   simpleMode = false,
@@ -199,11 +204,22 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const isApplyingHistoryRef = useRef(false);
   const blobUrlsRef = useRef<Set<string>>(new Set());
 
+  // Registry of per-model processed geometry, published from the R3F scene via
+  // onModelGeometryChange. Lets per-plate auto-orient reach the geometry of
+  // EVERY model on a plate, not just the currently selected one.
+  const geometryRegistryRef = useRef<Map<string, THREE.BufferGeometry>>(new Map());
+  const handleModelGeometryChange = useCallback((modelId: string, geometry: THREE.BufferGeometry | null) => {
+    if (geometry) {
+      geometryRegistryRef.current.set(modelId, geometry);
+    } else {
+      geometryRegistryRef.current.delete(modelId);
+    }
+  }, []);
+
   // --- Multi-plate state ---
   const [plateState, setPlateState] = useState<PlateManagerState>(() => createInitialPlateState());
 
   const handleAddPlate = useCallback(() => setPlateState(s => addPlate(s)), [setPlateState]);
-  const handleRemovePlate = useCallback((id: string) => setPlateState(s => removePlate(s, id)), [setPlateState]);
   const handleActivePlateChange = useCallback((id: string) => setPlateState(s => setActivePlate(s, id)), [setPlateState]);
   const handleRenamePlate = useCallback((id: string, name: string) => setPlateState(s => renamePlate(s, id, name)), [setPlateState]);
   const handleDuplicatePlate = useCallback((id: string) => setPlateState(s => duplicatePlate(s, id)), [setPlateState]);
@@ -218,10 +234,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     const addedIds = [...currentIds].filter(id => !prevIds.has(id));
     const removedIds = [...prevIds].filter(id => !currentIds.has(id));
     if (addedIds.length > 0 || removedIds.length > 0) {
+      // A simultaneous add + remove is an async cut/split replace: keep the new
+      // pieces on whichever plate held the source model (NOT the active plate),
+      // so they don't jump plates if the user switched tabs mid-operation.
+      const isReplace = addedIds.length > 0 && removedIds.length > 0;
       setPlateState(prev => {
         let s = prev;
-        for (const id of addedIds) s = addModelToActivePlate(s, id);
-        for (const id of removedIds) s = removeModelFromPlates(s, id);
+        if (isReplace) {
+          s = replaceModelOnSamePlate(s, removedIds[0], addedIds);
+          for (let i = 1; i < removedIds.length; i++) s = removeModelFromPlates(s, removedIds[i]);
+        } else {
+          for (const id of addedIds) s = addModelToActivePlate(s, id);
+          for (const id of removedIds) s = removeModelFromPlates(s, id);
+        }
         return s;
       });
     }
@@ -245,6 +270,27 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     () => models.filter(m => activePlateModelIds.has(m.id)),
     [models, activePlateModelIds],
   );
+
+  // Models on the active plate, in plate order — the source of truth for
+  // slicing and the slice-disclosure label.
+  const activePlateModels = visibleModels;
+
+  // Slice-button disclosure: target plate label + whether other plates hold models.
+  const activePlateName = useMemo(
+    () => plateState.plates.find(p => p.id === plateState.activePlateId)?.name ?? 'Plate',
+    [plateState],
+  );
+  const sliceButtonLabel = useMemo(() => {
+    const count = activePlateModels.length;
+    return `Slice ${activePlateName} (${count} model${count === 1 ? '' : 's'})`;
+  }, [activePlateName, activePlateModels.length]);
+  const otherPlatesHaveModels = useMemo(
+    () => plateState.plates.some(p => p.id !== plateState.activePlateId && p.modelIds.length > 0),
+    [plateState],
+  );
+  const handleSliceClick = useCallback(() => {
+    onSlice?.(activePlateModels.map(m => m.id));
+  }, [onSlice, activePlateModels]);
 
   // Notify parent of plate state changes
   useEffect(() => {
@@ -581,38 +627,44 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [handleModelTransform]);
 
   // Toolbar action handlers
-  const handleArrange = useCallback(() => {
-    if (!onModelTransform || visibleModels.length === 0) return;
 
-    const cols = Math.max(1, Math.ceil(Math.sqrt(visibleModels.length)));
-    const rows = Math.max(1, Math.ceil(visibleModels.length / cols));
+  /** Compute grid (x,y) positions for a list of models, keyed by model id. */
+  const computeArrangePositions = useCallback((list: LoadedModel[]): Map<string, [number, number]> => {
+    const positions = new Map<string, [number, number]>();
+    if (list.length === 0) return positions;
+
+    const cols = Math.max(1, Math.ceil(Math.sqrt(list.length)));
+    const rows = Math.max(1, Math.ceil(list.length / cols));
     const stepX = bedConfig.width / (cols + 1);
     const stepY = bedConfig.depth / (rows + 1);
 
-    const deltas: TransformDelta[] = [];
-
-    visibleModels.forEach((model, index) => {
+    list.forEach((model, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
-
       const x = -bedConfig.width / 2 + stepX * (col + 1);
       const y = -bedConfig.depth / 2 + stepY * (row + 1);
+      positions.set(model.id, [x, y]);
+    });
+    return positions;
+  }, [bedConfig.depth, bedConfig.width]);
 
-      const nextPosition: [number, number, number] = [x, y, model.position[2]];
+  /** Arrange an explicit list of models into a grid, recording one undo entry. */
+  const arrangeModelList = useCallback((list: LoadedModel[], actionLabel = 'Auto Arrange') => {
+    if (!onModelTransform || list.length === 0) return;
+
+    const positions = computeArrangePositions(list);
+    const deltas: TransformDelta[] = [];
+
+    list.forEach((model) => {
+      const xy = positions.get(model.id);
+      if (!xy) return;
+      const nextPosition: [number, number, number] = [xy[0], xy[1], model.position[2]];
 
       if (!triplesEqual(model.position, nextPosition)) {
         deltas.push({
           modelId: model.id,
-          before: {
-            position: model.position,
-            rotation: model.rotation,
-            scale: model.scale,
-          },
-          after: {
-            position: nextPosition,
-            rotation: model.rotation,
-            scale: model.scale,
-          },
+          before: { position: model.position, rotation: model.rotation, scale: model.scale },
+          after: { position: nextPosition, rotation: model.rotation, scale: model.scale },
         });
       }
 
@@ -620,9 +672,104 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     });
 
     if (deltas.length > 0) {
-      pushHistoryEntry({ action: 'Auto Arrange', deltas });
+      pushHistoryEntry({ action: actionLabel, deltas });
     }
-  }, [bedConfig.depth, bedConfig.width, handleModelTransform, visibleModels, onModelTransform, pushHistoryEntry, triplesEqual]);
+  }, [computeArrangePositions, handleModelTransform, onModelTransform, pushHistoryEntry, triplesEqual]);
+
+  /** Resolve the LoadedModel objects assigned to an explicit plate id. */
+  const getModelsOnPlate = useCallback((plateId: string): LoadedModel[] => {
+    const ids = new Set(getModelsForPlate(plateState, plateId));
+    return models.filter(m => ids.has(m.id));
+  }, [models, plateState]);
+
+  const handleArrange = useCallback(() => {
+    arrangeModelList(visibleModels);
+  }, [arrangeModelList, visibleModels]);
+
+  /**
+   * Auto-arrange a specific plate. Computes its model set from an explicit
+   * plateId (NOT the active plate / visibleModels) so it works on any tab and
+   * is immune to memo-staleness.
+   */
+  const handleArrangePlate = useCallback((plateId: string) => {
+    arrangeModelList(getModelsOnPlate(plateId));
+  }, [arrangeModelList, getModelsOnPlate]);
+
+  /**
+   * Auto-orient EVERY model on a specific plate, then chain an arrange pass so
+   * the re-oriented footprints don't overlap. Records ONE grouped undo entry.
+   * Geometry is read from the scene-owned registry (falling back to a model's
+   * pre-built geometry) so non-selected models can be oriented too.
+   */
+  const handleOrientPlate = useCallback((plateId: string) => {
+    if (!onModelTransform) return;
+    const list = getModelsOnPlate(plateId);
+    if (list.length === 0) return;
+
+    // 1) Orientation (rotation + bed-resting Z) per model from its geometry.
+    const orientResults = new Map<string, { rotation: [number, number, number]; dataZ: number }>();
+    for (const model of list) {
+      const geo = geometryRegistryRef.current.get(model.id) ?? model.geometry;
+      if (!geo) continue;
+      const result = computeAutoOrientation(geo, model.scale);
+      if (!result) continue;
+      const scaleVec = new THREE.Vector3(model.scale[0], model.scale[1], model.scale[2]);
+      const dataZ = computeBedPlacementZ(geo, result.quaternion, scaleVec);
+      orientResults.set(model.id, { rotation: result.rotation, dataZ });
+    }
+
+    // 2) Grid (x,y) over the same list to prevent overlap after re-orienting.
+    const positions = computeArrangePositions(list);
+
+    // 3) Apply combined transform; record ONE grouped undo entry.
+    const deltas: TransformDelta[] = [];
+    for (const model of list) {
+      const orient = orientResults.get(model.id);
+      const xy = positions.get(model.id);
+      const nextRotation = orient ? orient.rotation : model.rotation;
+      const nextZ = orient ? orient.dataZ : model.position[2];
+      const nextX = xy ? xy[0] : model.position[0];
+      const nextY = xy ? xy[1] : model.position[1];
+      const nextPosition: [number, number, number] = [nextX, nextY, nextZ];
+
+      const changed = !triplesEqual(model.position, nextPosition) || !triplesEqual(model.rotation, nextRotation);
+      if (changed) {
+        deltas.push({
+          modelId: model.id,
+          before: { position: model.position, rotation: model.rotation, scale: model.scale },
+          after: { position: nextPosition, rotation: nextRotation, scale: model.scale },
+        });
+      }
+
+      handleModelTransform(model.id, nextPosition, nextRotation, model.scale, { recordHistory: false });
+    }
+
+    if (deltas.length > 0) {
+      pushHistoryEntry({ action: 'Auto-Orient Plate', deltas });
+    }
+  }, [computeArrangePositions, getModelsOnPlate, handleModelTransform, onModelTransform, pushHistoryEntry, triplesEqual]);
+
+  /**
+   * Delete a specific plate. A non-empty plate prompts for confirmation and its
+   * models are removed from the workspace (overriding removePlate's
+   * orphan-migration behavior, which would otherwise move them to the new
+   * active plate). The last remaining plate cannot be deleted.
+   */
+  const handleDeletePlate = useCallback((plateId: string) => {
+    if (plateState.plates.length <= 1) return;
+    const plateModels = getModelsOnPlate(plateId);
+
+    if (plateModels.length > 0) {
+      const plateName = plateState.plates.find(p => p.id === plateId)?.name ?? 'this plate';
+      const confirmed = typeof window === 'undefined'
+        ? true
+        : window.confirm(`Delete ${plateName} and its ${plateModels.length} model${plateModels.length === 1 ? '' : 's'}? This cannot be undone.`);
+      if (!confirmed) return;
+      onDeleteModels?.(plateModels.map(m => m.id));
+    }
+
+    setPlateState(s => removePlate(s, plateId));
+  }, [getModelsOnPlate, onDeleteModels, plateState.plates]);
 
   const handleOrient = useCallback(() => {
     if (!onModelTransform) return;
@@ -662,6 +809,21 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setTextPlacementMode(false);
     setTextToolConfig(null);
   }, []);
+
+  // Plate switch cleanup: exit interactive tool modes and clear a stale selection
+  // that belongs to a different plate so tools/selection can't leak across plates.
+  // queueMicrotask defers the setState calls out of the effect body (codebase
+  // convention to satisfy react-hooks/set-state-in-effect).
+  const prevActivePlateIdRef = useRef(plateState.activePlateId);
+  useEffect(() => {
+    if (prevActivePlateIdRef.current === plateState.activePlateId) return;
+    prevActivePlateIdRef.current = plateState.activePlateId;
+    const selectionIsStale = !!selectedModelId && !activePlateModelIds.has(selectedModelId);
+    queueMicrotask(() => {
+      exitAllToolModes();
+      if (selectionIsStale) onModelSelect?.(null);
+    });
+  }, [plateState.activePlateId, activePlateModelIds, selectedModelId, exitAllToolModes, onModelSelect]);
 
   const handleCut = useCallback(() => {
     if (!hasSelection) {
@@ -957,6 +1119,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
       // TODO: flipUpper/flipLower and cutToParts are not yet implemented.
 
+      // The model-sync effect detects this remove+add as a replace and keeps the
+      // new pieces on whichever plate held the source model.
       onModelsReplace(selectedModelId, newModels);
       toast.success(`Model cut into ${newModels.length} part(s)`);
     };
@@ -1290,6 +1454,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         onSequentialToggle={handleSequentialToggle}
         sequentialActive={sequentialMode}
         simpleMode={simpleMode}
+        onAddPlate={handleAddPlate}
+        canAddPlate={plateState.plates.length < 10}
       />
 
       {/* Plate Tab Bar */}
@@ -1297,8 +1463,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         plates={plateState.plates}
         activePlateId={plateState.activePlateId}
         onActivePlateChange={handleActivePlateChange}
-        onAddPlate={handleAddPlate}
-        onRemovePlate={handleRemovePlate}
+        onArrangePlate={handleArrangePlate}
+        onOrientPlate={handleOrientPlate}
+        onDeletePlate={handleDeletePlate}
         onRenamePlate={handleRenamePlate}
         onDuplicatePlate={handleDuplicatePlate}
       />
@@ -1311,6 +1478,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           models={visibleModels}
           selectedModelId={selectedModelId}
           onModelSelect={onModelSelect}
+          onModelGeometryChange={handleModelGeometryChange}
           transformMode={transformMode}
           onModelTransform={handleModelTransform}
           onSelectedModelMetricsChange={(metrics) => {
@@ -1532,9 +1700,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         bedHeight={bedConfig.height}
         slicesRemaining={slicesRemaining}
         slicesTotal={slicesTotal}
-        onSlice={onSlice}
+        onSlice={handleSliceClick}
         slicing={slicing}
-        canSlice={canSlice && hasModels}
+        canSlice={canSlice && activePlateModels.length > 0}
+        sliceButtonLabel={sliceButtonLabel}
+        sliceNote={otherPlatesHaveModels ? 'Only the active plate is sliced.' : undefined}
       />
     </div>
   );

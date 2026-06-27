@@ -4,7 +4,7 @@
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import clsx from 'clsx';
-import { Plus, MoreHorizontal, Copy, Trash2, Pencil } from 'lucide-react';
+import { MoreHorizontal, Copy, Trash2, Pencil, LayoutGrid, Compass } from 'lucide-react';
 import { Button } from '@/common/components/ui';
 import type { BuildPlate } from '@/features/slicer/utils/plateManager';
 
@@ -12,8 +12,9 @@ export interface PlateTabBarProps {
   plates: BuildPlate[];
   activePlateId: string;
   onActivePlateChange: (plateId: string) => void;
-  onAddPlate: () => void;
-  onRemovePlate: (plateId: string) => void;
+  onArrangePlate: (plateId: string) => void;
+  onOrientPlate: (plateId: string) => void;
+  onDeletePlate: (plateId: string) => void;
   onRenamePlate: (plateId: string, name: string) => void;
   onDuplicatePlate: (plateId: string) => void;
 }
@@ -28,8 +29,9 @@ export const PlateTabBar: React.FC<PlateTabBarProps> = ({
   plates,
   activePlateId,
   onActivePlateChange,
-  onAddPlate,
-  onRemovePlate,
+  onArrangePlate,
+  onOrientPlate,
+  onDeletePlate,
   onRenamePlate,
   onDuplicatePlate,
 }) => {
@@ -39,7 +41,6 @@ export const PlateTabBar: React.FC<PlateTabBarProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const canAdd = plates.length < 10;
   const canRemove = plates.length > 1;
 
   // Close context menu on outside click
@@ -87,11 +88,11 @@ export const PlateTabBar: React.FC<PlateTabBarProps> = ({
           onDuplicatePlate(plateId);
           break;
         case 'delete':
-          if (canRemove) onRemovePlate(plateId);
+          if (canRemove) onDeletePlate(plateId);
           break;
       }
     },
-    [contextMenu, plates, canRemove, onDuplicatePlate, onRemovePlate],
+    [contextMenu, plates, canRemove, onDuplicatePlate, onDeletePlate],
   );
 
   const commitRename = useCallback(() => {
@@ -102,6 +103,9 @@ export const PlateTabBar: React.FC<PlateTabBarProps> = ({
     setEditValue('');
   }, [editingId, editValue, onRenamePlate]);
 
+  const actionIconClass =
+    'flex items-center justify-center p-0.5 rounded text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2/50 transition-colors';
+
   return (
     <>
       <div className="flex items-center gap-0.5 px-2 py-1 bg-pf-bg-1 border-b border-pf-border overflow-x-auto">
@@ -111,85 +115,122 @@ export const PlateTabBar: React.FC<PlateTabBarProps> = ({
           const count = plate.modelIds.length;
 
           return (
-            <Button
+            <div
               key={plate.id}
-              variant="unstyled"
               className={clsx(
-                'group relative flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors select-none whitespace-nowrap',
+                'group relative flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md transition-colors select-none whitespace-nowrap border',
                 isActive
-                  ? 'bg-pf-accent-bg text-pf-accent border border-pf-accent/30'
-                  : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary border border-transparent',
+                  ? 'bg-pf-accent-bg text-pf-accent border-pf-accent/30'
+                  : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary border-transparent',
               )}
-              onClick={() => onActivePlateChange(plate.id)}
-              onContextMenu={e => handleContextMenu(e, plate.id)}
             >
-              {isEditing ? (
-                <input
-                  ref={inputRef}
-                  className="bg-transparent border-b border-pf-accent text-pf-text-primary text-xs outline-none w-20"
-                  value={editValue}
-                  onChange={e => setEditValue(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') commitRename();
-                    if (e.key === 'Escape') {
-                      setEditingId(null);
-                      setEditValue('');
-                    }
-                  }}
-                  onClick={e => e.stopPropagation()}
-                />
-              ) : (
-                <span>{plate.name}</span>
+              {/* Tab select button (its own button — action icons are siblings, never nested) */}
+              <Button
+                variant="unstyled"
+                type="button"
+                className="flex items-center gap-1.5 bg-transparent outline-none cursor-pointer"
+                onClick={() => onActivePlateChange(plate.id)}
+                onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, plate.id)}
+                aria-label={`Select ${plate.name}${count > 0 ? ` (${count} model${count === 1 ? '' : 's'})` : ''}`}
+                aria-current={isActive ? 'true' : undefined}
+              >
+                {isEditing ? (
+                  <input
+                    ref={inputRef}
+                    className="bg-transparent border-b border-pf-accent text-pf-text-primary text-xs outline-none w-20"
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitRename();
+                      if (e.key === 'Escape') {
+                        setEditingId(null);
+                        setEditValue('');
+                      }
+                    }}
+                    onClick={e => e.stopPropagation()}
+                  />
+                ) : (
+                  <span>{plate.name}</span>
+                )}
+
+                {count > 0 && !isEditing && (
+                  <span
+                    className={clsx(
+                      'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold leading-none',
+                      isActive
+                        ? 'bg-pf-accent/20 text-pf-accent'
+                        : 'bg-pf-bg-2 text-pf-text-secondary',
+                    )}
+                  >
+                    {count}
+                  </span>
+                )}
+              </Button>
+
+              {/* Active-tab inline actions — siblings of the select button. Only the
+                  active tab shows these to avoid overflow with up to 10 plates. */}
+              {isActive && !isEditing && (
+                <>
+                  <Button
+                    variant="unstyled"
+                    type="button"
+                    className={actionIconClass}
+                    title="Auto-arrange this plate"
+                    aria-label={`Auto-arrange ${plate.name}`}
+                    onClick={() => onArrangePlate(plate.id)}
+                  >
+                    <LayoutGrid size={12} />
+                  </Button>
+                  <Button
+                    variant="unstyled"
+                    type="button"
+                    className={actionIconClass}
+                    title="Auto-orient all models on this plate"
+                    aria-label={`Auto-orient ${plate.name}`}
+                    onClick={() => onOrientPlate(plate.id)}
+                  >
+                    <Compass size={12} />
+                  </Button>
+                  <Button
+                    variant="unstyled"
+                    type="button"
+                    className={clsx(
+                      actionIconClass,
+                      canRemove ? 'hover:text-pf-error' : 'opacity-30 cursor-not-allowed',
+                    )}
+                    title={canRemove ? 'Delete this plate' : 'Cannot delete the last plate'}
+                    aria-label={`Delete ${plate.name}`}
+                    disabled={!canRemove}
+                    onClick={() => onDeletePlate(plate.id)}
+                  >
+                    <Trash2 size={12} />
+                  </Button>
+                </>
               )}
 
-              {count > 0 && !isEditing && (
-                <span
-                  className={clsx(
-                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold leading-none',
-                    isActive
-                      ? 'bg-pf-accent/20 text-pf-accent'
-                      : 'bg-pf-bg-2 text-pf-text-secondary',
-                  )}
-                >
-                  {count}
-                </span>
-              )}
-
-              {/* Kebab menu trigger (visible on hover or when active) */}
+              {/* Kebab menu trigger — sibling button (rename / duplicate / delete) */}
               {!isEditing && (
-                <span
-                  role="button"
-                  tabIndex={-1}
+                <Button
+                  variant="unstyled"
+                  type="button"
                   className={clsx(
-                    'ml-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-pf-bg-2/50 transition-opacity cursor-pointer',
+                    actionIconClass,
+                    'opacity-0 group-hover:opacity-100',
                     isActive && 'opacity-60',
                   )}
-                  onClick={e => {
+                  aria-label={`${plate.name} options`}
+                  onClick={(e: React.MouseEvent) => {
                     e.stopPropagation();
                     setContextMenu({ plateId: plate.id, x: e.clientX, y: e.clientY });
                   }}
                 >
                   <MoreHorizontal size={12} />
-                </span>
+                </Button>
               )}
-            </Button>
+            </div>
           );
         })}
-
-        {/* Add plate button */}
-        <Button
-          variant="unstyled"
-          disabled={!canAdd}
-          className={clsx(
-            'flex items-center justify-center w-7 h-7 rounded-md text-pf-text-secondary transition-colors',
-            canAdd ? 'hover:bg-pf-bg-2 hover:text-pf-text-primary cursor-pointer' : 'opacity-30 cursor-not-allowed',
-          )}
-          title={canAdd ? 'Add plate' : 'Maximum 10 plates'}
-          onClick={onAddPlate}
-        >
-          <Plus size={14} />
-        </Button>
       </div>
 
       {/* Context Menu */}

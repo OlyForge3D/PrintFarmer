@@ -30,6 +30,7 @@ interface SharedModelViewerProps {
   meshRef?: React.RefObject<THREE.Object3D | null>;
   onSelectedMetrics?: (metrics: ViewerMetrics) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
   renderSelectionBoundingBox: (geometry: THREE.BufferGeometry, outOfBounds?: boolean) => React.ReactNode;
   renderFaceSwatches: (geometry: THREE.BufferGeometry, onFaceClick: (normal: THREE.Vector3) => void) => React.ReactNode;
 }
@@ -154,6 +155,7 @@ function FallbackStlModel({
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
   renderSelectionBoundingBox,
   renderFaceSwatches,
 }: SharedModelViewerProps) {
@@ -221,6 +223,11 @@ function FallbackStlModel({
     ref.current.userData.geometry = geometry;
   }, [geometry, halfZ, ref]);
 
+  useEffect(() => {
+    onGeometryReady?.(geometry);
+    return () => onGeometryReady?.(null);
+  }, [geometry, onGeometryReady]);
+
   return (
     <group
       ref={ref as React.RefObject<THREE.Group | null>}
@@ -278,6 +285,7 @@ export function ThreeMFViewer({
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
   renderSelectionBoundingBox,
   renderFaceSwatches,
 }: SharedModelViewerProps) {
@@ -379,6 +387,12 @@ export function ThreeMFViewer({
     ref.current.userData.geometry = displayData.selectionGeometry;
   }, [displayData, ref]);
 
+  useEffect(() => {
+    if (!displayData) return;
+    onGeometryReady?.(displayData.selectionGeometry);
+    return () => onGeometryReady?.(null);
+  }, [displayData, onGeometryReady]);
+
   if (fallbackUrl) {
     return (
       <group>
@@ -396,6 +410,7 @@ export function ThreeMFViewer({
           meshRef={meshRef}
           onSelectedMetrics={onSelectedMetrics}
           onLayFlatFaceClick={onLayFlatFaceClick}
+          onGeometryReady={onGeometryReady}
           renderSelectionBoundingBox={renderSelectionBoundingBox}
           renderFaceSwatches={renderFaceSwatches}
         />

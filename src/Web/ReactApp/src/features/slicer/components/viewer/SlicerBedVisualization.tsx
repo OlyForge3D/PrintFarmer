@@ -14,6 +14,11 @@ import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
+import {
+  detectMajorFaces,
+  computeAutoOrientation,
+  computeBedPlacementZ,
+} from '@/features/slicer/utils/autoOrient';
 
 // W4: Module-level constant to avoid creating new Set on every render
 const EMPTY_FACE_SET = new Set<number>();
@@ -86,6 +91,13 @@ export interface SlicerBedVisualizationProps {
   onLayFlatComplete?: () => void;
   /** Increment to trigger auto-orient on the selected model */
   autoOrientTrigger?: number;
+  /**
+   * Called when a model's processed geometry becomes available or is removed.
+   * Lets the parent maintain a modelId → geometry registry so it can run
+   * geometry-dependent operations (e.g. auto-orient) on non-selected models.
+   * Passes `null` when the model unmounts.
+   */
+  onModelGeometryChange?: (modelId: string, geometry: THREE.BufferGeometry | null) => void;
   /** When true, measure tool is active for point-to-point distance */
   measureMode?: boolean;
   /** When true, models are offset radially for exploded assembly inspection */
@@ -618,95 +630,6 @@ function SelectionBoundingBox({ geometry, outOfBounds = false }: { geometry: THR
 }
 
 /**
- * Detect major planar face groups from a geometry by clustering triangles
- * with similar normals. Returns the most significant faces sorted by area.
- */
-function detectMajorFaces(
-  geometry: THREE.BufferGeometry,
-  minAreaFraction = 0.005,
-  maxFaces = 14,
-): Array<{ normal: THREE.Vector3; center: THREE.Vector3; area: number }> {
-  const posAttr = geometry.getAttribute('position');
-  if (!posAttr) return [];
-
-  const index = geometry.getIndex();
-  const triCount = index ? index.count / 3 : posAttr.count / 3;
-
-  const vA = new THREE.Vector3();
-  const vB = new THREE.Vector3();
-  const vC = new THREE.Vector3();
-  const edge1 = new THREE.Vector3();
-  const edge2 = new THREE.Vector3();
-  const fn = new THREE.Vector3();
-
-  interface FaceCluster {
-    weightedNormal: THREE.Vector3;
-    weightedCenter: THREE.Vector3;
-    totalArea: number;
-  }
-
-  const clusters: FaceCluster[] = [];
-  const ANGLE_THRESHOLD = 0.95; // ~18°
-  let totalArea = 0;
-
-  for (let i = 0; i < triCount; i++) {
-    if (index) {
-      vA.fromBufferAttribute(posAttr, index.getX(i * 3));
-      vB.fromBufferAttribute(posAttr, index.getX(i * 3 + 1));
-      vC.fromBufferAttribute(posAttr, index.getX(i * 3 + 2));
-    } else {
-      vA.fromBufferAttribute(posAttr, i * 3);
-      vB.fromBufferAttribute(posAttr, i * 3 + 1);
-      vC.fromBufferAttribute(posAttr, i * 3 + 2);
-    }
-
-    edge1.subVectors(vB, vA);
-    edge2.subVectors(vC, vA);
-    fn.crossVectors(edge1, edge2);
-    const area = fn.length() / 2;
-    if (area < 1e-6) continue;
-    fn.normalize();
-    totalArea += area;
-
-    const cx = (vA.x + vB.x + vC.x) / 3;
-    const cy = (vA.y + vB.y + vC.y) / 3;
-    const cz = (vA.z + vB.z + vC.z) / 3;
-
-    let matched = false;
-    for (const cluster of clusters) {
-      if (cluster.weightedNormal.clone().normalize().dot(fn) > ANGLE_THRESHOLD) {
-        cluster.weightedNormal.addScaledVector(fn, area);
-        cluster.weightedCenter.x += cx * area;
-        cluster.weightedCenter.y += cy * area;
-        cluster.weightedCenter.z += cz * area;
-        cluster.totalArea += area;
-        matched = true;
-        break;
-      }
-    }
-
-    if (!matched) {
-      clusters.push({
-        weightedNormal: fn.clone().multiplyScalar(area),
-        weightedCenter: new THREE.Vector3(cx * area, cy * area, cz * area),
-        totalArea: area,
-      });
-    }
-  }
-
-  const minArea = totalArea * minAreaFraction;
-  return clusters
-    .filter((c) => c.totalArea >= minArea)
-    .map((c) => ({
-      normal: c.weightedNormal.normalize(),
-      center: c.weightedCenter.divideScalar(c.totalArea),
-      area: c.totalArea,
-    }))
-    .sort((a, b) => b.area - a.area)
-    .slice(0, maxFaces);
-}
-
-/**
  * Oval swatch indicators rendered on major faces of a model.
  * Size is proportional to the face area. Shown in lay-flat mode
  * so the user can click a face to orient it downward.
@@ -791,35 +714,15 @@ function FaceSwatches({
 
 /**
  * Compute the data-model position Z that places the transformed model on the bed (z=0).
- * STLModel offsets by halfZ internally, so we account for that.
+ * STLModel offsets by halfZ internally, so we account for that. Thin wrapper over the
+ * pure {@link computeBedPlacementZ} util to keep a single source of truth for the math.
  */
 function computeZForBedPlacement(
   geometry: THREE.BufferGeometry,
   q: THREE.Quaternion,
   scale: THREE.Vector3 = new THREE.Vector3(1, 1, 1),
 ): number {
-  const posAttr = geometry.getAttribute('position');
-  if (!posAttr) return 0;
-
-  const v = new THREE.Vector3();
-  let minRotatedZ = Infinity;
-  for (let i = 0; i < posAttr.count; i++) {
-    v.fromBufferAttribute(posAttr, i);
-    v.multiply(scale).applyQuaternion(q);
-    if (v.z < minRotatedZ) minRotatedZ = v.z;
-  }
-
-  // Both STLModel and PrebuiltSTLModel offset group.z by halfZ:
-  //   STLModel (centered geo): halfZ = (max.z - min.z) / 2 = -min.z (since centered)
-  //   PrebuiltSTLModel (uncentered cut geo): halfZ = -min.z
-  // Using -min.z works universally for both model types.
-  // World Z of lowest vertex = data_pz + halfZ + minScaledRotatedZ.
-  // For bed placement (lowest at 0): data_pz = -halfZ - minScaledRotatedZ.
-  geometry.computeBoundingBox();
-  const halfZ = geometry.boundingBox
-    ? -geometry.boundingBox.min.z
-    : 0;
-  return -halfZ - minRotatedZ;
+  return computeBedPlacementZ(geometry, q, scale);
 }
 
 /**
@@ -845,6 +748,7 @@ function STLModel({
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
 }: { 
   url: string;
   position?: [number, number, number];
@@ -863,6 +767,7 @@ function STLModel({
     currentScale: [number, number, number];
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
 }) {
   const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Group>(null);
@@ -919,6 +824,13 @@ function STLModel({
       ref.current.userData.geometry = geometry;
     }
   }, [geometry, halfZ, ref]);
+
+  // Publish geometry to the parent registry so geometry-dependent operations
+  // (e.g. auto-orient a whole plate) can reach non-selected models too.
+  useEffect(() => {
+    onGeometryReady?.(geometry);
+    return () => onGeometryReady?.(null);
+  }, [geometry, onGeometryReady]);
 
   // Group origin = volumetric center. Position Z is offset by halfZ so the
   // data-model position.z=0 means "sitting on the bed".
@@ -986,6 +898,7 @@ function UrlModelViewer({
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
 }: {
   fileType: LoadedModel['fileType'];
   url: string;
@@ -1005,6 +918,7 @@ function UrlModelViewer({
     currentScale: [number, number, number];
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
 }) {
   if (fileType === '3mf') {
     return (
@@ -1022,6 +936,7 @@ function UrlModelViewer({
         meshRef={meshRef}
         onSelectedMetrics={onSelectedMetrics}
         onLayFlatFaceClick={onLayFlatFaceClick}
+        onGeometryReady={onGeometryReady}
         renderSelectionBoundingBox={(geometry, isOutOfBounds) => (
           <SelectionBoundingBox geometry={geometry} outOfBounds={isOutOfBounds} />
         )}
@@ -1047,6 +962,7 @@ function UrlModelViewer({
       meshRef={meshRef}
       onSelectedMetrics={onSelectedMetrics}
       onLayFlatFaceClick={onLayFlatFaceClick}
+      onGeometryReady={onGeometryReady}
     />
   );
 }
@@ -1070,6 +986,7 @@ function PrebuiltSTLModel({
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
 }: {
   inputGeometry: THREE.BufferGeometry;
   position?: [number, number, number];
@@ -1088,6 +1005,7 @@ function PrebuiltSTLModel({
     currentScale: [number, number, number];
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
 }) {
   const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;
@@ -1135,6 +1053,12 @@ function PrebuiltSTLModel({
       ref.current.userData.geometry = geometry;
     }
   }, [geometry, halfZ, ref]);
+
+  // Publish geometry to the parent registry (see STLModel for rationale).
+  useEffect(() => {
+    onGeometryReady?.(geometry);
+    return () => onGeometryReady?.(null);
+  }, [geometry, onGeometryReady]);
 
   return (
     <group
@@ -1702,6 +1626,7 @@ function BedScene({
   layFlatMode = false,
   onLayFlatComplete,
   autoOrientTrigger = 0,
+  onModelGeometryChange,
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
@@ -1730,6 +1655,18 @@ function BedScene({
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Object3D>(null);
+
+  // Stable-per-render map of per-model geometry registrars. Built with useMemo
+  // (not a ref) so we never read a ref during render. Each registrar forwards
+  // the model's processed geometry up to the parent's registry so non-selected
+  // models can still be auto-oriented.
+  const geometryRegistrars = useMemo(() => {
+    const map = new Map<string, (g: THREE.BufferGeometry | null) => void>();
+    for (const model of models) {
+      map.set(model.id, (g: THREE.BufferGeometry | null) => onModelGeometryChange?.(model.id, g));
+    }
+    return map;
+  }, [models, onModelGeometryChange]);
 
   // Disable orbit controls while painting on the model
   const handlePaintingStateChange = useCallback((isPainting: boolean) => {
@@ -1857,115 +1794,17 @@ function BedScene({
     const geo: THREE.BufferGeometry | undefined = obj.userData.geometry;
     if (!geo) return;
 
-    const faces = detectMajorFaces(geo, 0.005, 20);
+    const scaleArr: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
+    const result = computeAutoOrientation(geo, scaleArr);
+    if (!result) return;
 
-    // Build candidate normals: face normals + 6 principal axes
-    const candidateNormals: THREE.Vector3[] = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, -1, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1),
-    ];
-    for (const face of faces) {
-      candidateNormals.push(face.normal);
-    }
-
-    // Precompute per-triangle normals and areas for overhang scoring
-    const posAttr = geo.getAttribute('position');
-    const index = geo.getIndex();
-    const triCount = index ? index.count / 3 : posAttr.count / 3;
-    const triNormals: THREE.Vector3[] = [];
-    const triAreas: number[] = [];
-    const triCentroids: THREE.Vector3[] = [];
-    let totalArea = 0;
-    const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tC = new THREE.Vector3();
-    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), tn = new THREE.Vector3();
-    for (let i = 0; i < triCount; i++) {
-      if (index) {
-        tA.fromBufferAttribute(posAttr, index.getX(i * 3));
-        tB.fromBufferAttribute(posAttr, index.getX(i * 3 + 1));
-        tC.fromBufferAttribute(posAttr, index.getX(i * 3 + 2));
-      } else {
-        tA.fromBufferAttribute(posAttr, i * 3);
-        tB.fromBufferAttribute(posAttr, i * 3 + 1);
-        tC.fromBufferAttribute(posAttr, i * 3 + 2);
-      }
-      e1.subVectors(tB, tA);
-      e2.subVectors(tC, tA);
-      tn.crossVectors(e1, e2);
-      const area = tn.length() / 2;
-      if (area < 1e-6) {
-        triNormals.push(new THREE.Vector3(0, 0, 1));
-        triAreas.push(0);
-        triCentroids.push(new THREE.Vector3());
-        continue;
-      }
-      triNormals.push(tn.clone().normalize());
-      triAreas.push(area);
-      triCentroids.push(new THREE.Vector3().addVectors(tA, tB).add(tC).multiplyScalar(1 / 3));
-      totalArea += area;
-    }
-
-    // Evaluate each candidate: score by height + unsupported-overhang penalty
-    const OVERHANG_THRESH = -0.5; // ~60° from horizontal
-    const OVERHANG_WEIGHT = 2.0;
-    const SUPPORT_Z_TOL_MM = 0.8;
-    const v = new THREE.Vector3();
-    const rn = new THREE.Vector3();
-    const rc = new THREE.Vector3();
     const scaleVec = new THREE.Vector3(obj.scale.x, obj.scale.y, obj.scale.z);
-    let bestQ: THREE.Quaternion | null = null;
-    let bestScore = Infinity;
-
-    for (const normal of candidateNormals) {
-      const candidateQ = new THREE.Quaternion().setFromUnitVectors(
-        normal,
-        new THREE.Vector3(0, 0, -1),
-      );
-
-      // Height from scaled + rotated vertices
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (let i = 0; i < posAttr.count; i++) {
-        v.fromBufferAttribute(posAttr, i);
-        v.multiply(scaleVec).applyQuaternion(candidateQ);
-        if (v.z < minZ) minZ = v.z;
-        if (v.z > maxZ) maxZ = v.z;
-      }
-      const height = maxZ - minZ;
-
-      // Overhang area from triangles, excluding surfaces effectively supported by the bed.
-      let overhangArea = 0;
-      for (let i = 0; i < triCount; i++) {
-        rn.copy(triNormals[i]).applyQuaternion(candidateQ);
-        if (rn.z >= OVERHANG_THRESH) continue;
-
-        rc.copy(triCentroids[i]).multiply(scaleVec).applyQuaternion(candidateQ);
-        const isBedSupported = rc.z <= minZ + SUPPORT_Z_TOL_MM;
-        if (!isBedSupported) {
-          overhangArea += triAreas[i];
-        }
-      }
-      const overhangRatio = totalArea > 0 ? overhangArea / totalArea : 0;
-
-      // Keep height as a first-order term, but strongly penalize unsupported overhang.
-      const score = height * (1 + OVERHANG_WEIGHT * overhangRatio);
-      if (score < bestScore) {
-        bestScore = score;
-        bestQ = candidateQ;
-      }
-    }
-
-    if (!bestQ) return;
-    const euler = new THREE.Euler().setFromQuaternion(bestQ);
-    const dataZ = computeZForBedPlacement(geo, bestQ, scaleVec);
+    const dataZ = computeZForBedPlacement(geo, result.quaternion, scaleVec);
 
     onModelTransform(
       selectedModelId,
       [obj.position.x, obj.position.y, dataZ],
-      [euler.x, euler.y, euler.z],
+      result.rotation,
       obj.scale.toArray() as [number, number, number],
       { recordHistory: true, actionLabel: 'Auto-Orient' },
     );
@@ -2163,6 +2002,7 @@ function BedScene({
                         currentScale: metrics.currentScale,
                       })
                       : undefined}
+                    onGeometryReady={geometryRegistrars.get(model.id)}
                   />
                 ) : (
                   <ModelViewerErrorBoundary
@@ -2200,6 +2040,7 @@ function BedScene({
                           currentScale: metrics.currentScale,
                         })
                         : undefined}
+                      onGeometryReady={geometryRegistrars.get(model.id)}
                     />
                   </ModelViewerErrorBoundary>
                 )
@@ -2328,6 +2169,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   layFlatMode = false,
   onLayFlatComplete,
   autoOrientTrigger = 0,
+  onModelGeometryChange,
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
@@ -2397,6 +2239,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
               layFlatMode={layFlatMode}
               onLayFlatComplete={onLayFlatComplete}
               autoOrientTrigger={autoOrientTrigger}
+              onModelGeometryChange={onModelGeometryChange}
               measureMode={measureMode}
               assemblyViewActive={assemblyViewActive}
               splitTrigger={splitTrigger}
