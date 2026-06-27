@@ -170,10 +170,10 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         </div>
       ) : (
       /* Horizontal row: [label] [control] [reset button] */
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {/* Left: icon + label */}
         {label && (
-        <div className="flex items-center gap-1.5 min-w-0 w-2/5 shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 w-[46%] shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
           <div className="min-w-0">
             <label 
@@ -200,14 +200,14 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           {renderControl()}
         </div>
 
-        {/* Right: reset button (fixed spacer for alignment) */}
-        <div className="w-7 shrink-0 flex justify-center">
+        {/* Right: reset button (compact fixed spacer for alignment) */}
+        <div className="w-5 shrink-0 flex justify-center">
           {isModified && onReset && (
             <Button
               variant="subtle"
               type="button"
               onClick={onReset}
-              className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+              className="p-0 text-pf-warning hover:text-pf-warning transition-colors
                          hover:bg-pf-warning/10 rounded"
               title={`Reset to original: ${formatOriginalValue(originalValue)}`}
               aria-label={`Reset ${label} to original value`}
@@ -635,7 +635,7 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-l-none rounded-r-lg w-14 shrink-0 self-stretch flex items-center">
+        <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-l-none rounded-r-lg w-16 shrink-0 self-stretch flex items-center justify-center text-center whitespace-nowrap leading-tight">
           {unit}
         </span>
       )}
