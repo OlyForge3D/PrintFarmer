@@ -106,7 +106,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
     refetchInterval: 10_000,
   });
   const timelineWindow = timelineData?.window ?? { from, to };
-  const timelineEvents = timelineData?.events ?? [];
+  const timelineEvents = timelineData?.events;
 
   const { data: queueOverview = [] } = useQuery({
     queryKey: ["queue-overview-timeline"],
@@ -116,8 +116,9 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   });
 
   const parsedEvents = useMemo<TimelineEventWithDates[]>(() => {
+    const events = timelineEvents ?? [];
     const now = new Date();
-    return timelineEvents
+    return events
       .map((event) => {
         const startDate = new Date(event.enteredAtUtc);
         const inferredEnd = event.exitedAtUtc ? new Date(event.exitedAtUtc) : now;

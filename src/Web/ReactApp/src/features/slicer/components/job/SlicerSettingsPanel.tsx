@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Checkbox, Select } from '@/common/components/ui';
+import { Button, Checkbox, Select } from '@/common/components/ui';
 import { INFILL_PATTERNS } from '@/features/slicer/components/settings/metadataTypes';
 import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
 
@@ -172,9 +172,10 @@ function InfillPatternDropdown({
 
   return (
     <div ref={rootRef} className="relative">
-      <button
+      <Button
         ref={triggerRef}
         type="button"
+        variant="unstyled"
         role="combobox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
@@ -201,7 +202,7 @@ function InfillPatternDropdown({
         <span aria-hidden="true" className="flex shrink-0 items-center justify-center">
           <ChevronDownIcon className="h-5 w-5 text-pf-text-muted" />
         </span>
-      </button>
+      </Button>
 
       {isOpen && (
         <ul
