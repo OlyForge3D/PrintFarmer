@@ -1048,7 +1048,8 @@ public sealed class PrintablesOAuthService(
         [JsonPropertyName("token_type")]
         public string? TokenType { get; set; }
 
-        public string? Scope { get; }
+        [JsonPropertyName("scope")]
+        public string? Scope { get; set; }
 
         [JsonPropertyName("expires_in")]
         public int? ExpiresIn { get; set; }
