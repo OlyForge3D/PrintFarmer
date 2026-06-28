@@ -1222,10 +1222,23 @@ function CameraController({
 }) {
   const { camera, invalidate } = useThree();
 
-  // Frame the WHOLE grid. Re-runs when the grid bound changes (plate add/remove)
-  // so newly added plates fit in view. Framing is instant (no animation) — we
-  // never animate the camera on plate selection.
+  // Remember the grid radius we last framed so we can avoid yanking the camera
+  // back to the default isometric pose on every plate add/remove. We only
+  // re-frame when the grid GROWS beyond the envelope we previously framed (new
+  // content would otherwise fall outside the view); shrinking the grid (e.g.
+  // deleting a plate) keeps the user's current orbit untouched.
+  const framedRadiusRef = useRef<number | null>(null);
+
+  // Frame the WHOLE grid. Framing is instant (no animation) — we never animate
+  // the camera on plate selection.
   useEffect(() => {
+    const prev = framedRadiusRef.current;
+    // Skip re-framing when the grid did not grow past what we already framed.
+    if (prev !== null && gridRadius <= prev + 1e-3) {
+      return;
+    }
+    framedRadiusRef.current = gridRadius;
+
     // n=1 → gridRadius*2 == max(bedW,bedD), so span == max(bedW,bedD,bedH) and
     // distance == maxDimension*1.5 — identical framing to the legacy single bed.
     const span = Math.max(gridRadius * 2, bedHeight);
@@ -2245,6 +2258,7 @@ function BedScene({
                   canDelete={renderPlates.length > 1}
                   bedWidth={width}
                   bedDepth={depth}
+                  gridSpan={gridRadius * 2}
                   onActivate={() => onPlateActivate?.(plate.id)}
                   onRename={(name) => onPlateRename?.(plate.id, name)}
                   onDelete={() => onPlateDelete?.(plate.id)}

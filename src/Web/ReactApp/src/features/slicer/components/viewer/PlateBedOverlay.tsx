@@ -17,7 +17,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Html } from '@react-three/drei';
-import { LayoutGrid, Compass, Trash2, Lock, Unlock } from 'lucide-react';
+import { GridIcon, CompassIcon, DeleteIcon, LockIcon, LockOpenIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 
 export interface PlateBedOverlayProps {
@@ -30,6 +30,14 @@ export interface PlateBedOverlayProps {
   canDelete: boolean;
   bedWidth: number;
   bedDepth: number;
+  /**
+   * Full grid span (max extent across all plates). The camera pulls back as the
+   * grid grows (distance ∝ gridSpan), so we scale the drei `distanceFactor` by
+   * the same span to keep the plate number/title/actions a constant on-screen
+   * size regardless of how many plates are laid out. Falls back to the bed size
+   * for the single-plate case.
+   */
+  gridSpan?: number;
   onActivate: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
@@ -92,6 +100,7 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
   canDelete,
   bedWidth,
   bedDepth,
+  gridSpan,
   onActivate,
   onRename,
   onDelete,
@@ -121,6 +130,9 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
   const badge = String(plateNumber).padStart(2, '0');
   // Drei zIndexRange: keep the active plate's chrome above inactive plates.
   const zIndexRange: [number, number] = active ? [40, 30] : [20, 10];
+  // Keep the overlay a constant on-screen size as the grid (and camera distance)
+  // grows: distanceFactor tracks the full grid span, not just this plate's bed.
+  const labelDistanceFactor = Math.max(bedWidth, bedDepth, gridSpan ?? 0);
 
   return (
     <>
@@ -128,7 +140,7 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
       <Html
         position={[-bedWidth / 2, -bedDepth / 2 - 14, 0]}
         transform
-        distanceFactor={Math.max(bedWidth, bedDepth)}
+        distanceFactor={labelDistanceFactor}
         zIndexRange={zIndexRange}
         style={{ pointerEvents: 'auto', userSelect: 'none' }}
       >
@@ -191,7 +203,7 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
       <Html
         position={[bedWidth / 2 + 18, 0, 0]}
         transform
-        distanceFactor={Math.max(bedWidth, bedDepth)}
+        distanceFactor={labelDistanceFactor}
         zIndexRange={zIndexRange}
         style={{ pointerEvents: 'auto' }}
       >
@@ -203,21 +215,21 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
                 active={locked}
                 onClick={onToggleLock}
               >
-                {locked ? <Lock size={16} /> : <Unlock size={16} />}
+                {locked ? <LockIcon className="h-4 w-4" /> : <LockOpenIcon className="h-4 w-4" />}
               </PlateActionButton>
               <PlateActionButton
                 label="Auto-arrange plate"
                 disabled={locked}
                 onClick={onArrange}
               >
-                <LayoutGrid size={16} />
+                <GridIcon className="h-4 w-4" />
               </PlateActionButton>
               <PlateActionButton
                 label="Auto-orient plate"
                 disabled={locked}
                 onClick={onOrient}
               >
-                <Compass size={16} />
+                <CompassIcon className="h-4 w-4" />
               </PlateActionButton>
             </>
           )}
@@ -227,7 +239,7 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
             disabled={locked || !canDelete}
             onClick={onDelete}
           >
-            <Trash2 size={16} />
+            <DeleteIcon className="h-4 w-4" />
           </PlateActionButton>
         </div>
       </Html>

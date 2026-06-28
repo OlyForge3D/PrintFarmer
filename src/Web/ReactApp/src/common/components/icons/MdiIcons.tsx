@@ -45,6 +45,8 @@ import {
   mdiLoading,
   mdiContentCopy,
   mdiViewGrid,
+  mdiLockOpenVariantOutline,
+  mdiCompassOutline,
   mdiViewList,
   mdiFile,
   mdiFolder,
@@ -2825,6 +2827,40 @@ export function GridIcon({ className = 'w-4 h-4', ariaLabel = 'Grid' }: Omit<Ico
       role="img"
     >
       <path fill="currentColor" d={mdiViewGrid} />
+    </svg>
+  );
+}
+
+/**
+ * LockOpenIcon - Unlocked padlock (from @mdi/js mdiLockOpenVariantOutline)
+ */
+export function LockOpenIcon({ className = 'w-4 h-4', ariaLabel = 'Unlock' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiLockOpenVariantOutline} />
+    </svg>
+  );
+}
+
+/**
+ * CompassIcon - Compass / orientation (from @mdi/js mdiCompassOutline)
+ */
+export function CompassIcon({ className = 'w-4 h-4', ariaLabel = 'Orient' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCompassOutline} />
     </svg>
   );
 }
