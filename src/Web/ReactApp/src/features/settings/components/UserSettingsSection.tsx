@@ -140,7 +140,7 @@ function UserSettingsForm({
   return (
     <Card>
       <Card.Header>
-        <h2 className="text-lg font-semibold text-pf-text-primary">User Preferences</h2>
+        <h3 className="text-lg font-semibold text-pf-text-primary">User Preferences</h3>
         <p className="mt-1 text-sm text-pf-text-secondary">
           Personal settings that apply only to your account.
         </p>

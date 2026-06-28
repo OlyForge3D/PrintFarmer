@@ -216,6 +216,8 @@ function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeS
             <button
               key={scope.id}
               type="button"
+              role="radio"
+              aria-checked={isActive}
               title={scope.id === 'user' ? 'User' : scope.id === 'system' ? 'System' : scope.label}
               onClick={() => onScopeChange(scope.id)}
               className={clsx(

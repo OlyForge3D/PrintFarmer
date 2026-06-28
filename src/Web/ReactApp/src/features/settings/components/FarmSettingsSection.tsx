@@ -137,7 +137,7 @@ function FarmSettingsForm({
     <Card>
       <Card.Header>
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-pf-text-primary">Farm Settings</h2>
+          <h3 className="text-lg font-semibold text-pf-text-primary">Farm Settings</h3>
           {!canWrite && (
             <span className="inline-flex items-center gap-1 rounded-md border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-xs text-pf-text-secondary">
               <LockIcon className="h-3 w-3" />

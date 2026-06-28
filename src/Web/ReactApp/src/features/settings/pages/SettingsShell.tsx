@@ -704,6 +704,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
+  const shellTitle = effectiveScope === 'admin' ? 'Admin' : 'Settings';
   const toolbar = (
     <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:mr-72">
@@ -795,6 +796,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {toolbar}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
+                    <h1 className="mb-3 text-lg leading-none text-pf-text-primary md:hidden">{shellTitle}</h1>
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
