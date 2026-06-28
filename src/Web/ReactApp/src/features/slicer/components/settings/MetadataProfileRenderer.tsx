@@ -13,7 +13,7 @@
  * The MetadataProfileEditor top-level component remains here.
  * All type exports are re-exported for backward compatibility.
  */
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
@@ -110,6 +110,26 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   const clampedActiveTabIdx = Math.min(activeTabIdx, Math.max(0, visibleTabs.length - 1));
   const activeTab = visibleTabs[clampedActiveTabIdx] ?? visibleTabs[0];
 
+  // Roving-focus tablist: arrow keys move between tabs, Home/End jump to ends.
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const handleTabKeyDown = useCallback(
+    (e: React.KeyboardEvent, idx: number) => {
+      const count = visibleTabs.length;
+      if (count === 0) return;
+      let next: number | null = null;
+      if (e.key === 'ArrowRight') next = (idx + 1) % count;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + count) % count;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = count - 1;
+      if (next === null) return;
+      e.preventDefault();
+      setActiveTabIdx(next);
+      tabRefs.current[next]?.focus();
+    },
+    [visibleTabs.length],
+  );
+
   // A tab is "dirty" when any of its fields differs from the original snapshot.
   // Uses the same comparison as the per-field change tracking so the tab label
   // turns the modified color (orange) whenever a contained setting is changed.
@@ -131,16 +151,22 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border flex flex-col ${className}`}>
       {/* Tab bar + Advanced toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
-        <div className="flex gap-3 overflow-x-auto">
+        <div className="flex gap-3 overflow-x-auto" role="tablist" aria-label="Profile settings sections">
           {visibleTabs.map((tab, idx) => {
             const isActive = idx === clampedActiveTabIdx;
             const dirty = isTabDirty(tab);
             return (
               <Button
                 key={tab.name}
+                ref={(el: HTMLButtonElement | null) => { tabRefs.current[idx] = el; }}
                 variant="unstyled"
                 type="button"
                 size="sm"
+                role="tab"
+                id={`profile-tab-${slug(tab.name)}`}
+                aria-controls={`profile-tabpanel-${slug(tab.name)}`}
+                tabIndex={isActive ? 0 : -1}
+                onKeyDown={(e) => handleTabKeyDown(e, idx)}
                 onClick={() => setActiveTabIdx(idx)}
                 disabled={disabled}
                 aria-selected={isActive}
@@ -188,7 +214,13 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       </div>
 
       {/* Active tab content */}
-      <div className="p-2 flex-1 min-h-0 overflow-y-auto">
+      <div
+        className="p-2 flex-1 min-h-0 overflow-y-auto"
+        role="tabpanel"
+        id={activeTab ? `profile-tabpanel-${slug(activeTab.name)}` : undefined}
+        aria-labelledby={activeTab ? `profile-tab-${slug(activeTab.name)}` : undefined}
+        tabIndex={0}
+      >
         <MetadataTabRenderer
           tab={activeTab}
           allSettings={profileMeta.settings}
