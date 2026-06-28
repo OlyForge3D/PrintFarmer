@@ -58,3 +58,27 @@ export function buildSlicePayloadModels(activePlateModels: LoadedModel[]): Slice
     modelFileTransforms: sliceable.map(modelTransformJson),
   };
 }
+
+/**
+ * Compute the process-setting overrides to send with a slice job: ONLY the keys
+ * whose current editor value differs from the original baseline.
+ *
+ * The slicer editor seeds a complete ~300-key baseline (so every field gets a
+ * reset/modified affordance), but the named process profile and its `inherits:`
+ * chain are resolved worker-side. Sending the whole baseline would overwrite the
+ * profile's tuned/inherited values with generic frontend defaults, so we must
+ * send only the user's actual edits. `current` and `original` are seeded from
+ * the same coerced object, so this diff is exactly the set of user changes.
+ */
+export function diffProcessOverrides(
+  current: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  const overrides: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(current)) {
+    if (JSON.stringify(value) !== JSON.stringify(original[key])) {
+      overrides[key] = value;
+    }
+  }
+  return overrides;
+}

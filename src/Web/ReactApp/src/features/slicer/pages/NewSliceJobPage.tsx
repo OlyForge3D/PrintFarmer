@@ -50,7 +50,7 @@ import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/sl
 import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
-import { buildSlicePayloadModels, modelTransformJson } from '@/features/slicer/utils/slicePayload';
+import { buildSlicePayloadModels, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
@@ -1653,6 +1653,15 @@ export const NewSliceJobPage: React.FC = () => {
       ? undefined
       : resolveExtruderColour(0, selectedFilamentProfileId);
 
+    // Process-setting overrides: send ONLY the keys the user actually changed in
+    // the editor — never the full ~300-key metadata baseline. The named process
+    // profile (and its `inherits:` chain) is resolved worker-side, so re-sending
+    // unmodified defaults would clobber the profile's tuned/inherited values.
+    const modifiedProcessOverrides = diffProcessOverrides(
+      slicerSettings as unknown as Record<string, unknown>,
+      originalProcessSettings,
+    );
+
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       printerId: undefined,
@@ -1674,7 +1683,7 @@ export const NewSliceJobPage: React.FC = () => {
               : selectedProcessPresetId,
             overrides: {
               ...advancedProcessSettings,
-              ...slicerSettings,
+              ...modifiedProcessOverrides,
             },
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
@@ -1714,6 +1723,7 @@ export const NewSliceJobPage: React.FC = () => {
     filamentCostPerKg,
     modelFileName,
     modelFileUrl,
+    originalProcessSettings,
     physicalToolheads,
     printerIsMultiToolhead,
     requiredMaterialType,

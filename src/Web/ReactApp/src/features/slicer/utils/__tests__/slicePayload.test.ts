@@ -3,6 +3,7 @@ import {
   isSliceableModel,
   modelTransformJson,
   buildSlicePayloadModels,
+  diffProcessOverrides,
 } from '../slicePayload';
 import type { LoadedModel } from '@/features/slicer/components/viewer/SlicerBedVisualization';
 
@@ -70,6 +71,45 @@ describe('slicePayload', () => {
       ]);
       expect(result.modelFileTransforms).toHaveLength(2);
       expect(result.primary?.id).toBe('a');
+    });
+  });
+
+  describe('diffProcessOverrides', () => {
+    it('returns only the keys whose value changed from the baseline', () => {
+      const original = { wall_loops: 2, layer_height: 0.2, sparse_infill_density: 15 };
+      const current = { wall_loops: 4, layer_height: 0.2, sparse_infill_density: 15 };
+
+      expect(diffProcessOverrides(current, original)).toEqual({ wall_loops: 4 });
+    });
+
+    it('returns an empty object when nothing was modified (no default leakage)', () => {
+      const baseline = { wall_loops: 2, layer_height: 0.2, top_shell_layers: 4, enable_support: false };
+
+      // Unmodified profile → no overrides, so the worker keeps inherited values.
+      expect(diffProcessOverrides({ ...baseline }, baseline)).toEqual({});
+    });
+
+    it('treats equal-but-different-typed values as unchanged via JSON comparison', () => {
+      // Both sides are seeded from the same coerced object, so matching native
+      // values never produce a spurious override.
+      const original = { layer_height: 0.2, enable_support: false };
+      const current = { layer_height: 0.2, enable_support: false };
+
+      expect(diffProcessOverrides(current, original)).toEqual({});
+    });
+
+    it('includes a key whose baseline was undefined once the user sets it', () => {
+      expect(diffProcessOverrides({ brim_width: 5 }, {})).toEqual({ brim_width: 5 });
+    });
+
+    it('includes boolean and string edits, not just numbers', () => {
+      const original = { enable_support: false, support_type: 'normal(auto)' };
+      const current = { enable_support: true, support_type: 'tree(auto)' };
+
+      expect(diffProcessOverrides(current, original)).toEqual({
+        enable_support: true,
+        support_type: 'tree(auto)',
+      });
     });
   });
 });
