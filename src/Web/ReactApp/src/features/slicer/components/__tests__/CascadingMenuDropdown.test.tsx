@@ -84,6 +84,10 @@ describe('FilamentProfileDropdown trigger', () => {
     expect(screen.getByText('Generic ABS High Speed')).toBeInTheDocument();
     expect(screen.getByText('Generic PLA @0.4 nozzle')).toBeInTheDocument();
 
+    // Material sub-headers group the profiles by polymer (ABS / PLA).
+    expect(screen.getByText('ABS')).toBeInTheDocument();
+    expect(screen.getByText('PLA')).toBeInTheDocument();
+
     fireEvent.click(screen.getByText('Generic ABS High Speed'));
     expect(onSelect).toHaveBeenCalledWith('Generic ABS High Speed', 'system');
 

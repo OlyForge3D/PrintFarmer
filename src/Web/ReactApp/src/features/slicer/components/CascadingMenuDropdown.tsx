@@ -210,7 +210,7 @@ export function FilamentProfileDropdown({
   );
 
   const checkmark = (
-    <svg className="w-3 h-3 text-[#00a98f] shrink-0" fill="currentColor" viewBox="0 0 20 20">
+    <svg className="w-3 h-3 text-pf-accent-2 shrink-0" fill="currentColor" viewBox="0 0 20 20">
       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
     </svg>
   );
@@ -221,6 +221,8 @@ export function FilamentProfileDropdown({
         ref={triggerRef}
         type="button"
         disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
         onClick={() => {
           setIsOpen(prev => {
             if (!prev) { setSearchQuery(''); setShowFilterPanel(false); }
@@ -250,12 +252,13 @@ export function FilamentProfileDropdown({
       {isOpen && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-9999 rounded-md border border-[#3a3f48] shadow-xl overflow-hidden bg-[#2a3038] max-h-100"
+          role="listbox"
+          className="fixed z-50 rounded-md border border-pf-border shadow-xl overflow-hidden bg-pf-panel max-h-[25rem]"
         >
           {/* Header: search + filter toggle */}
-          <div className="sticky top-0 bg-[#2a3038] border-b border-[#3a3f48] p-2 flex gap-1.5">
+          <div className="sticky top-0 bg-pf-panel border-b border-pf-border p-2 flex gap-1.5">
             <div className="relative flex-1">
-              <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <input
@@ -264,15 +267,15 @@ export function FilamentProfileDropdown({
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search filaments..."
                 autoFocus
-                className="w-full pl-8 pr-3 py-1.5 text-sm bg-[#1e2228] text-white rounded border border-[#3a3f48]
-                  focus:outline-none focus:border-[#00a98f] placeholder-gray-500"
+                className="w-full pl-8 pr-3 py-1.5 text-sm bg-pf-bg-0 text-pf-text-primary rounded border border-pf-border
+                  focus:outline-none focus:border-pf-accent-2 placeholder-pf-text-muted"
               />
             </div>
             {/* Filter gear button */}
             <button
               type="button"
               onClick={() => setShowFilterPanel(prev => !prev)}
-              className={`p-1.5 rounded border transition-colors ${showFilterPanel ? 'border-[#00a98f] bg-[#00a98f]/20 text-[#00a98f]' : 'border-[#3a3f48] text-gray-400 hover:text-white hover:border-gray-500'}`}
+              className={`p-1.5 rounded border transition-colors ${showFilterPanel ? 'border-pf-accent-2 bg-pf-accent-2/20 text-pf-accent-2' : 'border-pf-border text-pf-text-muted hover:text-pf-text-primary hover:border-pf-border-light'}`}
               title="Configure visible manufacturers & materials"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -283,10 +286,10 @@ export function FilamentProfileDropdown({
 
           {/* Filter config panel */}
           {showFilterPanel && (
-            <div className="border-b border-[#3a3f48] bg-[#1e2228] p-3 space-y-3 max-h-60 overflow-y-auto">
+            <div className="border-b border-pf-border bg-pf-bg-0 p-3 space-y-3 max-h-60 overflow-y-auto">
               {/* Manufacturers */}
               <div>
-                <div className="text-xs font-medium text-gray-400 mb-1.5">Manufacturers</div>
+                <div className="text-xs font-medium text-pf-text-muted mb-1.5">Manufacturers</div>
                 <div className="flex flex-wrap gap-1.5">
                   {allManufacturers.map(mfr => {
                     const hidden = filterConfig.hiddenManufacturers.includes(mfr);
@@ -296,7 +299,7 @@ export function FilamentProfileDropdown({
                         type="button"
                         onClick={() => toggleHiddenMfr(mfr)}
                         className={`px-2 py-0.5 text-xs rounded-full border transition-colors
-                          ${hidden ? 'border-[#3a3f48] text-gray-500 bg-transparent' : 'border-[#00a98f] text-[#00a98f] bg-[#00a98f]/10'}`}
+                          ${hidden ? 'border-pf-border text-pf-text-muted bg-transparent' : 'border-pf-accent-2 text-pf-accent-2 bg-pf-accent-2/10'}`}
                       >
                         {mfr}
                       </button>
@@ -306,7 +309,7 @@ export function FilamentProfileDropdown({
               </div>
               {/* Materials */}
               <div>
-                <div className="text-xs font-medium text-gray-400 mb-1.5">Material Types</div>
+                <div className="text-xs font-medium text-pf-text-muted mb-1.5">Material Types</div>
                 <div className="flex flex-wrap gap-1.5">
                   {allMaterials.map(mat => {
                     const hidden = filterConfig.hiddenMaterials.includes(mat);
@@ -316,7 +319,7 @@ export function FilamentProfileDropdown({
                         type="button"
                         onClick={() => toggleHiddenMat(mat)}
                         className={`px-2 py-0.5 text-xs rounded-full border transition-colors
-                          ${hidden ? 'border-[#3a3f48] text-gray-500 bg-transparent' : 'border-[#00a98f] text-[#00a98f] bg-[#00a98f]/10'}`}
+                          ${hidden ? 'border-pf-border text-pf-text-muted bg-transparent' : 'border-pf-accent-2 text-pf-accent-2 bg-pf-accent-2/10'}`}
                       >
                         {mat}
                       </button>
@@ -332,7 +335,7 @@ export function FilamentProfileDropdown({
             {/* Custom profiles section */}
             {filteredCustom.length > 0 && (
               <div>
-                <div className="px-3 py-1.5 text-xs font-medium text-gray-400 border-b border-[#3a3f48] bg-[#252930]">
+                <div className="px-3 py-1.5 text-xs font-medium text-pf-text-muted border-b border-pf-border bg-pf-bg-1">
                   User Presets
                 </div>
                 {filteredCustom.map(p => (
@@ -341,7 +344,7 @@ export function FilamentProfileDropdown({
                     type="button"
                     onClick={() => handleProfileClick(p.name, 'custom')}
                     className={`w-full text-left px-4 py-1.5 text-sm flex items-center gap-2 transition-colors
-                      ${selectedProfileName === p.name ? 'text-[#00a98f] bg-[#00a98f]/10' : 'text-white hover:bg-[#353b44]'}`}
+                      ${selectedProfileName === p.name ? 'text-pf-accent-2 bg-pf-accent-2/10' : 'text-pf-text-primary hover:bg-pf-bg-2'}`}
                   >
                     {selectedProfileName === p.name && checkmark}
                     <span className="truncate">★ {p.name}</span>
@@ -350,15 +353,15 @@ export function FilamentProfileDropdown({
               </div>
             )}
 
-            {/* System profiles: Manufacturer → Material (click to select) */}
+            {/* System profiles: Manufacturer → Material → profile */}
             {(Object.keys(filteredTree).length > 0 || filteredCustom.length > 0) && (
-              <div className="px-3 py-1.5 text-xs font-medium text-gray-400 border-b border-[#3a3f48] bg-[#252930]">
+              <div className="px-3 py-1.5 text-xs font-medium text-pf-text-muted border-b border-pf-border bg-pf-bg-1">
                 System Presets ({totalFiltered})
               </div>
             )}
 
             {Object.keys(filteredTree).length === 0 && filteredCustom.length === 0 && (
-              <div className="px-3 py-4 text-sm text-gray-500 text-center">No matching profiles</div>
+              <div className="px-3 py-4 text-sm text-pf-text-muted text-center">No matching profiles</div>
             )}
 
             {Object.keys(filteredTree).sort().map(mfr => {
@@ -373,36 +376,43 @@ export function FilamentProfileDropdown({
                   <button
                     type="button"
                     onClick={() => toggleMfr(mfr)}
-                    className="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 text-white hover:bg-[#353b44] font-medium"
+                    className="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 text-pf-text-primary hover:bg-pf-bg-2 font-medium"
                   >
                     {chevron(mfrExpanded)}
                     <span className="truncate">{mfr}</span>
-                    <span className="text-xs text-gray-500 ml-auto">{mfrCount}</span>
+                    <span className="ml-auto shrink-0 rounded bg-pf-border/50 px-1.5 py-0.5 text-[10px] tabular-nums text-pf-text-muted">{mfrCount}</span>
                   </button>
 
-                  {/* Profile rows — each filament profile shown by name. */}
+                  {/* Profile rows grouped by material, each shown by full name. */}
                   {mfrExpanded && Object.keys(materials).sort().map(mat => {
                     const matProfiles = materials[mat];
 
-                    // Render EACH profile by its full name (previously this
-                    // collapsed a material group to one row showing only the
-                    // material type, hiding the actual filament profile name).
-                    return matProfiles.map(prof => {
-                      const isSelected = prof.name === selectedProfileName;
-                      return (
-                        <button
-                          key={`${mfr}:${mat}:${prof.name}`}
-                          type="button"
-                          onClick={() => handleProfileClick(prof.name, 'system')}
-                          title={prof.name}
-                          className={`w-full text-left pl-7 pr-3 py-1 text-sm flex items-center gap-2 transition-colors
-                            ${isSelected ? 'text-[#00a98f] bg-[#00a98f]/10' : 'text-gray-300 hover:bg-[#353b44]'}`}
-                        >
-                          {isSelected && checkmark}
-                          <span className="min-w-0 flex-1 truncate">{prof.name}</span>
-                        </button>
-                      );
-                    });
+                    return (
+                      <div key={`${mfr}:${mat}`}>
+                        {/* Material sub-header so users can scan by polymer. */}
+                        <div className="pl-7 pr-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pf-text-muted">
+                          {mat}
+                        </div>
+                        {matProfiles.map(prof => {
+                          const isSelected = prof.name === selectedProfileName;
+                          return (
+                            <button
+                              key={`${mfr}:${mat}:${prof.name}`}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              onClick={() => handleProfileClick(prof.name, 'system')}
+                              title={prof.name}
+                              className={`w-full text-left pl-9 pr-3 py-1 text-sm flex items-center gap-2 transition-colors
+                                ${isSelected ? 'text-pf-accent-2 bg-pf-accent-2/10' : 'text-pf-text-secondary hover:bg-pf-bg-2'}`}
+                            >
+                              {isSelected && checkmark}
+                              <span className="min-w-0 flex-1 truncate">{prof.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
                   })}
                 </div>
               );
