@@ -159,6 +159,21 @@ internal static class ProgramHelpers
                     }
                 }
 
+                // SignalR's WebSocket and Server-Sent-Events transports cannot set the
+                // Authorization header on the browser handshake, so the client sends the JWT as a
+                // ?access_token= query parameter instead. Honour it for hub paths when the header
+                // did not already supply a token; without this the WS upgrade to an [Authorize] hub
+                // (e.g. /hubs/slicers) is rejected 401 and SignalR silently downgrades to long-polling.
+                if (string.IsNullOrEmpty(context.Token))
+                {
+                    string accessToken = context.Request.Query["access_token"].ToString();
+                    if (!string.IsNullOrEmpty(accessToken)
+                        && context.HttpContext.Request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Token = accessToken;
+                    }
+                }
+
                 try
                 {
                     string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
