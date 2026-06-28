@@ -229,6 +229,7 @@ function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeS
             </button>
           );
         })}
+      </div>
     </div>
   );
 }
@@ -364,7 +365,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
           aria-label="Settings categories"
           className="absolute inset-x-4 top-[calc(100%-0.25rem)] z-50 max-h-72 overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0/95 p-1 shadow-lg backdrop-blur-md"
         >
-          {categories.map((category, index) => {
+          {categories.map((category) => {
             const Icon = getSettingsCategoryIcon(category.id);
             const isActive = activeCategory === category.id;
             const isMatching = isMatchingCategory(category.id);

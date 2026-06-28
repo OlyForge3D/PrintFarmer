@@ -818,6 +818,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
               </div>
             </div>
           )}
+          </div>
         </div>
 
         <CommandPalette
