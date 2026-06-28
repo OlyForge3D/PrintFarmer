@@ -2186,7 +2186,7 @@ export const NewSliceJobPage: React.FC = () => {
                             setProfileEditorOpen(true);
                           }}
                           disabled={!selectedProfile}
-                          title="Edit filament settings"
+                          title={selectedProfile ? 'Edit filament settings' : 'Select a filament first'}
                           aria-label={`Edit Extruder ${idx + 1} filament settings`}
                         >
                           <EditIcon className="w-3.5 h-3.5" />
