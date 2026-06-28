@@ -31,7 +31,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
@@ -197,9 +197,6 @@ const navigation: NavigationElement[] = [
   },
 ];
 
-const MOBILE_TOP_BAR_HEIGHT_PX = 48;
-const EXPANDED_RAIL_WIDTH_PX = 248;
-const COLLAPSED_RAIL_WIDTH_PX = 64;
 const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
@@ -477,10 +474,7 @@ export function Layout() {
     setShowLoginModal(true);
   };
 
-  const desktopRailWidth = navbarCollapsed ? COLLAPSED_RAIL_WIDTH_PX : EXPANDED_RAIL_WIDTH_PX;
-  const desktopShellStyle = useMemo(() => ({
-    '--pf-layout-rail-width': `${desktopRailWidth}px`,
-  }) as CSSProperties, [desktopRailWidth]);
+  const desktopRailWidthClassName = navbarCollapsed ? 'lg:w-16' : 'lg:w-[248px]';
 
   return (
     <div className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
@@ -492,10 +486,39 @@ export function Layout() {
       </a>
       <div ref={mobileDrawerAnnouncementRef} className="sr-only" aria-live="polite" aria-atomic="true" />
 
-      <div
-        className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
-        style={desktopShellStyle}
-      >
+      <div className="flex h-full min-h-0 flex-col">
+        <header
+          inert={sidebarOpen || undefined}
+          className="hidden shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-4 py-2 lg:flex"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</h1>
+            </div>
+            <span
+              className={clsx('ml-1 h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
+              title={isConnected ? 'Connected' : 'Disconnected'}
+              aria-label={isConnected ? 'Connected' : 'Disconnected'}
+            />
+          </div>
+
+          <FloatingControlBar
+            mobile
+            isAuthenticated={isAuthenticated}
+            userName={user?.username}
+            userMenuOpen={userMenuOpen}
+            onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
+            onCloseUserMenu={() => setUserMenuOpen(false)}
+            onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
+            onOpenPreferences={() => navigate('/settings')}
+            onOpenLogin={() => setShowLoginModal(true)}
+            onOpenRegister={() => setShowRegisterModal(true)}
+            onLogout={handleLogout}
+          />
+        </header>
+
+        <div className="flex min-h-0 flex-1">
         <header
           inert={sidebarOpen || undefined}
           className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"
@@ -561,10 +584,9 @@ export function Layout() {
 
         <div
           className={clsx(
-            'fixed inset-x-0 bottom-0 z-50 lg:hidden',
+            'fixed inset-x-0 top-12 bottom-0 z-50 lg:hidden',
             sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
           )}
-          style={{ top: `${MOBILE_TOP_BAR_HEIGHT_PX}px` }}
           aria-hidden={!sidebarOpen}
           inert={!sidebarOpen}
         >
@@ -649,7 +671,7 @@ export function Layout() {
 
         <aside
           ref={desktopRailRef}
-          className="hidden h-screen min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex"
+          className={clsx('hidden h-full min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
           aria-label="Main navigation"
         >
           <div className="flex h-full min-h-0 w-full flex-col">
@@ -814,25 +836,12 @@ export function Layout() {
           </div>
         </aside>
 
-        <FloatingControlBar
-          isAuthenticated={isAuthenticated}
-          userName={user?.username}
-          userMenuOpen={userMenuOpen}
-          onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
-          onCloseUserMenu={() => setUserMenuOpen(false)}
-          onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
-          onOpenPreferences={() => navigate('/settings')}
-          onOpenLogin={() => setShowLoginModal(true)}
-          onOpenRegister={() => setShowRegisterModal(true)}
-          onLogout={handleLogout}
-        />
-
         <main
           id="main-content"
           data-main-content
           inert={sidebarOpen || undefined}
           tabIndex={-1}
-          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen"
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-full"
         >
           <EmailConfirmationBanner />
           <PlatformBanner />
@@ -851,6 +860,7 @@ export function Layout() {
             </RouteErrorBoundary>
           </div>
         </main>
+        </div>
       </div>
 
       {userMenuOpen && (
