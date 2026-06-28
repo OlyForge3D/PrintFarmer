@@ -10,6 +10,7 @@ import {
   PrinterIcon,
   LayersIcon,
   SettingsIcon,
+  DashboardIcon,
   MenuIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -191,7 +192,7 @@ const navigation: NavigationElement[] = [
   {
     name: 'Admin Console',
     href: '/admin/manage',
-    icon: SettingsIcon,
+    icon: DashboardIcon,
     requiredRole: 'farm_admin',
     matches: (pathname) => pathname.startsWith('/admin/manage') || pathname.startsWith('/admin/system') || pathname.startsWith('/slice-jobs')
   },
@@ -675,28 +676,8 @@ export function Layout() {
           aria-label="Main navigation"
         >
           <div className="flex h-full min-h-0 w-full flex-col">
-            <div className={clsx('border-b border-pf-border', navbarCollapsed ? 'px-2 py-3' : 'px-4 py-4')}>
-              <div className={clsx('flex items-center', navbarCollapsed ? 'justify-center' : 'justify-between gap-3')}>
-                <div className={clsx('flex min-w-0 items-center', navbarCollapsed ? 'justify-center' : 'gap-3')}>
-                  <PrintFarmerLogoIcon decorative className="h-8 w-8 shrink-0 text-pf-accent" />
-                  {!navbarCollapsed && (
-                    <div className="min-w-0">
-                      <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
-                    </div>
-                  )}
-                </div>
-                {!navbarCollapsed && (
-                  <span
-                    className={clsx('h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
-                    title={isConnected ? 'Connected' : 'Disconnected'}
-                    aria-label={isConnected ? 'Connected' : 'Disconnected'}
-                  />
-                )}
-              </div>
-            </div>
-
             <nav
-              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-3' : 'px-3 py-4')}
+              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-4' : 'px-3 py-4')}
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
@@ -719,10 +700,10 @@ export function Layout() {
                               aria-label={item.name}
                               aria-current={isActive ? 'page' : undefined}
                               className={clsx(
-                                'flex h-11 w-11 items-center justify-center rounded-2xl border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                'flex h-11 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
                                 isActive
-                                  ? 'border-pf-accent bg-pf-accent/12 text-pf-accent'
-                                  : 'border-pf-border text-pf-text-primary hover:bg-pf-bg-2'
+                                  ? 'bg-pf-accent-bg/18 text-pf-accent'
+                                  : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
                               )}
                             >
                               <span aria-hidden="true">

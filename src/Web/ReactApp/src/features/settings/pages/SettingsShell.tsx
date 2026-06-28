@@ -704,8 +704,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
-  const shellTitle = effectiveScope === 'admin' ? 'Admin' : 'Settings';
-
   const toolbar = (
     <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:mr-72">
@@ -742,24 +740,20 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   return (
-    <div
-      data-settings-shell
-      className="flex min-h-0 flex-1 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col [&>div>div]:flex [&>div>div]:min-h-0 [&>div>div]:flex-1 [&>div>div]:flex-col"
-    >
+    <>
       <PageTemplate
         title={pageTitle}
         subtitle={pageDescription}
         padding="px-0"
         showHeader
       >
-        <div className="pf-settings-surface relative isolate flex flex-1 min-h-0 flex-col overflow-hidden pt-4">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
-          <div className="absolute inset-0 rounded-[1.5rem] bg-pf-bg-0/95" />
-          <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.08]" style={{ backgroundImage: SETTINGS_FRAME_GRID, backgroundSize: '24px 24px' }} />
-          <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.05]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} />
-        </div>
+        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-pf-border/70 bg-pf-bg-0/95 pt-4 shadow-[0_24px_80px_-46px_rgba(0,0,0,0.82)] backdrop-blur-sm">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
+            <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.08]" style={{ backgroundImage: SETTINGS_FRAME_GRID, backgroundSize: '24px 24px' }} />
+            <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.05]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} />
+          </div>
 
-        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-pf-border/70 shadow-[0_24px_80px_-46px_rgba(0,0,0,0.82)] backdrop-blur-sm">
+          <div className="relative flex min-h-0 flex-1 flex-col">
           {hasNoMatches ? (
             <div className="relative flex flex-1 min-h-0 flex-col">
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
@@ -801,7 +795,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {toolbar}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
-                    <h1 className="mb-3 text-lg leading-none text-pf-text-primary md:hidden">{shellTitle}</h1>
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
@@ -826,6 +819,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             </div>
           )}
         </div>
+          </div>
         </div>
 
         <CommandPalette
@@ -835,6 +829,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           onSelect={navigateToSetting}
         />
       </PageTemplate>
-    </div>
+    </>
   );
 };
