@@ -78,6 +78,15 @@ describe('PrinterLocationDragDrop', () => {
     expect(screen.getByText('Drag and drop printers to assign them to locations')).toBeInTheDocument();
   });
 
+  it('renders its heading as h2, not h1, to avoid a duplicate page-level h1', async () => {
+    render(<PrinterLocationDragDrop />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'Assign Printers to Locations' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
+  });
+
   it('shows loading state while fetching data', () => {
     vi.mocked(printerLocationService.getAllPrinters).mockImplementation(
       () => new Promise(() => {}),

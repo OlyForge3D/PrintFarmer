@@ -79,10 +79,15 @@ if (!string.IsNullOrWhiteSpace(jwtKey))
             {
                 OnMessageReceived = context =>
                 {
-                    string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
-                    if (token is not null)
+                    // Authorization header still takes precedence (mirrors the main API): only fall
+                    // back to the query token when the header didn't already supply one.
+                    if (string.IsNullOrEmpty(context.Token))
                     {
-                        context.Token = token;
+                        string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
+                        if (token is not null)
+                        {
+                            context.Token = token;
+                        }
                     }
 
                     return Task.CompletedTask;

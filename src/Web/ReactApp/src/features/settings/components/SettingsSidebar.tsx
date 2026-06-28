@@ -348,6 +348,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         type="button"
         onClick={() => setIsOpen((current) => !current)}
         aria-controls="settings-category-menu"
+        aria-expanded={isOpen}
         aria-label={`Settings category: ${activeLabel}`}
           title={`Settings category: ${activeLabel}`}
         className="flex w-full items-center justify-between gap-2 rounded-2xl border border-pf-border/80 bg-pf-bg-1/85 px-4 py-3 text-sm font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"

@@ -241,7 +241,7 @@ export const LocationManagement: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Printer Locations</h1>
+        <h2 className="text-3xl font-bold">Printer Locations</h2>
         {!showForm && (
           <Button onClick={() => { setFormData({ name: '', description: '', parentId: null }); setShowForm(true); }}>
             Add Location
