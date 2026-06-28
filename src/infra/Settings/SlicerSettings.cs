@@ -35,6 +35,13 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
     /// Resolves the effective set of enabled modes, falling back to <c>[SlicerMode]</c> when
     /// <see cref="EnabledModes"/> is unset or empty (back-compat with legacy settings).
     /// </summary>
+    /// <remarks>
+    /// Derived state — must NOT be persisted or surfaced as an editable setting. It is
+    /// <see cref="JsonIgnoreAttribute">[JsonIgnore]</see>d so it is excluded from settings JSON
+    /// serialization and skipped by the metadata reflector (which requires a
+    /// <see cref="JsonPropertyNameAttribute"/> on every serialized public property).
+    /// </remarks>
+    [JsonIgnore]
     public IReadOnlyList<SlicerMode> EffectiveEnabledModes
         => EnabledModes is { Count: > 0 } modes ? modes : [SlicerMode];
 
