@@ -221,7 +221,7 @@ export function FilamentProfileDropdown({
         ref={triggerRef}
         type="button"
         disabled={disabled}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-expanded={isOpen}
         onClick={() => {
           setIsOpen(prev => {
@@ -252,7 +252,8 @@ export function FilamentProfileDropdown({
       {isOpen && createPortal(
         <div
           ref={menuRef}
-          role="listbox"
+          role="dialog"
+          aria-label="Filament selector"
           className="fixed z-50 rounded-md border border-pf-border shadow-xl overflow-hidden bg-pf-panel max-h-[25rem]"
         >
           {/* Header: search + filter toggle */}
@@ -342,6 +343,7 @@ export function FilamentProfileDropdown({
                   <button
                     key={p.id}
                     type="button"
+                    aria-current={selectedProfileName === p.name ? 'true' : undefined}
                     onClick={() => handleProfileClick(p.name, 'custom')}
                     className={`w-full text-left px-4 py-1.5 text-sm flex items-center gap-2 transition-colors
                       ${selectedProfileName === p.name ? 'text-pf-accent-2 bg-pf-accent-2/10' : 'text-pf-text-primary hover:bg-pf-bg-2'}`}
@@ -399,8 +401,7 @@ export function FilamentProfileDropdown({
                             <button
                               key={`${mfr}:${mat}:${prof.name}`}
                               type="button"
-                              role="option"
-                              aria-selected={isSelected}
+                              aria-current={isSelected ? 'true' : undefined}
                               onClick={() => handleProfileClick(prof.name, 'system')}
                               title={prof.name}
                               className={`w-full text-left pl-9 pr-3 py-1 text-sm flex items-center gap-2 transition-colors

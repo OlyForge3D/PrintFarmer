@@ -42,7 +42,10 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
   const anyModified = fields.some((f) => {
     const orig = originalValues?.[f.key];
     const cur = values[f.key];
-    return orig !== undefined && String(orig) !== String(cur ?? '');
+    // Use the same JSON-based comparison as MetadataSettingRow's change tracking
+    // and the tab-dirty check so the reset button and the orange "modified"
+    // label/tab indicator never disagree.
+    return orig !== undefined && JSON.stringify(cur) !== JSON.stringify(orig);
   });
 
   const handleReset = () => {

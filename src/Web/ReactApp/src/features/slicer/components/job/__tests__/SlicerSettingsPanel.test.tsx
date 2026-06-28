@@ -19,6 +19,9 @@ vi.mock('@/features/slicer/components/settings/metadataTypes', () => ({
 }));
 
 vi.mock('@/common/components/ui', () => ({
+  Button: ({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { children?: React.ReactNode }) => (
+    <button {...rest}>{children}</button>
+  ),
   Checkbox: ({ id, checked, onChange }: { id: string; checked: boolean; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void }) => (
     <input type="checkbox" id={id} checked={checked} onChange={onChange} />
   ),

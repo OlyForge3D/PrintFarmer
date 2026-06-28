@@ -164,7 +164,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
                 size="sm"
                 role="tab"
                 id={`profile-tab-${slug(tab.name)}`}
-                aria-controls={`profile-tabpanel-${slug(tab.name)}`}
+                aria-controls="profile-settings-tabpanel"
                 tabIndex={isActive ? 0 : -1}
                 onKeyDown={(e) => handleTabKeyDown(e, idx)}
                 onClick={() => setActiveTabIdx(idx)}
@@ -217,7 +217,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       <div
         className="p-2 flex-1 min-h-0 overflow-y-auto"
         role="tabpanel"
-        id={activeTab ? `profile-tabpanel-${slug(activeTab.name)}` : undefined}
+        id="profile-settings-tabpanel"
         aria-labelledby={activeTab ? `profile-tab-${slug(activeTab.name)}` : undefined}
         tabIndex={0}
       >
