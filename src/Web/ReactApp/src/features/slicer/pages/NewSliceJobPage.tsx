@@ -22,6 +22,7 @@ import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
+import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
 import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
@@ -72,14 +73,21 @@ function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undef
   // Parse settings from profile if available
   const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
 
-  return {
-    layer_height: profile.layerHeight,
-    sparse_infill_density: profile.infillPercentage,
-    outer_wall_speed: profile.printSpeed,
-    enable_support: profile.supports,
-    // Spread any additional parsed settings from profile.settings
+  // Merge the explicit profile values (raw JSON + the four promoted fields) and
+  // resolve a COMPLETE baseline: every metadata-known key gets a value (the
+  // profile's when present, otherwise its metadata default), coerced to the
+  // editor's native type. This ensures every editable field has an original
+  // value so the reset/modified affordance works for all settings, not just the
+  // ~50 a profile declares explicitly.
+  const merged: Record<string, unknown> = {
     ...profileSettings,
-  } as OrcaProcessSettings;
+    ...(profile.layerHeight !== undefined ? { layer_height: profile.layerHeight } : {}),
+    ...(profile.infillPercentage !== undefined ? { sparse_infill_density: profile.infillPercentage } : {}),
+    ...(profile.printSpeed !== undefined ? { outer_wall_speed: profile.printSpeed } : {}),
+    ...(profile.supports !== undefined ? { enable_support: profile.supports } : {}),
+  };
+
+  return resolveProcessSettingsBaseline(merged) as unknown as OrcaProcessSettings;
 }
 
 function formatNozzleDiameter(diameter: number): string {
