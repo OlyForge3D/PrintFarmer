@@ -677,7 +677,7 @@ export function Layout() {
         >
           <div className="flex h-full min-h-0 w-full flex-col">
             <nav
-              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-4' : 'px-3 py-4')}
+              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-2' : 'px-3 py-4')}
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
