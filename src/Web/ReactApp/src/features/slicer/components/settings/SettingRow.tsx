@@ -201,7 +201,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         </div>
 
         {/* Right: reset button (compact fixed spacer for alignment) */}
-        <div className="w-5 shrink-0 flex justify-center">
+        <div className="w-6 shrink-0 flex justify-center">
           {isModified && onReset && (
             <Button
               variant="subtle"
