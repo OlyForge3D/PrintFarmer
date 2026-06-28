@@ -107,7 +107,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
 
     return (
       <div className="flex items-center gap-1.5 py-0.5">
-        <div className="w-2/5 shrink-0 truncate">
+        <div className="w-[46%] shrink-0 truncate">
           <span
             className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text'}`}
             title={meta.tooltip}
@@ -147,7 +147,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
             </span>
           </div>
         </div>
-        <div className="w-7 shrink-0 flex justify-center">
+        <div className="w-6 shrink-0 flex justify-center">
           {anyModified && (
             <Button
               variant="subtle"
@@ -273,7 +273,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
       const [px, py] = parsePoint(values[field.key], meta);
       return (
         <div className="flex items-center gap-1.5 py-0.5">
-          <div className="flex items-center gap-1.5 w-2/5 shrink-0">
+          <div className="flex items-center gap-1.5 w-[46%] shrink-0">
             <span
               className={`text-xs truncate ${isModified ? 'text-pf-warning font-medium' : 'text-pf-text-secondary'}`}
               title={meta.tooltip}
@@ -281,7 +281,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
               {meta.label}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 w-[30%] shrink-0">
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <div className="flex-1 flex items-center bg-pf-panel border border-pf-border rounded overflow-hidden">
               <span className="px-1.5 text-xs text-pf-text-muted select-none">X</span>
               <input
@@ -305,7 +305,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
               />
             </div>
           </div>
-          <div className="w-7 shrink-0 flex justify-center">
+          <div className="w-6 shrink-0 flex justify-center">
             {isModified && (
               <Button
                 variant="subtle"
@@ -347,7 +347,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
 
       return (
         <div className="flex items-center gap-1.5 py-0.5">
-          <div className="w-2/5 shrink-0 truncate">
+          <div className="w-[46%] shrink-0 truncate">
             <span
               className={`text-xs font-medium ${isModified ? 'text-pf-warning' : 'text-pf-text-secondary'}`}
               title={meta.tooltip}
@@ -386,7 +386,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
               </div>
             ))}
           </div>
-          <div className="w-7 shrink-0 flex justify-center">
+          <div className="w-6 shrink-0 flex justify-center">
             {isModified && (
               <Button
                 variant="subtle"

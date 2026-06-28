@@ -12,12 +12,61 @@ import { toast } from 'sonner';
 import { FacePaintOverlay } from './FacePaintOverlay';
 import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
+import { PlateBedOverlay } from './PlateBedOverlay';
 import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
+import {
+  detectMajorFaces,
+  computeAutoOrientation,
+  computeBedPlacementZ,
+} from '@/features/slicer/utils/autoOrient';
+import { localizeDragTarget } from '@/features/slicer/utils/bedDrag';
 
 // W4: Module-level constant to avoid creating new Set on every render
 const EMPTY_FACE_SET = new Set<number>();
 const EMPTY_COLOR_FACE_MAP = new Map<number, number>();
+
+/**
+ * Walks an object's ancestry to determine whether it belongs to the active
+ * plate. Plate offset groups tag themselves with `userData.plateActive`; a mesh
+ * with no plate marker (e.g. the legacy single-plate scene) is treated as
+ * active. Used to scope measure / text raycasts to the active plate only so
+ * all-plates-visible mode doesn't produce cross-plate surprises.
+ */
+function meshIsOnActivePlate(obj: THREE.Object3D): boolean {
+  let node: THREE.Object3D | null = obj;
+  while (node) {
+    if (typeof node.userData?.plateActive === 'boolean') return node.userData.plateActive;
+    node = node.parent;
+  }
+  return true;
+}
+
+/**
+ * Offset wrapper for a single plate's bed + models. Tags itself with
+ * `userData.plateActive` so descendant model meshes can be scoped to the active
+ * plate by measure / text tools. Model positions inside stay bed-local; the
+ * group's position carries the grid offset.
+ */
+function PlateGroup({
+  offset,
+  active,
+  children,
+}: {
+  offset: [number, number, number];
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.userData.plateActive = active;
+  }, [active]);
+  return (
+    <group ref={ref} position={offset} userData={{ plateActive: active }}>
+      {children}
+    </group>
+  );
+}
 
 export interface LoadedModel {
   id: string;
@@ -42,11 +91,41 @@ export interface BedConfig {
   originCenter?: boolean; // If true, origin is at bed center; if false, at corner
 }
 
+/**
+ * Describes one build plate to render in the all-plates-visible grid. The
+ * world-space `offset` translates the plate's bed + models; model positions
+ * themselves stay bed-local. `modelIds` selects (and orders) which of the
+ * scene's `models` belong to this plate.
+ */
+export interface ScenePlate {
+  id: string;
+  name: string;
+  offset: [number, number, number];
+  active: boolean;
+  locked: boolean;
+  modelIds: string[];
+}
+
 export interface SlicerBedVisualizationProps {
   bedConfig: BedConfig;
   models?: LoadedModel[];
+  /**
+   * Build plates to render simultaneously in the grid. Each plate's models are
+   * resolved from the scene `models` by id and wrapped in an offset group so
+   * model positions stay bed-local. When omitted, all `models` render on a
+   * single active plate at offset [0,0,0] (legacy single-plate parity).
+   */
+  plates?: ScenePlate[];
   selectedModelId?: string;
   onModelSelect?: (modelId: string | null) => void;
+  /** Called when a plate's bed is clicked — makes that plate the active slice target. */
+  onPlateActivate?: (plateId: string) => void;
+  /** Per-plate in-scene overlay actions (rendered only when >1 plate). */
+  onPlateRename?: (plateId: string, name: string) => void;
+  onPlateDelete?: (plateId: string) => void;
+  onPlateArrange?: (plateId: string) => void;
+  onPlateOrient?: (plateId: string) => void;
+  onPlateToggleLock?: (plateId: string) => void;
   /** Active transform tool: 'translate' | 'rotate' | 'scale' */
   transformMode?: 'translate' | 'rotate' | 'scale' | null;
   /** Called when a model is moved/rotated/scaled via TransformControls */
@@ -86,6 +165,13 @@ export interface SlicerBedVisualizationProps {
   onLayFlatComplete?: () => void;
   /** Increment to trigger auto-orient on the selected model */
   autoOrientTrigger?: number;
+  /**
+   * Called when a model's processed geometry becomes available or is removed.
+   * Lets the parent maintain a modelId → geometry registry so it can run
+   * geometry-dependent operations (e.g. auto-orient) on non-selected models.
+   * Passes `null` when the model unmounts.
+   */
+  onModelGeometryChange?: (modelId: string, geometry: THREE.BufferGeometry | null) => void;
   /** When true, measure tool is active for point-to-point distance */
   measureMode?: boolean;
   /** When true, models are offset radially for exploded assembly inspection */
@@ -436,18 +522,31 @@ function PrintBedPlatform({
   textureUrl, 
   textureFormat,
   showGridLines,
+  active = true,
+  highlight = false,
+  onBedClick,
 }: { 
   width: number; 
   depth: number; 
   textureUrl?: string;
   textureFormat?: 'svg' | 'png';
   showGridLines?: boolean;
+  /** Whether this plate is the active slice target. */
+  active?: boolean;
+  /** When true (multi-plate only), render the active/inactive highlight chrome. */
+  highlight?: boolean;
+  /** Click handler on the bed surface — activates the plate / deselects. */
+  onBedClick?: () => void;
 }) {
   const shouldUsePngTexture = textureUrl && textureFormat === 'png';
   const shouldUseSvgTexture = textureUrl && textureFormat === 'svg';
 
+  // Highlight chrome is only applied when multiple plates are visible, so the
+  // single-plate view stays pixel-identical to the legacy layout.
+  const edgeColor = highlight ? (active ? '#3b82f6' : '#3a3a52') : '#4a4a6a';
+
   return (
-    <group>
+    <group onClick={onBedClick ? (e) => { e.stopPropagation(); onBedClick(); } : undefined}>
       {/* Main bed surface */}
       {shouldUsePngTexture ? (
         <TextureFallbackBoundary fallback={<PlainPrintBed width={width} depth={depth} />}>
@@ -466,7 +565,7 @@ function PrintBedPlatform({
         <edgesGeometry attach="geometry">
           <planeGeometry args={[width, depth]} />
         </edgesGeometry>
-        <lineBasicMaterial color="#4a4a6a" linewidth={2} />
+        <lineBasicMaterial color={edgeColor} linewidth={2} />
       </lineSegments>
 
       {/* Grid lines — always shown when toggled on, otherwise only for plain beds */}
@@ -618,95 +717,6 @@ function SelectionBoundingBox({ geometry, outOfBounds = false }: { geometry: THR
 }
 
 /**
- * Detect major planar face groups from a geometry by clustering triangles
- * with similar normals. Returns the most significant faces sorted by area.
- */
-function detectMajorFaces(
-  geometry: THREE.BufferGeometry,
-  minAreaFraction = 0.005,
-  maxFaces = 14,
-): Array<{ normal: THREE.Vector3; center: THREE.Vector3; area: number }> {
-  const posAttr = geometry.getAttribute('position');
-  if (!posAttr) return [];
-
-  const index = geometry.getIndex();
-  const triCount = index ? index.count / 3 : posAttr.count / 3;
-
-  const vA = new THREE.Vector3();
-  const vB = new THREE.Vector3();
-  const vC = new THREE.Vector3();
-  const edge1 = new THREE.Vector3();
-  const edge2 = new THREE.Vector3();
-  const fn = new THREE.Vector3();
-
-  interface FaceCluster {
-    weightedNormal: THREE.Vector3;
-    weightedCenter: THREE.Vector3;
-    totalArea: number;
-  }
-
-  const clusters: FaceCluster[] = [];
-  const ANGLE_THRESHOLD = 0.95; // ~18°
-  let totalArea = 0;
-
-  for (let i = 0; i < triCount; i++) {
-    if (index) {
-      vA.fromBufferAttribute(posAttr, index.getX(i * 3));
-      vB.fromBufferAttribute(posAttr, index.getX(i * 3 + 1));
-      vC.fromBufferAttribute(posAttr, index.getX(i * 3 + 2));
-    } else {
-      vA.fromBufferAttribute(posAttr, i * 3);
-      vB.fromBufferAttribute(posAttr, i * 3 + 1);
-      vC.fromBufferAttribute(posAttr, i * 3 + 2);
-    }
-
-    edge1.subVectors(vB, vA);
-    edge2.subVectors(vC, vA);
-    fn.crossVectors(edge1, edge2);
-    const area = fn.length() / 2;
-    if (area < 1e-6) continue;
-    fn.normalize();
-    totalArea += area;
-
-    const cx = (vA.x + vB.x + vC.x) / 3;
-    const cy = (vA.y + vB.y + vC.y) / 3;
-    const cz = (vA.z + vB.z + vC.z) / 3;
-
-    let matched = false;
-    for (const cluster of clusters) {
-      if (cluster.weightedNormal.clone().normalize().dot(fn) > ANGLE_THRESHOLD) {
-        cluster.weightedNormal.addScaledVector(fn, area);
-        cluster.weightedCenter.x += cx * area;
-        cluster.weightedCenter.y += cy * area;
-        cluster.weightedCenter.z += cz * area;
-        cluster.totalArea += area;
-        matched = true;
-        break;
-      }
-    }
-
-    if (!matched) {
-      clusters.push({
-        weightedNormal: fn.clone().multiplyScalar(area),
-        weightedCenter: new THREE.Vector3(cx * area, cy * area, cz * area),
-        totalArea: area,
-      });
-    }
-  }
-
-  const minArea = totalArea * minAreaFraction;
-  return clusters
-    .filter((c) => c.totalArea >= minArea)
-    .map((c) => ({
-      normal: c.weightedNormal.normalize(),
-      center: c.weightedCenter.divideScalar(c.totalArea),
-      area: c.totalArea,
-    }))
-    .sort((a, b) => b.area - a.area)
-    .slice(0, maxFaces);
-}
-
-/**
  * Oval swatch indicators rendered on major faces of a model.
  * Size is proportional to the face area. Shown in lay-flat mode
  * so the user can click a face to orient it downward.
@@ -791,35 +801,15 @@ function FaceSwatches({
 
 /**
  * Compute the data-model position Z that places the transformed model on the bed (z=0).
- * STLModel offsets by halfZ internally, so we account for that.
+ * STLModel offsets by halfZ internally, so we account for that. Thin wrapper over the
+ * pure {@link computeBedPlacementZ} util to keep a single source of truth for the math.
  */
 function computeZForBedPlacement(
   geometry: THREE.BufferGeometry,
   q: THREE.Quaternion,
   scale: THREE.Vector3 = new THREE.Vector3(1, 1, 1),
 ): number {
-  const posAttr = geometry.getAttribute('position');
-  if (!posAttr) return 0;
-
-  const v = new THREE.Vector3();
-  let minRotatedZ = Infinity;
-  for (let i = 0; i < posAttr.count; i++) {
-    v.fromBufferAttribute(posAttr, i);
-    v.multiply(scale).applyQuaternion(q);
-    if (v.z < minRotatedZ) minRotatedZ = v.z;
-  }
-
-  // Both STLModel and PrebuiltSTLModel offset group.z by halfZ:
-  //   STLModel (centered geo): halfZ = (max.z - min.z) / 2 = -min.z (since centered)
-  //   PrebuiltSTLModel (uncentered cut geo): halfZ = -min.z
-  // Using -min.z works universally for both model types.
-  // World Z of lowest vertex = data_pz + halfZ + minScaledRotatedZ.
-  // For bed placement (lowest at 0): data_pz = -halfZ - minScaledRotatedZ.
-  geometry.computeBoundingBox();
-  const halfZ = geometry.boundingBox
-    ? -geometry.boundingBox.min.z
-    : 0;
-  return -halfZ - minRotatedZ;
+  return computeBedPlacementZ(geometry, q, scale);
 }
 
 /**
@@ -840,11 +830,13 @@ function STLModel({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
 }: { 
   url: string;
   position?: [number, number, number];
@@ -854,6 +846,7 @@ function STLModel({
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -863,6 +856,7 @@ function STLModel({
     currentScale: [number, number, number];
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
 }) {
   const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Group>(null);
@@ -920,6 +914,13 @@ function STLModel({
     }
   }, [geometry, halfZ, ref]);
 
+  // Publish geometry to the parent registry so geometry-dependent operations
+  // (e.g. auto-orient a whole plate) can reach non-selected models too.
+  useEffect(() => {
+    onGeometryReady?.(geometry);
+    return () => onGeometryReady?.(null);
+  }, [geometry, onGeometryReady]);
+
   // Group origin = volumetric center. Position Z is offset by halfZ so the
   // data-model position.z=0 means "sitting on the bed".
   return (
@@ -961,6 +962,8 @@ function STLModel({
           color="#009688"
           metalness={0.05}
           roughness={0.7}
+          transparent={dimmed}
+          opacity={dimmed ? 0.4 : 1}
         />
         {selected && <SelectionBoundingBox geometry={geometry} outOfBounds={outOfBounds} />}
       </mesh>
@@ -981,11 +984,13 @@ function UrlModelViewer({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
 }: {
   fileType: LoadedModel['fileType'];
   url: string;
@@ -996,6 +1001,7 @@ function UrlModelViewer({
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -1005,6 +1011,7 @@ function UrlModelViewer({
     currentScale: [number, number, number];
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
 }) {
   if (fileType === '3mf') {
     return (
@@ -1017,11 +1024,13 @@ function UrlModelViewer({
         outOfBounds={outOfBounds}
         layFlatMode={layFlatMode}
         draggable={draggable}
+        dimmed={dimmed}
         onClick={onClick}
         onDragStart={onDragStart}
         meshRef={meshRef}
         onSelectedMetrics={onSelectedMetrics}
         onLayFlatFaceClick={onLayFlatFaceClick}
+        onGeometryReady={onGeometryReady}
         renderSelectionBoundingBox={(geometry, isOutOfBounds) => (
           <SelectionBoundingBox geometry={geometry} outOfBounds={isOutOfBounds} />
         )}
@@ -1042,11 +1051,13 @@ function UrlModelViewer({
       outOfBounds={outOfBounds}
       layFlatMode={layFlatMode}
       draggable={draggable}
+      dimmed={dimmed}
       onClick={onClick}
       onDragStart={onDragStart}
       meshRef={meshRef}
       onSelectedMetrics={onSelectedMetrics}
       onLayFlatFaceClick={onLayFlatFaceClick}
+      onGeometryReady={onGeometryReady}
     />
   );
 }
@@ -1065,11 +1076,13 @@ function PrebuiltSTLModel({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
 }: {
   inputGeometry: THREE.BufferGeometry;
   position?: [number, number, number];
@@ -1079,6 +1092,7 @@ function PrebuiltSTLModel({
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
@@ -1088,6 +1102,7 @@ function PrebuiltSTLModel({
     currentScale: [number, number, number];
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
 }) {
   const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;
@@ -1136,6 +1151,12 @@ function PrebuiltSTLModel({
     }
   }, [geometry, halfZ, ref]);
 
+  // Publish geometry to the parent registry (see STLModel for rationale).
+  useEffect(() => {
+    onGeometryReady?.(geometry);
+    return () => onGeometryReady?.(null);
+  }, [geometry, onGeometryReady]);
+
   return (
     <group
       ref={ref as React.RefObject<THREE.Group | null>}
@@ -1175,6 +1196,8 @@ function PrebuiltSTLModel({
           color="#009688"
           metalness={0.05}
           roughness={0.7}
+          transparent={dimmed}
+          opacity={dimmed ? 0.4 : 1}
         />
         {selected && <SelectionBoundingBox geometry={geometry} outOfBounds={outOfBounds} />}
       </mesh>
@@ -1190,21 +1213,52 @@ function PrebuiltSTLModel({
  * OrbitControls ref is exposed so TransformControls can disable orbiting during drag.
  */
 function CameraController({ 
-  bedWidth, bedDepth, bedHeight, orbitRef 
+  bedHeight, gridRadius, orbitRef 
 }: { 
-  bedWidth: number; bedDepth: number; bedHeight: number;
+  bedHeight: number;
+  /** Half-extent of the full plate grid (max over plates of |offset| + bed/2). */
+  gridRadius: number;
   orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
 }) {
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
 
+  // Remember the grid radius we last framed so we can avoid yanking the camera
+  // back to the default isometric pose on every plate add/remove. We only
+  // re-frame when the grid GROWS beyond the envelope we previously framed (new
+  // content would otherwise fall outside the view); shrinking the grid (e.g.
+  // deleting a plate) keeps the user's current orbit untouched.
+  const framedRadiusRef = useRef<number | null>(null);
+
+  // Frame the WHOLE grid. Framing is instant (no animation) — we never animate
+  // the camera on plate selection.
   useEffect(() => {
-    const maxDimension = Math.max(bedWidth, bedDepth, bedHeight);
-    const distance = maxDimension * 1.5;
+    const prev = framedRadiusRef.current;
+    // Skip re-framing when the grid did not grow past what we already framed.
+    if (prev !== null && gridRadius <= prev + 1e-3) {
+      return;
+    }
+    framedRadiusRef.current = gridRadius;
+
+    // n=1 → gridRadius*2 == max(bedW,bedD), so span == max(bedW,bedD,bedH) and
+    // distance == maxDimension*1.5 — identical framing to the legacy single bed.
+    const span = Math.max(gridRadius * 2, bedHeight);
+    const distance = span * 1.5;
     camera.position.set(distance * 0.7, -distance * 0.7, distance * 0.6);
     camera.up.set(0, 0, 1); // Enforce Z-up for 3D printing convention
     camera.lookAt(0, 0, bedHeight / 4);
     camera.updateProjectionMatrix();
-  }, [camera, bedWidth, bedDepth, bedHeight]);
+    // Sync OrbitControls' own target to the look-at point. Without this the
+    // controls keep their previous internal target and snap the camera back on
+    // the next user interaction (visible when the grid re-frames on add/remove).
+    if (orbitRef.current) {
+      orbitRef.current.target.set(0, 0, bedHeight / 4);
+      orbitRef.current.update();
+    }
+    invalidate(); // frameloop="demand": redraw after re-framing
+  }, [camera, invalidate, bedHeight, gridRadius, orbitRef]);
+
+  // Allow zooming out far enough to see the entire grid, with headroom.
+  const maxDistance = Math.max(2000, gridRadius * 8);
 
   return (
     <OrbitControls
@@ -1214,7 +1268,7 @@ function CameraController({
       enableRotate={true}
       enableZoom={true}
       minDistance={50}
-      maxDistance={2000}
+      maxDistance={maxDistance}
       dampingFactor={0.05}
       rotateSpeed={0.8}
       zoomSpeed={1.2}
@@ -1421,10 +1475,11 @@ function useBuildPlateDrag({
       const hit = getPlaneIntersection(e.clientX, e.clientY);
       if (!hit) return;
 
-      const halfW = bedConfig.width / 2;
-      const halfD = bedConfig.depth / 2;
-      const nx = Math.max(-halfW, Math.min(halfW, hit.x + drag.offset.x));
-      const ny = Math.max(-halfD, Math.min(halfD, hit.y + drag.offset.y));
+      const [nx, ny] = localizeDragTarget(
+        { x: hit.x, y: hit.y },
+        { x: drag.offset.x, y: drag.offset.y },
+        { width: bedConfig.width, depth: bedConfig.depth },
+      );
 
       const model = modelsRef.current.find((m) => m.id === drag.modelId);
       if (!model) return;
@@ -1537,10 +1592,10 @@ function MeasureTool() {
       );
       raycaster.setFromCamera(ndc, camera);
 
-      // Raycast against all mesh children in the scene
+      // Raycast against active-plate mesh children only
       const meshes: THREE.Object3D[] = [];
       scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh) meshes.push(obj);
+        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh && meshIsOnActivePlate(obj)) meshes.push(obj);
       });
       const hits = raycaster.intersectObjects(meshes, false);
       if (hits.length === 0) return;
@@ -1666,7 +1721,7 @@ function TextPlacementTool({ onPlace }: { onPlace: (point: THREE.Vector3, normal
 
       const meshes: THREE.Object3D[] = [];
       scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh) meshes.push(obj);
+        if ((obj as THREE.Mesh).isMesh && obj.userData.isModelMesh && meshIsOnActivePlate(obj)) meshes.push(obj);
       });
 
       const hits = raycaster.intersectObjects(meshes, false);
@@ -1691,8 +1746,15 @@ function TextPlacementTool({ onPlace }: { onPlace: (point: THREE.Vector3, normal
 function BedScene({
   bedConfig,
   models = [],
+  plates,
   selectedModelId,
   onModelSelect,
+  onPlateActivate,
+  onPlateRename,
+  onPlateDelete,
+  onPlateArrange,
+  onPlateOrient,
+  onPlateToggleLock,
   transformMode,
   onModelTransform,
   onSelectedModelMetricsChange,
@@ -1702,6 +1764,7 @@ function BedScene({
   layFlatMode = false,
   onLayFlatComplete,
   autoOrientTrigger = 0,
+  onModelGeometryChange,
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
@@ -1731,6 +1794,18 @@ function BedScene({
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Object3D>(null);
 
+  // Stable-per-render map of per-model geometry registrars. Built with useMemo
+  // (not a ref) so we never read a ref during render. Each registrar forwards
+  // the model's processed geometry up to the parent's registry so non-selected
+  // models can still be auto-oriented.
+  const geometryRegistrars = useMemo(() => {
+    const map = new Map<string, (g: THREE.BufferGeometry | null) => void>();
+    for (const model of models) {
+      map.set(model.id, (g: THREE.BufferGeometry | null) => onModelGeometryChange?.(model.id, g));
+    }
+    return map;
+  }, [models, onModelGeometryChange]);
+
   // Disable orbit controls while painting on the model
   const handlePaintingStateChange = useCallback((isPainting: boolean) => {
     if (orbitRef.current) {
@@ -1746,6 +1821,34 @@ function BedScene({
     layFlatMode,
     transformMode,
   });
+
+  // Resolve the plate descriptors into rendered plates carrying their own
+  // models. When no plates are supplied, fall back to a single active plate
+  // holding every model at offset [0,0,0] (legacy single-plate parity).
+  const renderPlates = useMemo(() => {
+    const byId = new Map(models.map(m => [m.id, m]));
+    const source: ScenePlate[] = plates && plates.length > 0
+      ? plates
+      : [{ id: '__single__', name: 'Plate', offset: [0, 0, 0], active: true, locked: false, modelIds: models.map(m => m.id) }];
+    return source.map(p => ({
+      ...p,
+      models: p.modelIds.map(id => byId.get(id)).filter((m): m is LoadedModel => m != null),
+    }));
+  }, [plates, models]);
+
+  const multiPlate = renderPlates.length > 1;
+  const activePlate = renderPlates.find(p => p.active) ?? renderPlates[0];
+  const activePlateLocked = activePlate?.locked ?? false;
+
+  // Half-extent of the whole grid, used to frame the camera and raise the
+  // zoom-out limit. n=1 → max(width,depth)/2 (legacy single-bed framing).
+  const gridRadius = useMemo(() => {
+    let radius = Math.max(width, depth) / 2;
+    for (const p of renderPlates) {
+      radius = Math.max(radius, Math.abs(p.offset[0]) + width / 2, Math.abs(p.offset[1]) + depth / 2);
+    }
+    return radius;
+  }, [renderPlates, width, depth]);
 
   const dragStartTransformRef = useRef<{
     position: [number, number, number];
@@ -1818,6 +1921,18 @@ function BedScene({
     onSelectedModelMetricsChange?.(null);
   }, [justDraggedRef, onModelSelect, onSelectedModelMetricsChange]);
 
+  // Clicking a plate's bed activates that plate (slice target) and clears the
+  // current selection — mirroring the legacy "click empty bed to deselect"
+  // behavior while also switching the active plate (requirement: highlight and
+  // slice target never diverge). For the single-plate scene this is a plain
+  // deselect, identical to before.
+  const handleBedClick = useCallback((plateId: string) => {
+    if (justDraggedRef.current) return;
+    onPlateActivate?.(plateId);
+    onModelSelect?.(null);
+    onSelectedModelMetricsChange?.(null);
+  }, [justDraggedRef, onPlateActivate, onModelSelect, onSelectedModelMetricsChange]);
+
   useEffect(() => {
     if (!selectedModelId) {
       onSelectedModelMetricsChange?.(null);
@@ -1857,137 +1972,42 @@ function BedScene({
     const geo: THREE.BufferGeometry | undefined = obj.userData.geometry;
     if (!geo) return;
 
-    const faces = detectMajorFaces(geo, 0.005, 20);
+    const scaleArr: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
+    const result = computeAutoOrientation(geo, scaleArr);
+    if (!result) return;
 
-    // Build candidate normals: face normals + 6 principal axes
-    const candidateNormals: THREE.Vector3[] = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, -1, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1),
-    ];
-    for (const face of faces) {
-      candidateNormals.push(face.normal);
-    }
-
-    // Precompute per-triangle normals and areas for overhang scoring
-    const posAttr = geo.getAttribute('position');
-    const index = geo.getIndex();
-    const triCount = index ? index.count / 3 : posAttr.count / 3;
-    const triNormals: THREE.Vector3[] = [];
-    const triAreas: number[] = [];
-    const triCentroids: THREE.Vector3[] = [];
-    let totalArea = 0;
-    const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tC = new THREE.Vector3();
-    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), tn = new THREE.Vector3();
-    for (let i = 0; i < triCount; i++) {
-      if (index) {
-        tA.fromBufferAttribute(posAttr, index.getX(i * 3));
-        tB.fromBufferAttribute(posAttr, index.getX(i * 3 + 1));
-        tC.fromBufferAttribute(posAttr, index.getX(i * 3 + 2));
-      } else {
-        tA.fromBufferAttribute(posAttr, i * 3);
-        tB.fromBufferAttribute(posAttr, i * 3 + 1);
-        tC.fromBufferAttribute(posAttr, i * 3 + 2);
-      }
-      e1.subVectors(tB, tA);
-      e2.subVectors(tC, tA);
-      tn.crossVectors(e1, e2);
-      const area = tn.length() / 2;
-      if (area < 1e-6) {
-        triNormals.push(new THREE.Vector3(0, 0, 1));
-        triAreas.push(0);
-        triCentroids.push(new THREE.Vector3());
-        continue;
-      }
-      triNormals.push(tn.clone().normalize());
-      triAreas.push(area);
-      triCentroids.push(new THREE.Vector3().addVectors(tA, tB).add(tC).multiplyScalar(1 / 3));
-      totalArea += area;
-    }
-
-    // Evaluate each candidate: score by height + unsupported-overhang penalty
-    const OVERHANG_THRESH = -0.5; // ~60° from horizontal
-    const OVERHANG_WEIGHT = 2.0;
-    const SUPPORT_Z_TOL_MM = 0.8;
-    const v = new THREE.Vector3();
-    const rn = new THREE.Vector3();
-    const rc = new THREE.Vector3();
     const scaleVec = new THREE.Vector3(obj.scale.x, obj.scale.y, obj.scale.z);
-    let bestQ: THREE.Quaternion | null = null;
-    let bestScore = Infinity;
-
-    for (const normal of candidateNormals) {
-      const candidateQ = new THREE.Quaternion().setFromUnitVectors(
-        normal,
-        new THREE.Vector3(0, 0, -1),
-      );
-
-      // Height from scaled + rotated vertices
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (let i = 0; i < posAttr.count; i++) {
-        v.fromBufferAttribute(posAttr, i);
-        v.multiply(scaleVec).applyQuaternion(candidateQ);
-        if (v.z < minZ) minZ = v.z;
-        if (v.z > maxZ) maxZ = v.z;
-      }
-      const height = maxZ - minZ;
-
-      // Overhang area from triangles, excluding surfaces effectively supported by the bed.
-      let overhangArea = 0;
-      for (let i = 0; i < triCount; i++) {
-        rn.copy(triNormals[i]).applyQuaternion(candidateQ);
-        if (rn.z >= OVERHANG_THRESH) continue;
-
-        rc.copy(triCentroids[i]).multiply(scaleVec).applyQuaternion(candidateQ);
-        const isBedSupported = rc.z <= minZ + SUPPORT_Z_TOL_MM;
-        if (!isBedSupported) {
-          overhangArea += triAreas[i];
-        }
-      }
-      const overhangRatio = totalArea > 0 ? overhangArea / totalArea : 0;
-
-      // Keep height as a first-order term, but strongly penalize unsupported overhang.
-      const score = height * (1 + OVERHANG_WEIGHT * overhangRatio);
-      if (score < bestScore) {
-        bestScore = score;
-        bestQ = candidateQ;
-      }
-    }
-
-    if (!bestQ) return;
-    const euler = new THREE.Euler().setFromQuaternion(bestQ);
-    const dataZ = computeZForBedPlacement(geo, bestQ, scaleVec);
+    const dataZ = computeZForBedPlacement(geo, result.quaternion, scaleVec);
 
     onModelTransform(
       selectedModelId,
       [obj.position.x, obj.position.y, dataZ],
-      [euler.x, euler.y, euler.z],
+      result.rotation,
       obj.scale.toArray() as [number, number, number],
       { recordHistory: true, actionLabel: 'Auto-Orient' },
     );
   }, [autoOrientTrigger, onModelTransform, selectedModelId]);
 
-  // Assembly view: compute radial offsets from centroid
+  // Assembly view: compute radial offsets from centroid of the ACTIVE plate's
+  // models (assembly inspection is per active plate so other plates aren't
+  // dragged into the explode).
   const assemblyPositions = useMemo(() => {
-    if (!assemblyViewActive || models.length < 2) return null;
-    const cx = models.reduce((s, m) => s + m.position[0], 0) / models.length;
-    const cy = models.reduce((s, m) => s + m.position[1], 0) / models.length;
+    const activeModels = activePlate?.models ?? models;
+    if (!assemblyViewActive || activeModels.length < 2) return null;
+    const cx = activeModels.reduce((s, m) => s + m.position[0], 0) / activeModels.length;
+    const cy = activeModels.reduce((s, m) => s + m.position[1], 0) / activeModels.length;
     const MIN_DISPLACEMENT = 30;
     const SCALE_FACTOR = 1.5;
     const map = new Map<string, [number, number, number]>();
-    for (const model of models) {
+    for (const model of activeModels) {
       const dx = model.position[0] - cx;
       const dy = model.position[1] - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
       let ox: number, oy: number;
       if (dist < 0.01) {
         // Model at centroid — push outward along arbitrary direction based on index
-        const idx = models.indexOf(model);
-        const angle = (idx / models.length) * Math.PI * 2;
+        const idx = activeModels.indexOf(model);
+        const angle = (idx / activeModels.length) * Math.PI * 2;
         ox = Math.cos(angle) * MIN_DISPLACEMENT;
         oy = Math.sin(angle) * MIN_DISPLACEMENT;
       } else {
@@ -2004,7 +2024,7 @@ function BedScene({
       ]);
     }
     return map;
-  }, [assemblyViewActive, models]);
+  }, [assemblyViewActive, activePlate, models]);
 
   // Split: connected component analysis via union-find
   const lastSplitRef = useRef(0);
@@ -2099,26 +2119,12 @@ function BedScene({
       <directionalLight position={[-width, depth, height]} intensity={0.18} />
 
       {/* Camera controls */}
-      <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
+      <CameraController bedHeight={height} gridRadius={gridRadius} orbitRef={orbitRef} />
 
-      {/* Print bed — hidden during paint mode */}
-      {!hideBed && (
-        <PrintBedPlatform 
-          width={width} 
-          depth={depth} 
-          textureUrl={textureUrl}
-          textureFormat={textureFormat}
-          showGridLines={showGridLines}
-        />
-      )}
-
-      {/* Build volume wireframe */}
-      {!hideBed && <BuildVolumeWireframe width={width} depth={depth} height={height} />}
-
-      {/* Axis indicators */}
-      {!hideBed && showAxes && <AxisIndicators size={Math.min(width, depth) * 0.15} />}
-
-      {/* Loaded models */}
+      {/* Build plates — each plate's bed + models live in an offset group so
+          model positions stay bed-local (the group carries the grid offset).
+          For a single plate the offset is [0,0,0] → identical to the legacy
+          layout. */}
       <group onPointerMissed={handlePointerMissed}>
         {(() => {
           // m3: single source of truth for "any tool/mode active that should
@@ -2136,58 +2142,26 @@ function BedScene({
             textPlacementMode ||
             transformMode === 'rotate' ||
             transformMode === 'scale';
-          return models.map((model) => {
-          const displayPos = assemblyPositions?.get(model.id) ?? model.position;
-          return (
-            <Suspense key={model.id} fallback={<LoadingIndicator />}>
-              {(model.fileType === 'stl' || model.fileType === '3mf') && (
-                model.geometry ? (
-                  <PrebuiltSTLModel
-                    inputGeometry={model.geometry}
-                    position={displayPos}
-                    rotation={model.rotation}
-                    scale={model.scale}
-                    selected={model.id === selectedModelId}
-                    outOfBounds={outOfBoundsModelIds?.has(model.id)}
-                    layFlatMode={model.id === selectedModelId && layFlatMode}
-                    draggable={!isToolActive}
-                    onClick={() => onModelSelect?.(model.id)}
-                    onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
-                    onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
-                    meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
-                    onSelectedMetrics={model.id === selectedModelId
-                      ? (metrics) => onSelectedModelMetricsChange?.({
-                        modelId: model.id,
-                        baseSize: metrics.baseSize,
-                        currentSize: metrics.currentSize,
-                        currentScale: metrics.currentScale,
-                      })
-                      : undefined}
-                  />
-                ) : (
-                  <ModelViewerErrorBoundary
-                    resetKey={`${model.id}:${model.viewerUrl ?? model.url}`}
-                    fallback={(
-                      <Html center>
-                        <div
-                          className="max-w-xs rounded-lg border border-pf-border bg-pf-bg-1/95 px-4 py-3 text-center text-sm text-pf-text-primary shadow-lg backdrop-blur-sm"
-                          role="alert"
-                        >
-                          Failed to load this 3D model. Select another model or retry with a refreshed source.
-                        </div>
-                      </Html>
-                    )}
-                  >
-                    <UrlModelViewer
-                      fileType={model.fileType}
-                      url={model.viewerUrl ?? model.url}
+
+          const renderModel = (model: LoadedModel, dimmed: boolean, plateLocked: boolean) => {
+            const displayPos = assemblyPositions?.get(model.id) ?? model.position;
+            // Locked plates and inactive (dimmed) plates are not draggable so a
+            // stray drag can't mutate models the user isn't focused on.
+            const draggable = !isToolActive && !plateLocked && !dimmed;
+            return (
+              <Suspense key={model.id} fallback={<LoadingIndicator />}>
+                {(model.fileType === 'stl' || model.fileType === '3mf') && (
+                  model.geometry ? (
+                    <PrebuiltSTLModel
+                      inputGeometry={model.geometry}
                       position={displayPos}
                       rotation={model.rotation}
                       scale={model.scale}
                       selected={model.id === selectedModelId}
                       outOfBounds={outOfBoundsModelIds?.has(model.id)}
                       layFlatMode={model.id === selectedModelId && layFlatMode}
-                      draggable={!isToolActive}
+                      draggable={draggable}
+                      dimmed={dimmed}
                       onClick={() => onModelSelect?.(model.id)}
                       onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
                       onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
@@ -2200,13 +2174,105 @@ function BedScene({
                           currentScale: metrics.currentScale,
                         })
                         : undefined}
+                      onGeometryReady={geometryRegistrars.get(model.id)}
                     />
-                  </ModelViewerErrorBoundary>
-                )
+                  ) : (
+                    <ModelViewerErrorBoundary
+                      resetKey={`${model.id}:${model.viewerUrl ?? model.url}`}
+                      fallback={(
+                        <Html center>
+                          <div
+                            className="max-w-xs rounded-lg border border-pf-border bg-pf-bg-1/95 px-4 py-3 text-center text-sm text-pf-text-primary shadow-lg backdrop-blur-sm"
+                            role="alert"
+                          >
+                            Failed to load this 3D model. Select another model or retry with a refreshed source.
+                          </div>
+                        </Html>
+                      )}
+                    >
+                      <UrlModelViewer
+                        fileType={model.fileType}
+                        url={model.viewerUrl ?? model.url}
+                        position={displayPos}
+                        rotation={model.rotation}
+                        scale={model.scale}
+                        selected={model.id === selectedModelId}
+                        outOfBounds={outOfBoundsModelIds?.has(model.id)}
+                        layFlatMode={model.id === selectedModelId && layFlatMode}
+                        draggable={draggable}
+                        dimmed={dimmed}
+                        onClick={() => onModelSelect?.(model.id)}
+                        onDragStart={(cx, cy) => startDrag(model.id, cx, cy)}
+                        onLayFlatFaceClick={model.id === selectedModelId ? handleLayFlatFace : undefined}
+                        meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
+                        onSelectedMetrics={model.id === selectedModelId
+                          ? (metrics) => onSelectedModelMetricsChange?.({
+                            modelId: model.id,
+                            baseSize: metrics.baseSize,
+                            currentSize: metrics.currentSize,
+                            currentScale: metrics.currentScale,
+                          })
+                          : undefined}
+                        onGeometryReady={geometryRegistrars.get(model.id)}
+                      />
+                    </ModelViewerErrorBoundary>
+                  )
+                )}
+              </Suspense>
+            );
+          };
+
+          return renderPlates.map((plate, plateIndex) => (
+            <PlateGroup key={plate.id} offset={plate.offset} active={plate.active}>
+              {/* Print bed — hidden during paint mode */}
+              {!hideBed && (
+                <PrintBedPlatform
+                  width={width}
+                  depth={depth}
+                  textureUrl={textureUrl}
+                  textureFormat={textureFormat}
+                  showGridLines={showGridLines}
+                  active={plate.active}
+                  highlight={multiPlate}
+                  onBedClick={() => handleBedClick(plate.id)}
+                />
               )}
-            </Suspense>
-          );
-        });
+
+              {/* Build volume wireframe */}
+              {!hideBed && <BuildVolumeWireframe width={width} depth={depth} height={height} />}
+
+              {/* Axis indicators — only on the active plate to avoid clutter */}
+              {!hideBed && showAxes && plate.active && (
+                <AxisIndicators size={Math.min(width, depth) * 0.15} />
+              )}
+
+              {/* Per-plate chrome (number / title / actions). Suppressed at n=1
+                  to preserve legacy single-plate visual parity, and while the
+                  bed is hidden (paint/cut modes). */}
+              {multiPlate && !hideBed && (
+                <PlateBedOverlay
+                  plateNumber={plateIndex + 1}
+                  name={plate.name}
+                  active={plate.active}
+                  locked={plate.locked}
+                  canDelete={renderPlates.length > 1}
+                  bedWidth={width}
+                  bedDepth={depth}
+                  gridSpan={gridRadius * 2}
+                  onActivate={() => onPlateActivate?.(plate.id)}
+                  onRename={(name) => onPlateRename?.(plate.id, name)}
+                  onDelete={() => onPlateDelete?.(plate.id)}
+                  onArrange={() => onPlateArrange?.(plate.id)}
+                  onOrient={() => onPlateOrient?.(plate.id)}
+                  onToggleLock={() => onPlateToggleLock?.(plate.id)}
+                />
+              )}
+
+              {plate.models.map((model) =>
+                renderModel(model, multiPlate && !plate.active, plate.locked),
+              )}
+            </PlateGroup>
+          ));
         })()}
       </group>
 
@@ -2291,8 +2357,9 @@ function BedScene({
         />
       )}
 
-      {/* TransformControls for the selected model */}
-      {selectedModelId && transformMode && (
+      {/* TransformControls for the selected model — suppressed when the active
+          plate is locked (no gizmo, no transform). */}
+      {selectedModelId && transformMode && !activePlateLocked && (
         <ModelTransformControls
           meshRef={selectedMeshRef}
           mode={transformMode}
@@ -2315,8 +2382,15 @@ function BedScene({
 export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   bedConfig,
   models = [],
+  plates,
   selectedModelId,
   onModelSelect,
+  onPlateActivate,
+  onPlateRename,
+  onPlateDelete,
+  onPlateArrange,
+  onPlateOrient,
+  onPlateToggleLock,
   transformMode = null,
   onModelTransform,
   onSelectedModelMetricsChange,
@@ -2328,6 +2402,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   layFlatMode = false,
   onLayFlatComplete,
   autoOrientTrigger = 0,
+  onModelGeometryChange,
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
@@ -2386,8 +2461,15 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             <BedScene
               bedConfig={bedConfig}
               models={models}
+              plates={plates}
               selectedModelId={selectedModelId}
               onModelSelect={onModelSelect}
+              onPlateActivate={onPlateActivate}
+              onPlateRename={onPlateRename}
+              onPlateDelete={onPlateDelete}
+              onPlateArrange={onPlateArrange}
+              onPlateOrient={onPlateOrient}
+              onPlateToggleLock={onPlateToggleLock}
               transformMode={transformMode}
               onModelTransform={onModelTransform}
               onSelectedModelMetricsChange={onSelectedModelMetricsChange}
@@ -2397,6 +2479,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
               layFlatMode={layFlatMode}
               onLayFlatComplete={onLayFlatComplete}
               autoOrientTrigger={autoOrientTrigger}
+              onModelGeometryChange={onModelGeometryChange}
               measureMode={measureMode}
               assemblyViewActive={assemblyViewActive}
               splitTrigger={splitTrigger}

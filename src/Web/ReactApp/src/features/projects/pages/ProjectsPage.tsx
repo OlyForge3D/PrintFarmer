@@ -98,7 +98,7 @@ export const ProjectsPage: React.FC = () => {
 
  if (error) {
  return (
- <PageTemplate title="Projects" showHeader={false} padding="px-4" backgroundColor="bg-pf-bg-2">
+ <PageTemplate title="Projects" padding="px-4" backgroundColor="bg-pf-bg-2">
  <div className="p-4 text-pf-error">Failed to load projects: {String(error)}</div>
  </PageTemplate>
  );
@@ -108,7 +108,6 @@ export const ProjectsPage: React.FC = () => {
  <PageTemplate
  title="Projects"
  subtitle="Track multi-print jobs and progress"
- showHeader={false}
  padding="px-4"
  backgroundColor="bg-pf-bg-2"
  >
@@ -342,12 +341,12 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  <span>{project.completedPrints} / {project.totalPrints} prints</span>
  <span>{project.progressPercent}%</span>
  </div>
- <div className="h-2 bg-pf-bg-2 rounded-full overflow-hidden">
- <div
- className="h-full bg-pf-accent rounded-full transition-all duration-300"
- style={{ width: `${project.progressPercent}%` }}
+ <progress
+ value={project.progressPercent}
+ max={100}
+ aria-label={`${project.progressPercent}% complete`}
+ className="h-2 w-full overflow-hidden rounded-full bg-pf-bg-2 [&::-webkit-progress-bar]:bg-pf-bg-2 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-pf-accent [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-pf-accent"
  />
- </div>
  </div>
 
  {/* Footer info */}

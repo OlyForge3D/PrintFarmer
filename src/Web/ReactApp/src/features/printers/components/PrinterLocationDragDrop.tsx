@@ -145,7 +145,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold mb-2 text-pf-text-primary">Assign Printers to Locations</h1>
+        <h2 className="text-3xl font-bold mb-2 text-pf-text-primary">Assign Printers to Locations</h2>
         <p className="text-pf-text-secondary">Drag and drop printers to assign them to locations</p>
       </div>
 

@@ -73,13 +73,11 @@ export function SettingsPage({
     }
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
+  const loadSettings = useCallback(() => {
     setLoading(true);
     setError(null);
-    Promise.all([fetchSettingsMetadata(), fetchSettingsGroups()])
+    return Promise.all([fetchSettingsMetadata(), fetchSettingsGroups()])
       .then(async ([meta, groups]) => {
-        if (!mounted) return;
         setMetadata(meta);
         setGroupMetadata(groups);
         await refetchSettingsValues();
@@ -89,9 +87,12 @@ export function SettingsPage({
         setError('Failed to load settings metadata.');
         setLoading(false);
       });
-    return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch only on mount; URL changes within the settings shell should not retrigger
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchSettingsValues is stable; load should not re-run on its identity
   }, []);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
 
   const allowedGroupSet = useMemo(
     () => allowedGroups ? new Set(allowedGroups) : null,
@@ -262,8 +263,17 @@ export function SettingsPage({
 
   if (error) {
     return (
-      <div className="py-8 text-center text-pf-error" role="alert">
-        {error}
+      <div className="py-8 text-center" role="alert">
+        <p className="text-pf-error">{error}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mt-4"
+          onClick={() => void loadSettings()}
+        >
+          Retry
+        </Button>
       </div>
     );
   }

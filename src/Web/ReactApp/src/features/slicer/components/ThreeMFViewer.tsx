@@ -25,11 +25,13 @@ interface SharedModelViewerProps {
   outOfBounds?: boolean;
   layFlatMode?: boolean;
   draggable?: boolean;
+  dimmed?: boolean;
   onClick?: () => void;
   onDragStart?: (clientX: number, clientY: number) => void;
   meshRef?: React.RefObject<THREE.Object3D | null>;
   onSelectedMetrics?: (metrics: ViewerMetrics) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
+  onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
   renderSelectionBoundingBox: (geometry: THREE.BufferGeometry, outOfBounds?: boolean) => React.ReactNode;
   renderFaceSwatches: (geometry: THREE.BufferGeometry, onFaceClick: (normal: THREE.Vector3) => void) => React.ReactNode;
 }
@@ -149,11 +151,13 @@ function FallbackStlModel({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
   renderSelectionBoundingBox,
   renderFaceSwatches,
 }: SharedModelViewerProps) {
@@ -221,6 +225,11 @@ function FallbackStlModel({
     ref.current.userData.geometry = geometry;
   }, [geometry, halfZ, ref]);
 
+  useEffect(() => {
+    onGeometryReady?.(geometry);
+    return () => onGeometryReady?.(null);
+  }, [geometry, onGeometryReady]);
+
   return (
     <group
       ref={ref as React.RefObject<THREE.Group | null>}
@@ -256,7 +265,7 @@ function FallbackStlModel({
         castShadow
         receiveShadow
       >
-        <meshStandardMaterial color={DEFAULT_VIEWER_COLOR} metalness={0.05} roughness={0.7} />
+        <meshStandardMaterial color={DEFAULT_VIEWER_COLOR} metalness={0.05} roughness={0.7} transparent={dimmed} opacity={dimmed ? 0.4 : 1} />
         {selected ? renderSelectionBoundingBox(geometry, outOfBounds) : null}
       </mesh>
       {selected && layFlatMode && onLayFlatFaceClick ? renderFaceSwatches(geometry, onLayFlatFaceClick) : null}
@@ -273,11 +282,13 @@ export function ThreeMFViewer({
   outOfBounds = false,
   layFlatMode = false,
   draggable = false,
+  dimmed = false,
   onClick,
   onDragStart,
   meshRef,
   onSelectedMetrics,
   onLayFlatFaceClick,
+  onGeometryReady,
   renderSelectionBoundingBox,
   renderFaceSwatches,
 }: SharedModelViewerProps) {
@@ -379,6 +390,12 @@ export function ThreeMFViewer({
     ref.current.userData.geometry = displayData.selectionGeometry;
   }, [displayData, ref]);
 
+  useEffect(() => {
+    if (!displayData) return;
+    onGeometryReady?.(displayData.selectionGeometry);
+    return () => onGeometryReady?.(null);
+  }, [displayData, onGeometryReady]);
+
   if (fallbackUrl) {
     return (
       <group>
@@ -391,11 +408,13 @@ export function ThreeMFViewer({
           outOfBounds={outOfBounds}
           layFlatMode={layFlatMode}
           draggable={draggable}
+          dimmed={dimmed}
           onClick={onClick}
           onDragStart={onDragStart}
           meshRef={meshRef}
           onSelectedMetrics={onSelectedMetrics}
           onLayFlatFaceClick={onLayFlatFaceClick}
+          onGeometryReady={onGeometryReady}
           renderSelectionBoundingBox={renderSelectionBoundingBox}
           renderFaceSwatches={renderFaceSwatches}
         />
@@ -461,6 +480,8 @@ export function ThreeMFViewer({
             color={getExtruderColor(mesh.extruderIndex)}
             metalness={0.05}
             roughness={0.7}
+            transparent={dimmed}
+            opacity={dimmed ? 0.4 : 1}
           />
         </mesh>
       ))}

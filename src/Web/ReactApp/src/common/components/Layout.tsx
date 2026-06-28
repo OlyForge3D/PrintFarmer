@@ -10,6 +10,7 @@ import {
   PrinterIcon,
   LayersIcon,
   SettingsIcon,
+  DashboardIcon,
   MenuIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -31,7 +32,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
@@ -191,15 +192,12 @@ const navigation: NavigationElement[] = [
   {
     name: 'Admin Console',
     href: '/admin/manage',
-    icon: SettingsIcon,
+    icon: DashboardIcon,
     requiredRole: 'farm_admin',
     matches: (pathname) => pathname.startsWith('/admin/manage') || pathname.startsWith('/admin/system') || pathname.startsWith('/slice-jobs')
   },
 ];
 
-const MOBILE_TOP_BAR_HEIGHT_PX = 48;
-const EXPANDED_RAIL_WIDTH_PX = 248;
-const COLLAPSED_RAIL_WIDTH_PX = 64;
 const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
@@ -274,11 +272,10 @@ export function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-  const [navbarCollapsed, setNavbarCollapsed] = useState(() => {
+  const [navbarCollapsed, setNavbarCollapsed] = useState<boolean>(() => {
     const saved = localStorage.getItem(NAVBAR_COLLAPSED_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : false;
+    return saved ? Boolean(JSON.parse(saved)) : false;
   });
-  const [openCollapsedSection, setOpenCollapsedSection] = useState<string | null>(null);
   const desktopRailRef = useRef<HTMLDivElement | null>(null);
   const mobileDrawerAnnouncementRef = useRef<HTMLDivElement | null>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -286,8 +283,6 @@ export function Layout() {
   const sidebarAnnouncementTimeoutRef = useRef<number | null>(null);
   const previousSidebarOpenRef = useRef(false);
   const previousDrawerFocusRef = useRef<HTMLElement | null>(null);
-  const collapsedSectionTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const collapsedSectionPopoverRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
@@ -359,18 +354,6 @@ export function Layout() {
     setUserMenuOpen(false);
   };
 
-  const closeCollapsedSection = useCallback((returnFocus = false) => {
-    setOpenCollapsedSection((current) => {
-      if (returnFocus && current) {
-        window.requestAnimationFrame(() => {
-          collapsedSectionTriggerRefs.current[current]?.focus();
-        });
-      }
-
-      return null;
-    });
-  }, []);
-
   const announceMobileDrawer = useCallback((message: string) => {
     if (sidebarAnnouncementTimeoutRef.current !== null) {
       window.clearTimeout(sidebarAnnouncementTimeoutRef.current);
@@ -389,24 +372,7 @@ export function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!openCollapsedSection) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (desktopRailRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      closeCollapsedSection(true);
-    };
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [closeCollapsedSection, openCollapsedSection]);
-
-  useEffect(() => {
-    if (!sidebarOpen && !userMenuOpen && !openCollapsedSection) {
+    if (!sidebarOpen && !userMenuOpen) {
       return;
     }
 
@@ -414,28 +380,12 @@ export function Layout() {
       if (event.key === 'Escape') {
         setSidebarOpen(false);
         setUserMenuOpen(false);
-        closeCollapsedSection(true);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeCollapsedSection, sidebarOpen, userMenuOpen, openCollapsedSection]);
-
-  useEffect(() => {
-    if (!openCollapsedSection) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      const popover = collapsedSectionPopoverRefs.current[openCollapsedSection];
-      if (!focusFirstElement(popover)) {
-        popover?.focus();
-      }
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [openCollapsedSection]);
+  }, [sidebarOpen, userMenuOpen]);
 
   useEffect(() => {
     if (sidebarOpen) {
@@ -525,10 +475,7 @@ export function Layout() {
     setShowLoginModal(true);
   };
 
-  const desktopRailWidth = navbarCollapsed ? COLLAPSED_RAIL_WIDTH_PX : EXPANDED_RAIL_WIDTH_PX;
-  const desktopShellStyle = useMemo(() => ({
-    '--pf-layout-rail-width': `${desktopRailWidth}px`,
-  }) as CSSProperties, [desktopRailWidth]);
+  const desktopRailWidthClassName = navbarCollapsed ? 'lg:w-16' : 'lg:w-[248px]';
 
   return (
     <div className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
@@ -540,10 +487,39 @@ export function Layout() {
       </a>
       <div ref={mobileDrawerAnnouncementRef} className="sr-only" aria-live="polite" aria-atomic="true" />
 
-      <div
-        className="flex h-full min-h-0 flex-col lg:grid lg:grid-cols-[var(--pf-layout-rail-width)_minmax(0,1fr)]"
-        style={desktopShellStyle}
-      >
+      <div className="flex h-full min-h-0 flex-col">
+        <header
+          inert={sidebarOpen || undefined}
+          className="hidden shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-4 py-2 lg:flex"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
+            <div className="min-w-0">
+              <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
+            </div>
+            <span
+              className={clsx('ml-1 h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
+              title={isConnected ? 'Connected' : 'Disconnected'}
+              aria-label={isConnected ? 'Connected' : 'Disconnected'}
+            />
+          </div>
+
+          <FloatingControlBar
+            mobile
+            isAuthenticated={isAuthenticated}
+            userName={user?.username}
+            userMenuOpen={userMenuOpen}
+            onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
+            onCloseUserMenu={() => setUserMenuOpen(false)}
+            onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
+            onOpenPreferences={() => navigate('/settings')}
+            onOpenLogin={() => setShowLoginModal(true)}
+            onOpenRegister={() => setShowRegisterModal(true)}
+            onLogout={handleLogout}
+          />
+        </header>
+
+        <div className="flex flex-col lg:flex-row min-h-0 flex-1">
         <header
           inert={sidebarOpen || undefined}
           className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"
@@ -568,7 +544,7 @@ export function Layout() {
             <div className="flex min-w-0 items-center gap-2">
               <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
+                <div className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
               </div>
             </div>
           </div>
@@ -609,10 +585,9 @@ export function Layout() {
 
         <div
           className={clsx(
-            'fixed inset-x-0 bottom-0 z-50 lg:hidden',
+            'fixed inset-x-0 top-12 bottom-0 z-50 lg:hidden',
             sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
           )}
-          style={{ top: `${MOBILE_TOP_BAR_HEIGHT_PX}px` }}
           aria-hidden={!sidebarOpen}
           inert={!sidebarOpen}
         >
@@ -697,113 +672,49 @@ export function Layout() {
 
         <aside
           ref={desktopRailRef}
-          className="hidden h-screen min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex"
+          className={clsx('hidden h-full min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
           aria-label="Main navigation"
         >
           <div className="flex h-full min-h-0 w-full flex-col">
-            <div className={clsx('border-b border-pf-border', navbarCollapsed ? 'px-2 py-3' : 'px-4 py-4')}>
-              <div className={clsx('flex items-center', navbarCollapsed ? 'justify-center' : 'justify-between gap-3')}>
-                <div className={clsx('flex min-w-0 items-center', navbarCollapsed ? 'justify-center' : 'gap-3')}>
-                  <PrintFarmerLogoIcon decorative className="h-8 w-8 shrink-0 text-pf-accent" />
-                  {!navbarCollapsed && (
-                    <div className="min-w-0">
-                      <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
-                    </div>
-                  )}
-                </div>
-                {!navbarCollapsed && (
-                  <span
-                    className={clsx('h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
-                    title={isConnected ? 'Connected' : 'Disconnected'}
-                    aria-label={isConnected ? 'Connected' : 'Disconnected'}
-                  />
-                )}
-              </div>
-            </div>
-
             <nav
-              className={clsx('relative flex-1 min-h-0', navbarCollapsed ? 'overflow-visible px-2 py-3' : 'overflow-y-auto px-3 py-4')}
+              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-2' : 'px-3 py-4')}
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
-                <div className="space-y-2">
-                  {navigationGroups.map((group) => {
-                    const SectionIcon = group.header.icon;
-                    const isSectionActive = group.items.some((item) => isNavItemActive(item));
-                    const isOpen = openCollapsedSection === group.header.name;
-                    const popoverId = `rail-popover-${group.header.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+                <div className="space-y-1">
+                  {navigationGroups.map((group, groupIndex) => (
+                    <Fragment key={group.header.name}>
+                      {groupIndex > 0 && (
+                        <hr className="border-pf-border mx-2 my-2" aria-hidden="true" />
+                      )}
+                      <div className="flex flex-col items-center space-y-1" aria-label={group.header.name} role="group">
+                        {group.items.map((item) => {
+                          const ItemIcon = item.icon;
+                          const isActive = isNavItemActive(item);
 
-                    return (
-                      <div key={group.header.name} className="relative">
-                        <Button
-                          ref={(element) => {
-                            collapsedSectionTriggerRefs.current[group.header.name] = element;
-                          }}
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          className={clsx(
-                            'h-11 w-11 justify-center rounded-2xl border px-0',
-                            isSectionActive
-                              ? 'border-pf-accent bg-pf-accent/12 text-pf-accent'
-                              : 'border-pf-border text-pf-text-primary hover:bg-pf-bg-2'
-                          )}
-                          aria-label={group.header.name}
-                          title={group.header.name}
-                          aria-expanded={isOpen}
-                          aria-haspopup="dialog"
-                          aria-controls={isOpen ? popoverId : undefined}
-                          onClick={() => setOpenCollapsedSection((prev) => prev === group.header.name ? null : group.header.name)}
-                          iconCenter={<SectionIcon className="h-5 w-5" />}
-                        />
-
-                        {isOpen && (
-                          <div
-                            ref={(element) => {
-                              collapsedSectionPopoverRefs.current[group.header.name] = element;
-                            }}
-                            id={popoverId}
-                            role="dialog"
-                            aria-label={`${group.header.name} navigation`}
-                            tabIndex={-1}
-                            className="absolute left-full top-0 z-50 ml-3 w-64 rounded-2xl border border-pf-border bg-pf-bg-1 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]"
-                          >
-                            <div className="mb-1 flex items-center gap-3 rounded-xl px-2 py-2 text-sm font-semibold text-pf-text-primary">
+                          return (
+                            <NavLink
+                              key={item.href}
+                              to={item.href}
+                              title={item.name}
+                              aria-label={item.name}
+                              aria-current={isActive ? 'page' : undefined}
+                              className={clsx(
+                                'flex h-11 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                isActive
+                                  ? 'bg-pf-accent-bg/18 text-pf-accent'
+                                  : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                              )}
+                            >
                               <span aria-hidden="true">
-                                <SectionIcon className="h-5 w-5 text-pf-accent" />
+                                <ItemIcon className="h-5 w-5" />
                               </span>
-                              <span>{group.header.name}</span>
-                            </div>
-                            <div className="space-y-1">
-                              {group.items.map((item) => {
-                                const ItemIcon = item.icon;
-                                const isActive = isNavItemActive(item);
-
-                                return (
-                                  <NavLink
-                                    key={item.href}
-                                    to={item.href}
-                                    onClick={() => closeCollapsedSection()}
-                                    className={clsx(
-                                      'flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                                      isActive
-                                        ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
-                                        : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                                    )}
-                                  >
-                                    <span aria-hidden="true">
-                                      <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
-                                    </span>
-                                    <span className="flex-1 text-left">{item.name}</span>
-                                  </NavLink>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
+                            </NavLink>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </Fragment>
+                  ))}
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -897,7 +808,6 @@ export function Layout() {
                   size="sm"
                   className="w-full justify-center"
                   onClick={() => {
-                    setOpenCollapsedSection(null);
                     setNavbarCollapsed((prev) => !prev);
                   }}
                   iconCenter={navbarCollapsed ? <ChevronRightIcon className="h-5 w-5" /> : <ChevronLeftIcon className="h-5 w-5" />}
@@ -907,30 +817,17 @@ export function Layout() {
           </div>
         </aside>
 
-        <FloatingControlBar
-          isAuthenticated={isAuthenticated}
-          userName={user?.username}
-          userMenuOpen={userMenuOpen}
-          onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
-          onCloseUserMenu={() => setUserMenuOpen(false)}
-          onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
-          onOpenPreferences={() => navigate('/settings')}
-          onOpenLogin={() => setShowLoginModal(true)}
-          onOpenRegister={() => setShowRegisterModal(true)}
-          onLogout={handleLogout}
-        />
-
         <main
           id="main-content"
           data-main-content
           inert={sidebarOpen || undefined}
           tabIndex={-1}
-          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-screen"
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-full"
         >
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
-          <div className="px-2 pt-2 pb-4 lg:px-4 lg:pt-4 lg:pb-6">
+          <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2">
             <RouteErrorBoundary>
               <Suspense
                 fallback={
@@ -944,6 +841,7 @@ export function Layout() {
             </RouteErrorBoundary>
           </div>
         </main>
+        </div>
       </div>
 
       {userMenuOpen && (

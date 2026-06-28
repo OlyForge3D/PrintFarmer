@@ -328,7 +328,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             additionalModels = " " + string.Join(" ", effectiveModelPaths.Skip(1).Select(p => $"--load \"{p}\""));
         }
 
-        string plateFlag = job.PlateIndex.HasValue ? $" --plate {(job.PlateIndex.Value + 1)}" : string.Empty;
+        string plateFlag = job.PlateIndex.HasValue ? $" --plate { job.PlateIndex.Value + 1}" : string.Empty;
 
         string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag}{plateFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
 

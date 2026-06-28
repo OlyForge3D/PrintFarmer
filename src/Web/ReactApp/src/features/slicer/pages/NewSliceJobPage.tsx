@@ -18,26 +18,29 @@ import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
-import { AdvancedSettingsDisclosure } from '@/features/slicer/components/AdvancedSettingsDisclosure';
 import {
   SlicerSettingsPanel,
-  BED_TYPE_OPTIONS,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
+import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
 import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
+import {
+  classifyCustomProfileScope,
+  legacyMachineProfileMatchesPrinter,
+  legacyProcessProfileMatchesMachine,
+} from '../utils/customProfileScoping';
 import { isZipFile, extractOrcaBundle } from '@/features/slicer/orca/utils/orcaBundleExtractor';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select } from '@/common/components/ui';
+import { Button, Alert, Input, Select, ColorPicker } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { NozzleTypeLabels, NozzleTypeStringLabels } from '@/types/api';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
@@ -47,6 +50,7 @@ import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/sl
 import * as THREE from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
+import { buildSlicePayloadModels, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
@@ -69,14 +73,21 @@ function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undef
   // Parse settings from profile if available
   const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
 
-  return {
-    layer_height: profile.layerHeight,
-    sparse_infill_density: profile.infillPercentage,
-    outer_wall_speed: profile.printSpeed,
-    enable_support: profile.supports,
-    // Spread any additional parsed settings from profile.settings
+  // Merge the explicit profile values (raw JSON + the four promoted fields) and
+  // resolve a COMPLETE baseline: every metadata-known key gets a value (the
+  // profile's when present, otherwise its metadata default), coerced to the
+  // editor's native type. This ensures every editable field has an original
+  // value so the reset/modified affordance works for all settings, not just the
+  // ~50 a profile declares explicitly.
+  const merged: Record<string, unknown> = {
     ...profileSettings,
-  } as OrcaProcessSettings;
+    ...(profile.layerHeight !== undefined ? { layer_height: profile.layerHeight } : {}),
+    ...(profile.infillPercentage !== undefined ? { sparse_infill_density: profile.infillPercentage } : {}),
+    ...(profile.printSpeed !== undefined ? { outer_wall_speed: profile.printSpeed } : {}),
+    ...(profile.supports !== undefined ? { enable_support: profile.supports } : {}),
+  };
+
+  return resolveProcessSettingsBaseline(merged) as unknown as OrcaProcessSettings;
 }
 
 function formatNozzleDiameter(diameter: number): string {
@@ -138,28 +149,39 @@ function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile
   return Math.abs(profileNozzleDiameter - selectedDiameter) < NOZZLE_MATCH_TOLERANCE;
 }
 
-function getPrimaryNozzleTypeLabel(printer: PrinterForSlicing | undefined): string | undefined {
-  const toolhead = printer?.toolheads?.find((candidate) => candidate.isPrimary) ?? printer?.toolheads?.[0];
-  const nozzleType = toolhead?.nozzleType;
-
-  if (typeof nozzleType === 'number') {
-    return NozzleTypeLabels[nozzleType as keyof typeof NozzleTypeLabels];
-  }
-
-  if (typeof nozzleType !== 'string' || !nozzleType) {
-    return undefined;
-  }
-
-  const normalizedNozzleType = nozzleType.replace(/[^a-z0-9]/gi, '').toLowerCase();
-  const matchingKey = Object.keys(NozzleTypeStringLabels).find((key) => {
-    return key.replace(/[^a-z0-9]/gi, '').toLowerCase() === normalizedNozzleType;
-  });
-
-  return matchingKey ? NozzleTypeStringLabels[matchingKey] : nozzleType;
-}
-
 function profileMentionsHighFlow(text: string): boolean {
   return /\bhf\b/i.test(text);
+}
+
+const DEFAULT_FILAMENT_COLOUR = '888888';
+
+/** Normalize a hex string (with/without '#', 3 or 6 digits) to a 6-digit hex without '#'. */
+function normalizeHexNoHash(input: unknown): string | undefined {
+  if (typeof input !== 'string') return undefined;
+  const clean = input.replace(/^#/, '').trim();
+  if (/^[0-9a-fA-F]{6}$/.test(clean)) return clean.toUpperCase();
+  if (/^[0-9a-fA-F]{3}$/.test(clean)) {
+    return `${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`.toUpperCase();
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a filament profile's display colour (hex, no '#'), reading the
+ * OrcaSlicer `filament_colour` / `default_filament_colour` settings. Each may be
+ * a string or a per-extruder string array. Falls back to a neutral grey.
+ */
+function getFilamentProfileColour(profile: OrcaFilamentProfile | undefined): string {
+  const settings = profile?.settings;
+  if (settings) {
+    const candidates = [settings.filament_colour, settings.default_filament_colour];
+    for (const candidate of candidates) {
+      const raw = Array.isArray(candidate) ? candidate[0] : candidate;
+      const hex = normalizeHexNoHash(raw);
+      if (hex) return hex;
+    }
+  }
+  return DEFAULT_FILAMENT_COLOUR;
 }
 
 function getProcessLayerHeight(profile: OrcaProcessProfile): number {
@@ -182,7 +204,6 @@ export const NewSliceJobPage: React.FC = () => {
     machineProfileId: 'sliceJob.selectedMachineProfileId',
     filamentProfileId: 'sliceJob.selectedFilamentProfileId',
     processProfileId: 'sliceJob.selectedProcessProfileId',
-    spoolId: 'pf.sliceSpoolId',
   } as const;
 
   const { user } = useAuth();
@@ -217,8 +238,6 @@ export const NewSliceJobPage: React.FC = () => {
   // Material type filter for filament profile selection
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<string>('');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
-  // Optional Spoolman spool for cost estimation and queue routing
-  const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
 
   // === Cascading Profile Selection (OrcaSlicer-style) ===
   // Flow: Manufacturer → Printer Model → Machine Profile → Filament/Process filtered by machine
@@ -246,8 +265,13 @@ export const NewSliceJobPage: React.FC = () => {
   // Maps extruder index → filament profile name. Only used when printer has >1 physical toolhead.
   const [extruderFilamentProfileIds, setExtruderFilamentProfileIds] = useState<Record<number, string>>({});
 
-  // === Bed Type Override ===
-  const [selectedBedType, setSelectedBedType] = useState<string>('');
+  // Per-slice filament colour overrides (hex, no '#'). Keyed by extruder index;
+  // index 0 doubles as the single-filament colour. Defaults from the selected
+  // filament profile's filament_colour, user-overridable via the swatch.
+  const [extruderFilamentColours, setExtruderFilamentColours] = useState<Record<number, string>>({});
+
+  // Filament profile targeted by the per-row "edit" action (multi-extruder).
+  const [filamentEditProfile, setFilamentEditProfile] = useState<OrcaFilamentProfile | null>(null);
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
@@ -598,10 +622,9 @@ export const NewSliceJobPage: React.FC = () => {
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const jobProgress = useSliceJobProgress(submittedJobId);
 
-  // Snapshot of spool/cost/routing values captured at slice-submit time.
+  // Snapshot of cost/routing values captured at slice-submit time.
   // Keeps cost display and queue routing stable while sidebar stays editable.
   const [sliceSnapshot, setSliceSnapshot] = useState<{
-    spoolId: number | null;
     filamentCostPerKg: number | null;
     requiredPrinterModel: string | undefined;
     requiredMaterialType: string | undefined;
@@ -856,40 +879,25 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 30_000
   });
 
-  // Filter custom profiles by type for each selector
-  // Machine profiles filtered by selected printer (name or rawJson metadata matching)
+  // Filter custom profiles by type for each selector.
+  // Machine profiles are scoped by the authoritative catalog PrinterModel
+  // association (printerModelId). Legacy profiles without that association fall
+  // back to fuzzy manufacturer/model matching so they remain usable.
   const customMachineProfiles = useMemo(() => {
     const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
-    if (!selectedPrinterForSlicing?.manufacturerName && !selectedPrinterForSlicing?.modelName) {
-      return allCustomMachine;
-    }
-    const mfr = selectedPrinterForSlicing.manufacturerName?.toLowerCase() ?? '';
-    const model = selectedPrinterForSlicing.modelName?.toLowerCase() ?? '';
+    if (allCustomMachine.length === 0) return allCustomMachine;
     return allCustomMachine.filter(p => {
-      // Try to extract printer_model from rawJson
-      if (p.rawJson) {
-        try {
-          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
-          const printerModel = (parsed.printer_model as string)?.toLowerCase();
-          if (printerModel) {
-            // Match if printer_model contains model name words or vice versa
-            const modelWords = model.split(/[\s\-_]+/).filter(w => w.length > 2);
-            if (modelWords.some(w => printerModel.includes(w))) return true;
-            if (printerModel.split(/[\s\-_]+/).some(w => model.includes(w))) return true;
-            return false;
-          }
-        } catch { /* fall through to name matching */ }
-      }
-      // Fall back to fuzzy name matching against manufacturer + model
-      const nameLower = p.name.toLowerCase();
-      const modelWords = model.split(/[\s\-_]+/).filter(w => w.length > 2);
-      const mfrWords = mfr.split(/[\s\-_]+/).filter(w => w.length > 2);
-      const matchesModel = modelWords.length > 0 && modelWords.some(w => nameLower.includes(w));
-      const matchesMfr = mfrWords.length > 0 && mfrWords.some(w => nameLower.includes(w));
-      // Show if name matches model, or if no matching info show it anyway
-      return matchesModel || (matchesMfr && modelWords.length === 0);
+      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
+      if (scope === 'match') return true;
+      if (scope === 'mismatch') return false;
+      // Unscoped legacy profile — fall back to fuzzy printer matching.
+      return legacyMachineProfileMatchesPrinter(
+        p,
+        selectedPrinterForSlicing?.manufacturerName,
+        selectedPrinterForSlicing?.modelName,
+      );
     });
-  }, [customProfilesData, selectedPrinterForSlicing]);
+  }, [customProfilesData, selectedPrinterForSlicing, selectedPrinterModelId]);
 
   // Filament profiles filtered by selected machine profile compatibility
   const customFilamentProfiles = useMemo(() => {
@@ -909,26 +917,21 @@ export const NewSliceJobPage: React.FC = () => {
     });
   }, [customProfilesData, selectedMachineProfileId]);
 
+  // Process profiles are scoped by the authoritative catalog PrinterModel
+  // association (printerModelId). Legacy profiles without that association fall
+  // back to compatible_printers matching against the selected machine profile.
   const customProcessProfiles = useMemo(() => {
     const allCustomProcess = customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
-    if (!selectedMachineProfileId) return allCustomProcess;
+    if (allCustomProcess.length === 0) return allCustomProcess;
     return allCustomProcess.filter(p => {
-      if (p.rawJson) {
-        try {
-          const parsed = JSON.parse(p.rawJson) as Record<string, unknown>;
-          const compatible = parsed.compatible_printers as string[] | undefined;
-          if (compatible && compatible.length > 0) {
-            return compatible.some(c => c === selectedMachineProfileId);
-          }
-        } catch { /* hide profile if can't parse */ }
-      }
-      return false;
+      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
+      if (scope === 'match') return true;
+      if (scope === 'mismatch') return false;
+      // Unscoped legacy profile — fall back to compatible_printers matching.
+      return legacyProcessProfileMatchesMachine(p, selectedMachineProfileId);
     });
-  }, [customProfilesData, selectedMachineProfileId]);
+  }, [customProfilesData, selectedPrinterModelId, selectedMachineProfileId]);
 
-  // Combined loading state for profile queries
-  // Combined loading state for profile queries
-  const isProfilesLoading = isMachineProfilesLoading || isFilamentProfilesLoading || isProcessProfilesLoading;
 
   // === Profile Selection Computed Values (Incremental Loading) ===
   // Machine profiles are loaded when printer is selected (via modelId query)
@@ -1038,6 +1041,20 @@ export const NewSliceJobPage: React.FC = () => {
 
     return { user, system };
   }, [processProfilesData, selectedMachineProfile]);
+
+  const defaultProcessPresetId = useMemo(() => {
+    const firstSystemPreset = processProfilesBySource.user[0] ?? processProfilesBySource.system[0];
+    if (firstSystemPreset) {
+      return `system:${firstSystemPreset.name}`;
+    }
+
+    const firstCustomPreset = customProcessProfiles[0];
+    if (firstCustomPreset) {
+      return `custom:${firstCustomPreset.id}`;
+    }
+
+    return '';
+  }, [customProcessProfiles, processProfilesBySource]);
 
   useEffect(() => {
     const optionValues = nozzleOptions.map((option) => option.value);
@@ -1208,6 +1225,41 @@ export const NewSliceJobPage: React.FC = () => {
     return filamentProfilesData ?? [];
   }, [filamentProfilesData]);
 
+  // When a machine is selected, auto-fill filament/process defaults if they are empty.
+  // This keeps printer switching ergonomic while preserving valid restored selections.
+  useEffect(() => {
+    if (!selectedMachineProfileId) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (!selectedFilamentProfileId) {
+        const nextSystemFilament = allFilamentProfiles[0];
+        if (nextSystemFilament) {
+          setSelectedFilamentProfileId(nextSystemFilament.name);
+          setSelectedFilamentMaterial(nextSystemFilament.material || '');
+        } else {
+          const nextCustomFilament = customFilamentProfiles[0];
+          if (nextCustomFilament) {
+            setSelectedFilamentProfileId(nextCustomFilament.name);
+            setSelectedFilamentMaterial('');
+          }
+        }
+      }
+
+      if (!selectedProcessPresetId && defaultProcessPresetId) {
+        setSelectedProcessPresetId(defaultProcessPresetId);
+      }
+    });
+  }, [
+    allFilamentProfiles,
+    customFilamentProfiles,
+    defaultProcessPresetId,
+    selectedFilamentProfileId,
+    selectedMachineProfileId,
+    selectedProcessPresetId,
+  ]);
+
   // Selected process profile from Orca profile query
   const selectedProcessProfile = useMemo(() => {
     if (!selectedProcessPresetId || !selectedProcessPresetId.startsWith('system:')) {
@@ -1314,20 +1366,15 @@ export const NewSliceJobPage: React.FC = () => {
       const savedMachineProfileId = localStorage.getItem(STORAGE_KEYS.machineProfileId);
       const savedFilamentProfileId = localStorage.getItem(STORAGE_KEYS.filamentProfileId);
       const savedProcessProfileId = localStorage.getItem(STORAGE_KEYS.processProfileId);
-      const savedSpoolId = localStorage.getItem(STORAGE_KEYS.spoolId);
 
       queueMicrotask(() => {
         if (savedPrinterId) setSelectedPrinterId(savedPrinterId);
         if (savedMachineProfileId) setSelectedMachineProfileId(savedMachineProfileId);
         if (savedFilamentProfileId) setSelectedFilamentProfileId(savedFilamentProfileId);
         if (savedProcessProfileId) setSelectedProcessPresetId(savedProcessProfileId);
-        if (savedSpoolId) {
-          const parsed = parseInt(savedSpoolId, 10);
-          if (Number.isFinite(parsed)) setSelectedSpoolId(parsed);
-        }
       });
     } catch { /* ignore */ }
-  }, [STORAGE_KEYS.filamentProfileId, STORAGE_KEYS.machineProfileId, STORAGE_KEYS.printerId, STORAGE_KEYS.processProfileId, STORAGE_KEYS.spoolId]);
+  }, [STORAGE_KEYS.filamentProfileId, STORAGE_KEYS.machineProfileId, STORAGE_KEYS.printerId, STORAGE_KEYS.processProfileId]);
 
   // First use fallback: default to first available printer.
   useEffect(() => {
@@ -1368,13 +1415,6 @@ export const NewSliceJobPage: React.FC = () => {
       else localStorage.removeItem(STORAGE_KEYS.processProfileId);
     } catch { /* ignore */ }
   }, [STORAGE_KEYS.processProfileId, selectedProcessPresetId]);
-
-  useEffect(() => {
-    try {
-      if (selectedSpoolId != null) localStorage.setItem(STORAGE_KEYS.spoolId, String(selectedSpoolId));
-      else localStorage.removeItem(STORAGE_KEYS.spoolId);
-    } catch { /* ignore */ }
-  }, [STORAGE_KEYS.spoolId, selectedSpoolId]);
 
   // Derive model file URL when selected and add to bed
   useEffect(() => {
@@ -1437,14 +1477,6 @@ export const NewSliceJobPage: React.FC = () => {
     [selectedFilamentProfile],
   );
 
-  // Spools list for the spool picker (up to 500 non-archived spools).
-  const { data: spoolsResponse } = useQuery({
-    queryKey: ['spools-for-slice-picker'],
-    queryFn: () => apiClient.getSpools({ limit: 500 }),
-    staleTime: 60_000,
-  });
-  const availableSpools = spoolsResponse?.items ?? [];
-
   // Derive queue routing requirements from current slice selections.
   const requiredPrinterModel = useMemo(
     () => selectedPrinterForSlicing?.modelName ?? undefined,
@@ -1456,38 +1488,25 @@ export const NewSliceJobPage: React.FC = () => {
     [selectedPrinterForSlicing],
   );
 
-  // When a job is in flight, freeze cost/spool/routing to the snapshot captured at submit time.
+  // When a job is in flight, freeze cost/routing to the snapshot captured at submit time.
   const isSubmitted = submittedJobId != null && sliceSnapshot != null;
-  const effectiveSpoolId = isSubmitted ? sliceSnapshot.spoolId : selectedSpoolId;
   const effectiveFilamentCostPerKg = isSubmitted ? sliceSnapshot.filamentCostPerKg : filamentCostPerKg;
   const effectiveRequiredPrinterModel = isSubmitted ? sliceSnapshot.requiredPrinterModel : requiredPrinterModel;
   const effectiveRequiredMaterialType = isSubmitted ? sliceSnapshot.requiredMaterialType : requiredMaterialType;
   const effectiveRequiredNozzleDiameter = isSubmitted ? sliceSnapshot.requiredNozzleDiameter : requiredNozzleDiameter;
 
-  // Fetch per-gram cost from Spoolman for the effective spool (snapshot when in-flight, live otherwise).
-  const { data: spoolCostData } = useQuery({
-    queryKey: ['spool-cost-per-gram', effectiveSpoolId],
-    queryFn: () => sliceJobService.getSpoolCostPerGram(effectiveSpoolId!),
-    enabled: effectiveSpoolId != null,
-    staleTime: 60_000,
-  });
-
-  // Resolved per-gram cost: Spoolman spool takes precedence over profile cost.
+  // Slice-time cost is a best-effort estimate from the filament profile only.
+  // Actual cost is computed later when the sliced G-code is submitted as a print job.
   const resolvedCostPerGram = useMemo((): number | null => {
-    if (effectiveSpoolId != null && spoolCostData?.costPerGram != null) {
-      return spoolCostData.costPerGram;
-    }
     if (effectiveFilamentCostPerKg != null) {
       return effectiveFilamentCostPerKg / 1000;
     }
     return null;
-  }, [effectiveSpoolId, spoolCostData, effectiveFilamentCostPerKg]);
+  }, [effectiveFilamentCostPerKg]);
 
-  const costSource = useMemo((): 'spoolman' | 'profile' | null => {
-    if (effectiveSpoolId != null && spoolCostData?.costPerGram != null) return 'spoolman';
-    if (effectiveFilamentCostPerKg != null) return 'profile';
-    return null;
-  }, [effectiveSpoolId, spoolCostData, effectiveFilamentCostPerKg]);
+  const costSource = useMemo((): 'profile' | null => {
+    return effectiveFilamentCostPerKg != null ? 'profile' : null;
+  }, [effectiveFilamentCostPerKg]);
 
   const typedSlicerSettings = useMemo(() => {
     if (selectedProcessProfile) {
@@ -1557,14 +1576,44 @@ export const NewSliceJobPage: React.FC = () => {
     }
   });
 
-  const submitSliceJob = useCallback(() => {
+  const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
-    if (!selectedModelId && !modelFileUrl.trim()) {
+    // Plate-aware slicing: only the ACTIVE plate's models are sliced. The IDs
+    // are passed synchronously from the workspace's Slice button so we never
+    // depend on a (potentially stale) copy of plate state.
+    const activePlateModels = activeModelIds
+      ? bedModels.filter(m => activeModelIds.includes(m.id))
+      : bedModels;
+    const payloadModels = buildSlicePayloadModels(activePlateModels);
+    const primaryModel = payloadModels.primary;
+
+    // Guard: block when the active plate has no sliceable (server-hosted) models.
+    // For the plate-aware path (activeModelIds provided) an empty active plate is
+    // ALWAYS blocked — a stale root modelFileUrl must never slice a model that is
+    // not on the active plate. The legacy path keeps the manual-URL escape hatch.
+    const blockEmpty = activeModelIds
+      ? payloadModels.sliceableCount === 0
+      : payloadModels.sliceableCount === 0 && !modelFileUrl.trim();
+    if (blockEmpty) {
+      const msg = activeModelIds
+        ? 'The active plate has no sliceable models. Add a model to this plate before slicing.'
+        : 'Select a model or enter a URL';
+      setError(msg);
+      if (activeModelIds) toast.error(msg);
+      return;
+    }
+
+    // Effective single-model source: prefer the active plate's first sliceable
+    // model over root form state / bedModels[0].
+    const effectiveModelFileUrl = primaryModel ? primaryModel.url : modelFileUrl;
+    const effectiveModelFileName = primaryModel ? primaryModel.fileName : modelFileName;
+
+    if (!selectedModelId && !effectiveModelFileUrl.trim()) {
       setError('Select a model or enter a URL');
       return;
     }
-    if (!selectedModelId && modelFileUrl.trim() && !modelFileName.trim()) {
+    if (!primaryModel && !selectedModelId && modelFileUrl.trim() && !modelFileName.trim()) {
       setError('Model file name is required when using a URL');
       return;
     }
@@ -1590,17 +1639,43 @@ export const NewSliceJobPage: React.FC = () => {
       ? physicalToolheads.map((_, i) => extruderFilamentProfileIds[i] ?? '')
       : undefined;
 
+    // Build per-slice filament colour overrides (hex, with '#'). Defaults come
+    // from each selected profile's filament_colour and are user-overridable.
+    const resolveExtruderColour = (idx: number, profileName: string): string => {
+      const override = extruderFilamentColours[idx];
+      const colour = override ?? getFilamentProfileColour(allFilamentProfiles.find(p => p.name === profileName));
+      return `#${colour.replace(/^#/, '')}`;
+    };
+    const extruderFilamentColoursPayload = printerIsMultiToolhead
+      ? physicalToolheads.map((_, i) => resolveExtruderColour(i, extruderFilamentProfileIds[i] ?? ''))
+      : undefined;
+    const singleFilamentColour = printerIsMultiToolhead
+      ? undefined
+      : resolveExtruderColour(0, selectedFilamentProfileId);
+
+    // Process-setting overrides: send ONLY the keys the user actually changed in
+    // the editor — never the full ~300-key metadata baseline. The named process
+    // profile (and its `inherits:` chain) is resolved worker-side, so re-sending
+    // unmodified defaults would clobber the profile's tuned/inherited values.
+    const modifiedProcessOverrides = diffProcessOverrides(
+      slicerSettings as unknown as Record<string, unknown>,
+      originalProcessSettings,
+    );
+
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       printerId: undefined,
-      modelFileUrl: modelFileUrl,
-      modelFileName: modelFileName,
+      modelFileUrl: effectiveModelFileUrl,
+      modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
             filamentProfileName: selectedFilamentProfileId,
             // Include per-extruder names in profile JSON so workers can access them
             ...(extruderFilamentNames ? { filamentProfileNames: extruderFilamentNames } : {}),
+            // Per-slice filament colour overrides (preview/G-code metadata only)
+            ...(extruderFilamentColoursPayload ? { filamentColours: extruderFilamentColoursPayload } : {}),
+            ...(singleFilamentColour ? { filamentColour: singleFilamentColour } : {}),
             processProfileName: selectedProcessPresetId.startsWith('system:')
               ? selectedProcessPresetId.slice('system:'.length)
               : selectedProcessPresetId.startsWith('custom:')
@@ -1608,8 +1683,7 @@ export const NewSliceJobPage: React.FC = () => {
               : selectedProcessPresetId,
             overrides: {
               ...advancedProcessSettings,
-              ...slicerSettings,
-              ...(slicerMode === 'Advanced' && selectedBedType ? { curr_bed_type: selectedBedType } : {}),
+              ...modifiedProcessOverrides,
             },
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
@@ -1617,26 +1691,22 @@ export const NewSliceJobPage: React.FC = () => {
             : undefined,
       requiredCapabilitiesJson: '[]',
       priority: 1,
-      modelTransformJson: bedModels[0]
+      modelTransformJson: primaryModel
+        ? modelTransformJson(primaryModel)
+        : bedModels[0]
         ? JSON.stringify({ rotation: bedModels[0].rotation, scale: bedModels[0].scale, position: bedModels[0].position })
         : undefined,
       extruderFilamentProfileNames: extruderFilamentNames,
-      // Multi-model support: collect all bed model URLs that are server-hosted (non-blob)
-      modelFileUrls: bedModels.length > 1
-        ? bedModels.map(m => m.url).filter(u => u && !u.startsWith('blob:'))
-        : undefined,
-      // Per-model transforms: send each model's transform alongside its URL
-      modelFileTransforms: bedModels.length > 1
-        ? bedModels
-            .filter(m => m.url && !m.url.startsWith('blob:'))
-            .map(m => JSON.stringify({ rotation: m.rotation, scale: m.scale, position: m.position }))
-        : undefined,
+      extruderFilamentColours: extruderFilamentColoursPayload,
+      // Multi-model support: only the ACTIVE plate's server-hosted models.
+      modelFileUrls: payloadModels.modelFileUrls,
+      // Per-model transforms aligned with modelFileUrls (active plate only).
+      modelFileTransforms: payloadModels.modelFileTransforms,
     };
 
     // Freeze spool/cost/routing at submit time so the overlay and queue call
     // reflect what was actually sliced, regardless of later sidebar edits.
     setSliceSnapshot({
-      spoolId: selectedSpoolId,
       filamentCostPerKg: filamentCostPerKg,
       requiredPrinterModel: requiredPrinterModel,
       requiredMaterialType: requiredMaterialType,
@@ -1646,23 +1716,23 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation.mutate(request);
   }, [
     advancedProcessSettings,
+    allFilamentProfiles,
     bedModels,
+    extruderFilamentColours,
     extruderFilamentProfileIds,
     filamentCostPerKg,
     modelFileName,
     modelFileUrl,
+    originalProcessSettings,
     physicalToolheads,
     printerIsMultiToolhead,
     requiredMaterialType,
     requiredNozzleDiameter,
     requiredPrinterModel,
-    selectedBedType,
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
-    selectedSpoolId,
     slicerInfo.engine,
-    slicerMode,
     slicerSettings,
     submitMutation,
     user?.id,
@@ -1671,7 +1741,10 @@ export const NewSliceJobPage: React.FC = () => {
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    submitSliceJob();
+    // Slicing is driven exclusively by the workspace Slice button, which passes
+    // the active plate's model IDs to submitSliceJob(). A bare form submit (e.g.
+    // stray Enter) must NOT slice every plate's models, so it is intentionally a
+    // no-op here to preserve the plate-aware invariant.
   };
 
   const workspaceBedConfig = useMemo<BedConfig>(() => ({
@@ -1747,6 +1820,15 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, []);
 
+  // Remove one or more models from the workspace (e.g., when a non-empty plate
+  // is deleted). Clears the active single-model slice source if it was removed.
+  const handleWorkspaceDeleteModels = useCallback((modelIds: string[]) => {
+    if (modelIds.length === 0) return;
+    const removed = new Set(modelIds);
+    setBedModels(prev => prev.filter(m => !removed.has(m.id)));
+    setSelectedBedModelId(prev => (prev && removed.has(prev) ? null : prev));
+  }, []);
+
   const handleWorkspaceSettingsProfiles = useCallback(() => {
     const settingsPanel = document.querySelector('[aria-label="Process profile options menu"]');
     if (settingsPanel instanceof HTMLElement) {
@@ -1818,104 +1900,13 @@ export const NewSliceJobPage: React.FC = () => {
     );
   }
 
-  const selectedNozzleTypeLabel = getPrimaryNozzleTypeLabel(selectedPrinterForSlicing);
-  const nozzleFilterControl = selectedPrinterId && nozzleOptions.length > 0 ? (
-    <div className="flex h-full min-h-19 flex-col justify-center rounded-md border border-pf-border bg-pf-bg-0 px-2 py-2">
-      <label
-        htmlFor="slicer-nozzle-filter"
-        className="text-center text-xs font-semibold leading-tight text-pf-text-primary"
-      >
-        Nozzle
-      </label>
-      <Select
-        id="slicer-nozzle-filter"
-        value={selectedNozzleFilter}
-        onChange={(event) => {
-          setSelectedNozzleFilter(event.target.value);
-          setSelectedMachineProfileId('');
-        }}
-        disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
-        containerClassName="mt-1"
-        className="h-8 rounded-sm py-1 pl-2 pr-6 text-center text-sm font-semibold"
-      >
-        {nozzleOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </Select>
-      <span
-        className="mt-1 truncate text-center text-[11px] leading-tight text-pf-text-muted"
-        title={selectedNozzleTypeLabel ?? undefined}
-      >
-        {selectedNozzleTypeLabel ?? 'Machine profiles'}
-      </span>
-    </div>
-  ) : undefined;
-
   return (
-    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-2 pb-2">
-      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-2 overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-row">
+    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-4 pt-4 pb-4">
+      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-1.5 overflow-hidden lg:h-[calc(100dvh-5rem)] lg:min-h-0 lg:flex-row">
         {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden on narrow viewports, toggled via hamburger.
              On lg+ screens: inline beside visualizer unless explicitly toggled off.
              On narrow screens: slides over as fixed-width panel when toggled open. */}
-        <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
-
-          {/* PER-USER MODE TOGGLE — only when the admin has enabled both modes */}
-          {canToggleSlicerMode && slicerMode && (
-            <div
-              className="flex items-center gap-1 rounded-lg border border-pf-border bg-pf-panel p-1"
-              role="radiogroup"
-              aria-label="Slicer mode"
-            >
-              {slicerModeOptions.map((m, index) => {
-                const active = slicerMode === m;
-                return (
-                  <Button
-                    key={m}
-                    ref={(element) => {
-                      slicerModeRefs.current[m] = element;
-                    }}
-                    type="button"
-                    variant="unstyled"
-                    role="radio"
-                    aria-checked={active}
-                    tabIndex={active ? 0 : -1}
-                    onKeyDown={(event) => {
-                      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-                        event.preventDefault();
-                        const next = slicerModeOptions[(index + 1) % slicerModeOptions.length];
-                        setSlicerMode(next);
-                        slicerModeRefs.current[next]?.focus();
-                        return;
-                      }
-
-                      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-                        event.preventDefault();
-                        const next = slicerModeOptions[(index - 1 + slicerModeOptions.length) % slicerModeOptions.length];
-                        setSlicerMode(next);
-                        slicerModeRefs.current[next]?.focus();
-                        return;
-                      }
-
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSlicerMode(m);
-                      }
-                    }}
-                    onClick={() => setSlicerMode(m)}
-                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
-                      active
-                        ? 'bg-pf-accent text-pf-bg-1'
-                        : 'text-pf-text-secondary hover:text-pf-text-primary'
-                    }`}
-                  >
-                    {m}
-                  </Button>
-                );
-              })}
-            </div>
-          )}
+        <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
@@ -1924,144 +1915,155 @@ export const NewSliceJobPage: React.FC = () => {
             engineOptions={engineOptions}
           />
 
-          {/* PRINTER SELECTION - Select from registered printers first */}
-          <PrinterSlicerSelector
-            printers={printers}
-            isLoading={isPrintersLoading}
-            selectedPrinterId={selectedPrinterId}
-            accessory={nozzleFilterControl}
-            onPrinterChange={(printerId) => {
-              setSelectedPrinterId(printerId);
-              // Cascade reset: printer change resets all profile selections
-              setSelectedMachineProfileId('');
-              setSelectedNozzleFilter('');
-              setSelectedFilamentProfileId('');
-              setSelectedFilamentMaterial('');
-              setSelectedProcessPresetId('');
-              setExtruderFilamentProfileIds({});
-              // Machine profile auto-select will happen via the effect
-            }}
-            className="bg-pf-panel border border-pf-border rounded-lg p-3"
-          />
-
-          {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-semibold text-pf-text-primary">
-                Machine
-                {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
-              </label>
-              <div className="relative" ref={machineMenuRef}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="p-1 h-auto"
-                  onClick={() => setMachineMenuOpen(v => !v)}
-                  title="Machine profile options"
-                  aria-label="Machine profile options menu"
-                  aria-expanded={machineMenuOpen}
-                  aria-haspopup="menu"
-                >
-                  <MoreVerticalIcon className="w-4 h-4" />
-                </Button>
-                {machineMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={() => {
-                        setMachineMenuOpen(false);
-                        setProfileEditorType('machine');
-                        setProfileEditorOpen(true);
-                      }}
-                      disabled={!selectedMachineProfileId}
-                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
-                    >
-                      Edit settings
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={handleImportMachine}
-                      iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
-                    >
-                      Import profile
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
-                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
-                    >
-                      Manage profiles
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
-            <input
-              ref={importMachineFileRef}
-              type="file"
-              accept=".json,.orca_printer"
-              multiple
-              className="sr-only"
-              onChange={handleMachineFileImport}
-              aria-hidden="true"
-              tabIndex={-1}
+          {/* PRINTER + MACHINE SELECTION - one compact flow */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5 space-y-2">
+            <PrinterSlicerSelector
+              printers={printers}
+              isLoading={isPrintersLoading}
+              selectedPrinterId={selectedPrinterId}
+              onPrinterChange={(printerId) => {
+                setSelectedPrinterId(printerId);
+                // Cascade reset: printer change resets all profile selections
+                setSelectedMachineProfileId('');
+                setSelectedNozzleFilter('');
+                setSelectedFilamentProfileId('');
+                setSelectedFilamentMaterial('');
+                setSelectedProcessPresetId('');
+                setExtruderFilamentProfileIds({});
+                setExtruderFilamentColours({});
+                // Machine profile auto-select will happen via the effect
+              }}
+              className=""
             />
-            
-            {/* Show printer info when selected */}
-            {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
-              <p className="text-xs text-pf-text-muted mb-2">
-                Profiles for {selectedPrinterForSlicing.manufacturerName} {selectedPrinterForSlicing.modelName}
-                {selectedPrinterForSlicing.nozzleDiameter && (
-                  <span className="text-[11px]"> • {selectedPrinterForSlicing.nozzleDiameter}mm nozzle</span>
-                )}
-              </p>
-            ) : (
-              <p className="text-xs text-pf-warning mb-2">
-                Select a printer above to see available machine profiles
-              </p>
-            )}
 
-            {/* Machine Profile Selection (nozzle variants) - Custom profiles first, then system presets */}
-            <Select
-              label="Machine profile"
-              value={selectedMachineProfileId}
-              onChange={e => setSelectedMachineProfileId(e.target.value)}
-              disabled={!selectedPrinterId || (availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
-              className={`w-full ${!selectedPrinterId || isMachineProfilesLoading ? 'opacity-50' : ''}`}
-            >
-              <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
-              {/* Custom profiles first with ★ indicator */}
-              {filteredCustomMachineProfiles.length > 0 && (
-                <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+            <div className="border-t border-pf-border/70 pt-2 space-y-2">
+              {selectedPrinterId ? (
+                <>
+                  <div className="space-y-1">
+                    {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
+                    <input
+                      ref={importMachineFileRef}
+                      type="file"
+                      accept=".json,.orca_printer"
+                      multiple
+                      className="sr-only"
+                      onChange={handleMachineFileImport}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                    />
+                    <div className="flex items-center gap-1">
+                      <Select
+                        id="machine-profile-select"
+                        aria-label="Machine profile"
+                        value={selectedMachineProfileId}
+                        onChange={e => setSelectedMachineProfileId(e.target.value)}
+                        disabled={(availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
+                        containerClassName="flex-1 min-w-0"
+                        className={isMachineProfilesLoading ? 'opacity-50' : ''}
+                      >
+                        <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
+                        {/* Custom profiles first with ★ indicator */}
+                        {filteredCustomMachineProfiles.length > 0 && (
+                          <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+                        )}
+                        {filteredCustomMachineProfiles.map(profile => (
+                          <option key={`custom-${profile.id}`} value={profile.name}>
+                            ★ {profile.name}
+                          </option>
+                        ))}
+                        {/* System presets divider - only show if there are system profiles */}
+                        {availableMachineProfiles.length > 0 && (
+                          <option disabled className="text-pf-text-muted">── System Presets ──</option>
+                        )}
+                        {/* System profiles */}
+                        {availableMachineProfiles.map(profile => (
+                          <option key={profile.name} value={profile.name}>
+                            {profile.name}
+                          </option>
+                        ))}
+                      </Select>
+                      <div className="relative shrink-0" ref={machineMenuRef}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="p-1 h-auto"
+                          onClick={() => setMachineMenuOpen(v => !v)}
+                          title="Machine profile options"
+                          aria-label="Machine profile options menu"
+                          aria-expanded={machineMenuOpen}
+                          aria-haspopup="menu"
+                        >
+                          <MoreVerticalIcon className="w-4 h-4" />
+                        </Button>
+                        {machineMenuOpen && (
+                          <div className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                              onClick={() => {
+                                setMachineMenuOpen(false);
+                                setProfileEditorType('machine');
+                                setProfileEditorOpen(true);
+                              }}
+                              disabled={!selectedMachineProfileId}
+                              iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                            >
+                              Edit settings
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                              onClick={handleImportMachine}
+                              iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                            >
+                              Import profile
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                              onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                              iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                            >
+                              Manage profiles
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {nozzleOptions.length > 0 && (
+                    <Select
+                      label="Nozzle diameter"
+                      value={selectedNozzleFilter}
+                      onChange={(event) => {
+                        setSelectedNozzleFilter(event.target.value);
+                        setSelectedMachineProfileId('');
+                      }}
+                      disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
+                      className="w-full"
+                    >
+                      {nozzleOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-pf-warning">
+                  Select a printer above to choose machine and nozzle profiles
+                </p>
               )}
-              {filteredCustomMachineProfiles.map(profile => (
-                <option key={`custom-${profile.id}`} value={profile.name}>
-                  ★ {profile.name}
-                </option>
-              ))}
-              {/* System presets divider - only show if there are system profiles */}
-              {availableMachineProfiles.length > 0 && (
-                <option disabled className="text-pf-text-muted">── System Presets ──</option>
-              )}
-              {/* System profiles */}
-              {availableMachineProfiles.map(profile => (
-                <option key={profile.name} value={profile.name}>
-                  {profile.name}
-                  {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
-                </option>
-              ))}
-            </Select>
+
             {selectedPrinterId && machineProfilesData.length > 0 && !hasVisibleMachineProfiles && selectedNozzleDiameter !== undefined && (
               <p className="text-xs text-pf-warning mt-1">No machine profiles available for the selected nozzle</p>
             )}
@@ -2073,6 +2075,7 @@ export const NewSliceJobPage: React.FC = () => {
                 No matching slicer profiles found for this printer's manufacturer
               </p>
             )}
+            </div>
           </div>
 
           {/* FILAMENT PROFILE - cascading dropdown with manufacturer groups */}
@@ -2136,45 +2139,68 @@ export const NewSliceJobPage: React.FC = () => {
               />
 
               {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
-                <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-1.5">
                   {physicalToolheads.map((toolhead, idx) => {
-                    const extruderLabel = toolhead.name || `Extruder ${idx + 1}`;
-                    const nozzleInfo = toolhead.nozzleDiameter ? ` (${toolhead.nozzleDiameter}mm)` : '';
-                    const currentMaterial = toolhead.currentMaterial ? ` • ${toolhead.currentMaterial}` : '';
                     const selectedName = extruderFilamentProfileIds[idx] ?? '';
                     const selectedProfile = allFilamentProfiles.find(p => p.name === selectedName);
+                    const swatchColour = extruderFilamentColours[idx] ?? getFilamentProfileColour(selectedProfile);
 
                     return (
-                      <div key={toolhead.id ?? idx} className="border border-pf-border/50 rounded-md p-2 space-y-1" data-testid={`extruder-filament-${idx}`}>
-                        <div className="text-xs font-medium text-pf-text-secondary">
-                          {extruderLabel}{nozzleInfo}{currentMaterial}
-                        </div>
-                        <FilamentProfileDropdown
-                          profiles={allFilamentProfiles}
-                          customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
-                          selectedProfileName={selectedName}
-                          disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
-                          filterConfig={filamentFilterConfig}
-                          onFilterConfigChange={handleFilamentFilterChange}
-                          onSelect={(name, source) => {
-                            setExtruderFilamentProfileIds(prev => ({ ...prev, [idx]: name }));
-                            // Also keep the primary filament in sync (first extruder = primary)
-                            if (idx === 0) {
-                              setSelectedFilamentProfileId(name);
-                              if (source === 'system') {
-                                const sp = allFilamentProfiles.find(p => p.name === name);
-                                setSelectedFilamentMaterial(sp?.material || '');
-                              } else {
-                                setSelectedFilamentMaterial('');
-                              }
-                            }
-                          }}
+                      <div
+                        key={toolhead.id ?? idx}
+                        className="flex items-center gap-1 px-0.5 py-0"
+                        data-testid={`extruder-filament-${idx}`}
+                      >
+                        <ColorPicker
+                          swatchOnly
+                          swatchClassName="w-5 h-5 text-[11px] font-semibold"
+                          swatchContent={idx + 1}
+                          value={swatchColour}
+                          onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, [idx]: hex }))}
+                          aria-label={`Extruder ${idx + 1} filament colour`}
                         />
-                        {selectedProfile && (
-                          <div className="text-xs text-pf-text-muted">
-                            {selectedProfile.nozzleTemperature ?? 210}°C nozzle, {selectedProfile.bedTemperature ?? 60}°C bed
-                          </div>
-                        )}
+                        <div className="flex-1 min-w-0">
+                          <FilamentProfileDropdown
+                            profiles={allFilamentProfiles}
+                            customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                            selectedProfileName={selectedName}
+                            disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                            filterConfig={filamentFilterConfig}
+                            onFilterConfigChange={handleFilamentFilterChange}
+                            className="px-2 py-1 text-xs whitespace-nowrap"
+                            onSelect={(name, source) => {
+                              setExtruderFilamentProfileIds(prev => ({ ...prev, [idx]: name }));
+                              // Default the colour swatch from the newly selected profile.
+                              const sp = allFilamentProfiles.find(p => p.name === name);
+                              setExtruderFilamentColours(prev => ({ ...prev, [idx]: getFilamentProfileColour(sp) }));
+                              // Also keep the primary filament in sync (first extruder = primary)
+                              if (idx === 0) {
+                                setSelectedFilamentProfileId(name);
+                                if (source === 'system') {
+                                  setSelectedFilamentMaterial(sp?.material || '');
+                                } else {
+                                  setSelectedFilamentMaterial('');
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="p-1 h-auto shrink-0"
+                          onClick={() => {
+                            setFilamentEditProfile(selectedProfile ?? null);
+                            setProfileEditorType('filament');
+                            setProfileEditorOpen(true);
+                          }}
+                          disabled={!selectedProfile}
+                          title={selectedProfile ? 'Edit filament settings' : 'Select a filament first'}
+                          aria-label={`Edit Extruder ${idx + 1} filament settings`}
+                        >
+                          <EditIcon className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
                     );
                   })}
@@ -2215,6 +2241,7 @@ export const NewSliceJobPage: React.FC = () => {
                       className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
                       onClick={() => {
                         setFilamentMenuOpen(false);
+                        setFilamentEditProfile(null);
                         setProfileEditorType('filament');
                         setProfileEditorOpen(true);
                       }}
@@ -2261,23 +2288,35 @@ export const NewSliceJobPage: React.FC = () => {
             
             {allFilamentProfiles.length > 0 || customFilamentProfiles.length > 0 ? (
               <>
-                <FilamentProfileDropdown
-                  profiles={allFilamentProfiles}
-                  customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
-                  selectedProfileName={selectedFilamentProfileId}
-                  disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
-                  filterConfig={filamentFilterConfig}
-                  onFilterConfigChange={handleFilamentFilterChange}
-                  onSelect={(name, source) => {
-                    setSelectedFilamentProfileId(name);
-                    if (source === 'system') {
-                      const sp = allFilamentProfiles.find(p => p.name === name);
-                      setSelectedFilamentMaterial(sp?.material || '');
-                    } else {
-                      setSelectedFilamentMaterial('');
-                    }
-                  }}
-                />
+                <div className="flex items-center gap-1.5">
+                  <ColorPicker
+                    swatchOnly
+                    swatchClassName="w-7 h-7"
+                    value={extruderFilamentColours[0] ?? getFilamentProfileColour(selectedFilamentProfile)}
+                    onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, 0: hex }))}
+                    aria-label="Filament colour"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <FilamentProfileDropdown
+                      profiles={allFilamentProfiles}
+                      customProfiles={customFilamentProfiles.map(p => ({ id: p.id, name: p.name }))}
+                      selectedProfileName={selectedFilamentProfileId}
+                      disabled={allFilamentProfiles.length === 0 && customFilamentProfiles.length === 0}
+                      filterConfig={filamentFilterConfig}
+                      onFilterConfigChange={handleFilamentFilterChange}
+                      onSelect={(name, source) => {
+                        setSelectedFilamentProfileId(name);
+                        const sp = allFilamentProfiles.find(p => p.name === name);
+                        setExtruderFilamentColours(prev => ({ ...prev, 0: getFilamentProfileColour(sp) }));
+                        if (source === 'system') {
+                          setSelectedFilamentMaterial(sp?.material || '');
+                        } else {
+                          setSelectedFilamentMaterial('');
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
 
                 {/* Show selected profile's temperature info */}
                 {selectedFilamentProfile && (
@@ -2295,40 +2334,6 @@ export const NewSliceJobPage: React.FC = () => {
               </div>
             )}
           </div>
-          )}
-
-          {/* SPOOL PICKER - Optional Spoolman spool for cost estimation and queue routing */}
-          {availableSpools.length > 0 && (
-            <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-1.5">
-              <label htmlFor="slice-spool-select" className="block text-sm font-semibold text-pf-text-primary">
-                Spool <span className="font-normal text-pf-text-muted">(optional)</span>
-              </label>
-              <Select
-                id="slice-spool-select"
-                value={selectedSpoolId ?? ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedSpoolId(val === '' ? null : parseInt(val, 10));
-                }}
-                aria-label="Select spool"
-              >
-                <option value="">— None —</option>
-                {availableSpools.filter(s => !s.archived).map(s => {
-                  const parts = [s.vendor, s.filamentName || s.name, s.material, s.colorHex ? `#${s.colorHex}` : null].filter(Boolean);
-                  const remaining = s.remainingWeightG != null ? ` (${Math.round(s.remainingWeightG)}g)` : '';
-                  return (
-                    <option key={s.id} value={s.id}>
-                      {parts.join(' · ')}{remaining}
-                    </option>
-                  );
-                })}
-              </Select>
-              {selectedSpoolId != null && spoolCostData?.costPerGram != null && (
-                <p className="text-xs text-pf-text-muted">
-                  Cost: {spoolCostData.currency || '$'}{spoolCostData.costPerGram.toFixed(4)}/g <span className="text-pf-accent">(Spoolman)</span>
-                </p>
-              )}
-            </div>
           )}
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
@@ -2513,22 +2518,59 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* BED TYPE OVERRIDE (Advanced only — hidden in Simple mode per EasyPrint) */}
-          {slicerMode === 'Advanced' && (
-            <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-              <label htmlFor="nsj-bed-type" className="block text-sm font-semibold text-pf-text-primary">
-                Bed Type
-              </label>
-              <Select
-                id="nsj-bed-type"
-                value={selectedBedType}
-                onChange={(e) => setSelectedBedType(e.target.value)}
-              >
-                <option value="">Inherit from profile</option>
-                {BED_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </Select>
+          {/* PER-USER MODE TOGGLE — compact and colocated with the settings it controls */}
+          {canToggleSlicerMode && slicerMode && (
+            <div
+              className="flex items-center gap-1 rounded-md border border-pf-border bg-pf-panel p-1"
+              role="radiogroup"
+              aria-label="Slicer mode"
+            >
+              {slicerModeOptions.map((m, index) => {
+                const active = slicerMode === m;
+                return (
+                  <Button
+                    key={m}
+                    ref={(element) => {
+                      slicerModeRefs.current[m] = element;
+                    }}
+                    type="button"
+                    variant="unstyled"
+                    role="radio"
+                    aria-checked={active}
+                    tabIndex={active ? 0 : -1}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        const next = slicerModeOptions[(index + 1) % slicerModeOptions.length];
+                        setSlicerMode(next);
+                        slicerModeRefs.current[next]?.focus();
+                        return;
+                      }
+
+                      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        const next = slicerModeOptions[(index - 1 + slicerModeOptions.length) % slicerModeOptions.length];
+                        setSlicerMode(next);
+                        slicerModeRefs.current[next]?.focus();
+                        return;
+                      }
+
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSlicerMode(m);
+                      }
+                    }}
+                    onClick={() => setSlicerMode(m)}
+                    className={`flex-1 rounded px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      active
+                        ? 'bg-pf-accent text-pf-bg-1'
+                        : 'text-pf-text-secondary hover:text-pf-text-primary'
+                    }`}
+                  >
+                    {m}
+                  </Button>
+                );
+              })}
             </div>
           )}
 
@@ -2543,20 +2585,15 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* ADVANCED MODE: full OrcaSlicer parameter editor behind collapsible disclosure */}
           {slicerMode === 'Advanced' && (
-            <AdvancedSettingsDisclosure
-              currentSettings={slicerSettings as unknown as Record<string, unknown>}
-              originalSettings={originalProcessSettings}
-            >
-              <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
-                <SlicerSettingsPanel
-                  settings={slicerSettings}
-                  onChange={handleSlicerSettingsChange}
-                  advancedSettings={advancedProcessSettings}
-                  onAdvancedSettingsChange={setAdvancedProcessSettings}
-                  originalSettings={originalProcessSettings}
-                />
-              </div>
-            </AdvancedSettingsDisclosure>
+            <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
+              <SlicerSettingsPanel
+                settings={slicerSettings}
+                onChange={handleSlicerSettingsChange}
+                advancedSettings={advancedProcessSettings}
+                onAdvancedSettingsChange={setAdvancedProcessSettings}
+                originalSettings={originalProcessSettings}
+              />
+            </div>
           )}
 
           {/* Model picker modal — opened by workspace "+" button */}
@@ -2630,6 +2667,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onToggleSidebar={() => setSidebarOpen(v => !v)}
                 sidebarOpen={sidebarOpen}
                 onModelsReplace={handleWorkspaceModelsReplace}
+                onDeleteModels={handleWorkspaceDeleteModels}
                 simpleMode={slicerMode !== 'Advanced'}
                 className="h-full"
               />
@@ -2649,7 +2687,6 @@ export const NewSliceJobPage: React.FC = () => {
                 filamentCostPerKg={effectiveFilamentCostPerKg}
                 resolvedCostPerGram={resolvedCostPerGram}
                 costSource={costSource}
-                selectedSpoolId={effectiveSpoolId}
                 requiredPrinterModel={effectiveRequiredPrinterModel}
                 requiredMaterialType={effectiveRequiredMaterialType}
                 requiredNozzleDiameter={effectiveRequiredNozzleDiameter}
@@ -2713,11 +2750,11 @@ export const NewSliceJobPage: React.FC = () => {
       {/* Profile Editor Modal - for editing selected profile settings */}
       <ProfileEditorModal
         isOpen={profileEditorOpen}
-        onClose={() => setProfileEditorOpen(false)}
+        onClose={() => { setProfileEditorOpen(false); setFilamentEditProfile(null); }}
         profileType={profileEditorType}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
-          (selectedFilamentProfile ?? null)
+          (filamentEditProfile ?? selectedFilamentProfile ?? null)
         }
         onSaveSuccess={(_profileId, profileName) => {
           qc.invalidateQueries({ queryKey: ['customProfiles'] });

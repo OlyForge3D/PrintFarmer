@@ -119,6 +119,16 @@ describe('LocationManagement', () => {
     expect(screen.getByText('Printer Locations')).toBeInTheDocument();
   });
 
+  it('renders its section heading as h2, not h1, so it nests under the page title', async () => {
+    // This component is composed inside LocationManagementAdminPage, whose PageTemplate
+    // renders the single page-level <h1>. Its own heading must be an h2 to avoid a
+    // duplicate-h1 a11y regression.
+    render(<LocationManagement />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Printer Locations' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
+  });
+
   it('renders Add Location button', async () => {
     render(<LocationManagement />);
 

@@ -67,9 +67,9 @@ export function PageTemplate({
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
-                <h2 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
+                <h1 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
                   {title}
-                </h2>
+                </h1>
                 {titleActions && <div className="shrink-0">{titleActions}</div>}
               </div>
               {subtitle && (

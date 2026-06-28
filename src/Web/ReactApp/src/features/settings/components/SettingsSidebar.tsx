@@ -6,10 +6,6 @@ import { SettingsMatchText } from '@/features/settings/components/SettingsMatchT
 import { getSettingsCategoryIcon } from '@/features/settings/settings-navigation';
 import type { SettingsCategory, SettingsScope, SettingsScopeId } from '@/features/settings/types';
 
-const NAV_ITEM_STAGGER_MS = 18;
-const PREMIUM_TRANSITION_MS = 280;
-const PREMIUM_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
-
 interface SettingsSidebarProps {
   categories: SettingsCategory[];
   activeScope: SettingsScopeId;
@@ -125,16 +121,16 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
             <button
               type="button"
               onClick={() => onScopeChange(adminScope.id)}
-              aria-pressed={activeScope === adminScope.id}
+              aria-pressed={activeScope === adminScope.id ? 'true' : 'false'}
+              title={adminScope.label}
               className={clsx(
-                'mt-3 flex w-full items-center justify-between rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
+                'mt-3 flex w-full items-center justify-start rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
                 activeScope === adminScope.id
                   ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary'
                   : 'border-pf-border/80 bg-pf-bg-1/75 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/90 hover:text-pf-text-primary',
               )}
             >
               <span className="font-medium">{adminScope.label}</span>
-              <span className="text-xs uppercase tracking-[0.14em] text-pf-text-tertiary">Operations</span>
             </button>
           ) : null}
         </div>
@@ -154,40 +150,24 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     onClick={() => onCategoryChange(category.id)}
                     onKeyDown={(event) => handleKeyDown(event, index)}
                     aria-current={isActive ? 'page' : undefined}
-                    style={{ animationDelay: `${index * NAV_ITEM_STAGGER_MS}ms` }}
                     className={clsx(
-                      'group relative w-full rounded-[1.1rem] border border-transparent px-4 py-3 text-left text-sm',
+                      'group relative w-full rounded-[1.1rem] px-4 py-3 text-left text-sm',
                       'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
                       'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                      'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
+                      'transition-[transform,background-color,color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
                       isActive
-                        ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
+                        ? 'bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
                         : isMatching
-                          ? 'bg-pf-bg-1/75 text-pf-text-primary hover:border-pf-border/80 hover:bg-pf-bg-1/80'
-                          : 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
+                          ? 'bg-pf-bg-1/75 text-pf-text-primary hover:bg-pf-bg-1/80'
+                          : 'text-pf-text-secondary hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
                     )}
                   >
-                    <span
-                      aria-hidden="true"
-                      className={clsx(
-                        'absolute inset-y-3 left-0 w-[3px] rounded-r-full transition-opacity motion-reduce:transition-none',
-                        isActive ? 'bg-pf-accent opacity-100' : 'bg-pf-accent opacity-0 group-hover:opacity-55',
-                      )}
-                      style={{
-                        transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
-                        transitionTimingFunction: PREMIUM_EASING,
-                      }}
-                    />
                     <span className="flex items-center gap-3">
                       <span
                         className={clsx(
                           'shrink-0 transition-colors motion-reduce:transition-none',
                           isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
                         )}
-                        style={{
-                          transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
-                          transitionTimingFunction: PREMIUM_EASING,
-                        }}
                         aria-hidden="true"
                       >
                         <Icon className="h-5 w-5" />
@@ -238,6 +218,7 @@ function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeS
               type="button"
               role="radio"
               aria-checked={isActive}
+              title={scope.id === 'user' ? 'User' : scope.id === 'system' ? 'System' : scope.label}
               onClick={() => onScopeChange(scope.id)}
               className={clsx(
                 'rounded-xl px-3 py-2 text-sm font-medium transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
@@ -335,11 +316,6 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
     return matchingCategoryIds.includes(categoryId);
   };
 
-  const transitionStyle = {
-    transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
-    transitionTimingFunction: PREMIUM_EASING,
-  } as const;
-
   return (
     <div ref={dropdownRef} className="relative border-b border-pf-border/70 px-4 py-4 md:hidden">
       {primaryScopes.length > 1 ? (
@@ -357,14 +333,13 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
           onClick={() => handleScopeSelect(adminScope.id)}
           aria-pressed={activeScope === adminScope.id}
           className={clsx(
-            'mb-3 flex w-full items-center justify-between rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
+            'mb-3 flex w-full items-center justify-start rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
             activeScope === adminScope.id
               ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary'
               : 'border-pf-border/80 bg-pf-bg-1/75 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/90 hover:text-pf-text-primary',
           )}
         >
           <span className="font-medium">{adminScope.label}</span>
-          <span className="text-xs uppercase tracking-[0.14em] text-pf-text-tertiary">Operations</span>
         </button>
       ) : null}
 
@@ -372,9 +347,10 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         ref={buttonRef}
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
         aria-controls="settings-category-menu"
+        aria-expanded={isOpen}
         aria-label={`Settings category: ${activeLabel}`}
+          title={`Settings category: ${activeLabel}`}
         className="flex w-full items-center justify-between gap-2 rounded-2xl border border-pf-border/80 bg-pf-bg-1/85 px-4 py-3 text-sm font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
       >
         <span className="flex min-w-0 items-center gap-3">
@@ -383,7 +359,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
           </span>
           <span className="truncate">{activeLabel}</span>
         </span>
-        <ChevronDownIcon className={clsx('h-5 w-5', isOpen && 'rotate-180')} style={transitionStyle} />
+        <ChevronDownIcon className={clsx('h-5 w-5 transition-transform', isOpen && 'rotate-180')} />
       </button>
 
       {isOpen ? (
@@ -392,7 +368,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
           aria-label="Settings categories"
           className="absolute inset-x-4 top-[calc(100%-0.25rem)] z-50 max-h-72 overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0/95 p-1 shadow-lg backdrop-blur-md"
         >
-          {categories.map((category, index) => {
+          {categories.map((category) => {
             const Icon = getSettingsCategoryIcon(category.id);
             const isActive = activeCategory === category.id;
             const isMatching = isMatchingCategory(category.id);
@@ -403,17 +379,17 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                   type="button"
                   onClick={() => handleSelect(category.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  style={{ animationDelay: `${index * NAV_ITEM_STAGGER_MS}ms` }}
+                  title={category.label}
                   className={clsx(
-                    'flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-2.5 text-left text-sm',
+                    'flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm',
                     'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
                     'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                    'transition-[transform,background-color,color,box-shadow,border-color] motion-reduce:transition-none active:scale-[0.985]',
+                    'transition-[transform,background-color,color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
                     isActive
-                      ? 'border-pf-accent/35 bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
+                      ? 'bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
                       : isMatching
-                        ? 'bg-pf-bg-1/75 text-pf-text-primary hover:border-pf-border/80 hover:bg-pf-bg-1/80'
-                        : 'text-pf-text-secondary hover:border-pf-border/80 hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
+                        ? 'bg-pf-bg-1/75 text-pf-text-primary hover:bg-pf-bg-1/80'
+                        : 'text-pf-text-secondary hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
                   )}
                 >
                   <span className={clsx(isActive ? 'text-pf-accent' : 'text-pf-text-secondary')} aria-hidden="true">

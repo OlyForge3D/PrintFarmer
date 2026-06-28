@@ -38,6 +38,11 @@ export interface SubmitSliceJobRequest {
   modelTransformJson?: string;
   /** Per-extruder filament profile names for multi-toolhead printers (index = extruder index). */
   extruderFilamentProfileNames?: string[];
+  /**
+   * Per-extruder filament colour overrides (hex, with '#'). Index = extruder index.
+   * Cosmetic only — affects slice preview / G-code metadata, not print physics.
+   */
+  extruderFilamentColours?: string[];
   /** Multiple model file URLs for multi-model slice jobs (e.g., split/cut models). */
   modelFileUrls?: string[];
   /** Per-model transforms for multi-model slice jobs. Each entry corresponds positionally to a URL in modelFileUrls. */

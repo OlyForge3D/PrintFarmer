@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Farm.Infrastructure.Domain.Notifications;
 using Microsoft.Extensions.Logging;
 using WebPush;

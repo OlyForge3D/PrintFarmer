@@ -16,6 +16,10 @@ export interface SlicerStatusBarProps {
   onSlice?: () => void;
   slicing?: boolean;
   canSlice?: boolean;
+  /** Custom label for the slice button, e.g. "Slice Plate 2 (3 models)". */
+  sliceButtonLabel?: string;
+  /** One-line disclosure shown near the slice button, e.g. when other plates have models. */
+  sliceNote?: string;
 }
 
 export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
@@ -28,6 +32,8 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
   onSlice,
   slicing = false,
   canSlice = true,
+  sliceButtonLabel,
+  sliceNote,
 }) => {
   const hasSliceInfo = slicesRemaining !== undefined && slicesTotal !== undefined;
 
@@ -45,6 +51,11 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
 
       {/* Right side: Slice info and button */}
       <div className="flex items-center gap-4">
+        {sliceNote && (
+          <span className="text-xs text-pf-text-secondary" data-testid="slice-note">
+            {sliceNote}
+          </span>
+        )}
         {hasSliceInfo && (
           <div className="flex items-center gap-2 text-sm text-pf-text-secondary">
             <span>
@@ -68,7 +79,7 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
           disabled={!canSlice || slicing}
           className="px-6 py-1.5"
         >
-          {slicing ? 'Slicing...' : 'Slice'}
+          {slicing ? 'Slicing...' : (sliceButtonLabel ?? 'Slice')}
         </Button>
       </div>
     </div>

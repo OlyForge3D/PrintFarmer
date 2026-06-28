@@ -6,7 +6,8 @@
  * rows, and delegates each field to MetadataSettingRow.
  */
 import React, { useMemo } from 'react';
-import { SectionHeader } from '@/features/slicer/components/settings/SettingRow';
+import { SectionHeader, ResetIcon } from '@/features/slicer/components/settings/SettingRow';
+import { Button } from '@/common/components/ui';
 import { MetadataSettingRow } from '@/features/slicer/components/settings/MetadataSettingRow';
 import type {
   SectionLayout,
@@ -41,12 +42,25 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
   const anyModified = fields.some((f) => {
     const orig = originalValues?.[f.key];
     const cur = values[f.key];
-    return orig !== undefined && String(orig) !== String(cur ?? '');
+    // Use the same JSON-based comparison as MetadataSettingRow's change tracking
+    // and the tab-dirty check so the reset button and the orange "modified"
+    // label/tab indicator never disagree.
+    return orig !== undefined && JSON.stringify(cur) !== JSON.stringify(orig);
   });
+
+  const handleReset = () => {
+    fields.forEach((f) => {
+      const orig = originalValues?.[f.key];
+      if (orig === undefined) return;
+      const meta = allSettings[f.key];
+      const next = meta?.type === 'string' ? String(orig) : Number(orig);
+      onUpdate(f.key, next);
+    });
+  };
 
   return (
     <div className="flex items-center gap-1.5 py-0.5">
-      <div className="w-2/5 shrink-0 truncate">
+      <div className="w-[46%] shrink-0 truncate">
         <span
           className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text'}`}
           title={label}
@@ -59,7 +73,11 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
           const meta = allSettings[f.key];
           if (!meta) return null;
           const unit = meta.unit || '';
-          const val = values[f.key] ?? meta.default ?? '';
+          const rawVal = values[f.key] ?? meta.default ?? '';
+          const numVal =
+            rawVal === '' || rawVal === null || rawVal === undefined
+              ? ''
+              : Number(rawVal);
           return (
             <div key={f.key} className="flex items-center gap-1 flex-1">
               {meta.label && (
@@ -70,7 +88,7 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
                   type="number"
                   title={meta.tooltip || `${label} ${meta.label || ''}`}
                   className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
-                  value={val as number}
+                  value={numVal}
                   min={meta.min}
                   max={meta.max}
                   onChange={(e) => onUpdate(f.key, Number(e.target.value))}
@@ -88,6 +106,22 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
             </div>
           );
         })}
+      </div>
+      <div className="w-6 shrink-0 flex justify-center">
+        {anyModified && (
+          <Button
+            variant="subtle"
+            type="button"
+            onClick={handleReset}
+            disabled={disabled}
+            className="p-0 text-pf-warning hover:text-pf-warning transition-colors
+                       hover:bg-pf-warning/10 rounded"
+            title="Reset to original values"
+            aria-label={`Reset ${label} to original values`}
+          >
+            <ResetIcon className="w-4 h-4" />
+          </Button>
+        )}
       </div>
     </div>
   );

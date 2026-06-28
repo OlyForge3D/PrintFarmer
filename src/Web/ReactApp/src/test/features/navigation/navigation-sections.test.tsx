@@ -113,6 +113,32 @@ describe('Navigation rail sections', () => {
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
   });
 
+  it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
+    renderLayout();
+
+    // The brand wordmark is branding within the banner, not a document heading.
+    // Marking it <h1> (previously twice) competed with the page title for the
+    // single page-level h1, so it must not appear as a heading at all.
+    const brandHeadings = screen
+      .queryAllByRole('heading')
+      .filter((el) => el.textContent === 'PrintFarmer');
+    expect(brandHeadings).toHaveLength(0);
+  });
+
+  it('stacks the mobile header above main on small screens (column), row on desktop', () => {
+    const { container } = renderLayout();
+
+    // Regression guard: the content container that holds the mobile top-header,
+    // the desktop rail, and <main> must be a column on mobile and a row only at
+    // lg+. Without flex-col on mobile, the mobile header becomes a horizontal
+    // sibling of <main> and pushes the page content off-screen (blank on phones).
+    const main = container.querySelector('#main-content');
+    const contentRow = main?.parentElement;
+    expect(contentRow).not.toBeNull();
+    expect(contentRow!.className).toContain('flex-col');
+    expect(contentRow!.className).toContain('lg:flex-row');
+  });
+
   it('makes the mobile drawer inert when closed and moves focus into it when opened', async () => {
     const { container } = renderLayout();
 
@@ -144,27 +170,26 @@ describe('Navigation rail sections', () => {
     });
   });
 
-  it('opens collapsed rail popovers on click, focuses the first link, and restores focus on Escape', async () => {
+  it('renders the collapsed rail as a flat list of nav item icon links (no popovers)', async () => {
     localStorage.setItem('pf_navbar_collapsed', 'true');
-    renderLayout();
+    const { container } = renderLayout();
 
-    const filesButton = screen.getByRole('button', { name: 'Files' });
-    fireEvent.click(filesButton);
+    // Each nav item is a direct icon link in the collapsed rail — labelled by
+    // its name and pointing at its own route — rather than a grouped section
+    // button that opens a popover.
+    const railNav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const filesLink = within(railNav).getByRole('link', { name: 'Files' });
+    expect(filesLink).toHaveAttribute('href', '/files');
+    expect(within(railNav).getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/projects');
+    expect(within(railNav).getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/dashboard');
 
-    const dialog = screen.getByRole('dialog', { name: 'Files navigation' });
-    const filesLink = within(dialog).getByRole('link', { name: /^files$/i });
-    expect(dialog).toBeInTheDocument();
-    expect(filesLink).toBeInTheDocument();
-    expect(within(dialog).getByRole('link', { name: /projects/i })).toBeInTheDocument();
+    // The grouped section button + popover dialog behavior is gone.
+    expect(screen.queryByRole('button', { name: 'Files' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
 
+    // Group dividers are preserved between sections in the collapsed rail.
     await waitFor(() => {
-      expect(filesLink).toHaveFocus();
-    });
-
-    fireEvent.keyDown(window, { key: 'Escape' });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
-      expect(filesButton).toHaveFocus();
+      expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBeGreaterThanOrEqual(1);
     });
   });
 });

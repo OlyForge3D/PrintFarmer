@@ -24,7 +24,7 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
     /// <para>
     /// Persisted as a JSON string array (e.g. <c>["Simple","Advanced"]</c>). When absent
     /// (legacy settings written before this field existed), it resolves to <c>[SlicerMode]</c>
-    /// via <see cref="GetEnabledModes"/> so existing single-mode farms keep their behaviour.
+    /// via <see cref="EffectiveEnabledModes"/> so existing single-mode farms keep their behaviour.
     /// </para>
     /// </summary>
     [JsonPropertyName("enabledModes")]
@@ -35,12 +35,19 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
     /// Resolves the effective set of enabled modes, falling back to <c>[SlicerMode]</c> when
     /// <see cref="EnabledModes"/> is unset or empty (back-compat with legacy settings).
     /// </summary>
-    public IReadOnlyList<SlicerMode> GetEnabledModes()
-        => EnabledModes is { Count: > 0 } modes ? modes : new[] { SlicerMode };
+    /// <remarks>
+    /// Derived state — must NOT be persisted or surfaced as an editable setting. It is
+    /// <see cref="JsonIgnoreAttribute">[JsonIgnore]</see>d so it is excluded from settings JSON
+    /// serialization and skipped by the metadata reflector (which requires a
+    /// <see cref="JsonPropertyNameAttribute"/> on every serialized public property).
+    /// </remarks>
+    [JsonIgnore]
+    public IReadOnlyList<SlicerMode> EffectiveEnabledModes
+        => EnabledModes is { Count: > 0 } modes ? modes : [SlicerMode];
 
     public void Validate()
     {
-        if (!Enum.IsDefined(typeof(SlicerMode), SlicerMode))
+        if (!Enum.IsDefined(SlicerMode))
         {
             throw new ValidationException($"Invalid SlicerMode value '{SlicerMode}'. Must be Simple or Advanced.");
         }
@@ -54,7 +61,7 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
 
             foreach (SlicerMode mode in EnabledModes)
             {
-                if (!Enum.IsDefined(typeof(SlicerMode), mode))
+                if (!Enum.IsDefined(mode))
                 {
                     throw new ValidationException($"Invalid SlicerMode value '{mode}' in EnabledModes. Must be Simple or Advanced.");
                 }

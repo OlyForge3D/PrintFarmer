@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SliceJobService } from '@/services/sliceJobService';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
 const mockRequest = vi.fn();
 
@@ -20,12 +21,12 @@ describe('SliceJobService artifact URL helpers', () => {
   describe('getArtifactDownloadUrl', () => {
     it('builds correct download URL from artifact ID', () => {
       const url = service.getArtifactDownloadUrl('abc-123');
-      expect(url).toBe('/api/artifacts/abc-123');
+      expect(url).toBe(`${getApiBaseUrl()}/artifacts/abc-123`);
     });
 
     it('handles UUIDs', () => {
       const url = service.getArtifactDownloadUrl('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-      expect(url).toBe('/api/artifacts/f47ac10b-58cc-4372-a567-0e02b2c3d479');
+      expect(url).toBe(`${getApiBaseUrl()}/artifacts/f47ac10b-58cc-4372-a567-0e02b2c3d479`);
     });
   });
 
@@ -80,7 +81,7 @@ describe('SliceJobService artifact URL helpers', () => {
       });
 
       const url = await service.getArtifactGcodeUrl('art-2');
-      expect(url).toBe('/api/artifacts/art-2');
+      expect(url).toBe(`${getApiBaseUrl()}/artifacts/art-2`);
     });
   });
 

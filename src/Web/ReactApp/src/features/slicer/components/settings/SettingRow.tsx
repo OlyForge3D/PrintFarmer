@@ -170,10 +170,10 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         </div>
       ) : (
       /* Horizontal row: [label] [control] [reset button] */
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {/* Left: icon + label */}
         {label && (
-        <div className="flex items-center gap-1.5 min-w-0 w-2/5 shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 w-[46%] shrink-0">
           <span className="text-pf-accent-2 shrink-0">{icon}</span>
           <div className="min-w-0">
             <label 
@@ -194,19 +194,20 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           </div>
         )}
         
-        {/* Center: control */}
-        <div className="w-[30%] shrink-0" title={tooltip}>
+        {/* Center: control — fills the remaining width so there's no dead
+            whitespace on the right; the reset slot sits at the right edge. */}
+        <div className="flex-1 min-w-0" title={tooltip}>
           {renderControl()}
         </div>
 
-        {/* Right: reset button (fixed spacer for alignment) */}
-        <div className="w-7 shrink-0 flex justify-center">
+        {/* Right: reset button (compact fixed spacer for alignment) */}
+        <div className="w-6 shrink-0 flex justify-center">
           {isModified && onReset && (
             <Button
               variant="subtle"
               type="button"
               onClick={onReset}
-              className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+              className="p-0 text-pf-warning hover:text-pf-warning transition-colors
                          hover:bg-pf-warning/10 rounded"
               title={`Reset to original: ${formatOriginalValue(originalValue)}`}
               aria-label={`Reset ${label} to original value`}
@@ -634,7 +635,7 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         />
       </div>
       {unit && (
-        <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-l-none rounded-r-lg w-14 shrink-0 self-stretch flex items-center">
+        <span className="text-xs text-pf-text-muted px-1.5 bg-pf-border rounded-l-none rounded-r-lg w-16 shrink-0 self-stretch flex items-center justify-center text-center whitespace-nowrap leading-tight">
           {unit}
         </span>
       )}
@@ -889,9 +890,9 @@ interface SectionHeaderProps {
 
 /** Reusable section header — used in machine, filament, and process editors */
 export const SectionHeader: React.FC<SectionHeaderProps> = ({ icon, title }) => (
-  <div className="flex items-center gap-2 mb-1 mt-2">
-    {icon && <span className="text-pf-accent-2 shrink-0">{icon}</span>}
-    <h4 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide shrink-0">{title}</h4>
+  <div className="flex items-center gap-1.5 mb-1 mt-1.5">
+    {icon && <span className="text-pf-accent-2 shrink-0 [&_img]:w-3.5 [&_img]:h-3.5">{icon}</span>}
+    <h4 className="text-[11px] font-semibold text-pf-text-secondary uppercase tracking-wide shrink-0">{title}</h4>
     <div className="flex-1 border-t border-pf-border/50" />
   </div>
 );

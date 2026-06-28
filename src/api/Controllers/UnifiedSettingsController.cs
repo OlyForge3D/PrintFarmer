@@ -236,12 +236,17 @@ public class UnifiedSettingsController(
     {
         try
         {
-            IEnumerable<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata();
+            // Materialize inside the try: GetAllMetadata() is a lazy yield iterator, so without
+            // this the enumeration (and any exception, e.g. a settings property missing
+            // [JsonPropertyName]) would happen during response serialization — after the 200 status
+            // and headers are already on the wire — surfacing to the browser as a truncated
+            // ERR_INCOMPLETE_CHUNKED_ENCODING instead of a clean error. ToList() forces failure here.
+            List<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata().ToList();
             return Ok(metadata);
         }
         catch (Exception ex)
         {
-            return BadRequest($"Failed to get settings metadata: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get settings metadata: {ex.Message}");
         }
     }
 
@@ -258,12 +263,14 @@ public class UnifiedSettingsController(
     {
         try
         {
-            IEnumerable<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata();
+            // Materialize inside the try (lazy yield iterator) so failures surface as a clean
+            // 500 rather than a mid-stream truncated response. See GetMetadata() for details.
+            List<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata().ToList();
             return Ok(groups);
         }
         catch (Exception ex)
         {
-            return BadRequest($"Failed to get settings group metadata: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get settings group metadata: {ex.Message}");
         }
     }
 
