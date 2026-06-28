@@ -144,27 +144,26 @@ describe('Navigation rail sections', () => {
     });
   });
 
-  it('opens collapsed rail popovers on click, focuses the first link, and restores focus on Escape', async () => {
+  it('renders the collapsed rail as a flat list of nav item icon links (no popovers)', async () => {
     localStorage.setItem('pf_navbar_collapsed', 'true');
-    renderLayout();
+    const { container } = renderLayout();
 
-    const filesButton = screen.getByRole('button', { name: 'Files' });
-    fireEvent.click(filesButton);
+    // Each nav item is a direct icon link in the collapsed rail — labelled by
+    // its name and pointing at its own route — rather than a grouped section
+    // button that opens a popover.
+    const railNav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const filesLink = within(railNav).getByRole('link', { name: 'Files' });
+    expect(filesLink).toHaveAttribute('href', '/files');
+    expect(within(railNav).getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/projects');
+    expect(within(railNav).getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/dashboard');
 
-    const dialog = screen.getByRole('dialog', { name: 'Files navigation' });
-    const filesLink = within(dialog).getByRole('link', { name: /^files$/i });
-    expect(dialog).toBeInTheDocument();
-    expect(filesLink).toBeInTheDocument();
-    expect(within(dialog).getByRole('link', { name: /projects/i })).toBeInTheDocument();
+    // The grouped section button + popover dialog behavior is gone.
+    expect(screen.queryByRole('button', { name: 'Files' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
 
+    // Group dividers are preserved between sections in the collapsed rail.
     await waitFor(() => {
-      expect(filesLink).toHaveFocus();
-    });
-
-    fireEvent.keyDown(window, { key: 'Escape' });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
-      expect(filesButton).toHaveFocus();
+      expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBeGreaterThanOrEqual(1);
     });
   });
 });
