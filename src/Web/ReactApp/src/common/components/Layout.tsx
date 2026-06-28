@@ -495,7 +495,7 @@ export function Layout() {
           <div className="flex min-w-0 items-center gap-3">
             <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</h1>
+              <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
             </div>
             <span
               className={clsx('ml-1 h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
@@ -544,7 +544,7 @@ export function Layout() {
             <div className="flex min-w-0 items-center gap-2">
               <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
+                <div className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
               </div>
             </div>
           </div>

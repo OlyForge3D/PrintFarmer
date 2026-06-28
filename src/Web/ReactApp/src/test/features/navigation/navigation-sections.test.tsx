@@ -113,6 +113,18 @@ describe('Navigation rail sections', () => {
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
   });
 
+  it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
+    renderLayout();
+
+    // The brand wordmark is branding within the banner, not a document heading.
+    // Marking it <h1> (previously twice) competed with the page title for the
+    // single page-level h1, so it must not appear as a heading at all.
+    const brandHeadings = screen
+      .queryAllByRole('heading')
+      .filter((el) => el.textContent === 'PrintFarmer');
+    expect(brandHeadings).toHaveLength(0);
+  });
+
   it('stacks the mobile header above main on small screens (column), row on desktop', () => {
     const { container } = renderLayout();
 
