@@ -930,7 +930,7 @@ export function Layout() {
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
-          <div className="px-2 pt-2 pb-4 lg:px-4 lg:pt-4 lg:pb-6">
+          <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2">
             <RouteErrorBoundary>
               <Suspense
                 fallback={
