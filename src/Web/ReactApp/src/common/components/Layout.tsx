@@ -519,7 +519,7 @@ export function Layout() {
           />
         </header>
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex flex-col lg:flex-row min-h-0 flex-1">
         <header
           inert={sidebarOpen || undefined}
           className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"

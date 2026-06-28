@@ -113,6 +113,20 @@ describe('Navigation rail sections', () => {
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
   });
 
+  it('stacks the mobile header above main on small screens (column), row on desktop', () => {
+    const { container } = renderLayout();
+
+    // Regression guard: the content container that holds the mobile top-header,
+    // the desktop rail, and <main> must be a column on mobile and a row only at
+    // lg+. Without flex-col on mobile, the mobile header becomes a horizontal
+    // sibling of <main> and pushes the page content off-screen (blank on phones).
+    const main = container.querySelector('#main-content');
+    const contentRow = main?.parentElement;
+    expect(contentRow).not.toBeNull();
+    expect(contentRow!.className).toContain('flex-col');
+    expect(contentRow!.className).toContain('lg:flex-row');
+  });
+
   it('makes the mobile drawer inert when closed and moves focus into it when opened', async () => {
     const { container } = renderLayout();
 
