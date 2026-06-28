@@ -502,17 +502,21 @@ RUN set -eux; \
     export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
     export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
     \
-    npm run build 2>&1; \
+    set +e; \
+    npm run build > /tmp/frontend-build.log 2>&1; \
     build_status=$?; \
+    set -e; \
     \
     if [ "$build_status" -ne 0 ]; then \
         echo "[frontend-build] ERROR: Build failed with status $build_status"; \
+        tail -n 200 /tmp/frontend-build.log; \
         exit $build_status; \
     fi; \
     \
     if [ ! -d dist ] || [ ! -f dist/index.html ]; then \
         echo "[frontend-build] ERROR: dist directory or index.html not found!"; \
         ls -la; \
+        tail -n 80 /tmp/frontend-build.log || true; \
         exit 1; \
     fi; \
     \
