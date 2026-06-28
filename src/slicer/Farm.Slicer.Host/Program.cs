@@ -69,6 +69,25 @@ if (!string.IsNullOrWhiteSpace(jwtKey))
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero,
             };
+
+            // SignalR's WebSocket / Server-Sent-Events transports cannot set the Authorization
+            // header on the browser handshake, so the client sends the JWT as a ?access_token=
+            // query parameter instead. Honour it for hub paths (e.g. /hubs/slicers); without this
+            // the WS upgrade to the [Authorize] hub is rejected 401 and SignalR silently downgrades
+            // to long-polling. The negotiate POST still uses the Authorization header (default).
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
+                    if (token is not null)
+                    {
+                        context.Token = token;
+                    }
+
+                    return Task.CompletedTask;
+                },
+            };
         });
 }
 else
