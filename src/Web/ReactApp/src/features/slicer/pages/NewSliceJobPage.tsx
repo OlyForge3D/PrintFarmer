@@ -1883,8 +1883,8 @@ export const NewSliceJobPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-1 pt-0 pb-1">
-      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-1.5 overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-row">
+    <div className="min-h-full overflow-hidden bg-pf-bg-2 px-4 pt-4 pb-4">
+      <form onSubmit={onSubmit} className="relative flex min-h-[70vh] flex-col gap-1.5 overflow-hidden lg:h-[calc(100dvh-5rem)] lg:min-h-0 lg:flex-row">
         {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden on narrow viewports, toggled via hamburger.
              On lg+ screens: inline beside visualizer unless explicitly toggled off.
              On narrow screens: slides over as fixed-width panel when toggled open. */}
