@@ -274,11 +274,10 @@ export function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-  const [navbarCollapsed, setNavbarCollapsed] = useState(() => {
+  const [navbarCollapsed, setNavbarCollapsed] = useState<boolean>(() => {
     const saved = localStorage.getItem(NAVBAR_COLLAPSED_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : false;
+    return saved ? Boolean(JSON.parse(saved)) : false;
   });
-  const [openCollapsedSection, setOpenCollapsedSection] = useState<string | null>(null);
   const desktopRailRef = useRef<HTMLDivElement | null>(null);
   const mobileDrawerAnnouncementRef = useRef<HTMLDivElement | null>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -286,8 +285,6 @@ export function Layout() {
   const sidebarAnnouncementTimeoutRef = useRef<number | null>(null);
   const previousSidebarOpenRef = useRef(false);
   const previousDrawerFocusRef = useRef<HTMLElement | null>(null);
-  const collapsedSectionTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const collapsedSectionPopoverRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
@@ -359,18 +356,6 @@ export function Layout() {
     setUserMenuOpen(false);
   };
 
-  const closeCollapsedSection = useCallback((returnFocus = false) => {
-    setOpenCollapsedSection((current) => {
-      if (returnFocus && current) {
-        window.requestAnimationFrame(() => {
-          collapsedSectionTriggerRefs.current[current]?.focus();
-        });
-      }
-
-      return null;
-    });
-  }, []);
-
   const announceMobileDrawer = useCallback((message: string) => {
     if (sidebarAnnouncementTimeoutRef.current !== null) {
       window.clearTimeout(sidebarAnnouncementTimeoutRef.current);
@@ -389,24 +374,7 @@ export function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!openCollapsedSection) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (desktopRailRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      closeCollapsedSection(true);
-    };
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [closeCollapsedSection, openCollapsedSection]);
-
-  useEffect(() => {
-    if (!sidebarOpen && !userMenuOpen && !openCollapsedSection) {
+    if (!sidebarOpen && !userMenuOpen) {
       return;
     }
 
@@ -414,28 +382,12 @@ export function Layout() {
       if (event.key === 'Escape') {
         setSidebarOpen(false);
         setUserMenuOpen(false);
-        closeCollapsedSection(true);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeCollapsedSection, sidebarOpen, userMenuOpen, openCollapsedSection]);
-
-  useEffect(() => {
-    if (!openCollapsedSection) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      const popover = collapsedSectionPopoverRefs.current[openCollapsedSection];
-      if (!focusFirstElement(popover)) {
-        popover?.focus();
-      }
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [openCollapsedSection]);
+  }, [sidebarOpen, userMenuOpen]);
 
   useEffect(() => {
     if (sidebarOpen) {
@@ -722,88 +674,44 @@ export function Layout() {
             </div>
 
             <nav
-              className={clsx('relative flex-1 min-h-0', navbarCollapsed ? 'overflow-visible px-2 py-3' : 'overflow-y-auto px-3 py-4')}
+              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-3' : 'px-3 py-4')}
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
-                <div className="space-y-2">
-                  {navigationGroups.map((group) => {
-                    const SectionIcon = group.header.icon;
-                    const isSectionActive = group.items.some((item) => isNavItemActive(item));
-                    const isOpen = openCollapsedSection === group.header.name;
-                    const popoverId = `rail-popover-${group.header.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+                <div className="space-y-1">
+                  {navigationGroups.map((group, groupIndex) => (
+                    <Fragment key={group.header.name}>
+                      {groupIndex > 0 && (
+                        <hr className="border-pf-border mx-2 my-2" aria-hidden="true" />
+                      )}
+                      <div className="flex flex-col items-center space-y-1" aria-label={group.header.name} role="group">
+                        {group.items.map((item) => {
+                          const ItemIcon = item.icon;
+                          const isActive = isNavItemActive(item);
 
-                    return (
-                      <div key={group.header.name} className="relative">
-                        <Button
-                          ref={(element) => {
-                            collapsedSectionTriggerRefs.current[group.header.name] = element;
-                          }}
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          className={clsx(
-                            'h-11 w-11 justify-center rounded-2xl border px-0',
-                            isSectionActive
-                              ? 'border-pf-accent bg-pf-accent/12 text-pf-accent'
-                              : 'border-pf-border text-pf-text-primary hover:bg-pf-bg-2'
-                          )}
-                          aria-label={group.header.name}
-                          title={group.header.name}
-                          aria-expanded={isOpen}
-                          aria-haspopup="dialog"
-                          aria-controls={isOpen ? popoverId : undefined}
-                          onClick={() => setOpenCollapsedSection((prev) => prev === group.header.name ? null : group.header.name)}
-                          iconCenter={<SectionIcon className="h-5 w-5" />}
-                        />
-
-                        {isOpen && (
-                          <div
-                            ref={(element) => {
-                              collapsedSectionPopoverRefs.current[group.header.name] = element;
-                            }}
-                            id={popoverId}
-                            role="dialog"
-                            aria-label={`${group.header.name} navigation`}
-                            tabIndex={-1}
-                            className="absolute left-full top-0 z-50 ml-3 w-64 rounded-2xl border border-pf-border bg-pf-bg-1 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]"
-                          >
-                            <div className="mb-1 flex items-center gap-3 rounded-xl px-2 py-2 text-sm font-semibold text-pf-text-primary">
+                          return (
+                            <NavLink
+                              key={item.href}
+                              to={item.href}
+                              title={item.name}
+                              aria-label={item.name}
+                              aria-current={isActive ? 'page' : undefined}
+                              className={clsx(
+                                'flex h-11 w-11 items-center justify-center rounded-2xl border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+                                isActive
+                                  ? 'border-pf-accent bg-pf-accent/12 text-pf-accent'
+                                  : 'border-pf-border text-pf-text-primary hover:bg-pf-bg-2'
+                              )}
+                            >
                               <span aria-hidden="true">
-                                <SectionIcon className="h-5 w-5 text-pf-accent" />
+                                <ItemIcon className="h-5 w-5" />
                               </span>
-                              <span>{group.header.name}</span>
-                            </div>
-                            <div className="space-y-1">
-                              {group.items.map((item) => {
-                                const ItemIcon = item.icon;
-                                const isActive = isNavItemActive(item);
-
-                                return (
-                                  <NavLink
-                                    key={item.href}
-                                    to={item.href}
-                                    onClick={() => closeCollapsedSection()}
-                                    className={clsx(
-                                      'flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                                      isActive
-                                        ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
-                                        : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                                    )}
-                                  >
-                                    <span aria-hidden="true">
-                                      <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
-                                    </span>
-                                    <span className="flex-1 text-left">{item.name}</span>
-                                  </NavLink>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
+                            </NavLink>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </Fragment>
+                  ))}
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -897,7 +805,6 @@ export function Layout() {
                   size="sm"
                   className="w-full justify-center"
                   onClick={() => {
-                    setOpenCollapsedSection(null);
                     setNavbarCollapsed((prev) => !prev);
                   }}
                   iconCenter={navbarCollapsed ? <ChevronRightIcon className="h-5 w-5" /> : <ChevronLeftIcon className="h-5 w-5" />}
