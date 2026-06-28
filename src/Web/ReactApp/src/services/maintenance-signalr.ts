@@ -51,8 +51,8 @@ export class MaintenanceSignalRService {
       this.connection = new signalR.HubConnectionBuilder()
         .withUrl(this.hubUrl, {
           accessTokenFactory: () => {
-            // Get auth token from localStorage (matches apiClient behavior)
-            return localStorage.getItem('authToken') || '';
+            // Get auth token from localStorage (matches apiClient behavior).
+            return localStorage.getItem('auth-token') || '';
           }
         })
         .withAutomaticReconnect({
