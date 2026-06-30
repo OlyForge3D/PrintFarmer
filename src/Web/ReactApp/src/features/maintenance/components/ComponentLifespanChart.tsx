@@ -3,7 +3,7 @@ import { useComponentLifespan } from '../hooks/useComponentLifespan';
 import { Card } from '@/common/components/ui/Card';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
-export const ComponentLifespanChart: React.FC = () => {
+export const ComponentLifespanChart = React.memo(function ComponentLifespanChart() {
   const { data, isLoading, error } = useComponentLifespan();
 
   return (
@@ -26,4 +26,4 @@ export const ComponentLifespanChart: React.FC = () => {
       )}
     </Card>
   );
-};
+});

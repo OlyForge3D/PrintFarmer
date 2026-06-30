@@ -19,8 +19,9 @@ interface Props {
   error: Error | null;
 }
 
-export const MaterialSuccessRateChart: React.FC<Props> = ({ data, isLoading, error }) => (
-  <Card title="Success Rate by Material" className="h-96">
+export const MaterialSuccessRateChart = React.memo(function MaterialSuccessRateChart({ data, isLoading, error }: Props) {
+  return (
+    <Card title="Success Rate by Material" className="h-96">
     {isLoading ? (
       <ChartSkeleton />
     ) : error ? (
@@ -42,5 +43,6 @@ export const MaterialSuccessRateChart: React.FC<Props> = ({ data, isLoading, err
         </BarChart>
       </ResponsiveContainer>
     )}
-  </Card>
-);
+    </Card>
+  );
+});
