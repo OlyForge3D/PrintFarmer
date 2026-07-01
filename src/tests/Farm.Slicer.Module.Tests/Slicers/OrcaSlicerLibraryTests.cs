@@ -199,13 +199,14 @@ public class OrcaSlicerProfilesProviderTests
 
         int filamentCount = filaments.GetArrayLength();
 
-        // Expected: ~28 filament profiles (what's in the OrcaFilamentLibrary bundle)
-        // Note: The provider loads only profiles listed in the bundle metadata,
-        // not all individual .json files in the directory.
-        // The sample directory has 259 usable profiles (272 total - 13 with instantiation="false"),
-        // but only a subset are included in the bundle file.
-        filamentCount.Should().BeGreaterThan(0, "Should load at least some filament profiles");
-        filamentCount.Should().BeGreaterThanOrEqualTo(25, "Should load filament profiles from OrcaFilamentLibrary bundle");
+        int expectedFilamentCount = CountExistingUniversalFilamentsFromBundle(sampleProfilesPath);
+        int topLevelFilamentCount = Directory.GetFiles(
+            Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary", "filament"),
+            "*.json",
+            SearchOption.TopDirectoryOnly).Length;
+
+        expectedFilamentCount.Should().BeGreaterThan(topLevelFilamentCount, "the assertion should catch non-recursive top-level-only loading");
+        filamentCount.Should().Be(expectedFilamentCount, "Should load every filament profile referenced by OrcaFilamentLibrary.json");
     }
 
     [Fact]
@@ -387,6 +388,21 @@ public class OrcaSlicerProfilesProviderTests
             // This allows the test to work with different bundle configurations
             machineProfiles.Should().NotBeEmpty("Should have at least some machine profiles");
         }
+    }
+
+    private static int CountExistingUniversalFilamentsFromBundle(string sampleProfilesPath)
+    {
+        string bundlePath = Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary.json");
+        string bundleJson = File.ReadAllText(bundlePath);
+        using JsonDocument bundleDoc = JsonDocument.Parse(bundleJson);
+        JsonElement filamentList = bundleDoc.RootElement.GetProperty("filament_list");
+        string universalFilamentsDir = Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary");
+
+        return filamentList
+            .EnumerateArray()
+            .Select(entry => entry.GetProperty("sub_path").GetString())
+            .Where(subPath => !string.IsNullOrWhiteSpace(subPath))
+            .Count(subPath => File.Exists(Path.Combine(universalFilamentsDir, subPath!)));
     }
 }
 
