@@ -330,6 +330,7 @@ public class NotificationService(
                 string payload = JsonSerializer.Serialize(new
                 {
                     type = type.ToString(),
+                    title = subject,
                     subject,
                     body,
                     jobId = parsedJobId
