@@ -1,4 +1,14 @@
 {
   "version": "1.0.0",
-  "assets": []
+  "assets": [
+    {
+      "id": "prusa_mk4",
+      "manufacturerName": "Prusa",
+      "modelName": "MK4",
+      "bedModel": "bed-models/Prusa/MK4.stl",
+      "bedTexture": "bed-textures/Prusa/MK4_texture.svg",
+      "bedTextureFormat": "svg",
+      "coverImage": "cover-images/Prusa/MK4_cover.png"
+    }
+  ]
 }

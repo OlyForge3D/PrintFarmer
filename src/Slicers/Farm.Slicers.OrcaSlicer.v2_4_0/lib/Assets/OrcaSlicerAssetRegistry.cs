@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Text.Json;
 using Farm.Slicer.Module.Contracts.Libraries;
 
 namespace Farm.Slicers.OrcaSlicer.v2_4_0;
@@ -72,8 +73,23 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
             return;
         }
 
-        // TODO: Parse manifest and populate _assetsCache
-        await Task.CompletedTask;
+        try
+        {
+            using var manifest = await JsonDocument.ParseAsync(manifestStream, cancellationToken: ct);
+            foreach (SlicerAsset asset in ParseManifest(manifest.RootElement))
+            {
+                var key = $"{asset.ManufacturerName}:{asset.ModelName}".ToLowerInvariant();
+                _assetsCache[key] = asset;
+            }
+        }
+        catch (JsonException)
+        {
+            _assetsCache.Clear();
+        }
+        catch (InvalidOperationException)
+        {
+            _assetsCache.Clear();
+        }
     }
 
     private static Stream? GetEmbeddedResourceStream(string resourcePath)
@@ -82,5 +98,122 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
         var resourceName = $"OrcaSlicer_v2_4_0_Assets_{resourcePath}".Replace('/', '_');
 
         return assembly.GetManifestResourceStream(resourceName);
+    }
+
+    private static IEnumerable<SlicerAsset> ParseManifest(JsonElement root)
+    {
+        if (TryGetProperty(root, "assets", out JsonElement assets) &&
+            assets.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement asset in assets.EnumerateArray())
+            {
+                SlicerAsset? parsedAsset = ParseAssetEntry(asset);
+                if (parsedAsset is not null)
+                {
+                    yield return parsedAsset;
+                }
+            }
+
+            yield break;
+        }
+
+        if (!TryGetProperty(root, "manufacturers", out JsonElement manufacturers) ||
+            manufacturers.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (JsonElement manufacturer in manufacturers.EnumerateArray())
+        {
+            string? manufacturerName = GetString(manufacturer, "name");
+            if (string.IsNullOrWhiteSpace(manufacturerName) ||
+                !TryGetProperty(manufacturer, "printers", out JsonElement printers) ||
+                printers.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (JsonElement printer in printers.EnumerateArray())
+            {
+                string? modelName = GetString(printer, "name");
+                if (string.IsNullOrWhiteSpace(modelName))
+                {
+                    continue;
+                }
+
+                yield return new SlicerAsset(
+                    manufacturerName,
+                    modelName,
+                    HasAssetPath(printer, "bedModel"),
+                    HasAssetPath(printer, "bedTexture"),
+                    GetString(printer, "bedTextureFormat") ?? GetTextureFormat(GetString(printer, "bedTexture")),
+                    HasAssetPath(printer, "cover"),
+                    "2.4.0");
+            }
+        }
+    }
+
+    private static SlicerAsset? ParseAssetEntry(JsonElement asset)
+    {
+        string? manufacturerName = GetString(asset, "manufacturerName") ?? GetString(asset, "manufacturer");
+        string? modelName = GetString(asset, "modelName") ?? GetString(asset, "model") ?? GetString(asset, "name");
+        if (string.IsNullOrWhiteSpace(manufacturerName) || string.IsNullOrWhiteSpace(modelName))
+        {
+            return null;
+        }
+
+        string? bedTexture = GetString(asset, "bedTexture");
+        bool hasCoverImage = GetBool(asset, "hasCoverImage") ??
+            (HasAssetPath(asset, "coverImage") || HasAssetPath(asset, "cover"));
+
+        return new SlicerAsset(
+            manufacturerName,
+            modelName,
+            GetBool(asset, "hasBedModel") ?? HasAssetPath(asset, "bedModel"),
+            GetBool(asset, "hasBedTexture") ?? !string.IsNullOrWhiteSpace(bedTexture),
+            GetString(asset, "bedTextureFormat") ?? GetTextureFormat(bedTexture),
+            hasCoverImage,
+            "2.4.0");
+    }
+
+    private static bool HasAssetPath(JsonElement element, string propertyName)
+    {
+        return !string.IsNullOrWhiteSpace(GetString(element, propertyName));
+    }
+
+    private static bool? GetBool(JsonElement element, string propertyName)
+    {
+        return TryGetProperty(element, propertyName, out JsonElement property) && property.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? property.GetBoolean()
+            : null;
+    }
+
+    private static string? GetString(JsonElement element, string propertyName)
+    {
+        return TryGetProperty(element, propertyName, out JsonElement property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
+    {
+        foreach (JsonProperty candidate in element.EnumerateObject())
+        {
+            if (candidate.NameEquals(propertyName))
+            {
+                property = candidate.Value;
+                return true;
+            }
+        }
+
+        property = default;
+        return false;
+    }
+
+    private static string? GetTextureFormat(string? bedTexture)
+    {
+        return string.IsNullOrWhiteSpace(bedTexture)
+            ? null
+            : Path.GetExtension(bedTexture).TrimStart('.').ToLowerInvariant();
     }
 }

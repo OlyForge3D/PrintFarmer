@@ -114,6 +114,7 @@ tools/installer/dist/
 
 *.png
 !src/Web/ReactApp/public/assets/orcaslicer/**/*.png
+!src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/lib/Assets/**/*.png
 
 # C# devkit generated cache files
 *.lscache
