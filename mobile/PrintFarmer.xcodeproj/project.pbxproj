@@ -10,6 +10,9 @@
 		D610P4000000000000000002 /* ServerManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000001 /* ServerManagementViewModel.swift */; };
 		D610P4000000000000000004 /* ServerManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000003 /* ServerManagementViews.swift */; };
 		D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000005 /* ServerManagementViewModelTests.swift */; };
+		D610P5000000000000000002 /* ServerSwitcherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000001 /* ServerSwitcherViewModel.swift */; };
+		D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000003 /* ServerSwitcherMenu.swift */; };
+		D610P5000000000000000006 /* ServerSwitcherViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */; };
 		D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000001 /* ServerCredentialsStore.swift */; };
 		D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */; };
 		D61000000000000000000002 /* RegisteredServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000001 /* RegisteredServer.swift */; };
@@ -228,6 +231,9 @@
 		D610P4000000000000000001 /* ServerManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViewModel.swift; sourceTree = "<group>"; };
 		D610P4000000000000000003 /* ServerManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViews.swift; sourceTree = "<group>"; };
 		D610P4000000000000000005 /* ServerManagementViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViewModelTests.swift; sourceTree = "<group>"; };
+		D610P5000000000000000001 /* ServerSwitcherViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherViewModel.swift; sourceTree = "<group>"; };
+		D610P5000000000000000003 /* ServerSwitcherMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherMenu.swift; sourceTree = "<group>"; };
+		D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherViewModelTests.swift; sourceTree = "<group>"; };
 		D610F2000000000000000001 /* ServerCredentialsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerCredentialsStore.swift; sourceTree = "<group>"; };
 		D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerCredentialsStoreTests.swift; sourceTree = "<group>"; };
 		D61000000000000000000001 /* RegisteredServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisteredServer.swift; sourceTree = "<group>"; };
@@ -625,6 +631,7 @@
 				264B18486158F15238D0788D /* JobListViewModelTests.swift */,
 				016588B049630508F9B77403 /* LoginViewModelTests.swift */,
 				D610P4000000000000000005 /* ServerManagementViewModelTests.swift */,
+				D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */,
 				C832D8E0EECDD622BBEB9A68 /* NotificationsViewModelTests.swift */,
 				281DF848F7722BE9E0E28A2A /* PrinterDetailViewModelTests.swift */,
 				A1C5DEF1234567890ABC0004 /* PrinterControlsViewModelTests.swift */,
@@ -828,6 +835,7 @@
 				57A3A3E21352CC6A4514221E /* PrinterCardView.swift */,
 				B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */,
 				4E45A19848758E2DB8543C2A /* StatusBadge.swift */,
+				D610P5000000000000000003 /* ServerSwitcherMenu.swift */,
 				3F15146257C59F44A210F002 /* CustomIcons.swift */,
 				97DEEFD9852661DAA2637C25 /* TemperatureView.swift */,
 				DAFD389576B18CC0E5ADBB63 /* MJPEGStreamView.swift */,
@@ -877,6 +885,7 @@
 				1A0CD24EBD01E5889869039C /* JobListViewModel.swift */,
 				DAFDAD6E115B4CFF2CCC862D /* LoginViewModel.swift */,
 				D610P4000000000000000001 /* ServerManagementViewModel.swift */,
+				D610P5000000000000000001 /* ServerSwitcherViewModel.swift */,
 				C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */,
 				E61A5AAA3D1E4BAD9CA3FE7D /* PendingReadyMonitor.swift */,
 				4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */,
@@ -1082,6 +1091,7 @@
 				DFD4294EC690BF7D5A4E695F /* DashboardViewModelTests.swift in Sources */,
 				814473DF28A49641B79766BA /* LoginViewModelTests.swift in Sources */,
 				D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */,
+				D610P5000000000000000006 /* ServerSwitcherViewModelTests.swift in Sources */,
 				E0411324A6C10BFCD5EAB595 /* PrinterDetailViewModelTests.swift in Sources */,
 				A1C5DEF1234567890ABC0003 /* PrinterControlsViewModelTests.swift in Sources */,
 				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
@@ -1163,6 +1173,7 @@
 				6FB5573AA419B929334A449D /* JobListViewModel.swift in Sources */,
 				8A0E52A04D22061CB28D06BE /* LoginViewModel.swift in Sources */,
 				D610P4000000000000000002 /* ServerManagementViewModel.swift in Sources */,
+				D610P5000000000000000002 /* ServerSwitcherViewModel.swift in Sources */,
 				4F679582C671B972DF8C69C5 /* NotificationsViewModel.swift in Sources */,
 				0D7D6FE112414AE495990773 /* PendingReadyMonitor.swift in Sources */,
 				AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */,
@@ -1185,6 +1196,7 @@
 				C36E71E0B8D651B87256150D /* PrinterCardView.swift in Sources */,
 				2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */,
 				57E23E107ED77369284AF9D4 /* StatusBadge.swift in Sources */,
+				D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */,
 				2C6155264C934670F2278DC9 /* CustomIcons.swift in Sources */,
 				C46CED04E8CBA839846568BC /* TemperatureView.swift in Sources */,
 				77F7448C2D183C8F140C41CB /* MJPEGStreamView.swift in Sources */,
