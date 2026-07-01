@@ -146,20 +146,34 @@ final class ServerManagementViewModelTests: XCTestCase {
         }
     }
 
-    func testCancelledHealthCheckDoesNotReportReachableOrMutateHealthState() async {
-        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
-        let viewModel = ServerManagementViewModel(
-            registry: registry,
-            healthChecker: CancellingHealthChecker()
-        )
-        viewModel.prepareForAdd()
-        viewModel.serverURL = "https://print.example.com"
+    func testCancelledHealthCheckDoesNotRestorePriorHealthStateAfterEditorReset() async {
+        let priorStates: [ServerManagementViewModel.HealthState] = [
+            .reachable("Previously reachable"),
+            .unreachable("Previously unreachable")
+        ]
 
-        let result = await viewModel.checkHealth()
+        for priorState in priorStates {
+            let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+            let viewModel = ServerManagementViewModel(
+                registry: registry,
+                healthChecker: SlowHealthChecker()
+            )
+            viewModel.prepareForAdd()
+            viewModel.serverURL = "https://print.example.com"
+            viewModel.healthState = priorState
+            viewModel.errorMessage = "Previous error"
 
-        XCTAssertNil(result)
-        XCTAssertEqual(viewModel.healthState, .notChecked)
-        XCTAssertNil(viewModel.errorMessage)
+            let healthTask = Task { await viewModel.checkHealth() }
+            await waitForHealthChecking(viewModel)
+            viewModel.resetTransientEditorState()
+            healthTask.cancel()
+
+            let result = await healthTask.value
+
+            XCTAssertNil(result)
+            XCTAssertEqual(viewModel.healthState, .notChecked)
+            XCTAssertNil(viewModel.errorMessage)
+        }
     }
 
     func testCancelledSaveDoesNotAddServerToRegistry() async {
@@ -176,6 +190,7 @@ final class ServerManagementViewModelTests: XCTestCase {
         while viewModel.healthState != .checking {
             await Task.yield()
         }
+        viewModel.resetTransientEditorState()
         saveTask.cancel()
 
         let didSave = await saveTask.value
@@ -257,6 +272,20 @@ final class ServerManagementViewModelTests: XCTestCase {
         XCTAssertEqual(updated.lastKnownStatus, "Unreachable")
         XCTAssertEqual(updated.lastCheckedAt, Date(timeIntervalSince1970: 2_000))
     }
+
+    private func waitForHealthChecking(
+        _ viewModel: ServerManagementViewModel,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<100 {
+            if viewModel.healthState == .checking {
+                return
+            }
+            await Task.yield()
+        }
+        XCTFail("Expected health check to enter checking state.", file: file, line: line)
+    }
 }
 
 private struct StubHealthChecker: ServerHealthChecking {
@@ -264,12 +293,6 @@ private struct StubHealthChecker: ServerHealthChecking {
 
     func check(baseURL: URL) async throws -> ServerHealthCheckResult {
         result
-    }
-}
-
-private struct CancellingHealthChecker: ServerHealthChecking {
-    func check(baseURL: URL) async throws -> ServerHealthCheckResult {
-        throw CancellationError()
     }
 }
 

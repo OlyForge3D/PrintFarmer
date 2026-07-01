@@ -178,7 +178,6 @@ final class ServerManagementViewModel {
             return nil
         }
 
-        let previousHealthState = healthState
         healthState = .checking
         do {
             let result = try await healthChecker.check(baseURL: url)
@@ -187,9 +186,13 @@ final class ServerManagementViewModel {
             errorMessage = nil
             return result
         } catch is CancellationError {
-            healthState = previousHealthState
+            return nil
+        } catch let error as URLError where error.code == .cancelled {
             return nil
         } catch {
+            guard !Task.isCancelled else {
+                return nil
+            }
             let result = ServerHealthCheckResult(
                 isReachable: false,
                 statusCode: nil,
