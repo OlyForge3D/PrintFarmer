@@ -602,23 +602,38 @@ public class NotificationService(
             },
             async (target, ct) =>
             {
-                if (!await pushEndpointValidator(target.Endpoint, ct))
+                try
                 {
-                    outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: false, Error: "Endpoint failed local validation"));
-                    return;
+                    if (!await pushEndpointValidator(target.Endpoint, ct))
+                    {
+                        outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, Success: false, Expired: false, Error: "Endpoint failed local validation"));
+                        return;
+                    }
+
+                    var dispatchSubscription = new PushSubscription
+                    {
+                        Id = target.SubscriptionId,
+                        UserId = target.UserId,
+                        Endpoint = target.Endpoint,
+                        P256dh = target.P256dh,
+                        Auth = target.Auth
+                    };
+
+                    WebPushDispatchResult result = await webPushNotificationSender.SendAsync(dispatchSubscription, payload, ct);
+                    outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, result.Success, result.SubscriptionExpired, result.Error));
                 }
-
-                var dispatchSubscription = new PushSubscription
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    Id = target.SubscriptionId,
-                    UserId = target.UserId,
-                    Endpoint = target.Endpoint,
-                    P256dh = target.P256dh,
-                    Auth = target.Auth
-                };
-
-                WebPushDispatchResult result = await webPushNotificationSender.SendAsync(dispatchSubscription, payload, ct);
-                outcomes.Add(new PushDispatchOutcome(target.SubscriptionId, target.UserId, target.Endpoint, result.Success, result.SubscriptionExpired, result.Error));
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(
+                        ex,
+                        "Error dispatching web push notification for user {UserId} endpoint {Endpoint}",
+                        target.UserId,
+                        target.Endpoint);
+                }
             });
 
         var outcomeList = outcomes.ToList();
@@ -696,7 +711,22 @@ public class NotificationService(
             },
             async (target, ct) =>
             {
-                await SendEmailNotificationAsync(target.User, type, subject, body, ct);
+                try
+                {
+                    await SendEmailNotificationAsync(target.User, type, subject, body, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(
+                        ex,
+                        "Error dispatching email notification for user {UserId} target {Email}",
+                        target.User.Id,
+                        target.User.Email);
+                }
             });
     }
 

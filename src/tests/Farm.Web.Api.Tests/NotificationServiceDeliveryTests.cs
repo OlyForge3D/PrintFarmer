@@ -79,8 +79,7 @@ public class NotificationServiceDeliveryTests : IDisposable
         NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(true));
         await SendJobNotificationAsync(service, eventType);
 
-        bool shouldDeliver = enabled || (eventType == NotificationType.JobFailed && channel == NotificationDeliveryChannel.InApp);
-        VerifyChannelDelivery(channel, shouldDeliver);
+        VerifyChannelDelivery(eventType, channel, enabled);
     }
 
     [Fact]
@@ -162,20 +161,87 @@ public class NotificationServiceDeliveryTests : IDisposable
     [Fact]
     public async Task SendJobCompletedAsync_EmailServiceThrows_DoesNotPropagateException()
     {
-        UserDto user = CreateUser();
+        UserDto firstUser = CreateUser("first@example.com");
+        UserDto secondUser = CreateUser("second@example.com");
         _usersRepository.Setup(x => x.GetUsersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<UserDto> { user });
-        _emailService.Setup(x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserDto> { firstUser, secondUser });
+        bool secondEmailDelivered = false;
+        _emailService.Setup(x => x.SendAsync(
+                It.Is<EmailMessage>(m => m.To == firstUser.Email),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SMTP unavailable"));
+        _emailService.Setup(x => x.SendAsync(
+                It.Is<EmailMessage>(m => m.To == secondUser.Email),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (EmailMessage message, CancellationToken ct) =>
+            {
+                await Task.Delay(100, ct);
+                secondEmailDelivered = true;
+                return new EmailDispatchResult(true);
+            });
 
-        _dbContext.NotificationPreferences.Add(CreatePreferences(user.Id, NotificationType.JobCompleted, NotificationDeliveryChannel.Email, enabled: true));
+        _dbContext.NotificationPreferences.AddRange(
+            CreatePreferences(firstUser.Id, NotificationType.JobCompleted, NotificationDeliveryChannel.Email, enabled: true),
+            CreatePreferences(secondUser.Id, NotificationType.JobCompleted, NotificationDeliveryChannel.Email, enabled: true));
         await _dbContext.SaveChangesAsync();
 
         NotificationService service = CreateService();
         Func<Task> act = () => service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
 
         await act.Should().NotThrowAsync();
-        _emailService.Verify(x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Once);
+        _emailService.Verify(
+            x => x.SendAsync(It.Is<EmailMessage>(m => m.To == firstUser.Email), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _emailService.Verify(
+            x => x.SendAsync(It.Is<EmailMessage>(m => m.To == secondUser.Email), It.IsAny<CancellationToken>()),
+            Times.Once);
+        secondEmailDelivered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendJobCompletedAsync_WebPushSenderThrows_DoesNotSkipRemainingTargets()
+    {
+        UserDto firstUser = CreateUser("first@example.com");
+        UserDto secondUser = CreateUser("second@example.com");
+        _usersRepository.Setup(x => x.GetUsersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserDto> { firstUser, secondUser });
+
+        PushSubscription firstSubscription = CreatePushSubscription(firstUser.Id);
+        PushSubscription secondSubscription = CreatePushSubscription(secondUser.Id);
+        bool secondPushDelivered = false;
+        _webPushSender.Setup(x => x.SendAsync(
+                It.Is<PushSubscription>(s => s.UserId == firstUser.Id),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Push provider unavailable"));
+        _webPushSender.Setup(x => x.SendAsync(
+                It.Is<PushSubscription>(s => s.UserId == secondUser.Id),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (PushSubscription subscription, string payload, CancellationToken ct) =>
+            {
+                await Task.Delay(100, ct);
+                secondPushDelivered = true;
+                return new WebPushDispatchResult(true);
+            });
+
+        _dbContext.NotificationPreferences.AddRange(
+            CreatePreferences(firstUser.Id, NotificationType.JobCompleted, NotificationDeliveryChannel.Push, enabled: true),
+            CreatePreferences(secondUser.Id, NotificationType.JobCompleted, NotificationDeliveryChannel.Push, enabled: true));
+        _dbContext.PushSubscriptions.AddRange(firstSubscription, secondSubscription);
+        await _dbContext.SaveChangesAsync();
+
+        NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(true));
+        Func<Task> act = () => service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
+
+        await act.Should().NotThrowAsync();
+        _webPushSender.Verify(
+            x => x.SendAsync(It.Is<PushSubscription>(s => s.UserId == firstUser.Id), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _webPushSender.Verify(
+            x => x.SendAsync(It.Is<PushSubscription>(s => s.UserId == secondUser.Id), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        secondPushDelivered.Should().BeTrue();
     }
 
     [Fact]
@@ -543,21 +609,23 @@ public class NotificationServiceDeliveryTests : IDisposable
         };
     }
 
-    private void VerifyChannelDelivery(NotificationDeliveryChannel channel, bool shouldDeliver)
+    private void VerifyChannelDelivery(NotificationType eventType, NotificationDeliveryChannel channel, bool enabled)
     {
-        Times times = shouldDeliver ? Times.Once() : Times.Never();
-        switch (channel)
-        {
-            case NotificationDeliveryChannel.InApp:
-                _notificationRepository.Verify(x => x.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), times);
-                break;
-            case NotificationDeliveryChannel.Email:
-                _emailService.Verify(x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), times);
-                break;
-            case NotificationDeliveryChannel.Push:
-                _webPushSender.Verify(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), times);
-                break;
-        }
+        bool expectedInApp = channel == NotificationDeliveryChannel.InApp
+            ? enabled || eventType == NotificationType.JobFailed
+            : eventType == NotificationType.JobFailed;
+        bool expectedEmail = channel == NotificationDeliveryChannel.Email && enabled;
+        bool expectedPush = channel == NotificationDeliveryChannel.Push && enabled;
+
+        _notificationRepository.Verify(
+            x => x.AddAsync(It.Is<Notification>(n => n.Type == eventType), It.IsAny<CancellationToken>()),
+            expectedInApp ? Times.Once() : Times.Never());
+        _emailService.Verify(
+            x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()),
+            expectedEmail ? Times.Once() : Times.Never());
+        _webPushSender.Verify(
+            x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            expectedPush ? Times.Once() : Times.Never());
     }
 
     private NotificationService CreateService(Func<string, CancellationToken, Task<bool>>? endpointValidator = null)
