@@ -234,6 +234,45 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertTrue(signalRRecorder.services.last?.connectCalled ?? false)
     }
 
+    func testServiceContainerReconcilesRapidSwitchesToLatestServer() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
+        let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
+        let third = try registry.add(displayName: "Three", baseURL: URL(string: "https://three.example.com")!)
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(ServerCredentials(accessToken: "token-one", expiresAt: nil), serverId: first.id)
+        credentialsStore.save(ServerCredentials(accessToken: "token-two", expiresAt: nil), serverId: second.id)
+        credentialsStore.save(ServerCredentials(accessToken: "token-three", expiresAt: nil), serverId: third.id)
+
+        let initialSignalRService = BlockingSignalRService()
+        var serviceIndex = 0
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: SignalRRecorder(),
+            signalRServiceFactory: { _, _ in
+                defer { serviceIndex += 1 }
+                return serviceIndex == 0 ? initialSignalRService : MockSignalRService()
+            }
+        )
+
+        try registry.setActive(id: second.id)
+        let didStartDisconnect = await waitForSemaphore(initialSignalRService.disconnectStarted, timeout: 5)
+        XCTAssertTrue(didStartDisconnect)
+
+        try registry.setActive(id: third.id)
+        initialSignalRService.resumeDisconnect()
+        try await waitForBaseURL(third.baseURL, in: container)
+
+        let currentBaseURL = await container.apiClient?.currentBaseURL()
+        let currentAccessToken = await container.apiClient?.currentAccessToken()
+        XCTAssertEqual(currentBaseURL, third.baseURL)
+        XCTAssertEqual(currentAccessToken, "token-three")
+        XCTAssertEqual(registry.activeServerID, third.id)
+    }
+
     func testServiceContainerRebuildsPrinterServiceCacheOnSwitch() async throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
@@ -307,6 +346,49 @@ final class ServerRegistryTests: XCTestCase {
         }
     }
 
+    func testOldInFlightGetDataResponseIsIgnoredAfterSwitch() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
+        let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        let signalRRecorder = SignalRRecorder()
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: signalRRecorder
+        )
+        let oldClient = try XCTUnwrap(container.apiClient)
+        let requestStarted = DispatchSemaphore(value: 0)
+        let allowResponse = DispatchSemaphore(value: 0)
+        MockURLProtocol.requestHandler = { request in
+            requestStarted.signal()
+            _ = allowResponse.wait(timeout: .now() + 5)
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data("old-server-bytes".utf8))
+        }
+
+        let requestTask = Task {
+            try await oldClient.getData("/api/printers/\(UUID())/snapshot")
+        }
+        let didStartRequest = await waitForSemaphore(requestStarted, timeout: 5)
+        XCTAssertTrue(didStartRequest)
+
+        try registry.setActive(id: second.id)
+        try await waitForBaseURL(second.baseURL, in: container)
+        allowResponse.signal()
+
+        do {
+            _ = try await requestTask.value
+            XCTFail("Expected stale getData response to be ignored")
+        } catch let error as NetworkError {
+            guard case .staleServerResponse = error else {
+                XCTFail("Expected staleServerResponse, got \(error)")
+                return
+            }
+        }
+    }
+
     private func isolatedCredentialsStore() -> ServerCredentialsStore {
         let keychain = KeychainSwift(keyPrefix: "ServiceContainerSwitchingTests_\(UUID().uuidString)_")
         keychain.clear()
@@ -316,7 +398,8 @@ final class ServerRegistryTests: XCTestCase {
     private func switchingTestContainer(
         registry: ServerRegistry,
         credentialsStore: ServerCredentialsStore,
-        signalRRecorder: SignalRRecorder
+        signalRRecorder: SignalRRecorder,
+        signalRServiceFactory: ServiceContainer.SignalRServiceFactory? = nil
     ) -> ServiceContainer {
         ServiceContainer(
             serverRegistry: registry,
@@ -330,7 +413,10 @@ final class ServerRegistryTests: XCTestCase {
                     accessToken: accessToken
                 )
             },
-            signalRServiceFactory: { _, _ in
+            signalRServiceFactory: { baseURL, client in
+                if let signalRServiceFactory {
+                    return signalRServiceFactory(baseURL, client)
+                }
                 let service = MockSignalRService()
                 signalRRecorder.append(service)
                 return service
@@ -373,6 +459,39 @@ final class ServerRegistryTests: XCTestCase {
 
         func append(_ service: MockSignalRService) {
             services.append(service)
+        }
+    }
+
+    private final class BlockingSignalRService: SignalRServiceProtocol, @unchecked Sendable {
+        var connectionState: SignalRConnectionState = .disconnected
+        let disconnectStarted = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var disconnectContinuation: CheckedContinuation<Void, Never>?
+
+        func connect() async throws {
+            connectionState = .connected
+        }
+
+        func disconnect() async {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                disconnectContinuation = continuation
+                lock.unlock()
+                disconnectStarted.signal()
+            }
+            connectionState = .disconnected
+        }
+
+        func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) {}
+
+        func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {}
+
+        func resumeDisconnect() {
+            lock.lock()
+            let continuation = disconnectContinuation
+            disconnectContinuation = nil
+            lock.unlock()
+            continuation?.resume()
         }
     }
 }

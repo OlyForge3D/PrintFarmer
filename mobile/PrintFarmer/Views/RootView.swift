@@ -24,6 +24,7 @@ struct RootView: View {
             Group {
                 if authViewModel.isAuthenticated {
                     ContentView()
+                        .id(services.activeServerGeneration)
                         .task(id: services.activeServerGeneration) {
                             pendingReadyMonitor.configure(
                                 autoPrintService: services.autoPrintService,

@@ -39,14 +39,14 @@ actor AuthService: AuthServiceProtocol {
             throw NetworkError.invalidURL(serverURL)
         }
         let server = try await resolveActiveServer(for: url, normalizedURLString: normalizedURL)
-        await apiClient.updateBaseURL(url)
+        let loginClient = await apiClient.unauthenticatedClient(baseURL: url)
 
         let request = LoginRequest(
             usernameOrEmail: username,
             password: password,
             rememberMe: true
         )
-        let response: AuthResponse = try await apiClient.post("/api/auth/login", body: request)
+        let response: AuthResponse = try await loginClient.post("/api/auth/login", body: request)
 
         guard response.success, let token = response.token else {
             credentialsStore.clear(serverId: server.id)
@@ -57,8 +57,6 @@ actor AuthService: AuthServiceProtocol {
             ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
             serverId: server.id
         )
-        await apiClient.setAccessToken(token)
-        await registerTokenExpiryChecker()
         await activate(server)
         return response
     }
@@ -141,7 +139,7 @@ actor AuthService: AuthServiceProtocol {
                     return active
                 }
 
-                return try serverRegistry.add(displayName: url.host ?? "PrintFarmer", baseURL: url)
+                return try serverRegistry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
             }
         }
 
@@ -160,7 +158,7 @@ actor AuthService: AuthServiceProtocol {
                 return active
             }
 
-            let server = try registry.add(displayName: url.host ?? "PrintFarmer", baseURL: url)
+            let server = try registry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
             return server
         }
     }

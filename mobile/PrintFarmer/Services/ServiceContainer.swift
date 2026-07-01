@@ -38,6 +38,8 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private let observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
+    @ObservationIgnored private var activeServerSwitchTask: Task<Void, Never>?
+    @ObservationIgnored private var activeServerSwitchRequested = false
 
     init(
         baseURL: URL? = nil,
@@ -183,20 +185,39 @@ final class ServiceContainer: @unchecked Sendable {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.handleObservedServerChange()
                 self.observeActiveServer()
+                self.scheduleActiveServerSwitch()
             }
         }
     }
 
-    private func handleObservedServerChange() async {
-        guard let serverRegistry else { return }
-        guard let server = serverRegistry.activeServer else {
-            await switchToNoActiveServer()
-            return
-        }
+    private func scheduleActiveServerSwitch() {
+        activeServerSwitchRequested = true
+        guard activeServerSwitchTask == nil else { return }
 
-        await switchToServer(server)
+        activeServerSwitchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runActiveServerSwitchLoop()
+            self.activeServerSwitchTask = nil
+        }
+    }
+
+    private func runActiveServerSwitchLoop() async {
+        guard let serverRegistry else { return }
+
+        while true {
+            activeServerSwitchRequested = false
+            let targetID = serverRegistry.activeServerID
+            if let server = serverRegistry.activeServer {
+                await switchToServer(server)
+            } else {
+                await switchToNoActiveServer()
+            }
+
+            if serverRegistry.activeServerID == targetID && !activeServerSwitchRequested {
+                break
+            }
+        }
     }
 
     private func switchToActiveServer(_ server: RegisteredServer) async {

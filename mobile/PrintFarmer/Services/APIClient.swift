@@ -514,6 +514,10 @@ actor APIClient {
         accessToken
     }
 
+    func unauthenticatedClient(baseURL: URL) -> APIClient {
+        APIClient(baseURL: baseURL, session: session)
+    }
+
     /// Restores a previously-saved server URL from UserDefaults.
     /// Upgrades legacy `http://` IP URLs to `https://` to match current behavior.
     static func savedBaseURL() -> URL? {
@@ -539,6 +543,7 @@ actor APIClient {
         try await checkTokenExpiry()
         let request = try buildRequest(path: path, method: "GET")
         let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
         try validateResponse(response, data: data)
         return data
     }
