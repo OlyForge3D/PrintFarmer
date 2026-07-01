@@ -78,6 +78,15 @@ final class AuthViewModel {
         currentUser = nil
     }
 
+    func logoutIfServerRegistryUnavailable(_ registry: ServerRegistry) async {
+        guard isAuthenticated,
+              registry.servers.isEmpty || registry.activeServerID == nil else {
+            return
+        }
+
+        await logout()
+    }
+
     // MARK: - Demo Mode
 
     func loginAsDemo() {

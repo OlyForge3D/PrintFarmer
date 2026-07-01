@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D610P4000000000000000002 /* ServerManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000001 /* ServerManagementViewModel.swift */; };
+		D610P4000000000000000004 /* ServerManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000003 /* ServerManagementViews.swift */; };
+		D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000005 /* ServerManagementViewModelTests.swift */; };
 		D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000001 /* ServerCredentialsStore.swift */; };
 		D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */; };
 		D61000000000000000000002 /* RegisteredServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000001 /* RegisteredServer.swift */; };
@@ -222,6 +225,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D610P4000000000000000001 /* ServerManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViewModel.swift; sourceTree = "<group>"; };
+		D610P4000000000000000003 /* ServerManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViews.swift; sourceTree = "<group>"; };
+		D610P4000000000000000005 /* ServerManagementViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViewModelTests.swift; sourceTree = "<group>"; };
 		D610F2000000000000000001 /* ServerCredentialsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerCredentialsStore.swift; sourceTree = "<group>"; };
 		D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerCredentialsStoreTests.swift; sourceTree = "<group>"; };
 		D61000000000000000000001 /* RegisteredServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisteredServer.swift; sourceTree = "<group>"; };
@@ -618,6 +624,7 @@
 				CB279A2CAF8BE1C1BD61D6B2 /* JobDetailViewModelTests.swift */,
 				264B18486158F15238D0788D /* JobListViewModelTests.swift */,
 				016588B049630508F9B77403 /* LoginViewModelTests.swift */,
+				D610P4000000000000000005 /* ServerManagementViewModelTests.swift */,
 				C832D8E0EECDD622BBEB9A68 /* NotificationsViewModelTests.swift */,
 				281DF848F7722BE9E0E28A2A /* PrinterDetailViewModelTests.swift */,
 				A1C5DEF1234567890ABC0004 /* PrinterControlsViewModelTests.swift */,
@@ -776,6 +783,7 @@
 			isa = PBXGroup;
 			children = (
 				BA0262E35EBDB310533C010A /* SettingsView.swift */,
+				D610P4000000000000000003 /* ServerManagementViews.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -868,6 +876,7 @@
 				F9121CFE5C6DFAB79CD12B21 /* JobDetailViewModel.swift */,
 				1A0CD24EBD01E5889869039C /* JobListViewModel.swift */,
 				DAFDAD6E115B4CFF2CCC862D /* LoginViewModel.swift */,
+				D610P4000000000000000001 /* ServerManagementViewModel.swift */,
 				C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */,
 				E61A5AAA3D1E4BAD9CA3FE7D /* PendingReadyMonitor.swift */,
 				4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */,
@@ -1072,6 +1081,7 @@
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
 				DFD4294EC690BF7D5A4E695F /* DashboardViewModelTests.swift in Sources */,
 				814473DF28A49641B79766BA /* LoginViewModelTests.swift in Sources */,
+				D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */,
 				E0411324A6C10BFCD5EAB595 /* PrinterDetailViewModelTests.swift in Sources */,
 				A1C5DEF1234567890ABC0003 /* PrinterControlsViewModelTests.swift in Sources */,
 				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
@@ -1152,6 +1162,7 @@
 				FB7019EE21E8A15811BE2787 /* JobDetailViewModel.swift in Sources */,
 				6FB5573AA419B929334A449D /* JobListViewModel.swift in Sources */,
 				8A0E52A04D22061CB28D06BE /* LoginViewModel.swift in Sources */,
+				D610P4000000000000000002 /* ServerManagementViewModel.swift in Sources */,
 				4F679582C671B972DF8C69C5 /* NotificationsViewModel.swift in Sources */,
 				0D7D6FE112414AE495990773 /* PendingReadyMonitor.swift in Sources */,
 				AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */,
@@ -1185,6 +1196,7 @@
 				D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */,
 				8F2654878B838B7E5AA35AAC /* PrinterListView.swift in Sources */,
 				8E016F38A846594333A70CEB /* SettingsView.swift in Sources */,
+				D610P4000000000000000004 /* ServerManagementViews.swift in Sources */,
 				BCB617F9B1642391E9805237 /* Color+Hex.swift in Sources */,
 				98213E171862DBCDFD587795 /* ThemeColors.swift in Sources */,
 				EF380A83B48A16EAB8906C70 /* ThemeManager.swift in Sources */,

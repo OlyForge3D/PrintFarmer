@@ -7,8 +7,8 @@ struct PFarmApp: App {
     #endif
     @State private var router = AppRouter()
     @State private var authViewModel: AuthViewModel
-    @State private var services: ServiceContainer
     @State private var serverRegistry: ServerRegistry
+    @State private var services: ServiceContainer
     @State private var themeManager = ThemeManager()
 
     init() {
@@ -37,8 +37,8 @@ struct PFarmApp: App {
             RootView()
                 .environment(router)
                 .environment(authViewModel)
-                .environment(services)
                 .environment(serverRegistry)
+                .environment(services)
                 .environment(themeManager)
                 .tint(Color.pfAccent)
                 .preferredColorScheme(themeManager.preferredColorScheme)

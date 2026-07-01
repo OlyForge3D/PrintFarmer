@@ -8,12 +8,14 @@ import SwiftUI
 struct RootView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
     @State private var disconnectTask: Task<Void, Never>?
+    @State private var staleRegistrySignOutTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +24,18 @@ struct RootView: View {
             }
 
             Group {
-                if authViewModel.isAuthenticated {
+                if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
+                    launchScreen
+                        .task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            minimumSplashElapsed = true
+                        }
+                } else if serverRegistry.servers.isEmpty || serverRegistry.activeServerID == nil {
+                    AddFirstServerView()
+                        .task {
+                            await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+                        }
+                } else if authViewModel.isAuthenticated {
                     ContentView()
                         .id(services.activeServerGeneration)
                         .task(id: services.activeServerGeneration) {
@@ -40,12 +53,6 @@ struct RootView: View {
                         }
                         .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
                             router.pendingReadyCount = newValue
-                        }
-                } else if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
-                    launchScreen
-                        .task {
-                            try? await Task.sleep(for: .seconds(1.5))
-                            minimumSplashElapsed = true
                         }
                 } else if !hasSeenOnboarding {
                     OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
@@ -67,7 +74,18 @@ struct RootView: View {
             pendingReadyMonitor.stopMonitoring()
             router.pendingReadyCount = 0
         }
-        .onDisappear { disconnectTask?.cancel() }
+        .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
+            guard isEmpty else { return }
+            signOutIfServerRegistryUnavailable()
+        }
+        .onChange(of: serverRegistry.activeServerID) { _, activeServerID in
+            guard activeServerID == nil else { return }
+            signOutIfServerRegistryUnavailable()
+        }
+        .onDisappear {
+            disconnectTask?.cancel()
+            staleRegistrySignOutTask?.cancel()
+        }
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.
@@ -88,5 +106,12 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color("LaunchBackground"))
+    }
+
+    private func signOutIfServerRegistryUnavailable() {
+        staleRegistrySignOutTask?.cancel()
+        staleRegistrySignOutTask = Task {
+            await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+        }
     }
 }
