@@ -25,6 +25,11 @@ export interface ResolvedNavPreferences {
   regularItems: NavPreferenceItem[];
 }
 
+export interface NavPreferenceGroup<T extends NavPreferenceItem = NavPreferenceItem> {
+  sectionName: string;
+  items: T[];
+}
+
 const DEFAULT_ORDER_BY_ROLE: Record<NavPreferenceRole, string[]> = {
   guest: ['overview'],
   operator: [
@@ -148,7 +153,30 @@ export function loadNavPreferences(storageKey: string, storage: Storage = localS
 }
 
 export function saveNavPreferences(storageKey: string, preferences: NavPreferences, storage: Storage = localStorage) {
-  storage.setItem(storageKey, JSON.stringify(preferences));
+  try {
+    storage.setItem(storageKey, JSON.stringify(preferences));
+  } catch (error) {
+    console.warn('Unable to save navigation preferences.', error);
+  }
+}
+
+export function groupNavItemsByResolvedOrder<T extends NavPreferenceItem>(items: readonly T[]): NavPreferenceGroup<T>[] {
+  const groups: NavPreferenceGroup<T>[] = [];
+
+  items.forEach((item) => {
+    const currentGroup = groups.at(-1);
+    if (currentGroup?.sectionName === item.sectionName) {
+      currentGroup.items.push(item);
+      return;
+    }
+
+    groups.push({
+      sectionName: item.sectionName,
+      items: [item],
+    });
+  });
+
+  return groups;
 }
 
 export function moveNavItem(preferences: NavPreferences, itemId: string, targetIndex: number): NavPreferences {

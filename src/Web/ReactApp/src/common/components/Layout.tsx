@@ -51,6 +51,7 @@ import { BoxIcon, SpoolIcon } from 'lucide-react';
 import {
   createDefaultNavPreferences,
   getNavPreferencesStorageKey,
+  groupNavItemsByResolvedOrder,
   loadNavPreferences,
   moveNavItem,
   normalizeNavPreferences,
@@ -98,6 +99,7 @@ interface NavigationGroup {
 
 type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionHeader;
 type SectionedNavigationItem = NavigationItem & { sectionName: string };
+type MoveButtonDirection = 'up' | 'down';
 
 const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
 const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
@@ -298,24 +300,10 @@ function toPreferenceItem(item: SectionedNavigationItem): NavPreferenceItem {
 }
 
 function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup[] {
-  const groups: NavigationGroup[] = [];
-  const groupByName = new Map<string, NavigationGroup>();
-
-  items.forEach((item) => {
-    let group = groupByName.get(item.sectionName);
-    if (!group) {
-      group = {
-        header: navigationHeadersByName.get(item.sectionName) ?? { name: item.sectionName, icon: HomeIcon },
-        items: [],
-      };
-      groupByName.set(item.sectionName, group);
-      groups.push(group);
-    }
-
-    group.items.push(item);
-  });
-
-  return groups;
+  return groupNavItemsByResolvedOrder(items).map((group) => ({
+    header: navigationHeadersByName.get(group.sectionName) ?? { name: group.sectionName, icon: HomeIcon },
+    items: group.items,
+  }));
 }
 
 export function Layout() {
@@ -371,6 +359,8 @@ export function Layout() {
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileDrawerRef = useRef<HTMLDivElement | null>(null);
   const sidebarAnnouncementTimeoutRef = useRef<number | null>(null);
+  const customizeMoveButtonRefs = useRef(new Map<string, { up: HTMLButtonElement | null; down: HTMLButtonElement | null; row: HTMLDivElement | null }>());
+  const pendingCustomizeMoveFocusRef = useRef<{ itemId: string; direction: MoveButtonDirection } | null>(null);
   const previousSidebarOpenRef = useRef(false);
   const previousDrawerFocusRef = useRef<HTMLElement | null>(null);
 
@@ -464,10 +454,6 @@ export function Layout() {
     setStoredNavPreferences(defaults);
     setShowHiddenNavigation(false);
   }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
-
-  const reorderNavItem = useCallback((itemId: string, targetIndex: number) => {
-    updateNavPreferences((preferences) => moveNavItem(preferences, itemId, targetIndex));
-  }, [updateNavPreferences]);
 
   const isNavItemActive = (item: NavigationItem) => {
     if (item.matches) {
@@ -613,6 +599,42 @@ export function Layout() {
   const hiddenNavigationIds = useMemo(() => new Set(navPreferences.hiddenItemIds), [navPreferences.hiddenItemIds]);
   const pinnedNavigationIds = useMemo(() => new Set(navPreferences.pinnedItemIds), [navPreferences.pinnedItemIds]);
 
+  const reorderNavItem = useCallback((itemId: string, targetIndex: number, focusDirection?: MoveButtonDirection) => {
+    const item = customizeNavigationItems.find((candidate) => candidate.id === itemId);
+    const targetPosition = Math.max(1, Math.min(targetIndex + 1, customizeNavigationItems.length));
+    if (focusDirection) {
+      pendingCustomizeMoveFocusRef.current = { itemId, direction: focusDirection };
+    }
+
+    updateNavPreferences((preferences) => moveNavItem(preferences, itemId, targetIndex));
+    if (item) {
+      announceMobileDrawer(`Moved ${item.name} to position ${targetPosition} of ${customizeNavigationItems.length}.`);
+    }
+  }, [announceMobileDrawer, customizeNavigationItems, updateNavPreferences]);
+
+  useEffect(() => {
+    const pendingFocus = pendingCustomizeMoveFocusRef.current;
+    if (!pendingFocus) {
+      return;
+    }
+
+    const itemIndex = customizeNavigationItems.findIndex((item) => item.id === pendingFocus.itemId);
+    if (itemIndex < 0) {
+      pendingCustomizeMoveFocusRef.current = null;
+      return;
+    }
+
+    const moveRefs = customizeMoveButtonRefs.current.get(pendingFocus.itemId);
+    const oppositeButton = pendingFocus.direction === 'up' ? moveRefs?.down : moveRefs?.up;
+    if (oppositeButton && !oppositeButton.disabled) {
+      oppositeButton.focus();
+    } else {
+      moveRefs?.row?.focus();
+    }
+
+    pendingCustomizeMoveFocusRef.current = null;
+  }, [customizeNavigationItems]);
+
   const renderNavigationLink = (item: SectionedNavigationItem, collapsed = false, onNavigate?: () => void) => {
     const ItemIcon = item.icon;
     const isActive = isNavItemActive(item);
@@ -644,6 +666,7 @@ export function Layout() {
       <NavLink
         key={item.id}
         to={item.href}
+        aria-current={isActive ? 'page' : undefined}
         onClick={onNavigate}
         className={clsx(
           'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
@@ -663,7 +686,7 @@ export function Layout() {
   const renderNavigationGroups = (groups: NavigationGroup[], collapsed = false, onNavigate?: () => void) => (
     <div className={collapsed ? 'space-y-1' : 'space-y-1'}>
       {groups.map((group, groupIndex) => (
-        <Fragment key={group.header.name}>
+        <Fragment key={`${group.header.name}-${groupIndex}`}>
           {groupIndex > 0 && (
             <hr className={clsx('border-pf-border', collapsed ? 'mx-2 my-2' : 'mx-3')} aria-hidden="true" />
           )}
@@ -737,7 +760,13 @@ export function Layout() {
             return (
               <div
                 key={item.id}
+                ref={(node) => {
+                  const current = customizeMoveButtonRefs.current.get(item.id) ?? { up: null, down: null, row: null };
+                  current.row = node;
+                  customizeMoveButtonRefs.current.set(item.id, current);
+                }}
                 role="listitem"
+                tabIndex={-1}
                 draggable
                 onDragStart={() => setDraggingNavItemId(item.id)}
                 onDragEnd={() => setDraggingNavItemId(null)}
@@ -767,7 +796,12 @@ export function Layout() {
                       className="h-8 w-8 px-0"
                       aria-label={`Move ${item.name} up`}
                       disabled={index === 0}
-                      onClick={() => reorderNavItem(item.id, index - 1)}
+                      ref={(node) => {
+                        const current = customizeMoveButtonRefs.current.get(item.id) ?? { up: null, down: null, row: null };
+                        current.up = node;
+                        customizeMoveButtonRefs.current.set(item.id, current);
+                      }}
+                      onClick={() => reorderNavItem(item.id, index - 1, 'up')}
                       iconCenter={<ArrowUpIcon className="h-4 w-4" />}
                     />
                     <Button
@@ -777,7 +811,12 @@ export function Layout() {
                       className="h-8 w-8 px-0"
                       aria-label={`Move ${item.name} down`}
                       disabled={index === customizeNavigationItems.length - 1}
-                      onClick={() => reorderNavItem(item.id, index + 1)}
+                      ref={(node) => {
+                        const current = customizeMoveButtonRefs.current.get(item.id) ?? { up: null, down: null, row: null };
+                        current.down = node;
+                        customizeMoveButtonRefs.current.set(item.id, current);
+                      }}
+                      onClick={() => reorderNavItem(item.id, index + 1, 'down')}
                       iconCenter={<ArrowDownIcon className="h-4 w-4" />}
                     />
                     <Button

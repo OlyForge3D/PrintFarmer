@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultNavPreferences,
   getNavPreferencesStorageKey,
+  groupNavItemsByResolvedOrder,
   loadNavPreferences,
   moveNavItem,
   resolveNavPreferences,
@@ -24,6 +25,7 @@ const items: NavPreferenceItem[] = [
 describe('navPreferences', () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it('uses role-based default ordering', () => {
@@ -76,5 +78,57 @@ describe('navPreferences', () => {
     expect(reset.hiddenItemIds).toEqual([]);
     expect(reset.pinnedItemIds).toEqual([]);
     expect(reset.orderedItemIds.slice(0, 3)).toEqual(['overview', 'print-queue', 'printers']);
+  });
+
+  it('reorders visible items correctly when there are hidden items', () => {
+    const defaults = createDefaultNavPreferences(items, 'operator');
+    const hidden = setNavItemHidden(defaults, 'print-queue', true);
+    const reordered = moveNavItem(hidden, 'overview', 2);
+    const resolved = resolveNavPreferences(items, 'operator', reordered);
+
+    expect(resolved.visibleItems.map((item) => item.id)).toEqual([
+      'printers',
+      'overview',
+      'scheduling',
+      'files',
+      'filament-inventory',
+      'auto-dispatch',
+    ]);
+  });
+
+  it('groups resolved items contiguously so cross-section moves render in resolved order', () => {
+    const defaults = createDefaultNavPreferences(items, 'operator');
+    const movedAcrossSections = moveNavItem(defaults, 'print-queue', 2);
+    const resolved = resolveNavPreferences(items, 'operator', movedAcrossSections);
+    const groups = groupNavItemsByResolvedOrder(resolved.regularItems);
+
+    expect(groups.map((group) => ({
+      sectionName: group.sectionName,
+      itemIds: group.items.map((item) => item.id),
+    }))).toEqual([
+      { sectionName: 'Dashboard', itemIds: ['overview'] },
+      { sectionName: 'Printers', itemIds: ['printers'] },
+      { sectionName: 'Dashboard', itemIds: ['print-queue'] },
+      { sectionName: 'Files', itemIds: ['scheduling', 'files'] },
+      { sectionName: 'Printers', itemIds: ['filament-inventory'] },
+      { sectionName: 'Admin', itemIds: ['auto-dispatch'] },
+    ]);
+    expect(groups.flatMap((group) => group.items.map((item) => item.id))).toEqual(
+      resolved.regularItems.map((item) => item.id)
+    );
+  });
+
+  it('swallows storage write failures when saving nav preferences', () => {
+    const defaults = createDefaultNavPreferences(items, 'operator');
+    const storage = {
+      setItem: vi.fn(() => {
+        throw new DOMException('Storage disabled', 'SecurityError');
+      }),
+    } as unknown as Storage;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(() => saveNavPreferences('throwing-storage', defaults, storage)).not.toThrow();
+    expect(storage.setItem).toHaveBeenCalledWith('throwing-storage', JSON.stringify(defaults));
+    expect(warn).toHaveBeenCalled();
   });
 });
