@@ -8,6 +8,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Button } from "@/common/components/ui";
 import { apiClient } from "@/services/api";
 import type { QueueOverviewDto, QueueStatsDto, TimelineEventDto } from "@/types/api";
 
@@ -120,19 +121,25 @@ function fmtDur(ms: number): string {
 }
 
 // ── Time ticks ────────────────────────────────────────────────────────────────
-function buildTicks(startMs: number, endMs: number, zoom: ZoomLevel): Tick[] {
-  const interval = zoom === "day" ? MS_PER_HOUR : 4 * MS_PER_HOUR;
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildTicks(startMs: number, endMs: number, zoom: ZoomLevel): Tick[] {
   const ticks: Tick[] = [];
-  // Snap first tick to a local-timezone-aligned boundary
-  const localOffsetMs = new Date(startMs).getTimezoneOffset() * -60_000;
-  const aligned = startMs + localOffsetMs;
-  let t = Math.ceil(aligned / interval) * interval - localOffsetMs;
-  if (t < startMs) t += interval;
-  while (t <= endMs) {
-    const d = new Date(t);
+  const cursor = new Date(startMs);
+
+  if (zoom === "day") {
+    cursor.setMinutes(0, 0, 0);
+    if (cursor.getTime() < startMs) cursor.setHours(cursor.getHours() + 1);
+  } else {
+    const nextHour = Math.ceil(cursor.getHours() / 4) * 4;
+    cursor.setHours(nextHour, 0, 0, 0);
+    if (cursor.getTime() < startMs) cursor.setHours(cursor.getHours() + 4);
+  }
+
+  while (cursor.getTime() <= endMs) {
+    const d = new Date(cursor);
     const major = zoom === "week" && d.getHours() === 0 && d.getMinutes() === 0;
     ticks.push({
-      ms: t,
+      ms: d.getTime(),
       label: major
         ? new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric" }).format(d)
         : new Intl.DateTimeFormat(undefined, {
@@ -142,9 +149,13 @@ function buildTicks(startMs: number, endMs: number, zoom: ZoomLevel): Tick[] {
           }).format(d),
       major,
     });
-    t += interval;
+    cursor.setHours(cursor.getHours() + (zoom === "day" ? 1 : 4));
   }
   return ticks;
+}
+
+function zoomForSpan(spanMs: number): ZoomLevel {
+  return spanMs <= MS_PER_DAY ? "day" : "week";
 }
 
 // ── Non-staffed shading ───────────────────────────────────────────────────────
@@ -237,8 +248,9 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
   return (
     <div className="flex rounded-lg overflow-hidden border border-pf-border" role="group" aria-label={ariaLabel}>
       {options.map((opt, i) => (
-        <button
+        <Button
           key={opt.value}
+          variant="unstyled"
           type="button"
           onClick={() => onChange(opt.value)}
           aria-pressed={active === opt.value}
@@ -253,7 +265,7 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
             .join(" ")}
         >
           {opt.label}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -262,10 +274,14 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimelineTabProps) {
   // ── UI state ────────────────────────────────────────────────────────────────
-  const [mode, setMode] = useState<ViewMode>("printers");
-  const [zoom, setZoom] = useState<ZoomLevel>("day");
   const dateFromMs = dateFrom?.getTime() ?? null;
   const dateToMs = dateTo?.getTime() ?? null;
+  const externalSpanMs =
+    dateFromMs != null && dateToMs != null
+      ? Math.max(dateToMs - dateFromMs, MS_PER_MINUTE)
+      : null;
+  const [mode, setMode] = useState<ViewMode>("printers");
+  const [zoom, setZoom] = useState<ZoomLevel>(() => zoomForSpan(externalSpanMs ?? MS_PER_DAY));
   const externalWindowKey = `${dateFromMs ?? "auto"}:${dateToMs ?? "auto"}`;
   const [manualWindow, setManualWindow] = useState(() => {
     const now = Date.now();
@@ -287,8 +303,9 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   const isManualWindow = manualWindow.externalWindowKey === externalWindowKey;
   const winStart = isManualWindow ? manualWindow.start : dateFromMs ?? manualWindow.start;
   const winEnd = isManualWindow ? manualWindow.end : dateToMs ?? manualWindow.end;
-  const winDur = zoom === "day" ? MS_PER_DAY : MS_PER_WEEK;
-  const minChartPx = (winDur / MS_PER_HOUR) * MIN_PX_PER_H[zoom];
+  const winDur = Math.max(winEnd - winStart, MS_PER_MINUTE);
+  const activeZoom = isManualWindow ? zoom : zoomForSpan(winDur);
+  const minChartPx = (winDur / MS_PER_HOUR) * MIN_PX_PER_H[activeZoom];
   const totalChartPx = Math.max(chartW || minChartPx, minChartPx);
   const pxPerMs = totalChartPx / winDur;
 
@@ -373,7 +390,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [hasLanes]);
+  }, [hasLanes, isError]);
 
   // ── Stats summary ─────────────────────────────────────────────────────────────
   const summary = useMemo(() => {
@@ -399,7 +416,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
   }, [overview, stats]);
 
   // ── Derived layout ─────────────────────────────────────────────────────────
-  const ticks = useMemo(() => buildTicks(winStart, winEnd, zoom), [winStart, winEnd, zoom]);
+  const ticks = useMemo(() => buildTicks(winStart, winEnd, activeZoom), [winStart, winEnd, activeZoom]);
 
   const shadeBlocks = useMemo(() => {
     if (!summary.assumptions) return [];
@@ -413,14 +430,15 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
 
   // ── Navigation handlers ───────────────────────────────────────────────────
   const goToday = useCallback(() => {
-    const half = zoom === "day" ? 12 * MS_PER_HOUR : 3.5 * MS_PER_DAY;
+    const dur = activeZoom === "day" ? MS_PER_DAY : MS_PER_WEEK;
+    const half = dur / 2;
     const now = Date.now();
     setManualWindow({
       start: now - half,
-      end: now - half + winDur,
+      end: now - half + dur,
       externalWindowKey,
     });
-  }, [externalWindowKey, zoom, winDur]);
+  }, [activeZoom, externalWindowKey]);
 
   const step = useCallback(
     (dir: -1 | 1) => {
@@ -547,41 +565,44 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
               { value: "day" as ZoomLevel, label: "Day" },
               { value: "week" as ZoomLevel, label: "Week" },
             ]}
-            active={zoom}
+            active={activeZoom}
             onChange={applyZoom}
             ariaLabel="Zoom level"
           />
 
-          <button
+          <Button
+            variant="unstyled"
             type="button"
             onClick={() => step(-1)}
             aria-label="Previous period"
             className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors text-lg leading-none"
           >
             ‹
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="unstyled"
             type="button"
             onClick={goToday}
             className="px-3 h-8 text-sm bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors"
           >
             Today
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="unstyled"
             type="button"
             onClick={() => step(1)}
             aria-label="Next period"
             className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors text-lg leading-none"
           >
             ›
-          </button>
+          </Button>
 
           <span className="flex-1" aria-hidden="true" />
 
           {/* Live pulse indicator */}
           {(() => {
-            const indicatorColor = isError ? 'bg-pf-error' : 'bg-pf-success';
-            const indicatorLabel = isError ? 'Error' : 'Live';
+            const indicatorColor = isError ? "bg-pf-error" : "bg-pf-success";
+            const indicatorLabel = isError ? "Error" : "Live";
             return (
               <span className="flex items-center gap-1.5 text-xs text-pf-text-secondary select-none">
                 <span className="relative flex h-2 w-2" aria-hidden="true">
@@ -594,7 +615,8 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
           })()}
 
           {/* Fullscreen toggle */}
-          <button
+          <Button
+            variant="unstyled"
             type="button"
             onClick={toggleFullscreen}
             aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
@@ -607,7 +629,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
                 <path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9" />
               )}
             </svg>
-          </button>
+          </Button>
         </div>
 
         {/* ── Gantt chart ──────────────────────────────────────────────────── */}
@@ -628,7 +650,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
             <div role="alert" className="p-10 text-center">
               <p className="font-semibold text-pf-error">Failed to load timeline</p>
               <p className="text-sm text-pf-text-secondary mt-1">
-                {(error as Error)?.message ?? 'Unknown error'}
+                {(error as Error)?.message ?? "Unknown error"}
               </p>
             </div>
           ) : isLoading && lanes.length === 0 ? (
@@ -927,6 +949,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
           {/* ── Legend ── */}
           {lanes.length > 0 && (
             <div
+              role="group"
               className="px-4 py-2.5 border-t border-pf-border bg-pf-bg-0/80 flex flex-wrap items-center gap-x-5 gap-y-1.5"
               aria-label="Status legend"
             >
