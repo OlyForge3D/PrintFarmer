@@ -47,7 +47,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             of: "\"backend\": \"Moonraker\"",
             with: "\"backend\": \"\(backendString)\""
         )
-        var printer = try TestFixtures.decodePrinter(from: json)
+        var printer = try TestData.decodePrinter(from: json)
         printer.isOnline = isOnline
         printer.state = state
         return printer

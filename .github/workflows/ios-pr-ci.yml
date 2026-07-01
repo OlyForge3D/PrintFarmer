@@ -39,6 +39,38 @@ jobs:
             -resolvePackageDependencies \
             -clonedSourcePackagesDirPath build/SourcePackages
 
+      - name: Resolve iPhone simulator destination
+        run: |
+          set -euo pipefail
+          SIMCTL_DEVICES_JSON="$(xcrun simctl list devices available -j)"
+          SIMULATOR_UDID="$(
+            SIMCTL_DEVICES_JSON="$SIMCTL_DEVICES_JSON" python3 <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          data = json.loads(os.environ["SIMCTL_DEVICES_JSON"])
+          candidates = []
+          for runtime, devices in data.get("devices", {}).items():
+              version = tuple(int(part) for part in re.findall(r"\d+", runtime))
+              for device in devices:
+                  name = device.get("name", "")
+                  if device.get("isAvailable") is False or not name.startswith("iPhone "):
+                      continue
+                  model = tuple(int(part) for part in re.findall(r"\d+", name))
+                  candidates.append((version, model, name, device["udid"]))
+
+          if not candidates:
+              sys.exit("No available iPhone simulator found")
+
+          candidates.sort()
+          print(candidates[-1][3])
+          PY
+          )"
+          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
+          echo "Using iPhone simulator UDID: $SIMULATOR_UDID"
+
       - name: Build (Debug)
         timeout-minutes: 20
         run: |
@@ -46,7 +78,7 @@ jobs:
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGN_IDENTITY="-" \
@@ -74,6 +106,38 @@ jobs:
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
+      - name: Resolve iPhone simulator destination
+        run: |
+          set -euo pipefail
+          SIMCTL_DEVICES_JSON="$(xcrun simctl list devices available -j)"
+          SIMULATOR_UDID="$(
+            SIMCTL_DEVICES_JSON="$SIMCTL_DEVICES_JSON" python3 <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          data = json.loads(os.environ["SIMCTL_DEVICES_JSON"])
+          candidates = []
+          for runtime, devices in data.get("devices", {}).items():
+              version = tuple(int(part) for part in re.findall(r"\d+", runtime))
+              for device in devices:
+                  name = device.get("name", "")
+                  if device.get("isAvailable") is False or not name.startswith("iPhone "):
+                      continue
+                  model = tuple(int(part) for part in re.findall(r"\d+", name))
+                  candidates.append((version, model, name, device["udid"]))
+
+          if not candidates:
+              sys.exit("No available iPhone simulator found")
+
+          candidates.sort()
+          print(candidates[-1][3])
+          PY
+          )"
+          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
+          echo "Using iPhone simulator UDID: $SIMULATOR_UDID"
+
       - name: Run unit tests
         timeout-minutes: 15
         run: |
@@ -81,7 +145,7 @@ jobs:
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGN_IDENTITY="-" \
