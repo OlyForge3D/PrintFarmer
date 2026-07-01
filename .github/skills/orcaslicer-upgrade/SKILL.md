@@ -63,6 +63,12 @@ cp "$ORCA_SRC/resources/images/custom-gcode_"*.svg src/Web/ReactApp/public/icons
 # ── 5. Update printer assets (macOS — requires OrcaSlicer.app vNEW) ─────
 ./scripts/restore-orcaslicer-assets.js
 
+# ── 5b. Refresh sample profile test fixtures (mirror of Orca system profiles)
+# Regenerate the 11 vendor bundles under sample_profiles/orcaslicer from the
+# target-version source tree. Full procedure + invariants in "Step 8b".
+python3 tools/refresh-sample-profiles.py "$ORCA_SRC/resources/profiles" --check  # dry run
+python3 tools/refresh-sample-profiles.py "$ORCA_SRC/resources/profiles"          # apply
+
 # ── 6. Review diffs ──────────────────────────────────────────────────────
 git diff src/Web/ReactApp/src/features/slicer/generated/orcaSettingsMetadata.json | head -100
 git diff src/Web/ReactApp/public/icons/orca/ | head -40
@@ -87,7 +93,7 @@ ssh "$DEPLOY_HOST" "cd '$DEPLOY_ROOT' && \
 ## Prerequisites
 
 - **macOS**: OrcaSlicer.app installed at `/Applications/OrcaSlicer.app` — download the target version from [OrcaSlicer releases](https://github.com/OrcaSlicer/OrcaSlicer/releases)
-- **OrcaSlicer source** checked out locally (`ORCA_SRC=<OrcaSlicer source checkout>`) — must be checked out to the target version tag
+- **OrcaSlicer source** checked out locally (`ORCA_SRC=<OrcaSlicer source checkout>`) — must be checked out to the target version tag. Also provides `resources/profiles/` for the sample-profile fixture refresh (Step 8b) and `resources/images/` for icons (Step 6).
 - **Python 3.8+** with standard library (no extra packages)
 - **Server**: SSH access via `DEPLOY_HOST`, the deployed PrintFarmer root in `DEPLOY_ROOT`, and the API base URL in `DEPLOY_API_URL`
 
@@ -343,6 +349,49 @@ src/Web/ReactApp/src/features/slicer/components/settings/FilamentProfileEditor.t
 
 If new types exist, add them to the `ORCA_FILAMENT_TYPES` array.
 
+### Step 8b: Refresh Sample Profile Test Fixtures
+
+`sample_profiles/orcaslicer/` is a checked-in **mirror of OrcaSlicer's system profiles** for a fixed set of vendors. It is used as test data by `Farm.Slicer.Module.Tests` (`OrcaSlicerProfilesProviderTests`, `ProfileSampleDataTests`, `OrcaSlicerLibraryTests`). **Every version bump must refresh this mirror** from the target version's `resources/profiles/` — otherwise the tests validate stale profiles and you miss real changes (e.g. 2.4.1's deterministic `setting_id` rework rewrites the `setting_id` of nearly every profile across all vendors).
+
+> This is separate from Step 12 (profiles shipped in the Docker image via the AppImage). Step 8b is **test data in the repo**; Step 12 is **runtime data in the container**. Both must track the same OrcaSlicer version.
+
+**Vendor set** (exactly these 11 — 10 vendors + OrcaFilamentLibrary): `Elegoo`, `Eryone`, `Flashforge`, `OrcaFilamentLibrary`, `Phrozen`, `Prusa`, `Qidi`, `Ratrig`, `Snapmaker`, `Sovol`, `Voron`. Do not add or remove vendors during a version bump unless the request explicitly asks for it.
+
+**Source of truth:** the OrcaSlicer **source checkout** at the target tag (`$ORCA_SRC/resources/profiles`) — it contains every vendor. The installed OrcaSlicer.app only bundles a subset, so prefer the source checkout.
+
+**Fixture format (must be preserved for clean diffs):** JSON is **tab-indented, UTF-8 with non-ASCII preserved, LF line endings, trailing newline**, file mode `644`; key order preserved from source. Binary assets (cover `*.png`, bed `*.stl`, vendor `*.svg` logos) are byte-copied. The helper reproduces this exactly (verified byte-identical against unchanged profiles).
+
+```bash
+cd "$PFARM_ROOT"
+
+# Dry run first — reports per-vendor change counts, exits non-zero if stale
+python3 tools/refresh-sample-profiles.py "$ORCA_SRC/resources/profiles" --check
+
+# Apply the refresh (defaults --output to sample_profiles/orcaslicer,
+# --vendors to the dirs already present in the mirror)
+python3 tools/refresh-sample-profiles.py "$ORCA_SRC/resources/profiles"
+
+# Review scope of the change
+git diff --stat sample_profiles/orcaslicer | tail -20
+```
+
+**Verify invariants after refresh** (these mirror the reviewer integrity checklist):
+
+```bash
+# Exactly the 11 vendor dirs, no additions/removals
+ls -d sample_profiles/orcaslicer/*/ | xargs -n1 basename
+# All JSON parses
+find sample_profiles/orcaslicer -name '*.json' -print0 | xargs -0 -I{} python3 -c "import json,sys;json.load(open(sys.argv[1]))" {}
+# Zero CRLF in JSON fixtures (binary png/stl assets legitimately contain 0x0D)
+find sample_profiles/orcaslicer -name '*.json' -print0 | xargs -0 grep -lU $'\r' ; echo "empty above = LF-only OK"
+# File modes 644 (no unexpected exec bits)
+find sample_profiles/orcaslicer -type f ! -perm 644 -print
+```
+
+**Versioned provider gotcha (do NOT blindly bump):** the C# provider namespace is version-stamped — `Farm.Slicers.OrcaSlicer.v2_4_0`, and `OrcaSlicerProfilesProviderTests.GetProfilesVersion_ReturnsCurrentVersion` asserts `"2.4.0"`. This "provider generation" axis is **intentionally decoupled** from the bundle data version (see issue #577). Refreshing the sample data to a new patch version does **not** by itself require creating a new provider generation or changing that assertion. Only introduce a new `v2_x_y` provider generation as a deliberate, separate decision — never just edit the assertion to make a test pass.
+
+Keep this refresh as its own **data-only commit**, separate from the version-bump/code commit (matches how the 2.4.0 refresh was landed).
+
 ### Step 9: Frontend Build and Lint
 
 ```bash
@@ -355,10 +404,13 @@ npm run lint     # Must succeed with 0 ESLint errors
 
 ```bash
 cd src
+# Serialization round-trip (settings metadata / CLI JSON contract)
 dotnet test ./tests/Farm.OrcaSlicer.Worker.Tests/ --filter "SettingsSerializationTests" -c Debug
+# Profile fixture tests (validate the refreshed sample_profiles/orcaslicer from Step 8b)
+dotnet test ./tests/Farm.Slicer.Module.Tests/ -c Debug
 ```
 
-The `SettingsSerializationTests` verify the profile JSON serialization round-trip matches what the CLI expects.
+The `SettingsSerializationTests` verify the profile JSON serialization round-trip matches what the CLI expects. `Farm.Slicer.Module.Tests` load and assert against `sample_profiles/orcaslicer/`; if a fixture-count or content assertion legitimately changed with the new profiles, update the assertion — but **never** change the intentionally-decoupled `GetProfilesVersion` assertion just to pass (see Step 8b gotcha).
 
 ### Step 11: Profile Editor Visual Verification
 
@@ -420,6 +472,7 @@ curl -s "$DEPLOY_API_URL/api/slicer/workers" | python3 -m json.tool
 ### Step 14: Commit Everything
 
 ```bash
+# Commit 1 — version bump + metadata/icons/assets (code + generated data)
 git add -A
 git commit -m "feat: upgrade OrcaSlicer to vX.Y.Z
 
@@ -431,6 +484,14 @@ git commit -m "feat: upgrade OrcaSlicer to vX.Y.Z
 - Update manifest.json with new printer entries
 - [Added N new material types]
 - [CLI serialization changes]"
+
+# Commit 2 — sample profile fixtures (data-only; keep separate — see Step 8b)
+git add sample_profiles/orcaslicer
+git commit -m "chore: refresh OrcaSlicer sample profiles to vX.Y.Z
+
+- Mirror 11 vendor bundles from vX.Y.Z resources/profiles
+- [Deterministic setting_id rework / new printers / dedup as applicable]
+- Fixtures only; provider generation (Farm.Slicers.OrcaSlicer.vN) unchanged"
 ```
 
 ---
@@ -487,6 +548,22 @@ git commit -m "feat: upgrade OrcaSlicer to vX.Y.Z
 **Cause**: Version was not bumped in all locations. The version must match in Dockerfile ARGs, `container-versions.conf`, compose templates, and the server `.env`.
 
 **Fix**: Re-run the grep check from Step 2 and ensure all files reference the same version.
+
+### Sample profile fixture diff is huge / all setting_ids changed
+
+**Symptom**: After `refresh-sample-profiles.py`, thousands of `setting_id` values changed across every vendor.
+
+**Cause**: This is expected for releases that rework profile IDs (e.g. 2.4.1 "de-duplicate profile setting IDs" derives each ID deterministically from vendor/type/name). It is a genuine upstream change, not a formatting artifact — the helper reproduces the repo's exact tab-indented format (verified byte-identical on unchanged files).
+
+**Fix**: Review with `git diff --stat`, confirm the diff is content (not whitespace) via a spot-check, run `Farm.Slicer.Module.Tests`, and commit as a data-only commit.
+
+### Sample profile test fails after refresh
+
+**Symptom**: A `Farm.Slicer.Module.Tests` assertion fails after Step 8b.
+
+**Cause**: Either a fixture-count/content assertion legitimately changed with the new profiles, or a test hard-codes a specific `setting_id` that the new version rewrote.
+
+**Fix**: Update the assertion to the new expected value **only** if it reflects a real profile change. Do **not** touch `GetProfilesVersion_ReturnsCurrentVersion` — that asserts the decoupled provider generation (issue #577), not the bundle data version.
 
 ---
 
@@ -552,6 +629,11 @@ OrcaSlicer.app (macOS)           ──►  src/Web/ReactApp/public/assets/orcas
 | Profile loading | `src/orcaslicer-worker/Services/OrcaProfilesService.cs` |
 | Profile caching | `src/orcaslicer-worker/Services/CachedOrcaProfilesService.cs` |
 | Serialization tests | `src/tests/Farm.OrcaSlicer.Worker.Tests/SettingsSerializationTests.cs` |
+| **Sample profile fixtures** | |
+| Fixture mirror (test data) | `sample_profiles/orcaslicer/` (11 vendor bundles) |
+| Fixture refresh tool | `tools/refresh-sample-profiles.py` |
+| Fixture tests | `src/tests/Farm.Slicer.Module.Tests/Slicers/OrcaSlicerLibraryTests.cs`, `.../SlicerServices/ProfileSampleDataTests.cs` |
+| Versioned provider (generation axis) | `src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/` (`GetProfilesVersion()`; decoupled from bundle data — issue #577) |
 | **Assets** | |
 | Asset extraction (Node.js) | `scripts/restore-orcaslicer-assets.js` |
 | Asset extraction (bash) | `scripts/extract-orcaslicer-assets.sh` |
