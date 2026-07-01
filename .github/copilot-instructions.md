@@ -80,7 +80,10 @@ The SwiftUI iOS app lives in `mobile/` and was merged in from `OlyForge3D/PFarm-
 
 API integration:
 
-- The app reads `PRINTFARMER_API_URL` to locate the backend. The mobile README defaults to `http://localhost:5000`; for local PrintFarmer dev, override to `http://localhost:5245` so it matches the .NET API.
+- The app supports multiple registered servers. `PRINTFARMER_API_URL` seeds/overrides
+  the initial development server; for local PrintFarmer dev, use
+  `http://localhost:5245` so it matches the .NET API. Legacy `pf_server_url`
+  installs migrate into the registry on first launch.
 - The mobile app consumes the same `/api/*` JSON contract as the React frontend — camelCase property names, string enums (see Serialization Rules below). Do not introduce mobile-only DTOs unless absolutely required; extend the shared API instead.
 
 Common commands (run from `mobile/`):
