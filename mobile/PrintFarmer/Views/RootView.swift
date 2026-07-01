@@ -15,6 +15,7 @@ struct RootView: View {
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
     @State private var disconnectTask: Task<Void, Never>?
+    @State private var staleRegistrySignOutTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +24,18 @@ struct RootView: View {
             }
 
             Group {
-                if authViewModel.isAuthenticated {
+                if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
+                    launchScreen
+                        .task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            minimumSplashElapsed = true
+                        }
+                } else if serverRegistry.servers.isEmpty || serverRegistry.activeServerID == nil {
+                    AddFirstServerView()
+                        .task {
+                            await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+                        }
+                } else if authViewModel.isAuthenticated {
                     ContentView()
                         .task {
                             pendingReadyMonitor.configure(
@@ -41,18 +53,10 @@ struct RootView: View {
                         .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
                             router.pendingReadyCount = newValue
                         }
-                } else if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
-                    launchScreen
-                        .task {
-                            try? await Task.sleep(for: .seconds(1.5))
-                            minimumSplashElapsed = true
-                        }
                 } else if !hasSeenOnboarding {
                     OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
                 } else if !hasCompletedNetworkPermission {
                     LocalNetworkPermissionView(hasCompletedNetworkPermission: $hasCompletedNetworkPermission)
-                } else if serverRegistry.servers.isEmpty {
-                    AddFirstServerView()
                 } else {
                     LoginView()
                 }
@@ -65,7 +69,18 @@ struct RootView: View {
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
         }
-        .onDisappear { disconnectTask?.cancel() }
+        .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
+            guard isEmpty else { return }
+            signOutIfServerRegistryUnavailable()
+        }
+        .onChange(of: serverRegistry.activeServerID) { _, activeServerID in
+            guard activeServerID == nil else { return }
+            signOutIfServerRegistryUnavailable()
+        }
+        .onDisappear {
+            disconnectTask?.cancel()
+            staleRegistrySignOutTask?.cancel()
+        }
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.
@@ -86,5 +101,12 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color("LaunchBackground"))
+    }
+
+    private func signOutIfServerRegistryUnavailable() {
+        staleRegistrySignOutTask?.cancel()
+        staleRegistrySignOutTask = Task {
+            await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+        }
     }
 }

@@ -30,14 +30,18 @@ struct ServersView: View {
                 viewModel = ServerManagementViewModel(registry: registry)
             }
         }
-        .sheet(isPresented: $showingAddServer) {
+        .sheet(isPresented: $showingAddServer, onDismiss: {
+            viewModel?.resetTransientEditorState()
+        }) {
             NavigationStack {
                 if let viewModel {
                     ServerEditorView(viewModel: viewModel, mode: .add)
                 }
             }
         }
-        .sheet(item: $editingServer) { server in
+        .sheet(item: $editingServer, onDismiss: {
+            viewModel?.resetTransientEditorState()
+        }) { server in
             NavigationStack {
                 if let viewModel {
                     ServerEditorView(viewModel: viewModel, mode: .edit(server))
@@ -225,9 +229,23 @@ struct ServerEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var viewModel: ServerManagementViewModel
     let mode: PresentationMode
+    let showsCancel: Bool
+    let showsNavigationTitle: Bool
     @State private var saveTask: Task<Void, Never>?
     @State private var healthTask: Task<Void, Never>?
     @FocusState private var focusedField: Field?
+
+    init(
+        viewModel: ServerManagementViewModel,
+        mode: PresentationMode,
+        showsCancel: Bool = true,
+        showsNavigationTitle: Bool = true
+    ) {
+        self.viewModel = viewModel
+        self.mode = mode
+        self.showsCancel = showsCancel
+        self.showsNavigationTitle = showsNavigationTitle
+    }
 
     private enum Field: Hashable {
         case name, url
@@ -290,11 +308,13 @@ struct ServerEditorView: View {
                 }
             }
         }
-        .navigationTitle(title)
+        .navigationTitle(showsNavigationTitle ? title : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+            if showsCancel {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
@@ -314,6 +334,7 @@ struct ServerEditorView: View {
         .onDisappear {
             saveTask?.cancel()
             healthTask?.cancel()
+            viewModel.resetTransientEditorState()
         }
     }
 
@@ -379,7 +400,12 @@ struct AddFirstServerView: View {
                 .padding(.horizontal)
 
                 if let viewModel {
-                    ServerEditorView(viewModel: viewModel, mode: .add)
+                    ServerEditorView(
+                        viewModel: viewModel,
+                        mode: .add,
+                        showsCancel: false,
+                        showsNavigationTitle: false
+                    )
                         .clipShape(RoundedRectangle(cornerRadius: 18))
                 } else {
                     ProgressView()

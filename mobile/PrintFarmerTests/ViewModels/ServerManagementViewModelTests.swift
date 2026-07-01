@@ -131,6 +131,61 @@ final class ServerManagementViewModelTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testURLSessionHealthCheckerTreatsCancelledURLErrorAsCancellation() async throws {
+        let session = MockURLProtocol.mockSession()
+        MockURLProtocol.requestHandler = { _ in
+            throw URLError(.cancelled)
+        }
+
+        do {
+            _ = try await URLSessionServerHealthChecker(session: session)
+                .check(baseURL: URL(string: "https://print.example.com")!)
+            XCTFail("Expected cancellation to be rethrown.")
+        } catch is CancellationError {
+            XCTAssertTrue(true)
+        }
+    }
+
+    func testCancelledHealthCheckDoesNotReportReachableOrMutateHealthState() async {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let viewModel = ServerManagementViewModel(
+            registry: registry,
+            healthChecker: CancellingHealthChecker()
+        )
+        viewModel.prepareForAdd()
+        viewModel.serverURL = "https://print.example.com"
+
+        let result = await viewModel.checkHealth()
+
+        XCTAssertNil(result)
+        XCTAssertEqual(viewModel.healthState, .notChecked)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testCancelledSaveDoesNotAddServerToRegistry() async {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let viewModel = ServerManagementViewModel(
+            registry: registry,
+            healthChecker: SlowHealthChecker()
+        )
+        viewModel.prepareForAdd()
+        viewModel.displayName = "Farm"
+        viewModel.serverURL = "https://print.example.com"
+
+        let saveTask = Task { await viewModel.save() }
+        while viewModel.healthState != .checking {
+            await Task.yield()
+        }
+        saveTask.cancel()
+
+        let didSave = await saveTask.value
+
+        XCTAssertFalse(didSave)
+        XCTAssertTrue(registry.servers.isEmpty)
+        XCTAssertNil(registry.activeServerID)
+        XCTAssertEqual(viewModel.healthState, .notChecked)
+    }
+
     func testDeleteActiveServerHandsOffToAnotherServer() throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
@@ -143,6 +198,42 @@ final class ServerManagementViewModelTests: XCTestCase {
         XCTAssertEqual(registry.servers.map(\.id), [second.id])
         XCTAssertEqual(registry.activeServerID, second.id)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testDeletingOnlyServerWhileAuthenticatedClearsSessionAndRegistry() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(displayName: "Only", baseURL: URL(string: "https://only.example.com")!)
+        let serverViewModel = ServerManagementViewModel(
+            registry: registry,
+            healthChecker: StubHealthChecker(result: .reachable())
+        )
+        let authService = MockAuthService()
+        let services = ServiceContainer()
+        services.authService = authService
+        let authViewModel = AuthViewModel(services: services)
+        authViewModel.isAuthenticated = true
+        authViewModel.currentUser = UserDTO(
+            id: UUID(),
+            username: "admin",
+            email: "admin@example.com",
+            firstName: nil,
+            lastName: nil,
+            isActive: true,
+            emailConfirmed: true,
+            lastLogin: nil,
+            createdAt: Date(),
+            roles: ["farm_admin"],
+            permissions: []
+        )
+
+        serverViewModel.delete(server)
+        await authViewModel.logoutIfServerRegistryUnavailable(registry)
+
+        XCTAssertTrue(registry.servers.isEmpty)
+        XCTAssertNil(registry.activeServerID)
+        XCTAssertTrue(authService.logoutCalled)
+        XCTAssertFalse(authViewModel.isAuthenticated)
+        XCTAssertNil(authViewModel.currentUser)
     }
 
     func testEditServerRevalidatesURLAndUpdatesStatus() async throws {
@@ -171,8 +262,21 @@ final class ServerManagementViewModelTests: XCTestCase {
 private struct StubHealthChecker: ServerHealthChecking {
     let result: ServerHealthCheckResult
 
-    func check(baseURL: URL) async -> ServerHealthCheckResult {
+    func check(baseURL: URL) async throws -> ServerHealthCheckResult {
         result
+    }
+}
+
+private struct CancellingHealthChecker: ServerHealthChecking {
+    func check(baseURL: URL) async throws -> ServerHealthCheckResult {
+        throw CancellationError()
+    }
+}
+
+private struct SlowHealthChecker: ServerHealthChecking {
+    func check(baseURL: URL) async throws -> ServerHealthCheckResult {
+        try await Task.sleep(for: .seconds(30))
+        return .reachable()
     }
 }
 

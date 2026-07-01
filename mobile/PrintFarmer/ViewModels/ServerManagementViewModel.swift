@@ -8,7 +8,7 @@ struct ServerHealthCheckResult: Equatable, Sendable {
 }
 
 protocol ServerHealthChecking: Sendable {
-    func check(baseURL: URL) async -> ServerHealthCheckResult
+    func check(baseURL: URL) async throws -> ServerHealthCheckResult
 }
 
 struct URLSessionServerHealthChecker: ServerHealthChecking {
@@ -18,9 +18,10 @@ struct URLSessionServerHealthChecker: ServerHealthChecking {
         self.session = session
     }
 
-    func check(baseURL: URL) async -> ServerHealthCheckResult {
+    func check(baseURL: URL) async throws -> ServerHealthCheckResult {
         let endpoints = ["health", "healthz"]
         var lastNetworkError: URLError?
+        var lastErrorMessage: String?
 
         for endpoint in endpoints {
             let url = baseURL.appending(path: endpoint)
@@ -36,21 +37,22 @@ struct URLSessionServerHealthChecker: ServerHealthChecking {
                     statusCode: statusCode,
                     message: statusCode.map { "Reachable (HTTP \($0))" } ?? "Reachable"
                 )
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let error as URLError {
+                if error.code == .cancelled {
+                    throw CancellationError()
+                }
                 lastNetworkError = error
             } catch {
-                return ServerHealthCheckResult(
-                    isReachable: true,
-                    statusCode: nil,
-                    message: "Reachable"
-                )
+                lastErrorMessage = error.localizedDescription
             }
         }
 
         return ServerHealthCheckResult(
             isReachable: false,
             statusCode: nil,
-            message: lastNetworkError?.localizedDescription ?? "Server is unreachable"
+            message: lastNetworkError?.localizedDescription ?? lastErrorMessage ?? "Server is unreachable"
         )
     }
 }
@@ -160,6 +162,14 @@ final class ServerManagementViewModel {
         }
     }
 
+    func resetTransientEditorState() {
+        mode = .add
+        displayName = ""
+        serverURL = ""
+        healthState = .notChecked
+        errorMessage = nil
+    }
+
     @discardableResult
     func checkHealth() async -> ServerHealthCheckResult? {
         guard formValidationError == nil, let normalizedURLString, let url = URL(string: normalizedURLString) else {
@@ -168,11 +178,27 @@ final class ServerManagementViewModel {
             return nil
         }
 
+        let previousHealthState = healthState
         healthState = .checking
-        let result = await healthChecker.check(baseURL: url)
-        healthState = result.isReachable ? .reachable(result.message) : .unreachable(result.message)
-        errorMessage = nil
-        return result
+        do {
+            let result = try await healthChecker.check(baseURL: url)
+            try Task.checkCancellation()
+            healthState = result.isReachable ? .reachable(result.message) : .unreachable(result.message)
+            errorMessage = nil
+            return result
+        } catch is CancellationError {
+            healthState = previousHealthState
+            return nil
+        } catch {
+            let result = ServerHealthCheckResult(
+                isReachable: false,
+                statusCode: nil,
+                message: error.localizedDescription
+            )
+            healthState = .unreachable(result.message)
+            errorMessage = nil
+            return result
+        }
     }
 
     @discardableResult
@@ -183,6 +209,7 @@ final class ServerManagementViewModel {
         }
 
         let healthResult = await checkHealth()
+        guard !Task.isCancelled else { return false }
         let healthStatus = healthResult?.isReachable == true ? "Reachable" : "Unreachable"
         let checkedAt = now()
 
