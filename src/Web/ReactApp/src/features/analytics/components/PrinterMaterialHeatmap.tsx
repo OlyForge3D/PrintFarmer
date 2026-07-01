@@ -43,8 +43,8 @@ function groupByPrinter(data: PrinterMaterialPerformance[]): { grouped: GroupedD
 
 const COLORS = ['#4F8AFA', '#34D399', '#F87171', '#FBBF24', '#A78BFA', '#F472B6', '#60A5FA', '#FB923C'];
 
-export const PrinterMaterialHeatmap: React.FC<Props> = ({ data, isLoading, error }) => {
-  const { grouped, materials } = groupByPrinter(data);
+export const PrinterMaterialHeatmap = React.memo(function PrinterMaterialHeatmap({ data, isLoading, error }: Props) {
+  const { grouped, materials } = React.useMemo(() => groupByPrinter(data), [data]);
 
   return (
     <Card title="Printer × Material Performance" className="h-96">
@@ -75,4 +75,4 @@ export const PrinterMaterialHeatmap: React.FC<Props> = ({ data, isLoading, error
       )}
     </Card>
   );
-};
+});

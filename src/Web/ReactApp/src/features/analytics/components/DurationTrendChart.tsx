@@ -19,8 +19,9 @@ interface Props {
   error: Error | null;
 }
 
-export const DurationTrendChart: React.FC<Props> = ({ data, isLoading, error }) => (
-  <Card title="Print Duration Trends" className="h-96">
+export const DurationTrendChart = React.memo(function DurationTrendChart({ data, isLoading, error }: Props) {
+  return (
+    <Card title="Print Duration Trends" className="h-96">
     {isLoading ? (
       <ChartSkeleton />
     ) : error ? (
@@ -46,5 +47,6 @@ export const DurationTrendChart: React.FC<Props> = ({ data, isLoading, error }) 
         </LineChart>
       </ResponsiveContainer>
     )}
-  </Card>
-);
+    </Card>
+  );
+});

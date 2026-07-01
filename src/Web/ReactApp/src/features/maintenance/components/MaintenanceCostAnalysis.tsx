@@ -5,7 +5,7 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recha
 
 const COLORS = ['#4F8AFA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6', '#60A5FA'];
 
-export const MaintenanceCostAnalysis: React.FC = () => {
+export const MaintenanceCostAnalysis = React.memo(function MaintenanceCostAnalysis() {
   const { data, isLoading, error } = useMaintenanceCostAnalysis();
 
   return (
@@ -29,4 +29,4 @@ export const MaintenanceCostAnalysis: React.FC = () => {
       )}
     </Card>
   );
-};
+});

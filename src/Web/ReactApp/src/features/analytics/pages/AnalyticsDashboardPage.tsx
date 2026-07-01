@@ -5,6 +5,10 @@ import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
+  type DailyCost,
+  type DailyJobCount,
+  type FilamentByMaterial,
+  type PrinterUtilization,
   useStatisticsSummary,
   useJobsOverTime,
   useCostOverTime,
@@ -27,6 +31,11 @@ export interface AnalyticsDashboardContentProps {
   endDate?: string;
   showSummaryCards?: boolean;
 }
+
+const EMPTY_JOBS: DailyJobCount[] = [];
+const EMPTY_COSTS: DailyCost[] = [];
+const EMPTY_FILAMENT_BY_MATERIAL: FilamentByMaterial[] = [];
+const EMPTY_PRINTER_UTILIZATION: PrinterUtilization[] = [];
 
 export function AnalyticsDashboardContent({
   days,
@@ -82,10 +91,10 @@ export function AnalyticsDashboardContent({
         <Tabs.Panels>
           <Tabs.Panel id="overview">
             <div className="grid grid-cols-1 gap-6 pt-4 lg:grid-cols-2">
-              <JobsOverTimeChart data={jobsData ?? []} isLoading={jobsLoading} error={jobsError} />
-              <CostOverTimeChart data={costData ?? []} isLoading={costLoading} error={costError} />
-              <FilamentByMaterialChart data={filamentData ?? []} isLoading={filamentLoading} error={filamentError} />
-              <PrinterUtilizationChart data={utilizationData ?? []} isLoading={utilizationLoading} error={utilizationError} />
+              <JobsOverTimeChart data={jobsData ?? EMPTY_JOBS} isLoading={jobsLoading} error={jobsError} />
+              <CostOverTimeChart data={costData ?? EMPTY_COSTS} isLoading={costLoading} error={costError} />
+              <FilamentByMaterialChart data={filamentData ?? EMPTY_FILAMENT_BY_MATERIAL} isLoading={filamentLoading} error={filamentError} />
+              <PrinterUtilizationChart data={utilizationData ?? EMPTY_PRINTER_UTILIZATION} isLoading={utilizationLoading} error={utilizationError} />
             </div>
           </Tabs.Panel>
           <Tabs.Panel id="correlations">

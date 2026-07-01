@@ -1,6 +1,11 @@
 import React from 'react';
 import { Tabs } from '@/common/components/ui/Tabs';
 import {
+  type DurationTrend,
+  type FailureReason,
+  type MaterialSuccessRate,
+  type PrinterMaterialPerformance,
+  type TemperatureQualityCorrelation,
   useMaterialSuccessRates,
   usePrinterMaterialPerformance,
   useTemperatureQualityCorrelation,
@@ -17,7 +22,13 @@ interface Props {
   days?: number;
 }
 
-export const CorrelationChartsSection: React.FC<Props> = ({ days }) => {
+const EMPTY_MATERIAL_SUCCESS_RATES: MaterialSuccessRate[] = [];
+const EMPTY_PRINTER_MATERIAL_PERFORMANCE: PrinterMaterialPerformance[] = [];
+const EMPTY_TEMPERATURE_QUALITY_CORRELATION: TemperatureQualityCorrelation[] = [];
+const EMPTY_DURATION_TRENDS: DurationTrend[] = [];
+const EMPTY_FAILURE_REASONS: FailureReason[] = [];
+
+export const CorrelationChartsSection = React.memo(function CorrelationChartsSection({ days }: Props) {
   const materialRates = useMaterialSuccessRates(days);
   const printerMaterial = usePrinterMaterialPerformance(days);
   const tempQuality = useTemperatureQualityCorrelation(days);
@@ -36,35 +47,35 @@ export const CorrelationChartsSection: React.FC<Props> = ({ days }) => {
       <Tabs.Panels>
         <Tabs.Panel id="material">
           <MaterialSuccessRateChart
-            data={materialRates.data ?? []}
+            data={materialRates.data ?? EMPTY_MATERIAL_SUCCESS_RATES}
             isLoading={materialRates.isLoading}
             error={materialRates.error}
           />
         </Tabs.Panel>
         <Tabs.Panel id="printer-material">
           <PrinterMaterialHeatmap
-            data={printerMaterial.data ?? []}
+            data={printerMaterial.data ?? EMPTY_PRINTER_MATERIAL_PERFORMANCE}
             isLoading={printerMaterial.isLoading}
             error={printerMaterial.error}
           />
         </Tabs.Panel>
         <Tabs.Panel id="temperature">
           <TemperatureScatterPlot
-            data={tempQuality.data ?? []}
+            data={tempQuality.data ?? EMPTY_TEMPERATURE_QUALITY_CORRELATION}
             isLoading={tempQuality.isLoading}
             error={tempQuality.error}
           />
         </Tabs.Panel>
         <Tabs.Panel id="duration">
           <DurationTrendChart
-            data={durationTrends.data ?? []}
+            data={durationTrends.data ?? EMPTY_DURATION_TRENDS}
             isLoading={durationTrends.isLoading}
             error={durationTrends.error}
           />
         </Tabs.Panel>
         <Tabs.Panel id="failures">
           <FailureReasonsChart
-            data={failureReasons.data ?? []}
+            data={failureReasons.data ?? EMPTY_FAILURE_REASONS}
             isLoading={failureReasons.isLoading}
             error={failureReasons.error}
           />
@@ -72,4 +83,4 @@ export const CorrelationChartsSection: React.FC<Props> = ({ days }) => {
       </Tabs.Panels>
     </Tabs>
   );
-};
+});
