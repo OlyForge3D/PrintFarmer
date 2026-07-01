@@ -1,4 +1,3 @@
-﻿#pragma warning disable CA5394 // Random is adequate for test data generation
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,6 +42,11 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
         _authenticatedClient?.Dispose();
         _unauthenticatedClient?.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    private static string UniquePrinterServerUrl()
+    {
+        return $"http://printer-{Guid.NewGuid():N}.test";
     }
 
     // =========================================================================
@@ -145,7 +149,7 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer1",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -158,7 +162,7 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer2",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -500,7 +504,7 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Test Printer",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -576,7 +580,7 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Test Printer",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -635,7 +639,7 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Test Printer",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -730,7 +734,7 @@ public class PrinterGroupsControllerTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Test Printer",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,

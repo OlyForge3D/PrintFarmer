@@ -188,6 +188,13 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         return (printer, printerId);
     }
 
+    private AutoDispatchBackgroundService CreateService()
+    {
+        return new AutoDispatchBackgroundService(
+            _trigger, _scopeFactory, _hubMock.Object,
+            NullLogger<AutoDispatchBackgroundService>.Instance);
+    }
+
     private PrintJob SeedQueuedJob(string name = "Test Job", int priority = 0, int queuePosition = 1)
     {
         Guid gcodeFileId = Guid.NewGuid();
@@ -237,15 +244,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
-
-        // Now seed job and configure mocks
+        AutoDispatchBackgroundService svc = CreateService();
         PrintJob job = SeedQueuedJob("benchy");
 
         DispatchScore goodScore = new(
@@ -262,16 +261,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto());
 
-        // Act: trigger idle
-        _trigger.NotifyPrinterIdle(printerId);
-
-        // Give the service time to process
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Assert: DispatchJobAsync was called
         _dispatchServiceMock.Verify(
@@ -312,18 +302,12 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto());
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ReconcileStartupEligiblePrintersAsync(cts.Token);
+        DispatchTriggerEvent triggerEvent = await _trigger.ReadAsync(cts.Token);
+        triggerEvent.PrinterId.Should().Be(printerId);
+        triggerEvent.SkipIdleThreshold.Should().BeTrue();
+        await svc.ProcessPrinterIdleAsync(triggerEvent.PrinterId, triggerEvent.SkipIdleThreshold, cts.Token);
 
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
@@ -341,19 +325,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedQueuedJob();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Assert: scorer never called, nothing dispatched
         _scorerMock.Verify(
@@ -375,19 +348,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedQueuedJob();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         _scorerMock.Verify(
             s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
@@ -405,19 +367,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         // No jobs seeded
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // No jobs → scorer never called, no dispatch
         _scorerMock.Verify(
@@ -438,15 +389,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
-
-        // Now seed job and configure mocks
+        AutoDispatchBackgroundService svc = CreateService();
         PrintJob job = SeedQueuedJob();
 
         DispatchScore eliminatedScore = new(
@@ -459,14 +402,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([eliminatedScore]);
 
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Should NOT dispatch
         _dispatchServiceMock.Verify(
@@ -489,15 +425,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
-
-        // Now seed job and configure mocks
+        AutoDispatchBackgroundService svc = CreateService();
         PrintJob job = SeedQueuedJob();
 
         DispatchScore lowScore = new(
@@ -510,14 +438,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([lowScore]);
 
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
@@ -534,15 +455,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
-
-        // Now seed job and configure mocks
+        AutoDispatchBackgroundService svc = CreateService();
         PrintJob job = SeedQueuedJob("benchy-suggest");
 
         DispatchScore goodScore = new(
@@ -555,14 +468,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
 
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Should NOT call DispatchJobAsync
         _dispatchServiceMock.Verify(
@@ -585,15 +491,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
-
-        // Now seed job and configure mocks
+        AutoDispatchBackgroundService svc = CreateService();
         PrintJob job = SeedQueuedJob("log-check");
 
         DispatchScore goodScore = new(
@@ -606,14 +504,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
 
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Assert: DispatchLog was written with Suggested action
         List<DispatchLog> logs = await _db.DispatchLogs.ToListAsync();
@@ -633,17 +524,11 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
+        AutoDispatchBackgroundService svc = CreateService();
 
         // Now seed job and trigger
         SeedQueuedJob();
-        _trigger.NotifyPrinterIdle(printerId);
+        Task processTask = svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: false, cts.Token);
 
         // Wait until the service has actually registered the pending idle-wait, then
         // cancel it. Polling for registration (rather than a fixed delay) makes this
@@ -655,13 +540,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         }
 
         _trigger.CancelPendingDispatch(printerId);
-
-        await Task.Delay(3000, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await processTask;
 
         // Should never reach scoring or dispatch
         _scorerMock.Verify(
@@ -686,19 +565,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedQueuedJob();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         _scorerMock.Verify(
             s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
@@ -743,19 +611,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedQueuedJob();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Should not score or dispatch because printer already has active job
         _scorerMock.Verify(
@@ -777,19 +634,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedQueuedJob("should-not-dispatch");
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        AutoDispatchBackgroundService svc = CreateService();
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Per-printer auto-dispatch disabled → never score, never dispatch
         _scorerMock.Verify(
@@ -810,15 +656,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, _scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        // Start service first (no queued jobs → startup reconciliation does nothing)
-        Task serviceTask = svc.StartAsync(cts.Token);
-        await Task.Delay(100, cts.Token);
-
-        // Now seed job and configure mocks
+        AutoDispatchBackgroundService svc = CreateService();
         PrintJob job = SeedQueuedJob();
 
         DispatchScore goodScore = new(
@@ -835,14 +673,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Printer connection failed"));
 
-        _trigger.NotifyPrinterIdle(printerId);
-
-        await Task.Delay(500, cts.Token);
-        await cts.CancelAsync();
-
-        try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         // Should send dispatchfailed SignalR event
         _clientProxyMock.Verify(

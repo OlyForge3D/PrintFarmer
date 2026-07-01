@@ -1,4 +1,3 @@
-﻿#pragma warning disable CA5394 // Random is adequate for test data generation
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,6 +39,11 @@ public class LocationSubtreeTests : IAsyncLifetime
     {
         _client?.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    private static string UniquePrinterServerUrl()
+    {
+        return $"http://printer-{Guid.NewGuid():N}.test";
     }
 
     // =========================================================================
@@ -116,7 +120,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Warehouse",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -129,7 +133,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomA",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -142,7 +146,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomB",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.OctoPrint,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -222,7 +226,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomA-1",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -235,7 +239,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomA-2",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -373,7 +377,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomA",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -387,7 +391,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomB",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -479,7 +483,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Warehouse",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -492,7 +496,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-RoomA",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -505,7 +509,7 @@ public class LocationSubtreeTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Rack1",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = UniquePrinterServerUrl(),
                 Backend = (int)PrinterBackend.OctoPrint,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,

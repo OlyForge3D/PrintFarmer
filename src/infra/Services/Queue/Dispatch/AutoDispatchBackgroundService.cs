@@ -53,13 +53,13 @@ public sealed class AutoDispatchBackgroundService(
             // Fire-and-forget the dispatch cycle for this printer. Each cycle
             // runs on its own Task so multiple idle printers are handled concurrently
             // (the dispatch lock serializes only the critical DB-read+assign window).
-            _ = Task.Run(() => HandlePrinterIdleAsync(triggerEvent.PrinterId, triggerEvent.SkipIdleThreshold, stoppingToken), stoppingToken);
+            _ = Task.Run(() => ProcessPrinterIdleAsync(triggerEvent.PrinterId, triggerEvent.SkipIdleThreshold, stoppingToken), stoppingToken);
         }
 
         logger.LogInformation("[AutoDispatch] Background service stopping");
     }
 
-    private async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
+    internal async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
     {
         DateTime startupAt = DateTime.UtcNow;
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
@@ -99,7 +99,7 @@ public sealed class AutoDispatchBackgroundService(
         }
     }
 
-    private async Task HandlePrinterIdleAsync(Guid printerId, bool skipIdleThreshold, CancellationToken serviceCt)
+    internal async Task ProcessPrinterIdleAsync(Guid printerId, bool skipIdleThreshold, CancellationToken serviceCt)
     {
         try
         {
