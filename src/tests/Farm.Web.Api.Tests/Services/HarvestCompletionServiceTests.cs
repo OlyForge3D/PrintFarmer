@@ -115,25 +115,13 @@ public class HarvestCompletionServiceTests
 
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation> { operation });
-        _harvestRepoMock.Setup(h => h.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-
         // Act
-        await _service.StartAsync(cts.Token);
-        await Task.Delay(150);
-        cts.Cancel();
-
-        try
-        {
-            await _service.StopAsync(cts.Token);
-        }
-        catch (OperationCanceledException) { }
+        await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
 
         // Assert
         Assert.Equal(GcodeHarvestStatus.Completed, operation.Status);
         Assert.NotNull(operation.CompletedAt);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -151,22 +139,13 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation> { operation });
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-
         // Act
-        await _service.StartAsync(cts.Token);
-        await Task.Delay(150);
-        cts.Cancel();
-
-        try
-        {
-            await _service.StopAsync(cts.Token);
-        }
-        catch (OperationCanceledException) { }
+        await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
 
         // Assert
-        Assert.NotEqual(GcodeHarvestStatus.Completed, operation.Status);
-        _harvestRepoMock.Verify(h => h.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(GcodeHarvestStatus.Running, operation.Status);
+        Assert.Null(operation.CompletedAt);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -223,11 +202,10 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation>());
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)); // Increased to allow startup logging
+        using var cts = new CancellationTokenSource();
 
         // Act
         await _service.StartAsync(cts.Token);
-        await Task.Delay(100); // Give service time to start and log
         cts.Cancel();
 
         try
