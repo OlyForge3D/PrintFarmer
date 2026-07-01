@@ -364,13 +364,17 @@ actor APIClient {
 
     /// Restores the saved server URL string, upgrading legacy `http://` IP URLs.
     static func savedServerURLString() -> String? {
-        guard let saved = UserDefaults.standard.string(forKey: serverURLKey),
+        savedServerURLString(userDefaults: .standard)
+    }
+
+    static func savedServerURLString(userDefaults: UserDefaults) -> String? {
+        guard let saved = userDefaults.string(forKey: serverURLKey),
               let normalized = normalizeServerURLString(saved, upgradeLegacyIPHTTP: true) else {
             return nil
         }
 
         if normalized != saved {
-            UserDefaults.standard.set(normalized, forKey: serverURLKey)
+            userDefaults.set(normalized, forKey: serverURLKey)
         }
 
         return normalized
