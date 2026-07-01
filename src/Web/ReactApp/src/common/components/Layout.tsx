@@ -16,6 +16,10 @@ import {
   ChevronRightIcon,
   CloseIcon,
   GearIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  EyeIcon,
+  EyeOffIcon,
   FolderOpenIcon,
   HistoryIcon,
   WrenchIcon,
@@ -44,9 +48,22 @@ import { NfcPairingModal } from '@/features/nfc/components/NfcPairingModal';
 import { useNfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
 import { FloatingControlBar } from '@/common/components/FloatingControlBar';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
+import {
+  createDefaultNavPreferences,
+  getNavPreferencesStorageKey,
+  loadNavPreferences,
+  moveNavItem,
+  normalizeNavPreferences,
+  resolveNavPreferences,
+  saveNavPreferences,
+  setNavItemHidden,
+  setNavItemPinned,
+} from '@/common/utils/navPreferences';
+import type { NavPreferenceItem, NavPreferenceRole, NavPreferences } from '@/common/utils/navPreferences';
 // Layout now uses <Outlet /> for nested routes
 
 interface NavigationItem {
+  id: string;
   name: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -75,11 +92,12 @@ interface NavigationSectionHeader {
 }
 
 interface NavigationGroup {
-  header: NavigationSectionHeader;
-  items: NavigationItem[];
+  header: Pick<NavigationSectionHeader, 'name' | 'icon'>;
+  items: SectionedNavigationItem[];
 }
 
 type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionHeader;
+type SectionedNavigationItem = NavigationItem & { sectionName: string };
 
 const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
 const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
@@ -87,8 +105,9 @@ const isNavigationItem = (item: NavigationElement): item is NavigationItem => !i
 
 const navigation: NavigationElement[] = [
   { name: 'Dashboard', icon: HomeIcon, isSectionHeader: true },
-  { name: 'Overview', href: '/dashboard', icon: HomeIcon, matches: (pathname) => pathname === '/' || pathname.startsWith('/dashboard') },
+  { id: 'overview', name: 'Overview', href: '/dashboard', icon: HomeIcon, matches: (pathname) => pathname === '/' || pathname.startsWith('/dashboard') },
   {
+    id: 'print-queue',
     name: 'Print Queue',
     href: '/printQueue',
     icon: HistoryIcon,
@@ -98,6 +117,7 @@ const navigation: NavigationElement[] = [
 
   { name: 'Printers', icon: PrinterIcon, isSectionHeader: true },
   {
+    id: 'printers',
     name: 'Printers',
     href: '/printers',
     icon: PrinterIcon,
@@ -105,6 +125,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname === '/printers' || /^\/printers\/[^/]+$/.test(pathname)
   },
   {
+    id: 'filament-inventory',
     name: 'Filament Inventory',
     href: '/spools',
     icon: SpoolIcon,
@@ -113,6 +134,7 @@ const navigation: NavigationElement[] = [
 
   { name: 'Files', icon: FolderOpenIcon, isSectionHeader: true },
   {
+    id: 'files',
     name: 'Files',
     href: '/files',
     icon: FolderOpenIcon,
@@ -120,6 +142,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/files')
   },
   {
+    id: 'projects',
     name: 'Projects',
     href: '/projects',
     icon: ClipboardListIcon,
@@ -127,6 +150,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/projects')
   },
   {
+    id: 'scheduling',
     name: 'Scheduling',
     href: '/scheduling',
     icon: CalendarIcon,
@@ -135,6 +159,7 @@ const navigation: NavigationElement[] = [
 
   { name: 'Slicer', icon: BoxIcon, isSectionHeader: true },
   {
+    id: 'slice-job',
     name: 'Slice Job',
     href: '/slicer',
     icon: BoxIcon,
@@ -148,6 +173,7 @@ const navigation: NavigationElement[] = [
 
   { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
   {
+    id: 'maintenance',
     name: 'Maintenance',
     href: '/maintenance',
     icon: WrenchIcon,
@@ -155,6 +181,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
   },
   {
+    id: 'locations',
     name: 'Locations',
     href: '/locations/dashboard',
     icon: LocationIcon,
@@ -162,6 +189,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/locations')
   },
   {
+    id: 'analytics',
     name: 'Analytics',
     href: '/analytics',
     icon: TrendingUpIcon,
@@ -169,6 +197,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
   },
   {
+    id: 'auto-dispatch',
     name: 'Auto-Dispatch',
     href: '/auto-dispatch',
     icon: PlayIcon,
@@ -176,6 +205,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/auto-dispatch')
   },
   {
+    id: 'catalog',
     name: 'Catalog',
     href: '/catalog',
     icon: LayersIcon,
@@ -183,6 +213,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/catalog')
   },
   {
+    id: 'system-settings',
     name: 'System Settings',
     href: '/admin/settings',
     icon: GearIcon,
@@ -190,6 +221,7 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/admin/settings')
   },
   {
+    id: 'admin-console',
     name: 'Admin Console',
     href: '/admin/manage',
     icon: DashboardIcon,
@@ -198,6 +230,7 @@ const navigation: NavigationElement[] = [
   },
 ];
 
+const FAVORITES_HEADER: Pick<NavigationSectionHeader, 'name' | 'icon'> = { name: 'Favorites', icon: HomeIcon };
 const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
@@ -231,6 +264,58 @@ function focusFirstElement(container: HTMLElement | null): boolean {
 
   firstFocusable.focus();
   return true;
+}
+
+function getSectionedNavigation(elements: NavigationElement[]): SectionedNavigationItem[] {
+  const sectionedItems: SectionedNavigationItem[] = [];
+  let currentSectionName = 'Navigation';
+
+  elements.forEach((item) => {
+    if (isSectionHeader(item)) {
+      currentSectionName = item.name;
+      return;
+    }
+
+    if (isNavigationItem(item)) {
+      sectionedItems.push({ ...item, sectionName: currentSectionName });
+    }
+  });
+
+  return sectionedItems;
+}
+
+const navigationItems = getSectionedNavigation(navigation);
+const navigationHeadersByName = new Map(
+  navigation.filter(isSectionHeader).map((header) => [header.name, { name: header.name, icon: header.icon }])
+);
+
+function toPreferenceItem(item: SectionedNavigationItem): NavPreferenceItem {
+  return {
+    id: item.id,
+    name: item.name,
+    sectionName: item.sectionName,
+  };
+}
+
+function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup[] {
+  const groups: NavigationGroup[] = [];
+  const groupByName = new Map<string, NavigationGroup>();
+
+  items.forEach((item) => {
+    let group = groupByName.get(item.sectionName);
+    if (!group) {
+      group = {
+        header: navigationHeadersByName.get(item.sectionName) ?? { name: item.sectionName, icon: HomeIcon },
+        items: [],
+      };
+      groupByName.set(item.sectionName, group);
+      groups.push(group);
+    }
+
+    group.items.push(item);
+  });
+
+  return groups;
 }
 
 export function Layout() {
@@ -276,6 +361,11 @@ export function Layout() {
     const saved = localStorage.getItem(NAVBAR_COLLAPSED_STORAGE_KEY);
     return saved ? Boolean(JSON.parse(saved)) : false;
   });
+  const navPreferencesStorageKey = useMemo(() => getNavPreferencesStorageKey(user?.id), [user?.id]);
+  const [storedNavPreferences, setStoredNavPreferences] = useState<Partial<NavPreferences> | null>(() => loadNavPreferences(navPreferencesStorageKey));
+  const [customizeNavigation, setCustomizeNavigation] = useState(false);
+  const [showHiddenNavigation, setShowHiddenNavigation] = useState(false);
+  const [draggingNavItemId, setDraggingNavItemId] = useState<string | null>(null);
   const desktopRailRef = useRef<HTMLDivElement | null>(null);
   const mobileDrawerAnnouncementRef = useRef<HTMLDivElement | null>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -288,7 +378,19 @@ export function Layout() {
     localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
   }, [navbarCollapsed]);
 
-  const filteredNavigation = useMemo(() => {
+  useEffect(() => {
+    setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
+  }, [navPreferencesStorageKey]);
+
+  const navPreferenceRole = useMemo<NavPreferenceRole>(() => {
+    if (!isAuthenticated) {
+      return 'guest';
+    }
+
+    return canRole('farm_admin') ? 'admin' : 'operator';
+  }, [canRole, isAuthenticated]);
+
+  const availableNavigationItems = useMemo<SectionedNavigationItem[]>(() => {
     const isHiddenByCapabilities = (item: NavigationItem) => {
       if (item.requiresSlicingCapability && capabilities?.slicingEnabled === false) return true;
       if (item.requiresModelFiles && capabilities?.modelFilesEnabled === false) return true;
@@ -296,24 +398,14 @@ export function Layout() {
     };
 
     if (!isAuthenticated) {
-      return navigation.filter((item) => {
-        if (isDivider(item)) return true;
-        if (isSectionHeader(item)) {
-          return !item.requiredRole;
-        }
-
+      return navigationItems.filter((item) => {
         if (isHiddenByCapabilities(item)) return false;
         if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
     }
 
-    return navigation.filter((item) => {
-      if (isDivider(item)) return true;
-      if (isSectionHeader(item)) {
-        return !item.requiredRole || canRole(item.requiredRole);
-      }
-
+    return navigationItems.filter((item) => {
       if (item.requiredRole && !canRole(item.requiredRole)) return false;
       if (item.requiredPermission && !canPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       if (isHiddenByCapabilities(item)) return false;
@@ -322,24 +414,60 @@ export function Layout() {
     });
   }, [isAuthenticated, canRole, canPermission, isSlicerAvailable, capabilities]);
 
-  const navigationGroups = useMemo<NavigationGroup[]>(() => {
-    const groups: NavigationGroup[] = [];
+  const navPreferenceItems = useMemo(() => availableNavigationItems.map(toPreferenceItem), [availableNavigationItems]);
+  const navigationItemById = useMemo(() => new Map(availableNavigationItems.map((item) => [item.id, item])), [availableNavigationItems]);
+  const resolvedNavPreferences = useMemo(
+    () => resolveNavPreferences(navPreferenceItems, navPreferenceRole, storedNavPreferences),
+    [navPreferenceItems, navPreferenceRole, storedNavPreferences]
+  );
+  const navPreferences = resolvedNavPreferences.preferences;
+  const favoriteNavigationItems = useMemo(
+    () => resolvedNavPreferences.favoriteItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.favoriteItems]
+  );
+  const regularNavigationItems = useMemo(
+    () => resolvedNavPreferences.regularItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.regularItems]
+  );
+  const hiddenNavigationItems = useMemo(
+    () => resolvedNavPreferences.hiddenItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.hiddenItems]
+  );
+  const favoriteNavigationGroups = useMemo<NavigationGroup[]>(
+    () => favoriteNavigationItems.length > 0 ? [{ header: FAVORITES_HEADER, items: favoriteNavigationItems }] : [],
+    [favoriteNavigationItems]
+  );
+  const navigationGroups = useMemo<NavigationGroup[]>(() => groupNavigationItems(regularNavigationItems), [regularNavigationItems]);
+  const allNavigationGroups = useMemo<NavigationGroup[]>(
+    () => [...favoriteNavigationGroups, ...navigationGroups],
+    [favoriteNavigationGroups, navigationGroups]
+  );
 
-    filteredNavigation.forEach((item) => {
-      if (isSectionHeader(item)) {
-        groups.push({ header: item, items: [] });
-        return;
-      }
-
-      if (!isNavigationItem(item) || groups.length === 0) {
-        return;
-      }
-
-      groups[groups.length - 1].items.push(item);
+  const updateNavPreferences = useCallback((updater: (preferences: NavPreferences) => NavPreferences) => {
+    setStoredNavPreferences((current) => {
+      const normalized = normalizeNavPreferences(navPreferenceItems, navPreferenceRole, current);
+      const next = updater(normalized);
+      saveNavPreferences(navPreferencesStorageKey, next);
+      return next;
     });
+  }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
 
-    return groups.filter((group) => group.items.length > 0);
-  }, [filteredNavigation]);
+  const resetNavPreferences = useCallback(() => {
+    const defaults = createDefaultNavPreferences(navPreferenceItems, navPreferenceRole);
+    saveNavPreferences(navPreferencesStorageKey, defaults);
+    setStoredNavPreferences(defaults);
+    setShowHiddenNavigation(false);
+  }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
+
+  const reorderNavItem = useCallback((itemId: string, targetIndex: number) => {
+    updateNavPreferences((preferences) => moveNavItem(preferences, itemId, targetIndex));
+  }, [updateNavPreferences]);
 
   const isNavItemActive = (item: NavigationItem) => {
     if (item.matches) {
@@ -476,6 +604,212 @@ export function Layout() {
   };
 
   const desktopRailWidthClassName = navbarCollapsed ? 'lg:w-16' : 'lg:w-[248px]';
+  const customizeNavigationItems = useMemo(
+    () => resolvedNavPreferences.orderedItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.orderedItems]
+  );
+  const hiddenNavigationIds = useMemo(() => new Set(navPreferences.hiddenItemIds), [navPreferences.hiddenItemIds]);
+  const pinnedNavigationIds = useMemo(() => new Set(navPreferences.pinnedItemIds), [navPreferences.pinnedItemIds]);
+
+  const renderNavigationLink = (item: SectionedNavigationItem, collapsed = false, onNavigate?: () => void) => {
+    const ItemIcon = item.icon;
+    const isActive = isNavItemActive(item);
+
+    if (collapsed) {
+      return (
+        <NavLink
+          key={item.id}
+          to={item.href}
+          title={item.name}
+          aria-label={item.name}
+          aria-current={isActive ? 'page' : undefined}
+          onClick={onNavigate}
+          className={clsx(
+            'flex h-11 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+            isActive
+              ? 'bg-pf-accent-bg/18 text-pf-accent'
+              : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+          )}
+        >
+          <span aria-hidden="true">
+            <ItemIcon className="h-5 w-5" />
+          </span>
+        </NavLink>
+      );
+    }
+
+    return (
+      <NavLink
+        key={item.id}
+        to={item.href}
+        onClick={onNavigate}
+        className={clsx(
+          'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+          isActive
+            ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+            : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+        )}
+      >
+        <span aria-hidden="true">
+          <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
+        </span>
+        <span className="flex-1 text-left">{item.name}</span>
+      </NavLink>
+    );
+  };
+
+  const renderNavigationGroups = (groups: NavigationGroup[], collapsed = false, onNavigate?: () => void) => (
+    <div className={collapsed ? 'space-y-1' : 'space-y-1'}>
+      {groups.map((group, groupIndex) => (
+        <Fragment key={group.header.name}>
+          {groupIndex > 0 && (
+            <hr className={clsx('border-pf-border', collapsed ? 'mx-2 my-2' : 'mx-3')} aria-hidden="true" />
+          )}
+          {collapsed ? (
+            <div className="flex flex-col items-center space-y-1" aria-label={group.header.name} role="group">
+              {group.items.map((item) => renderNavigationLink(item, true, onNavigate))}
+            </div>
+          ) : (
+            <section aria-label={group.header.name} className="space-y-0.5">
+              <div className="space-y-0.5">
+                {group.items.map((item) => renderNavigationLink(item, false, onNavigate))}
+              </div>
+            </section>
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+
+  const renderHiddenNavigation = (collapsed = false, onNavigate?: () => void) => {
+    if (hiddenNavigationItems.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className={clsx('border-t border-pf-border pt-2', collapsed ? 'mt-2 flex flex-col items-center gap-1' : 'mt-3 space-y-2')}>
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          className={clsx(collapsed ? 'h-10 w-10 px-0' : 'w-full justify-center')}
+          aria-expanded={showHiddenNavigation}
+          aria-label={`${showHiddenNavigation ? 'Hide' : 'Show'} hidden navigation items`}
+          title={`${showHiddenNavigation ? 'Hide' : 'Show'} hidden navigation items`}
+          onClick={() => setShowHiddenNavigation((prev) => !prev)}
+          iconLeft={!collapsed ? (showHiddenNavigation ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />) : undefined}
+          iconCenter={collapsed ? (showHiddenNavigation ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />) : undefined}
+        >
+          {!collapsed && `${showHiddenNavigation ? 'Hide' : 'Show'} hidden (${hiddenNavigationItems.length})`}
+        </Button>
+        {showHiddenNavigation && (
+          <div className={collapsed ? 'flex flex-col items-center space-y-1' : 'space-y-0.5'} aria-label="Hidden navigation items" role="group">
+            {hiddenNavigationItems.map((item) => renderNavigationLink(item, collapsed, onNavigate))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCustomizeNavigationPanel = () => {
+    if (!customizeNavigation) {
+      return null;
+    }
+
+    return (
+      <section className="mb-3 rounded-xl border border-pf-border bg-pf-bg-2 p-2" aria-label="Customize navigation">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-pf-text-primary">Customize nav</h2>
+            <p className="text-xs text-pf-text-muted">Drag items or use Move up/down. Hidden items remain available under Show hidden.</p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setCustomizeNavigation(false)}>
+            Done
+          </Button>
+        </div>
+        <div className="space-y-1" role="list" aria-label="Navigation order">
+          {customizeNavigationItems.map((item, index) => {
+            const hidden = hiddenNavigationIds.has(item.id);
+            const pinned = pinnedNavigationIds.has(item.id);
+
+            return (
+              <div
+                key={item.id}
+                role="listitem"
+                draggable
+                onDragStart={() => setDraggingNavItemId(item.id)}
+                onDragEnd={() => setDraggingNavItemId(null)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggingNavItemId && draggingNavItemId !== item.id) {
+                    reorderNavItem(draggingNavItemId, index);
+                  }
+                  setDraggingNavItemId(null);
+                }}
+                className={clsx(
+                  'rounded-lg border border-pf-border bg-pf-bg-1 p-2 text-xs',
+                  draggingNavItemId === item.id && 'opacity-60'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-pf-text-primary">{item.name}</span>
+                    <span className="block truncate text-pf-text-muted">{item.sectionName}</span>
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      className="h-8 w-8 px-0"
+                      aria-label={`Move ${item.name} up`}
+                      disabled={index === 0}
+                      onClick={() => reorderNavItem(item.id, index - 1)}
+                      iconCenter={<ArrowUpIcon className="h-4 w-4" />}
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      className="h-8 w-8 px-0"
+                      aria-label={`Move ${item.name} down`}
+                      disabled={index === customizeNavigationItems.length - 1}
+                      onClick={() => reorderNavItem(item.id, index + 1)}
+                      iconCenter={<ArrowDownIcon className="h-4 w-4" />}
+                    />
+                    <Button
+                      type="button"
+                      variant={pinned ? 'secondary' : 'subtle'}
+                      size="sm"
+                      aria-pressed={pinned}
+                      onClick={() => updateNavPreferences((preferences) => setNavItemPinned(preferences, item.id, !pinned))}
+                    >
+                      {pinned ? 'Pinned' : 'Pin'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={hidden ? 'secondary' : 'subtle'}
+                      size="sm"
+                      aria-pressed={!hidden}
+                      onClick={() => updateNavPreferences((preferences) => setNavItemHidden(preferences, item.id, !hidden))}
+                    >
+                      {hidden ? 'Show' : 'Hide'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="mt-2 w-full justify-center" onClick={resetNavPreferences}>
+          Reset to defaults
+        </Button>
+      </section>
+    );
+  };
 
   return (
     <div className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
@@ -630,42 +964,22 @@ export function Layout() {
             </div>
 
             <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-3 py-3" aria-label="Main navigation">
-              {navigationGroups.map((group, groupIndex) => {
-                return (
-                  <Fragment key={group.header.name}>
-                    {groupIndex > 0 && (
-                      <hr className="border-pf-border mx-3" aria-hidden="true" />
-                    )}
-                    <section aria-label={group.header.name} className="space-y-0.5">
-                      <div className="space-y-0.5">
-                        {group.items.map((item) => {
-                          const ItemIcon = item.icon;
-                          const isActive = isNavItemActive(item);
-
-                          return (
-                            <NavLink
-                              key={item.href}
-                              to={item.href}
-                              onClick={() => setSidebarOpen(false)}
-                              className={clsx(
-                                'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                                isActive
-                                  ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
-                                  : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                              )}
-                            >
-                              <span aria-hidden="true">
-                                <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
-                              </span>
-                              <span className="flex-1 text-left">{item.name}</span>
-                            </NavLink>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  </Fragment>
-                );
-              })}
+              <div className="mb-3 flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={customizeNavigation ? 'secondary' : 'subtle'}
+                  size="sm"
+                  className="w-full justify-center"
+                  aria-pressed={customizeNavigation}
+                  onClick={() => setCustomizeNavigation((prev) => !prev)}
+                  iconLeft={<GearIcon className="h-4 w-4" />}
+                >
+                  Customize
+                </Button>
+              </div>
+              {renderCustomizeNavigationPanel()}
+              {renderNavigationGroups(allNavigationGroups, false, () => setSidebarOpen(false))}
+              {renderHiddenNavigation(false, () => setSidebarOpen(false))}
             </nav>
           </div>
         </div>
@@ -681,79 +995,16 @@ export function Layout() {
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
-                <div className="space-y-1">
-                  {navigationGroups.map((group, groupIndex) => (
-                    <Fragment key={group.header.name}>
-                      {groupIndex > 0 && (
-                        <hr className="border-pf-border mx-2 my-2" aria-hidden="true" />
-                      )}
-                      <div className="flex flex-col items-center space-y-1" aria-label={group.header.name} role="group">
-                        {group.items.map((item) => {
-                          const ItemIcon = item.icon;
-                          const isActive = isNavItemActive(item);
-
-                          return (
-                            <NavLink
-                              key={item.href}
-                              to={item.href}
-                              title={item.name}
-                              aria-label={item.name}
-                              aria-current={isActive ? 'page' : undefined}
-                              className={clsx(
-                                'flex h-11 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                                isActive
-                                  ? 'bg-pf-accent-bg/18 text-pf-accent'
-                                  : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                              )}
-                            >
-                              <span aria-hidden="true">
-                                <ItemIcon className="h-5 w-5" />
-                              </span>
-                            </NavLink>
-                          );
-                        })}
-                      </div>
-                    </Fragment>
-                  ))}
-                </div>
+                <>
+                  {renderNavigationGroups(allNavigationGroups, true)}
+                  {renderHiddenNavigation(true)}
+                </>
               ) : (
-                <div className="space-y-1">
-                  {navigationGroups.map((group, groupIndex) => {
-                    return (
-                      <Fragment key={group.header.name}>
-                        {groupIndex > 0 && (
-                          <hr className="border-pf-border mx-3" aria-hidden="true" />
-                        )}
-                        <section aria-label={group.header.name} className="space-y-0.5">
-                          <div className="space-y-0.5">
-                            {group.items.map((item) => {
-                              const ItemIcon = item.icon;
-                              const isActive = isNavItemActive(item);
-
-                              return (
-                                <NavLink
-                                  key={item.href}
-                                  to={item.href}
-                                  className={clsx(
-                                    'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
-                                    isActive
-                                      ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
-                                      : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                                  )}
-                                >
-                                  <span aria-hidden="true">
-                                    <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
-                                  </span>
-                                  <span className="flex-1 text-left">{item.name}</span>
-                                </NavLink>
-                              );
-                            })}
-                          </div>
-                        </section>
-                      </Fragment>
-                    );
-                  })}
-                </div>
+                <>
+                  {renderCustomizeNavigationPanel()}
+                  {renderNavigationGroups(allNavigationGroups)}
+                  {renderHiddenNavigation()}
+                </>
               )}
             </nav>
 
@@ -800,6 +1051,23 @@ export function Layout() {
               </div>
 
               <div className="mt-2">
+                <Button
+                  type="button"
+                  aria-label={customizeNavigation ? 'Finish customizing navigation' : 'Customize navigation'}
+                  title={customizeNavigation ? 'Finish customizing navigation' : 'Customize navigation'}
+                  variant={customizeNavigation ? 'secondary' : 'subtle'}
+                  size="sm"
+                  className="mb-2 w-full justify-center"
+                  aria-pressed={customizeNavigation}
+                  onClick={() => {
+                    setCustomizeNavigation((prev) => !prev);
+                    setNavbarCollapsed(false);
+                  }}
+                  iconCenter={navbarCollapsed ? <GearIcon className="h-5 w-5" /> : undefined}
+                  iconLeft={!navbarCollapsed ? <GearIcon className="h-4 w-4" /> : undefined}
+                >
+                  {!navbarCollapsed && (customizeNavigation ? 'Done customizing' : 'Customize')}
+                </Button>
                 <Button
                   type="button"
                   aria-label={navbarCollapsed ? 'Expand navigation rail' : 'Collapse navigation rail'}
