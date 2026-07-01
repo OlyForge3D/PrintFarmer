@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
@@ -57,6 +58,12 @@ struct ContentView: View {
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
             List {
+                if ServerSwitcherViewModel(servers: serverRegistry.servers, activeServerID: serverRegistry.activeServerID).isVisible {
+                    ServerSwitcherMenu(style: .sidebar)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        .listRowSeparator(.hidden)
+                }
+
                 // Operations
                 Section {
                     sidebarButton(tab: .dashboard, title: "Dashboard", icon: "house")

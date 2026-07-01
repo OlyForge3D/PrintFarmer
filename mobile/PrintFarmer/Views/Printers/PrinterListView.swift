@@ -45,6 +45,12 @@ struct PrinterListView: View {
                 await viewModel.loadPrinters()
             }
             .toolbar {
+                if sizeClass == .compact {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ServerSwitcherMenu(style: .toolbar)
+                    }
+                }
+
                 ToolbarItem(placement: .automatic) {
                     statusFilterMenu
                 }
