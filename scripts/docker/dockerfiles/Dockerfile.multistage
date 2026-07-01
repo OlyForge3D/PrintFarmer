@@ -6,7 +6,7 @@
 ############################################################
 
 # Global build arguments
-ARG ORCASLICER_VERSION=2.4.0
+ARG ORCASLICER_VERSION=2.4.1
 ARG BUILD_VERBOSITY=quiet
 
 # Multi-architecture support
