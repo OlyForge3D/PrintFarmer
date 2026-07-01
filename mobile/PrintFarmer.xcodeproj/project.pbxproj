@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D61000000000000000000002 /* RegisteredServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000001 /* RegisteredServer.swift */; };
+		D61000000000000000000004 /* ServerRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000003 /* ServerRegistry.swift */; };
+		D61000000000000000000006 /* ServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000005 /* ServerRegistryTests.swift */; };
 		G1C5E77D0F5644239382149E /* MockMaintenanceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G15023AB18C74D619A437C5B /* MockMaintenanceService.swift */; };
 		G1B2DE97C03D425FABD4BDD4 /* MockAutoDispatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1A0D67EA5BA48C685032FBA /* MockAutoDispatchService.swift */; };
 		G1D0E211DA844BED9C0F19BD /* MockJobAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1A233F477344637B2AC9E9C /* MockJobAnalyticsService.swift */; };
@@ -217,6 +220,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D61000000000000000000001 /* RegisteredServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisteredServer.swift; sourceTree = "<group>"; };
+		D61000000000000000000003 /* ServerRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRegistry.swift; sourceTree = "<group>"; };
+		D61000000000000000000005 /* ServerRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRegistryTests.swift; sourceTree = "<group>"; };
 		G15023AB18C74D619A437C5B /* MockMaintenanceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockMaintenanceService.swift; sourceTree = "<group>"; };
 		G1A0D67EA5BA48C685032FBA /* MockAutoDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAutoDispatchService.swift; sourceTree = "<group>"; };
 		G1A233F477344637B2AC9E9C /* MockJobAnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockJobAnalyticsService.swift; sourceTree = "<group>"; };
@@ -504,6 +510,7 @@
 				CAA04408A2539F908022484D /* JobService.swift */,
 				D6121AF27098BBC7AC438846 /* LocationService.swift */,
 				007F057316513D6585B3D53A /* NotificationService.swift */,
+				D61000000000000000000003 /* ServerRegistry.swift */,
 				D6F328EBCA1FFAB87F2E1347 /* PrinterService.swift */,
 				C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */,
 				967769D7BBE893354EE7158A /* ServiceContainer.swift */,
@@ -551,6 +558,7 @@
 			isa = PBXGroup;
 			children = (
 				4B4E2EE087E92C131271B37F /* FilamentModels.swift */,
+				D61000000000000000000001 /* RegisteredServer.swift */,
 				B8D7C5C4CE62E9F3684E5B1F /* Models.swift */,
 				A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */,
 				62BAD7F52A9EFEE471AA461C /* RequestModels.swift */,
@@ -818,6 +826,7 @@
 			isa = PBXGroup;
 			children = (
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
+				D61000000000000000000005 /* ServerRegistryTests.swift */,
 				A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */,
 				1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */,
 			);
@@ -1037,6 +1046,7 @@
 				G142D92FBF824D7ABB0E5813 /* DispatchViewModelTests.swift in Sources */,
 				G127C8AD0BA949758A364AB4 /* UptimeViewModelTests.swift in Sources */,
 				72ADD2FE13E9535610CF1D7E /* ModelsTests.swift in Sources */,
+				D61000000000000000000006 /* ServerRegistryTests.swift in Sources */,
 				4BF27ADE0992B441FDBEAD6E /* MockURLProtocol.swift in Sources */,
 				A1B2C3D4E5F6789012345678 /* MockAPIServer.swift in Sources */,
 				137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */,
@@ -1105,6 +1115,7 @@
 				8ED9E2039EB36A33F0B9850D /* Formatting+Extensions.swift in Sources */,
 				660DA45F179749438845EEE1 /* SpoolmanSpool+ColorName.swift in Sources */,
 				42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */,
+				D61000000000000000000002 /* RegisteredServer.swift in Sources */,
 				A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */,
 				AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */,
 				4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */,
@@ -1118,6 +1129,7 @@
 				8227ECB595FD6058EFBE3E3C /* SignalRServiceProtocol.swift in Sources */,
 				317FBEA2115393EBB15E8035 /* StatisticsServiceProtocol.swift in Sources */,
 				940708CCB42A9134DABC1B06 /* APIClient.swift in Sources */,
+				D61000000000000000000004 /* ServerRegistry.swift in Sources */,
 				238D3CB78DB178A6F10855ED /* AuthService.swift in Sources */,
 				4AF7E845E7195CD9D93A7CA3 /* JobService.swift in Sources */,
 				34A13F4F8A2F168BA6B3E859 /* LocationService.swift in Sources */,
