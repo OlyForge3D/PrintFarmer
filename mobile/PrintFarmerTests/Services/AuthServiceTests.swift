@@ -1,3 +1,4 @@
+import KeychainSwift
 import XCTest
 @testable import PrintFarmer
 
@@ -9,20 +10,43 @@ final class AuthServiceTests: XCTestCase {
 
     private var apiClient: APIClient!
     private var authService: AuthService!
+    private var keychain: KeychainSwift!
+    private var userDefaults: UserDefaults!
+    private var userDefaultsSuiteName: String!
 
     override func setUp() {
         super.setUp()
         MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
-        authService = AuthService(apiClient: apiClient)
+        let suiteName = "AuthServiceTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let testKeychain = KeychainSwift(keyPrefix: "AuthServiceTests_\(UUID().uuidString)_")
+        let client = MockAPIClient.makeAPIClient()
+        defaults.removePersistentDomain(forName: suiteName)
+        testKeychain.clear()
+
+        userDefaultsSuiteName = suiteName
+        userDefaults = defaults
+        keychain = testKeychain
+        apiClient = client
+        authService = AuthService(
+            apiClient: client,
+            credentialsStore: ServerCredentialsStore(keychain: testKeychain),
+            userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
+            migrateLegacyServerURL: false
+        )
     }
 
     override func tearDown() {
         MockURLProtocol.reset()
+        keychain.clear()
+        userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         // Clean up any persisted server URL from tests
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         apiClient = nil
         authService = nil
+        keychain = nil
+        userDefaults = nil
+        userDefaultsSuiteName = nil
         super.tearDown()
     }
 

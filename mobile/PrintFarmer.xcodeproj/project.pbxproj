@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000001 /* ServerCredentialsStore.swift */; };
+		D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */; };
 		D61000000000000000000002 /* RegisteredServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000001 /* RegisteredServer.swift */; };
 		D61000000000000000000004 /* ServerRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000003 /* ServerRegistry.swift */; };
 		D61000000000000000000006 /* ServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000005 /* ServerRegistryTests.swift */; };
@@ -220,6 +222,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D610F2000000000000000001 /* ServerCredentialsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerCredentialsStore.swift; sourceTree = "<group>"; };
+		D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerCredentialsStoreTests.swift; sourceTree = "<group>"; };
 		D61000000000000000000001 /* RegisteredServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisteredServer.swift; sourceTree = "<group>"; };
 		D61000000000000000000003 /* ServerRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRegistry.swift; sourceTree = "<group>"; };
 		D61000000000000000000005 /* ServerRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRegistryTests.swift; sourceTree = "<group>"; };
@@ -511,6 +515,7 @@
 				D6121AF27098BBC7AC438846 /* LocationService.swift */,
 				007F057316513D6585B3D53A /* NotificationService.swift */,
 				D61000000000000000000003 /* ServerRegistry.swift */,
+				D610F2000000000000000001 /* ServerCredentialsStore.swift */,
 				D6F328EBCA1FFAB87F2E1347 /* PrinterService.swift */,
 				C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */,
 				967769D7BBE893354EE7158A /* ServiceContainer.swift */,
@@ -827,6 +832,7 @@
 			children = (
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
 				D61000000000000000000005 /* ServerRegistryTests.swift */,
+				D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */,
 				A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */,
 				1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */,
 			);
@@ -1047,6 +1053,7 @@
 				G127C8AD0BA949758A364AB4 /* UptimeViewModelTests.swift in Sources */,
 				72ADD2FE13E9535610CF1D7E /* ModelsTests.swift in Sources */,
 				D61000000000000000000006 /* ServerRegistryTests.swift in Sources */,
+				D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */,
 				4BF27ADE0992B441FDBEAD6E /* MockURLProtocol.swift in Sources */,
 				A1B2C3D4E5F6789012345678 /* MockAPIServer.swift in Sources */,
 				137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */,
@@ -1130,6 +1137,7 @@
 				317FBEA2115393EBB15E8035 /* StatisticsServiceProtocol.swift in Sources */,
 				940708CCB42A9134DABC1B06 /* APIClient.swift in Sources */,
 				D61000000000000000000004 /* ServerRegistry.swift in Sources */,
+				D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */,
 				238D3CB78DB178A6F10855ED /* AuthService.swift in Sources */,
 				4AF7E845E7195CD9D93A7CA3 /* JobService.swift in Sources */,
 				34A13F4F8A2F168BA6B3E859 /* LocationService.swift in Sources */,
