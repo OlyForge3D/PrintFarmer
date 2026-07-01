@@ -50,6 +50,7 @@ import { FloatingControlBar } from '@/common/components/FloatingControlBar';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
 import {
   createDefaultNavPreferences,
+  getNavMoveFocusTarget,
   getNavPreferencesStorageKey,
   groupNavItemsByResolvedOrder,
   loadNavPreferences,
@@ -625,12 +626,7 @@ export function Layout() {
     }
 
     const moveRefs = customizeMoveButtonRefs.current.get(pendingFocus.itemId);
-    const oppositeButton = pendingFocus.direction === 'up' ? moveRefs?.down : moveRefs?.up;
-    if (oppositeButton && !oppositeButton.disabled) {
-      oppositeButton.focus();
-    } else {
-      moveRefs?.row?.focus();
-    }
+    getNavMoveFocusTarget(moveRefs, pendingFocus.direction)?.focus();
 
     pendingCustomizeMoveFocusRef.current = null;
   }, [customizeNavigationItems]);

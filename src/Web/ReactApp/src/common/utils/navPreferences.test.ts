@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultNavPreferences,
+  getNavMoveFocusTarget,
   getNavPreferencesStorageKey,
   groupNavItemsByResolvedOrder,
   loadNavPreferences,
@@ -116,6 +117,27 @@ describe('navPreferences', () => {
     expect(groups.flatMap((group) => group.items.map((item) => item.id))).toEqual(
       resolved.regularItems.map((item) => item.id)
     );
+  });
+
+  it('keeps focus on the pressed move button when it remains enabled', () => {
+    const up = document.createElement('button');
+    const down = document.createElement('button');
+    const row = document.createElement('div');
+
+    expect(getNavMoveFocusTarget({ up, down, row }, 'up')).toBe(up);
+    expect(getNavMoveFocusTarget({ up, down, row }, 'down')).toBe(down);
+  });
+
+  it('falls back from a disabled pressed move button to the opposite button or row', () => {
+    const up = document.createElement('button');
+    const down = document.createElement('button');
+    const row = document.createElement('div');
+
+    up.disabled = true;
+    expect(getNavMoveFocusTarget({ up, down, row }, 'up')).toBe(down);
+
+    down.disabled = true;
+    expect(getNavMoveFocusTarget({ up, down, row }, 'up')).toBe(row);
   });
 
   it('swallows storage write failures when saving nav preferences', () => {

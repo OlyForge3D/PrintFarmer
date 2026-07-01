@@ -30,6 +30,28 @@ export interface NavPreferenceGroup<T extends NavPreferenceItem = NavPreferenceI
   items: T[];
 }
 
+export type NavMoveDirection = 'up' | 'down';
+
+export interface NavMoveFocusTargets {
+  up?: HTMLButtonElement | null;
+  down?: HTMLButtonElement | null;
+  row?: HTMLElement | null;
+}
+
+export function getNavMoveFocusTarget(targets: NavMoveFocusTargets | undefined, direction: NavMoveDirection) {
+  const clickedButton = direction === 'up' ? targets?.up : targets?.down;
+  if (clickedButton && !clickedButton.disabled) {
+    return clickedButton;
+  }
+
+  const oppositeButton = direction === 'up' ? targets?.down : targets?.up;
+  if (oppositeButton && !oppositeButton.disabled) {
+    return oppositeButton;
+  }
+
+  return targets?.row ?? null;
+}
+
 const DEFAULT_ORDER_BY_ROLE: Record<NavPreferenceRole, string[]> = {
   guest: ['overview'],
   operator: [
