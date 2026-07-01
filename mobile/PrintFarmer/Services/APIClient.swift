@@ -394,6 +394,13 @@ actor APIClient {
         if upgradeLegacyIPHTTP, scheme == "http", isIPv4Address(host) {
             components.scheme = "https"
         }
+        let effectiveScheme = components.scheme?.lowercased() ?? scheme
+        components.scheme = effectiveScheme
+        components.host = host.lowercased()
+        if (effectiveScheme == "https" && components.port == 443)
+            || (effectiveScheme == "http" && components.port == 80) {
+            components.port = nil
+        }
 
         guard let url = components.url else { return nil }
         let absoluteString = url.absoluteString

@@ -1,6 +1,7 @@
 import XCTest
 @testable import PrintFarmer
 
+@MainActor
 final class ServerRegistryTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var userDefaultsSuiteName: String!
@@ -153,5 +154,55 @@ final class ServerRegistryTests: XCTestCase {
 
         XCTAssertEqual(reloaded.servers.map(\.id), [existing.id])
         XCTAssertEqual(reloaded.servers.first?.normalizedURLString, "https://existing.example.com")
+    }
+
+    func testCorruptPersistedRegistryIsPreservedAndDoesNotRunLegacyMigration() throws {
+        let corruptData = Data([0xde, 0xad, 0xbe, 0xef])
+        userDefaults.set(corruptData, forKey: ServerRegistry.storageKey)
+        userDefaults.set("https://legacy.example.com", forKey: APIClient.serverURLKey)
+
+        let registry = ServerRegistry(userDefaults: userDefaults)
+
+        XCTAssertTrue(registry.servers.isEmpty)
+        XCTAssertNil(registry.activeServerID)
+        XCTAssertEqual(userDefaults.data(forKey: ServerRegistry.storageKey), corruptData)
+        XCTAssertEqual(userDefaults.data(forKey: ServerRegistry.corruptBackupKey), corruptData)
+        XCTAssertEqual(userDefaults.string(forKey: APIClient.serverURLKey), "https://legacy.example.com")
+        XCTAssertFalse(userDefaults.bool(forKey: ServerRegistry.legacyMigrationCompletedKey))
+    }
+
+    func testLegacyMigrationDoesNotResurrectDeletedServerWhenRegistryIsEmpty() throws {
+        userDefaults.set("https://legacy.example.com", forKey: APIClient.serverURLKey)
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(displayName: "Existing", baseURL: URL(string: "https://existing.example.com")!)
+
+        try registry.remove(id: server.id)
+        let reloaded = ServerRegistry(userDefaults: userDefaults)
+
+        XCTAssertTrue(reloaded.servers.isEmpty)
+        XCTAssertNil(reloaded.activeServerID)
+        XCTAssertEqual(userDefaults.string(forKey: APIClient.serverURLKey), "https://legacy.example.com")
+    }
+
+    func testDefaultHTTPSPortIsDeduplicated() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        _ = try registry.add(displayName: "One", baseURL: URL(string: "https://print.example.com")!)
+
+        XCTAssertThrowsError(
+            try registry.add(displayName: "Duplicate", baseURL: URL(string: "https://print.example.com:443")!)
+        ) { error in
+            XCTAssertEqual(error as? ServerRegistryError, .duplicateURL("https://print.example.com"))
+        }
+    }
+
+    func testDefaultHTTPPortIsDeduplicated() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        _ = try registry.add(displayName: "One", baseURL: URL(string: "http://print.example.com")!)
+
+        XCTAssertThrowsError(
+            try registry.add(displayName: "Duplicate", baseURL: URL(string: "http://print.example.com:80")!)
+        ) { error in
+            XCTAssertEqual(error as? ServerRegistryError, .duplicateURL("http://print.example.com"))
+        }
     }
 }

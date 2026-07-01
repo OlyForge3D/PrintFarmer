@@ -18,9 +18,12 @@ enum ServerRegistryError: LocalizedError, Equatable {
     }
 }
 
+@MainActor
 @Observable
 final class ServerRegistry {
     static let storageKey = "pf_server_registry"
+    static let corruptBackupKey = "pf_server_registry_corrupt_backup"
+    static let legacyMigrationCompletedKey = "pf_server_registry_legacy_migration_completed"
 
     private struct PersistedRegistry: Codable {
         var servers: [RegisteredServer]
@@ -41,10 +44,19 @@ final class ServerRegistry {
         self.userDefaults = userDefaults
         self.now = now
 
-        if let data = userDefaults.data(forKey: Self.storageKey),
-           let persisted = try? JSONDecoder().decode(PersistedRegistry.self, from: data) {
-            self.servers = persisted.servers
-            self.activeServerID = persisted.activeServerID
+        if let data = userDefaults.data(forKey: Self.storageKey) {
+            do {
+                let persisted = try JSONDecoder().decode(PersistedRegistry.self, from: data)
+                self.servers = persisted.servers
+                self.activeServerID = persisted.activeServerID
+            } catch {
+                // Keep the unreadable registry blob intact and copy it aside for recovery.
+                // Treating this as a fresh install would let migration/sanitize overwrite it.
+                userDefaults.set(data, forKey: Self.corruptBackupKey)
+                self.servers = []
+                self.activeServerID = nil
+                return
+            }
         } else {
             self.servers = []
             self.activeServerID = nil
@@ -137,8 +149,13 @@ final class ServerRegistry {
             return value
         }
 
-        components.scheme = scheme.lowercased()
+        let normalizedScheme = scheme.lowercased()
+        components.scheme = normalizedScheme
         components.host = host.lowercased()
+        if (normalizedScheme == "https" && components.port == 443)
+            || (normalizedScheme == "http" && components.port == 80) {
+            components.port = nil
+        }
         components.path = stripTrailingSlashes(from: components.path)
         var value = components.url?.absoluteString ?? url.absoluteString
         while value.hasSuffix("/") { value.removeLast() }
@@ -188,7 +205,8 @@ final class ServerRegistry {
     }
 
     private func migrateLegacyServerIfNeeded() {
-        guard servers.isEmpty,
+        guard userDefaults.data(forKey: Self.storageKey) == nil,
+              !userDefaults.bool(forKey: Self.legacyMigrationCompletedKey),
               let legacyURLString = userDefaults.string(forKey: APIClient.serverURLKey),
               let normalized = Self.normalizedLegacyURLString(legacyURLString),
               let url = URL(string: normalized) else {
@@ -209,6 +227,7 @@ final class ServerRegistry {
         )
         servers = [server]
         activeServerID = server.id
+        userDefaults.set(true, forKey: Self.legacyMigrationCompletedKey)
         persist()
     }
 
