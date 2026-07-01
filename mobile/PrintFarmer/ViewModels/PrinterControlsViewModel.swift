@@ -264,6 +264,7 @@ final class PrinterControlsViewModel: ObservableObject {
             case .clientError(_, let api): return (api?.detail ?? api?.message ?? api?.title ?? "Command rejected.", false)
             case .unexpectedStatus(let code): return ("Unexpected response (\(code)).", false)
             case .invalidURL, .invalidResponse, .decodingFailed, .authFailed: return ("Command failed.", false)
+            case .staleServerResponse: return ("Server changed. Refresh and try again.", false)
             }
         }
         if let url = error as? URLError {

@@ -14,7 +14,6 @@ struct PFarmApp: App {
     init() {
         let registry = ServerRegistry()
         _serverRegistry = State(initialValue: registry)
-
         if DemoMode.shared.isActive {
             let container = ServiceContainer.demo()
             _services = State(initialValue: container)
@@ -27,7 +26,7 @@ struct PFarmApp: App {
             } else {
                 resolvedURL = APIClient.savedBaseURL() ?? AppConfig.baseURL
             }
-            let container = ServiceContainer(baseURL: resolvedURL)
+            let container = ServiceContainer(baseURL: resolvedURL, serverRegistry: registry)
             _services = State(initialValue: container)
             _authViewModel = State(initialValue: AuthViewModel(services: container))
         }

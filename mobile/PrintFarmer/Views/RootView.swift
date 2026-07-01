@@ -37,7 +37,8 @@ struct RootView: View {
                         }
                 } else if authViewModel.isAuthenticated {
                     ContentView()
-                        .task {
+                        .id(services.activeServerGeneration)
+                        .task(id: services.activeServerGeneration) {
                             pendingReadyMonitor.configure(
                                 autoPrintService: services.autoPrintService,
                                 printerService: services.printerService
@@ -68,6 +69,10 @@ struct RootView: View {
                 router.pendingReadyCount = 0
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
+        }
+        .onChange(of: services.activeServerGeneration) {
+            pendingReadyMonitor.stopMonitoring()
+            router.pendingReadyCount = 0
         }
         .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
             guard isEmpty else { return }

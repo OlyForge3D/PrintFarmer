@@ -51,6 +51,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     // MARK: - Public API
 
     func connect() async throws {
+        guard connectionState != .connected && connectionState != .connecting else { return }
         intentionalDisconnect = false
         connectionState = .connecting
         reconnectAttempt = 0

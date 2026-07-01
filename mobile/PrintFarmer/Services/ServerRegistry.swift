@@ -74,7 +74,7 @@ final class ServerRegistry {
     }
 
     @discardableResult
-    func add(displayName: String, baseURL: URL) throws -> RegisteredServer {
+    func add(displayName: String, baseURL: URL, makeActiveIfNeeded: Bool = true) throws -> RegisteredServer {
         let normalized = try Self.normalizedURLString(for: baseURL.absoluteString)
         try rejectDuplicate(normalizedURLString: normalized)
 
@@ -87,7 +87,7 @@ final class ServerRegistry {
             updatedAt: timestamp
         )
         servers.append(server)
-        if activeServerID == nil {
+        if makeActiveIfNeeded && activeServerID == nil {
             activeServerID = server.id
         }
         persist()
