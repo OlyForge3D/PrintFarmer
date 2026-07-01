@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/common/components/Layout';
+import { getNavPreferencesStorageKey, NAV_PREFERENCES_VERSION } from '@/common/utils/navPreferences';
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -63,6 +64,12 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 }));
 
 describe('Navigation rail sections', () => {
+  const getDesktopNav = (container: HTMLElement) => {
+    const nav = container.querySelector('aside[aria-label="Main navigation"] nav[aria-label="Main navigation"]');
+    expect(nav).not.toBeNull();
+    return nav as HTMLElement;
+  };
+
   const renderLayout = () => {
     const queryClient = createTestQueryClient();
     return render(
@@ -81,20 +88,52 @@ describe('Navigation rail sections', () => {
 
   it('renders the new left rail sections with grouped child links', async () => {
     const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(container.querySelectorAll('section[aria-label]').length).toBeGreaterThanOrEqual(8);
-      expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBe(8);
+      expect(desktopNav.querySelectorAll('section[aria-label]')).toHaveLength(8);
+      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(7);
     });
     expect(screen.queryByText('Dashboard', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
     expect(screen.queryByText('Admin', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
 
-    expect(screen.getByRole('link', { name: /overview/i })).toHaveAttribute('href', '/dashboard');
-    expect(screen.getByRole('link', { name: /print queue/i })).toHaveAttribute('href', '/printQueue');
-    expect(container.querySelector('a[href="/files"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/projects"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/admin/settings"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/admin/manage"]')).not.toBeNull();
+    expect(within(desktopNav).getByRole('link', { name: /overview/i })).toHaveAttribute('href', '/dashboard');
+    expect(within(desktopNav).getByRole('link', { name: /print queue/i })).toHaveAttribute('href', '/printQueue');
+    expect(desktopNav.querySelector('a[href="/files"]')).not.toBeNull();
+    expect(desktopNav.querySelector('a[href="/projects"]')).not.toBeNull();
+    expect(desktopNav.querySelector('a[href="/admin/settings"]')).not.toBeNull();
+    expect(desktopNav.querySelector('a[href="/admin/manage"]')).not.toBeNull();
+  });
+
+  it('renders each default desktop nav link once', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(15);
+    });
+
+    const hrefs = Array.from(desktopNav.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.getAttribute('href'));
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+
+  it('keeps pinned items out of their original section and hidden items out of the main rail', async () => {
+    localStorage.setItem(getNavPreferencesStorageKey('1'), JSON.stringify({
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: [],
+      hiddenItemIds: ['projects'],
+      pinnedItemIds: ['files'],
+    }));
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(desktopNav.querySelector('section[aria-label="Favorites"]')).not.toBeNull();
+    });
+
+    expect(desktopNav.querySelectorAll('a[href="/files"]')).toHaveLength(1);
+    expect(desktopNav.querySelector('a[href="/projects"]')).toBeNull();
+    expect(within(desktopNav).getByRole('button', { name: /show hidden navigation items/i })).toBeInTheDocument();
   });
 
   it('hides the admin section for authenticated non-admin users', () => {
