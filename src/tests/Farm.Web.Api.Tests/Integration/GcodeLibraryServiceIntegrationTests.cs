@@ -144,6 +144,36 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task QueryLibraryAsync_WithDescriptionSearch_ReturnsMatching()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
+
+        string uniqueId = Guid.NewGuid().ToString()[..8];
+        var file = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Description Search Test",
+            FileName = $"description-search-{uniqueId}.gcode",
+            Description = $"Calibration tower {uniqueId}",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/description-search-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"description-search-hash-{uniqueId}",
+            UploadedAt = DateTime.UtcNow
+        };
+        context.GcodeFiles.Add(file);
+        await context.SaveChangesAsync();
+
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync($"CALIBRATION TOWER {uniqueId}", null, null, null, CancellationToken.None);
+
+        result.Should().ContainSingle(g => g.Id == file.Id);
+    }
+
+    [Fact]
     public async Task QueryLibraryAsync_WithMaterialFilter_ReturnsMatching()
     {
         // Arrange
@@ -390,4 +420,3 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 
     #endregion
 }
-
