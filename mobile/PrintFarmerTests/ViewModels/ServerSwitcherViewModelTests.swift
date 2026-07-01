@@ -45,6 +45,23 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.items[1].accessibilityLabel, "Shop Farm, active server")
     }
 
+    func testItemsDisambiguateDuplicateDisplayNamesWithHost() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        _ = try registry.add(displayName: "Farm", baseURL: URL(string: "https://home.example.com")!)
+        _ = try registry.add(displayName: "Farm", baseURL: URL(string: "https://shop.example.com")!, makeActiveIfNeeded: false)
+        _ = try registry.add(displayName: "Unique Farm", baseURL: URL(string: "https://unique.example.com")!, makeActiveIfNeeded: false)
+
+        let viewModel = ServerSwitcherViewModel(servers: registry.servers, activeServerID: registry.activeServerID)
+        let displayNames = viewModel.items.map(\.displayName)
+
+        XCTAssertNotEqual(displayNames[0], displayNames[1])
+        XCTAssertEqual(displayNames[0], "Farm (home.example.com)")
+        XCTAssertEqual(displayNames[1], "Farm (shop.example.com)")
+        XCTAssertEqual(displayNames[2], "Unique Farm")
+        XCTAssertEqual(viewModel.items[0].accessibilityLabel, "Farm (home.example.com), active server")
+        XCTAssertEqual(viewModel.items[1].accessibilityLabel, "Farm (shop.example.com), switch server")
+    }
+
     func testVisibilityDegradesForZeroOrSingleServer() throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         var viewModel = ServerSwitcherViewModel(servers: registry.servers, activeServerID: registry.activeServerID)
