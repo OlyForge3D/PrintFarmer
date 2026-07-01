@@ -5,11 +5,10 @@ import UserNotifications
 
 struct SettingsView: View {
     @Environment(AuthViewModel.self) private var authViewModel
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ThemeManager.self) private var themeManager
     @AppStorage("nfcTagFormat") private var nfcTagFormat: NFCTagFormat = .openPrintTag
     @State private var showLogoutConfirmation = false
-    @State private var showChangeURL = false
-    @State private var newServerURL = ""
     @State private var logoutTask: Task<Void, Never>?
 
     var body: some View {
@@ -78,14 +77,17 @@ struct SettingsView: View {
                 }
 
                 Section("Server") {
-                    let savedURL = APIClient.savedServerURLString() ?? "Not configured"
-                    LabeledContent("API URL", value: savedURL)
+                    if let activeServer = serverRegistry.activeServer {
+                        LabeledContent("Active", value: activeServer.displayName)
+                        LabeledContent("API URL", value: activeServer.normalizedURLString)
+                    } else {
+                        LabeledContent("API URL", value: "Not configured")
+                    }
 
-                    Button {
-                        newServerURL = APIClient.savedServerURLString() ?? ""
-                        showChangeURL = true
+                    NavigationLink {
+                        ServersView()
                     } label: {
-                        Label("Change Server URL", systemImage: "link")
+                        Label("Manage Servers", systemImage: "server.rack")
                     }
                 }
 
@@ -114,24 +116,6 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("You will need to sign in again to access your print farm.")
-            }
-            .alert("Change Server URL", isPresented: $showChangeURL) {
-                TextField("https://print.example.com", text: $newServerURL)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    #endif
-                Button("Save") {
-                    let trimmed = newServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if let normalized = APIClient.normalizedServerURLString(trimmed) {
-                        UserDefaults.standard.set(normalized, forKey: APIClient.serverURLKey)
-                        logoutTask = Task { await authViewModel.logout() }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Enter the URL of your Printfarmer server. You will need to sign in again.")
             }
             .onDisappear { logoutTask?.cancel() }
         }
