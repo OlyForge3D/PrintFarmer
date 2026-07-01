@@ -60,8 +60,9 @@ actor AuthService: AuthServiceProtocol {
     }
 
     func logout() async {
+        let currentServer = await activeServer()
         try? await apiClient.postVoid("/api/auth/logout")
-        if let server = await activeServer() {
+        if let server = currentServer {
             credentialsStore.clear(serverId: server.id)
         }
         await apiClient.setAccessToken(nil)
@@ -71,7 +72,7 @@ actor AuthService: AuthServiceProtocol {
     /// Returns the current user on success, nil if no valid session.
     func restoreSession() async -> UserDTO? {
         guard let server = await activeServer() else { return nil }
-        credentialsStore.migrateLegacyCredentialsIfNeeded(to: server.id)
+        migrateLegacyCredentialsIfAllowed(to: server)
         guard let credentials = credentialsStore.load(serverId: server.id) else { return nil }
 
         await apiClient.updateBaseURL(server.baseURL)
@@ -82,8 +83,10 @@ actor AuthService: AuthServiceProtocol {
             let user: UserDTO = try await apiClient.get("/api/auth/me")
             return user
         } catch {
-            credentialsStore.clear(serverId: server.id)
-            await apiClient.setAccessToken(nil)
+            if isDefinitiveAuthRejection(error) {
+                credentialsStore.clear(serverId: server.id)
+                await apiClient.setAccessToken(nil)
+            }
             return nil
         }
     }
@@ -95,7 +98,7 @@ actor AuthService: AuthServiceProtocol {
     var isAuthenticated: Bool {
         get async {
             guard let server = await activeServer() else { return false }
-            credentialsStore.migrateLegacyCredentialsIfNeeded(to: server.id)
+            migrateLegacyCredentialsIfAllowed(to: server)
             return credentialsStore.load(serverId: server.id) != nil
         }
     }
@@ -144,6 +147,32 @@ actor AuthService: AuthServiceProtocol {
         await apiClient.setTokenExpiryChecker { [weak self] in
             guard let self else { return true }
             return await self.isTokenExpired()
+        }
+    }
+
+    private func migrateLegacyCredentialsIfAllowed(to server: RegisteredServer) {
+        guard legacyServerURLMatches(server) else { return }
+        credentialsStore.migrateLegacyCredentialsIfNeeded(to: server.id)
+    }
+
+    private func legacyServerURLMatches(_ server: RegisteredServer) -> Bool {
+        guard let legacyURLString = APIClient.savedServerURLString(userDefaults: userDefaultsBox.userDefaults) else {
+            return false
+        }
+        return legacyURLString == server.normalizedURLString
+    }
+
+    private func isDefinitiveAuthRejection(_ error: Error) -> Bool {
+        guard let networkError = error as? NetworkError else { return false }
+        switch networkError {
+        case .unauthorized, .forbidden:
+            return true
+        case .clientError(let statusCode, _):
+            return statusCode == 401 || statusCode == 403
+        case .unexpectedStatus(let statusCode):
+            return statusCode == 401 || statusCode == 403
+        default:
+            return false
         }
     }
 }

@@ -11,6 +11,7 @@ final class ServerCredentialsStore: @unchecked Sendable {
     static let legacyTokenExpiryKey = "pf_token_expiry"
 
     private let keychain: KeychainSwift
+    private let keychainAccess: KeychainSwiftAccessOptions = .accessibleAfterFirstUnlockThisDeviceOnly
     private let lock = NSLock()
 
     init(keychain: KeychainSwift = KeychainSwift()) {
@@ -21,9 +22,13 @@ final class ServerCredentialsStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        keychain.set(credentials.accessToken, forKey: tokenKey(serverId: serverId))
+        keychain.set(credentials.accessToken, forKey: tokenKey(serverId: serverId), withAccess: keychainAccess)
         if let expiresAt = credentials.expiresAt {
-            keychain.set(String(expiresAt.timeIntervalSince1970), forKey: expiryKey(serverId: serverId))
+            keychain.set(
+                String(expiresAt.timeIntervalSince1970),
+                forKey: expiryKey(serverId: serverId),
+                withAccess: keychainAccess
+            )
         } else {
             keychain.delete(expiryKey(serverId: serverId))
         }
@@ -63,9 +68,9 @@ final class ServerCredentialsStore: @unchecked Sendable {
             return false
         }
 
-        keychain.set(legacyToken, forKey: tokenKey(serverId: serverId))
+        keychain.set(legacyToken, forKey: tokenKey(serverId: serverId), withAccess: keychainAccess)
         if let legacyExpiry = keychain.get(Self.legacyTokenExpiryKey) {
-            keychain.set(legacyExpiry, forKey: expiryKey(serverId: serverId))
+            keychain.set(legacyExpiry, forKey: expiryKey(serverId: serverId), withAccess: keychainAccess)
         }
         clearLegacyCredentialsLocked()
         return true
