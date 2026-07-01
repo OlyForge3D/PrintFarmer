@@ -24,7 +24,7 @@ struct RootView: View {
             Group {
                 if authViewModel.isAuthenticated {
                     ContentView()
-                        .task {
+                        .task(id: services.activeServerGeneration) {
                             pendingReadyMonitor.configure(
                                 autoPrintService: services.autoPrintService,
                                 printerService: services.printerService
@@ -61,6 +61,10 @@ struct RootView: View {
                 router.pendingReadyCount = 0
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
+        }
+        .onChange(of: services.activeServerGeneration) {
+            pendingReadyMonitor.stopMonitoring()
+            router.pendingReadyCount = 0
         }
         .onDisappear { disconnectTask?.cancel() }
     }

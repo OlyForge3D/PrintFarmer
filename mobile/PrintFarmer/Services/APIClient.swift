@@ -328,6 +328,33 @@ final class PrivateNetworkSessionDelegate: NSObject, URLSessionDelegate, URLSess
     }
 }
 
+// MARK: - Active Server Generation
+
+final class ActiveServerGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var current: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    @discardableResult
+    func advance() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
+
+    func isCurrent(_ generation: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value == generation
+    }
+}
+
 // MARK: - API Client
 
 actor APIClient {
@@ -337,6 +364,8 @@ actor APIClient {
     private var baseURL: URL
     private var accessToken: String?
     private var tokenExpiryChecker: (@Sendable () async -> Bool)?
+    private let serverGeneration: ActiveServerGeneration?
+    private let generationAtCreation: Int?
 
     /// Shared delegate that trusts self-signed certs on private networks.
     private static let privateNetworkDelegate = PrivateNetworkSessionDelegate()
@@ -432,9 +461,17 @@ actor APIClient {
         return f
     }()
 
-    init(baseURL: URL, session: URLSession? = nil) {
+    init(
+        baseURL: URL,
+        session: URLSession? = nil,
+        serverGeneration: ActiveServerGeneration? = nil,
+        accessToken: String? = nil
+    ) {
         self.baseURL = baseURL
         self.session = session ?? Self.makePrivateNetworkSession()
+        self.accessToken = accessToken
+        self.serverGeneration = serverGeneration
+        self.generationAtCreation = serverGeneration?.current
 
         self.decoder = JSONDecoder()
         // ASP.NET Core can emit fractional seconds; the built-in .iso8601 strategy
@@ -557,6 +594,7 @@ actor APIClient {
     // MARK: - Internal
 
     private func buildRequest(path: String, method: String) throws -> URLRequest {
+        try validateActiveServerGeneration()
         // Pre-flight: reject if token is known to be expired
         // (check is sync-safe — the actual async check happens in execute/executeVoid wrappers)
         guard let url = URL(string: path, relativeTo: baseURL) else {
@@ -576,6 +614,7 @@ actor APIClient {
     private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
         try await checkTokenExpiry()
         let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
         try validateResponse(response, data: data)
         
         // Handle empty response body for Optional types (e.g., 204 No Content, 200 with empty body)
@@ -611,13 +650,22 @@ actor APIClient {
     private func executeVoid(_ request: URLRequest) async throws {
         try await checkTokenExpiry()
         let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
         try validateResponse(response, data: data)
     }
 
     private func checkTokenExpiry() async throws {
+        try validateActiveServerGeneration()
         if let checker = tokenExpiryChecker, await checker() {
             NotificationCenter.default.post(name: .sessionExpired, object: nil)
             throw NetworkError.unauthorized
+        }
+    }
+
+    private func validateActiveServerGeneration() throws {
+        guard let serverGeneration, let generationAtCreation else { return }
+        if !serverGeneration.isCurrent(generationAtCreation) {
+            throw NetworkError.staleServerResponse
         }
     }
 
@@ -694,6 +742,7 @@ enum NetworkError: LocalizedError, Sendable {
     case decodingFailed(Error)
     case transportError(URLError)
     case authFailed(String)
+    case staleServerResponse
 
     var errorDescription: String? {
         switch self {
@@ -734,6 +783,7 @@ enum NetworkError: LocalizedError, Sendable {
             guard !details.isEmpty else { return base }
             return "\(base) [\(details.joined(separator: "] ["))]"
         case .authFailed(let message): return message
+        case .staleServerResponse: return "Ignored response from a previous server selection"
         }
     }
 

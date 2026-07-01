@@ -15,17 +15,20 @@ actor AuthService: AuthServiceProtocol {
     private let credentialsStore: ServerCredentialsStore
     private let userDefaultsBox: AuthServiceUserDefaultsBox
     private let migrateLegacyServerURL: Bool
+    private let serverRegistry: ServerRegistry?
 
     init(
         apiClient: APIClient,
         credentialsStore: ServerCredentialsStore = ServerCredentialsStore(),
         userDefaultsBox: AuthServiceUserDefaultsBox = AuthServiceUserDefaultsBox(.standard),
-        migrateLegacyServerURL: Bool = true
+        migrateLegacyServerURL: Bool = true,
+        serverRegistry: ServerRegistry? = nil
     ) {
         self.apiClient = apiClient
         self.credentialsStore = credentialsStore
         self.userDefaultsBox = userDefaultsBox
         self.migrateLegacyServerURL = migrateLegacyServerURL
+        self.serverRegistry = serverRegistry
     }
 
     /// Authenticate against a Printfarmer server.
@@ -56,6 +59,7 @@ actor AuthService: AuthServiceProtocol {
         )
         await apiClient.setAccessToken(token)
         await registerTokenExpiryChecker()
+        await activate(server)
         return response
     }
 
@@ -110,6 +114,12 @@ actor AuthService: AuthServiceProtocol {
     }
 
     private func activeServer() async -> RegisteredServer? {
+        if let serverRegistry {
+            return await MainActor.run {
+                serverRegistry.activeServer
+            }
+        }
+
         let userDefaultsBox = userDefaultsBox
         let migrateLegacyServerURL = migrateLegacyServerURL
         return await MainActor.run {
@@ -121,6 +131,20 @@ actor AuthService: AuthServiceProtocol {
     }
 
     private func resolveActiveServer(for url: URL, normalizedURLString: String) async throws -> RegisteredServer {
+        if let serverRegistry {
+            return try await MainActor.run {
+                if let matching = serverRegistry.servers.first(where: { $0.normalizedURLString == normalizedURLString }) {
+                    return matching
+                }
+
+                if let active = serverRegistry.activeServer, active.normalizedURLString == normalizedURLString {
+                    return active
+                }
+
+                return try serverRegistry.add(displayName: url.host ?? "PrintFarmer", baseURL: url)
+            }
+        }
+
         let userDefaultsBox = userDefaultsBox
         let migrateLegacyServerURL = migrateLegacyServerURL
         return try await MainActor.run {
@@ -129,7 +153,6 @@ actor AuthService: AuthServiceProtocol {
                 migrateLegacyServerURL: migrateLegacyServerURL
             )
             if let matching = registry.servers.first(where: { $0.normalizedURLString == normalizedURLString }) {
-                try registry.setActive(id: matching.id)
                 return matching
             }
 
@@ -138,8 +161,26 @@ actor AuthService: AuthServiceProtocol {
             }
 
             let server = try registry.add(displayName: url.host ?? "PrintFarmer", baseURL: url)
-            try registry.setActive(id: server.id)
             return server
+        }
+    }
+
+    private func activate(_ server: RegisteredServer) async {
+        if let serverRegistry {
+            await MainActor.run {
+                try? serverRegistry.setActive(id: server.id)
+            }
+            return
+        }
+
+        let userDefaultsBox = userDefaultsBox
+        let migrateLegacyServerURL = migrateLegacyServerURL
+        await MainActor.run {
+            let registry = ServerRegistry(
+                userDefaults: userDefaultsBox.userDefaults,
+                migrateLegacyServerURL: migrateLegacyServerURL
+            )
+            try? registry.setActive(id: server.id)
         }
     }
 

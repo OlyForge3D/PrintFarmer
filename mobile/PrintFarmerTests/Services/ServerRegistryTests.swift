@@ -1,4 +1,5 @@
 import XCTest
+import KeychainSwift
 @testable import PrintFarmer
 
 @MainActor
@@ -203,6 +204,175 @@ final class ServerRegistryTests: XCTestCase {
             try registry.add(displayName: "Duplicate", baseURL: URL(string: "http://print.example.com:80")!)
         ) { error in
             XCTAssertEqual(error as? ServerRegistryError, .duplicateURL("http://print.example.com"))
+        }
+    }
+
+    func testServiceContainerSwitchesWhenActiveServerChanges() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
+        let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(ServerCredentials(accessToken: "token-one", expiresAt: nil), serverId: first.id)
+        credentialsStore.save(ServerCredentials(accessToken: "token-two", expiresAt: nil), serverId: second.id)
+        let signalRRecorder = SignalRRecorder()
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: signalRRecorder
+        )
+
+        try registry.setActive(id: second.id)
+        try await waitForBaseURL(second.baseURL, in: container)
+
+        let currentBaseURL = await container.apiClient?.currentBaseURL()
+        let currentAccessToken = await container.apiClient?.currentAccessToken()
+        XCTAssertEqual(currentBaseURL, second.baseURL)
+        XCTAssertEqual(currentAccessToken, "token-two")
+        XCTAssertTrue(signalRRecorder.services.first?.disconnectCalled ?? false)
+        XCTAssertTrue(signalRRecorder.services.last?.connectCalled ?? false)
+    }
+
+    func testServiceContainerRebuildsPrinterServiceCacheOnSwitch() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
+        let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        let signalRRecorder = SignalRRecorder()
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: signalRRecorder
+        )
+        let printerID = UUID()
+        MockURLProtocol.requestHandler = { request in
+            let supportsMovement = request.url?.host == "two.example.com"
+            let json = Self.capabilitiesJSON(printerID: printerID, supportsMovement: supportsMovement)
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(json.utf8))
+        }
+
+        let firstCapabilities = try await container.printerService.getBackendCapabilities(printerId: printerID)
+        XCTAssertFalse(firstCapabilities.supportsMovement)
+
+        try registry.setActive(id: second.id)
+        try await waitForBaseURL(second.baseURL, in: container)
+        let secondCapabilities = try await container.printerService.getBackendCapabilities(printerId: printerID)
+
+        XCTAssertTrue(secondCapabilities.supportsMovement)
+    }
+
+    func testOldInFlightAPIResponseIsIgnoredAfterSwitch() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
+        let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        let signalRRecorder = SignalRRecorder()
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: signalRRecorder
+        )
+        let oldClient = try XCTUnwrap(container.apiClient)
+        let requestStarted = DispatchSemaphore(value: 0)
+        let allowResponse = DispatchSemaphore(value: 0)
+        MockURLProtocol.requestHandler = { request in
+            requestStarted.signal()
+            _ = allowResponse.wait(timeout: .now() + 5)
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(TestJSON.printerArray.utf8))
+        }
+
+        let requestTask = Task {
+            let _: [Printer] = try await oldClient.get("/api/printers")
+        }
+        let didStartRequest = await waitForSemaphore(requestStarted, timeout: 5)
+        XCTAssertTrue(didStartRequest)
+
+        try registry.setActive(id: second.id)
+        try await waitForBaseURL(second.baseURL, in: container)
+        allowResponse.signal()
+
+        do {
+            try await requestTask.value
+            XCTFail("Expected stale server response to be ignored")
+        } catch let error as NetworkError {
+            guard case .staleServerResponse = error else {
+                XCTFail("Expected staleServerResponse, got \(error)")
+                return
+            }
+        }
+    }
+
+    private func isolatedCredentialsStore() -> ServerCredentialsStore {
+        let keychain = KeychainSwift(keyPrefix: "ServiceContainerSwitchingTests_\(UUID().uuidString)_")
+        keychain.clear()
+        return ServerCredentialsStore(keychain: keychain)
+    }
+
+    private func switchingTestContainer(
+        registry: ServerRegistry,
+        credentialsStore: ServerCredentialsStore,
+        signalRRecorder: SignalRRecorder
+    ) -> ServiceContainer {
+        ServiceContainer(
+            serverRegistry: registry,
+            credentialsStore: credentialsStore,
+            userDefaultsBox: AuthServiceUserDefaultsBox(userDefaults),
+            apiClientFactory: { baseURL, generation, accessToken in
+                APIClient(
+                    baseURL: baseURL,
+                    session: MockURLProtocol.mockSession(),
+                    serverGeneration: generation,
+                    accessToken: accessToken
+                )
+            },
+            signalRServiceFactory: { _, _ in
+                let service = MockSignalRService()
+                signalRRecorder.append(service)
+                return service
+            }
+        )
+    }
+
+    private func waitForSemaphore(_ semaphore: DispatchSemaphore, timeout: TimeInterval) async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: semaphore.wait(timeout: .now() + timeout) == .success)
+            }
+        }
+    }
+
+    private func waitForBaseURL(_ expectedURL: URL, in container: ServiceContainer) async throws {
+        for _ in 0..<40 {
+            if await container.apiClient?.currentBaseURL() == expectedURL {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTFail("Timed out waiting for ServiceContainer to switch to \(expectedURL.absoluteString)")
+    }
+
+    private static func capabilitiesJSON(printerID: UUID, supportsMovement: Bool) -> String {
+        """
+        {
+            "printerId": "\(printerID)",
+            "printerName": "Test",
+            "backend": "Moonraker",
+            "supportsMovement": \(supportsMovement),
+            "supportsTemperatureControl": true
+        }
+        """
+    }
+
+    private final class SignalRRecorder {
+        private(set) var services: [MockSignalRService] = []
+
+        func append(_ service: MockSignalRService) {
+            services.append(service)
         }
     }
 }
