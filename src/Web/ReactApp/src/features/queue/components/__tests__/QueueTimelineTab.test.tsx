@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import QueueTimelineTab from "../QueueTimelineTab";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import QueueTimelineTab, { buildTicks } from "../QueueTimelineTab";
 import type { QueueOverviewDto, QueueStatsDto, TimelineEventDto } from "@/types/api";
 
 const getAnalyticsTimelineMock = vi.fn();
@@ -72,7 +72,18 @@ const queueOverview: QueueOverviewDto[] = [
   },
 ];
 
-function renderTimeline() {
+const TEST_DATE_FROM = new Date("2026-06-24T00:00:00.000Z");
+const TEST_DATE_TO = new Date("2026-06-25T00:00:00.000Z");
+
+interface RenderTimelineOptions {
+  dateFrom?: Date;
+  dateTo?: Date;
+}
+
+function renderTimeline({
+  dateFrom = TEST_DATE_FROM,
+  dateTo = TEST_DATE_TO,
+}: RenderTimelineOptions = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -82,15 +93,55 @@ function renderTimeline() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <QueueTimelineTab stats={stats} />
+      <QueueTimelineTab
+        stats={stats}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+      />
     </QueryClientProvider>
   );
 }
 
+describe("buildTicks", () => {
+  it("emits week-mode major ticks at local midnight across a DST transition", () => {
+    const originalTz = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+
+    try {
+      const start = new Date(2026, 2, 8, 0, 0, 0, 0).getTime();
+      const end = new Date(2026, 2, 15, 0, 0, 0, 0).getTime();
+      const majorTicks = buildTicks(start, end, "week")
+        .filter((tick) => tick.major)
+        .map((tick) => new Date(tick.ms));
+
+      expect(majorTicks).toHaveLength(8);
+      expect(majorTicks.map((tick) => tick.getDate())).toEqual([8, 9, 10, 11, 12, 13, 14, 15]);
+      expect(majorTicks.every((tick) => tick.getHours() === 0 && tick.getMinutes() === 0)).toBe(true);
+    } finally {
+      if (originalTz == null) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTz;
+      }
+    }
+  });
+});
+
 describe("QueueTimelineTab", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-24T12:00:00.000Z"));
+    global.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
     getAnalyticsTimelineMock.mockReset();
     getQueueOverviewMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows loading state while timeline is fetching", () => {
@@ -99,7 +150,7 @@ describe("QueueTimelineTab", () => {
 
     renderTimeline();
 
-    expect(screen.getByText("Loading timeline...")).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading timeline' })).toBeInTheDocument();
   });
 
   it("renders summary cards and timeline lanes", async () => {
@@ -109,19 +160,16 @@ describe("QueueTimelineTab", () => {
     renderTimeline();
 
     expect(await screen.findByText("RocketVase.gcode")).toBeInTheDocument();
-    expect(screen.getByText("Queued Jobs")).toBeInTheDocument();
-    expect(screen.getByText("Currently Printing")).toBeInTheDocument();
-    expect(screen.getByText("Active Printers")).toBeInTheDocument();
-    expect(screen.getByText("Next Estimated Completion")).toBeInTheDocument();
-    expect(screen.getByText("Queue Completion (Continuous)")).toBeInTheDocument();
-    expect(screen.getByText("Queue Completion (Staffed Hours)")).toBeInTheDocument();
-    expect(screen.getByText(/Adjusted for non-working hours/i)).toBeInTheDocument();
+    expect(screen.getByText("Prints Queued")).toBeInTheDocument();
+    expect(screen.getByText("Printing Now")).toBeInTheDocument();
+    expect(screen.getByText("Printers Active")).toBeInTheDocument();
+    expect(screen.getByText("Until All Done")).toBeInTheDocument();
     expect(screen.getByText("6")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("Core One A")).toBeInTheDocument();
     expect(screen.getByText("Core One B")).toBeInTheDocument();
-    expect(screen.getByText("CaseTop.gcode")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /RocketVase.gcode on Core One A/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /CaseTop\.gcode/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /RocketVase\.gcode on Core One A/i })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(getAnalyticsTimelineMock).toHaveBeenCalledTimes(1);
@@ -129,14 +177,37 @@ describe("QueueTimelineTab", () => {
     });
   });
 
+  it("renders recent events and the now marker in a multi-day external range", async () => {
+    getAnalyticsTimelineMock.mockResolvedValue([
+      {
+        jobId: "job-recent",
+        jobName: "RecentWidget.gcode",
+        printerName: "Core One A",
+        state: "Printing",
+        enteredAtUtc: "2026-06-24T11:00:00.000Z",
+        durationSeconds: 3600,
+      },
+    ] satisfies TimelineEventDto[]);
+    getQueueOverviewMock.mockResolvedValue(queueOverview);
+
+    renderTimeline({
+      dateFrom: new Date("2026-06-17T12:00:00.000Z"),
+      dateTo: new Date("2026-06-24T12:00:00.000Z"),
+    });
+
+    expect(await screen.findByRole("img", { name: /RecentWidget\.gcode on Core One A/i })).toBeInTheDocument();
+    expect(screen.getByText("Now")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Week" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("renders empty state when no timeline events exist", async () => {
     getAnalyticsTimelineMock.mockResolvedValue([]);
-    getQueueOverviewMock.mockResolvedValue(queueOverview);
+    getQueueOverviewMock.mockResolvedValue([]);
 
     renderTimeline();
 
-    expect(await screen.findByText("No timeline events")).toBeInTheDocument();
-    expect(screen.getByText("Timeline data will appear after jobs move through queue states.")).toBeInTheDocument();
+    expect(await screen.findByText("No activity in this window")).toBeInTheDocument();
+    expect(screen.getByText("Navigate forward or back, or switch to Week zoom.")).toBeInTheDocument();
   });
 
   it("renders error state when timeline request fails", async () => {
