@@ -8,9 +8,10 @@ namespace Farm.Slicers.OrcaSlicer.v2_4_0;
 /// Provides access to OrcaSlicer v2.4.0 assets (bed models, textures, printer cover images).
 /// Assets are embedded as resources in the library assembly.
 /// </summary>
-public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
+public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry, IDisposable
 {
-    private readonly Dictionary<string, SlicerAsset> _assetsCache = [];
+    private readonly SemaphoreSlim _initializationLock = new(1, 1);
+    private IReadOnlyDictionary<string, SlicerAsset> _assetsCache = new Dictionary<string, SlicerAsset>();
     private bool _initialized = false;
 
     public async Task<SlicerAsset?> GetAssetAsync(
@@ -19,14 +20,15 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
         CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
+        IReadOnlyDictionary<string, SlicerAsset> assetsCache = Volatile.Read(ref _assetsCache);
         var key = $"{manufacturerName}:{modelName}".ToLowerInvariant();
-        return _assetsCache.TryGetValue(key, out var asset) ? asset : null;
+        return assetsCache.TryGetValue(key, out var asset) ? asset : null;
     }
 
     public async Task<IEnumerable<SlicerAsset>> ListAssetsAsync(CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
-        return _assetsCache.Values;
+        return Volatile.Read(ref _assetsCache).Values;
     }
 
     public Stream? GetBedModelStream(string manufacturerName, string modelName)
@@ -51,51 +53,72 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
         return GetEmbeddedResourceStream($"cover-images/{manufacturerName}/{modelName}_cover.png");
     }
 
+    public void Dispose()
+    {
+        _initializationLock.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
 #pragma warning disable S1172 // Unused parameters are allowed in private methods
     private async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
 #pragma warning restore S1172
-        if (_initialized)
+        if (Volatile.Read(ref _initialized))
         {
             return;
         }
 
-        _initialized = true;
-
-        // Load asset manifest from embedded resources
-        var assembly = typeof(OrcaSlicerLibrary_v2_4_0).Assembly;
-        const string manifestResource = "OrcaSlicer_v2_4_0_Assets_manifest.json";
-
-        var manifestStream = assembly.GetManifestResourceStream(manifestResource);
-        if (manifestStream == null)
-        {
-            // No manifest embedded yet - assets can be added later
-            return;
-        }
-
+        await _initializationLock.WaitAsync(ct);
         try
         {
-            using var manifest = await JsonDocument.ParseAsync(manifestStream, cancellationToken: ct);
-            foreach (SlicerAsset asset in ParseManifest(manifest.RootElement))
+            if (Volatile.Read(ref _initialized))
             {
-                var key = $"{asset.ManufacturerName}:{asset.ModelName}".ToLowerInvariant();
-                _assetsCache[key] = asset;
+                return;
             }
+
+            // Load asset manifest from embedded resources
+            var assembly = typeof(OrcaSlicerLibrary_v2_4_0).Assembly;
+            const string manifestResource = "orcaslicer_v2_4_0_assets_manifest.json";
+            var assetsCache = new Dictionary<string, SlicerAsset>();
+
+            using var manifestStream = assembly.GetManifestResourceStream(manifestResource);
+            if (manifestStream is not null)
+            {
+                try
+                {
+                    using var manifest = await JsonDocument.ParseAsync(manifestStream, cancellationToken: ct);
+                    foreach (SlicerAsset asset in ParseManifest(manifest.RootElement))
+                    {
+                        var key = $"{asset.ManufacturerName}:{asset.ModelName}".ToLowerInvariant();
+                        assetsCache[key] = asset;
+                    }
+                }
+                catch (JsonException)
+                {
+                    assetsCache.Clear();
+                }
+                catch (InvalidOperationException)
+                {
+                    assetsCache.Clear();
+                }
+            }
+
+            Volatile.Write(ref _assetsCache, assetsCache);
+            Volatile.Write(ref _initialized, true);
         }
-        catch (JsonException)
+        finally
         {
-            _assetsCache.Clear();
-        }
-        catch (InvalidOperationException)
-        {
-            _assetsCache.Clear();
+            _initializationLock.Release();
         }
     }
 
     private static Stream? GetEmbeddedResourceStream(string resourcePath)
     {
         var assembly = typeof(OrcaSlicerLibrary_v2_4_0).Assembly;
-        var resourceName = $"OrcaSlicer_v2_4_0_Assets_{resourcePath}".Replace('/', '_');
+        var resourceName = $"OrcaSlicer_v2_4_0_Assets_{resourcePath}"
+            .Replace('\\', '.')
+            .Replace('/', '.')
+            .ToLowerInvariant();
 
         return assembly.GetManifestResourceStream(resourceName);
     }

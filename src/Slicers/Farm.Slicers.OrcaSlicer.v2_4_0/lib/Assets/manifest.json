@@ -9,6 +9,12 @@
       "bedTexture": "bed-textures/Prusa/MK4_texture.svg",
       "bedTextureFormat": "svg",
       "coverImage": "cover-images/Prusa/MK4_cover.png"
+    },
+    {
+      "id": "casemaker_casebot",
+      "manufacturerName": "CaseMaker",
+      "modelName": "CaseBot",
+      "bedModel": "bed-models/casemaker/casebot.stl"
     }
   ]
 }

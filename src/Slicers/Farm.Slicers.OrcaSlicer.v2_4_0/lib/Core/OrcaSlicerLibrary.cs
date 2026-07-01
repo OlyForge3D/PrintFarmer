@@ -6,7 +6,7 @@ namespace Farm.Slicers.OrcaSlicer.v2_4_0;
 /// OrcaSlicer v2.4.0 slicer library implementation.
 /// </summary>
 #pragma warning disable S101 // Class name required to match version numbering for plugin discovery
-public class OrcaSlicerLibrary_v2_4_0 : ISlicerLibrary
+public class OrcaSlicerLibrary_v2_4_0 : ISlicerLibrary, IDisposable
 #pragma warning restore S101
 {
     private readonly ISlicerProfilesProvider _profilesProvider;
@@ -36,5 +36,11 @@ public class OrcaSlicerLibrary_v2_4_0 : ISlicerLibrary
     {
         // For now, accept any config. This can be enhanced to validate OrcaSlicer-specific properties.
         return Task.FromResult(new SlicerConfigValidationResult());
+    }
+
+    public void Dispose()
+    {
+        (_assetRegistry as IDisposable)?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

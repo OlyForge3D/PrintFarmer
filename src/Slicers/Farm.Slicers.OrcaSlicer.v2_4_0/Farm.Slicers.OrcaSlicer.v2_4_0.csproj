@@ -21,7 +21,7 @@
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
     <EmbeddedResource Include="lib/Assets/**/*" Exclude="lib/Assets/**/*.cs">
-      <LogicalName>OrcaSlicer_v2_4_0_Assets_$([System.String]::Copy('%(RecursiveDir)').Replace('\', '_').Replace('/', '_'))%(Filename)%(Extension)</LogicalName>
+      <LogicalName>$([System.String]::Copy('OrcaSlicer_v2_4_0_Assets_%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '.').Replace('/', '.').ToLowerInvariant())</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
