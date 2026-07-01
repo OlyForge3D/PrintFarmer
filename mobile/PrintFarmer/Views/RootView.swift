@@ -8,6 +8,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
@@ -50,6 +51,8 @@ struct RootView: View {
                     OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
                 } else if !hasCompletedNetworkPermission {
                     LocalNetworkPermissionView(hasCompletedNetworkPermission: $hasCompletedNetworkPermission)
+                } else if serverRegistry.servers.isEmpty {
+                    AddFirstServerView()
                 } else {
                     LoginView()
                 }

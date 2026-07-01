@@ -2,8 +2,10 @@ import SwiftUI
 
 struct LoginView: View {
     @Environment(AuthViewModel.self) private var authViewModel
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var viewModel = LoginViewModel()
+    @State private var appliedActiveServerID: UUID?
     @State private var loginTask: Task<Void, Never>?
     @FocusState private var focusedField: LoginField?
 
@@ -44,6 +46,12 @@ struct LoginView: View {
         .onTapGesture { focusedField = nil }
         .animation(.easeInOut(duration: 0.2), value: authViewModel.errorMessage)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isServerURLExpanded)
+        .onAppear {
+            applyActiveServerIfNeeded()
+        }
+        .onChange(of: serverRegistry.activeServerID) {
+            applyActiveServerIfNeeded()
+        }
         .onDisappear { loginTask?.cancel() }
     }
 
@@ -196,5 +204,12 @@ struct LoginView: View {
         guard viewModel.isFormValid, !authViewModel.isLoading else { return }
         focusedField = nil
         loginTask = Task { await viewModel.login(using: authViewModel) }
+    }
+
+    private func applyActiveServerIfNeeded() {
+        guard let activeServer = serverRegistry.activeServer,
+              appliedActiveServerID != activeServer.id else { return }
+        viewModel = LoginViewModel(activeServer: activeServer)
+        appliedActiveServerID = activeServer.id
     }
 }
