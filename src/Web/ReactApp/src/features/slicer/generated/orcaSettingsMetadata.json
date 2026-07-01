@@ -2,8 +2,8 @@
   "_meta": {
     "source": "OrcaSlicer PrintConfig.cpp + Tab.cpp",
     "generator": "tools/extract-orca-metadata.py",
-    "totalSettings": 841,
-    "filamentSettings": 97,
+    "totalSettings": 842,
+    "filamentSettings": 98,
     "machineSettings": 115,
     "processSettings": 343
   },
@@ -137,7 +137,11 @@
               },
               {
                 "key": "chamber_temperature",
-                "compound": false
+                "compound": true
+              },
+              {
+                "key": "chamber_minimal_temperature",
+                "compound": true
               }
             ]
           },
@@ -658,6 +662,16 @@
         "min": 0,
         "max": 100,
         "mode": "simple",
+        "default": "0"
+      },
+      "chamber_minimal_temperature": {
+        "key": "chamber_minimal_temperature",
+        "type": "int",
+        "coType": "coInts",
+        "label": "Minimal",
+        "tooltip": "This is the chamber temperature at which printing should start, while the chamber continues heating toward the \"Target\" chamber temperature. For example, set the Target to 60 and the Minimal to 50 to begin printing once the chamber reaches 50°C, without waiting for the full 60°C.\\n\\nIt sets a G-code variable named chamber_minimal_temperature, which can be passed to your print start macro or a heat soak macro, like this: PRINT_START (other variables) CHAMBER_MIN_TEMP=[chamber_minimal_temperature].\\n\\nUnlike the \"Target\" chamber temperature, this option does not emit any M141/M191 commands; it only exposes the value to your custom G-code. It should not exceed the \"Target\" chamber temperature.",
+        "unit": "℃",
+        "min": 0,
         "default": "0"
       },
       "chamber_temperature": {
