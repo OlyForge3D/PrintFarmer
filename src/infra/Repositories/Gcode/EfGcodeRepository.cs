@@ -16,25 +16,21 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
 
     public async Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? printerModelId, CancellationToken ct)
     {
-        // Load all files with includes first (required for SQLite compatibility with string.Contains)
-        List<GcodeFile> allFiles = await _db.GcodeFiles
-            .Include(g => g.SourcePrinter)
-            .Include(g => g.PrinterModel)
-            .Include(g => g.Tags)
-            .ToListAsync(ct);
+        IQueryable<GcodeFile> query = _db.GcodeFiles.AsNoTrackingWithIdentityResolution();
 
-        // Apply client-side filtering for case-insensitive search
-        IEnumerable<GcodeFile> query = allFiles.AsEnumerable();
-
-        if (!string.IsNullOrEmpty(search))
+        if (!string.IsNullOrWhiteSpace(search))
         {
-            string searchLower = search.ToLowerInvariant();
+#pragma warning disable CA1862 // Database providers translate ToLower; StringComparison overloads do not translate consistently.
+            string searchLower = search.Trim().ToLowerInvariant();
+
+            // SQLite lower() is ASCII-only; production providers/collations handle Unicode case folding better.
             query = query.Where(g =>
-                (g.FileName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (g.Description != null && g.Description.Contains(searchLower, StringComparison.OrdinalIgnoreCase)));
+                g.FileName.ToLower().Contains(searchLower) ||
+                (g.Description != null && g.Description.ToLower().Contains(searchLower)));
+#pragma warning restore CA1862
         }
 
-        if (!string.IsNullOrEmpty(material))
+        if (!string.IsNullOrWhiteSpace(material))
         {
             query = query.Where(g => g.RequiredMaterial == material);
         }
@@ -42,7 +38,9 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         if (nozzleDiameter.HasValue)
         {
             double nd = nozzleDiameter.Value;
-            query = query.Where(g => g.RequiredNozzleDiameter != null && Math.Abs(g.RequiredNozzleDiameter.Value - nd) < 0.001);
+            double minNozzleDiameter = nd - 0.001;
+            double maxNozzleDiameter = nd + 0.001;
+            query = query.Where(g => g.RequiredNozzleDiameter > minNozzleDiameter && g.RequiredNozzleDiameter < maxNozzleDiameter);
         }
 
         if (printerModelId.HasValue)
@@ -50,7 +48,13 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             query = query.Where(g => g.PrinterModelId == printerModelId.Value);
         }
 
-        return query.OrderByDescending(g => g.UploadedAt).ToList();
+        return await query
+            .Include(g => g.SourcePrinter)
+            .Include(g => g.PrinterModel)
+            .Include(g => g.Tags)
+            .OrderByDescending(g => g.UploadedAt)
+            .ThenBy(g => g.Id)
+            .ToListAsync(ct);
     }
 
     public Task<GcodeFile?> GetByIdWithIncludesAsync(Guid id, CancellationToken ct)
@@ -172,6 +176,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             ("name", "desc") => filterQuery.OrderByDescending(g => g.FileName),
             _ => filterQuery.OrderBy(g => g.FileName) // Default: name ascending
         };
+        sortedQuery = sortedQuery.ThenBy(g => g.Id);
 
         // Apply pagination
         int skip = (page - 1) * pageSize;
@@ -188,7 +193,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
 
         // Now load the full files WITH includes using the IDs
         Dictionary<Guid, GcodeFile> filesByIdDict = await _db.GcodeFiles
-            .AsNoTracking()
+            .AsNoTrackingWithIdentityResolution()
             .Where(g => fileIds.Contains(g.Id))
             .Include(g => g.Tags) // Use skip-navigation instead of TagMappings
             .Include(g => g.PrinterModel)
