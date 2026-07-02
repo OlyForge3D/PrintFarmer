@@ -16,12 +16,14 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
 
     public async Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? printerModelId, CancellationToken ct)
     {
-        IQueryable<GcodeFile> query = _db.GcodeFiles.AsNoTracking();
+        IQueryable<GcodeFile> query = _db.GcodeFiles.AsNoTrackingWithIdentityResolution();
 
         if (!string.IsNullOrWhiteSpace(search))
         {
 #pragma warning disable CA1862 // Database providers translate ToLower; StringComparison overloads do not translate consistently.
             string searchLower = search.Trim().ToLowerInvariant();
+
+            // SQLite lower() is ASCII-only; production providers/collations handle Unicode case folding better.
             query = query.Where(g =>
                 g.FileName.ToLower().Contains(searchLower) ||
                 (g.Description != null && g.Description.ToLower().Contains(searchLower)));
@@ -38,7 +40,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             double nd = nozzleDiameter.Value;
             double minNozzleDiameter = nd - 0.001;
             double maxNozzleDiameter = nd + 0.001;
-            query = query.Where(g => g.RequiredNozzleDiameter >= minNozzleDiameter && g.RequiredNozzleDiameter <= maxNozzleDiameter);
+            query = query.Where(g => g.RequiredNozzleDiameter > minNozzleDiameter && g.RequiredNozzleDiameter < maxNozzleDiameter);
         }
 
         if (printerModelId.HasValue)
@@ -51,6 +53,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             .Include(g => g.PrinterModel)
             .Include(g => g.Tags)
             .OrderByDescending(g => g.UploadedAt)
+            .ThenBy(g => g.Id)
             .ToListAsync(ct);
     }
 
