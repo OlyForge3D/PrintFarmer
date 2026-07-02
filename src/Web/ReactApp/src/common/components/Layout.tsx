@@ -1017,11 +1017,11 @@ export function Layout() {
             aria-label="Mobile navigation drawer"
             tabIndex={-1}
             className={clsx(
-              'relative flex h-full w-[248px] max-w-[calc(100vw-1rem)] flex-col border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
+              'relative flex h-full min-h-0 w-[248px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
               sidebarOpen ? 'translate-x-0' : '-translate-x-full'
             )}
           >
-            <div className="flex items-center justify-between border-b border-pf-border px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-pf-border px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
                 <div className="min-w-0">
@@ -1039,7 +1039,7 @@ export function Layout() {
               />
             </div>
 
-            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-3 py-3" aria-label="Main navigation">
+            <nav className="min-h-0 flex-1 basis-0 space-y-1 overflow-y-auto overscroll-contain px-3 py-3" aria-label="Main navigation">
               <div className="mb-3 flex items-center gap-2">
                 <Button
                   type="button"
@@ -1062,11 +1062,11 @@ export function Layout() {
 
         <aside
           ref={desktopRailRef}
-          className={clsx('hidden h-full min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
+          className={clsx('hidden h-full max-h-full min-h-0 overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
         >
-          <div className="flex h-full min-h-0 w-full flex-col">
+          <div className="flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden">
             <nav
-              className={clsx('relative flex-1 min-h-0 overflow-y-auto py-4', navbarCollapsed ? 'px-2' : 'px-3')}
+              className={clsx('relative min-h-0 flex-1 basis-0 overflow-y-auto overscroll-contain py-4', navbarCollapsed ? 'px-2' : 'px-3')}
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
@@ -1083,7 +1083,7 @@ export function Layout() {
               )}
             </nav>
 
-            <div className="shrink-0 border-t border-pf-border p-2">
+            <div className="max-h-[40%] shrink-0 overflow-y-auto overscroll-contain border-t border-pf-border p-2">
               {!navbarCollapsed && pendingAttentionCount > 0 && (
                 <div className="mb-2 flex items-center justify-end rounded-lg border border-pf-border bg-pf-bg-2 px-3 py-2">
                   <Button

@@ -153,6 +153,39 @@ describe('Navigation rail sections', () => {
     expect(container.querySelector('aside[aria-label="Main navigation"]')).toBeNull();
   });
 
+  it('bounds desktop and mobile navigation so nav links scroll independently of pinned controls', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const desktopAside = container.querySelector('aside');
+    const desktopShell = desktopAside?.firstElementChild;
+    const desktopFooter = desktopNav.nextElementSibling;
+
+    expect(desktopAside?.className).toContain('max-h-full');
+    expect(desktopAside?.className).toContain('overflow-hidden');
+    expect(desktopShell?.className).toContain('max-h-full');
+    expect(desktopShell?.className).toContain('overflow-hidden');
+    expect(desktopNav.className).toContain('min-h-0');
+    expect(desktopNav.className).toContain('basis-0');
+    expect(desktopNav.className).toContain('overflow-y-auto');
+    expect(desktopNav.className).toContain('overscroll-contain');
+    expect(desktopFooter?.className).toContain('shrink-0');
+    expect(desktopFooter?.className).toContain('max-h-[40%]');
+    expect(desktopFooter?.className).toContain('overflow-y-auto');
+
+    const menuButton = screen.getByRole('button', { name: 'Open navigation menu' });
+    fireEvent.click(menuButton);
+
+    const mobileDrawer = await screen.findByRole('dialog', { name: 'Mobile navigation drawer' });
+    const mobileNav = within(mobileDrawer).getByRole('navigation', { name: 'Main navigation' });
+    expect(mobileDrawer.className).toContain('min-h-0');
+    expect(mobileDrawer.className).toContain('overflow-hidden');
+    expect(mobileDrawer.firstElementChild?.className).toContain('shrink-0');
+    expect(mobileNav.className).toContain('min-h-0');
+    expect(mobileNav.className).toContain('basis-0');
+    expect(mobileNav.className).toContain('overflow-y-auto');
+    expect(mobileNav.className).toContain('overscroll-contain');
+  });
+
   it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
     renderLayout();
 
