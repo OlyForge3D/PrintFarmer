@@ -176,6 +176,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             ("name", "desc") => filterQuery.OrderByDescending(g => g.FileName),
             _ => filterQuery.OrderBy(g => g.FileName) // Default: name ascending
         };
+        sortedQuery = sortedQuery.ThenBy(g => g.Id);
 
         // Apply pagination
         int skip = (page - 1) * pageSize;
@@ -192,7 +193,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
 
         // Now load the full files WITH includes using the IDs
         Dictionary<Guid, GcodeFile> filesByIdDict = await _db.GcodeFiles
-            .AsNoTracking()
+            .AsNoTrackingWithIdentityResolution()
             .Where(g => fileIds.Contains(g.Id))
             .Include(g => g.Tags) // Use skip-navigation instead of TagMappings
             .Include(g => g.PrinterModel)

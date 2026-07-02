@@ -353,6 +353,59 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task QueryAsync_WithSameUploadedAtAcrossPages_OrdersByIdWithoutDuplication()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
+        string uniqueId = Guid.NewGuid().ToString()[..8];
+        DateTime uploadedAt = DateTime.UtcNow;
+        Guid[] expectedIds =
+        [
+            Guid.Parse("00000000-0000-0000-0000-000000000011"),
+            Guid.Parse("00000000-0000-0000-0000-000000000012"),
+            Guid.Parse("00000000-0000-0000-0000-000000000013"),
+            Guid.Parse("00000000-0000-0000-0000-000000000014"),
+            Guid.Parse("00000000-0000-0000-0000-000000000015")
+        ];
+
+        var files = expectedIds
+            .Reverse()
+            .Select((id, index) => new GcodeFile
+            {
+                Id = id,
+                Name = $"Paged Tie {uniqueId} {index}",
+                FileName = $"paged-tie-{uniqueId}-{index}.gcode",
+                FolderId = folder.Id,
+                FilePath = $"/gcodes/paged-tie-{uniqueId}-{index}.gcode",
+                FileSizeBytes = 1024 + index,
+                FileHash = $"paged-tie-hash-{uniqueId}-{index}",
+                UploadedAt = uploadedAt
+            })
+            .ToList();
+        context.GcodeFiles.AddRange(files);
+        await context.SaveChangesAsync();
+
+        var firstPage = await service.QueryAsync(null, "date", "asc", uniqueId, 1, 2, null, null, null, CancellationToken.None);
+        var secondPage = await service.QueryAsync(null, "date", "asc", uniqueId, 2, 2, null, null, null, CancellationToken.None);
+        var thirdPage = await service.QueryAsync(null, "date", "asc", uniqueId, 3, 2, null, null, null, CancellationToken.None);
+
+        Guid[] actualIds = firstPage.Files
+            .Concat(secondPage.Files)
+            .Concat(thirdPage.Files)
+            .Select(file => Guid.Parse(file.Id!))
+            .ToArray();
+
+        firstPage.TotalFiles.Should().Be(expectedIds.Length);
+        secondPage.TotalFiles.Should().Be(expectedIds.Length);
+        thirdPage.TotalFiles.Should().Be(expectedIds.Length);
+        actualIds.Should().Equal(expectedIds);
+        actualIds.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task QueryLibraryAsync_WithMultipleFilters_ReturnsMatchingBoth()
     {
         // Arrange
