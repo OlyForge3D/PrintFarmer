@@ -484,6 +484,14 @@ export function Layout() {
     }, 1_500);
   }, []);
 
+  const toggleNavbarCollapsed = useCallback(() => {
+    setNavbarCollapsed((prev) => {
+      const next = !prev;
+      announceMobileDrawer(next ? 'Navigation collapsed to icons.' : 'Navigation expanded.');
+      return next;
+    });
+  }, [announceMobileDrawer]);
+
   useEffect(() => {
     if (!sidebarOpen && !userMenuOpen) {
       return;
@@ -597,6 +605,7 @@ export function Layout() {
   );
   const hiddenNavigationIds = useMemo(() => new Set(navPreferences.hiddenItemIds), [navPreferences.hiddenItemIds]);
   const pinnedNavigationIds = useMemo(() => new Set(navPreferences.pinnedItemIds), [navPreferences.pinnedItemIds]);
+  const activeToggleHintId = 'desktop-nav-active-toggle-hint';
 
   const reorderNavItem = useCallback((itemId: string, targetIndex: number, focusDirection?: MoveButtonDirection) => {
     const item = customizeNavigationItems.find((candidate) => candidate.id === itemId);
@@ -635,10 +644,14 @@ export function Layout() {
     const activeToggleDescription = isActive && enableActiveToggle
       ? `${item.name} — activate again to ${navbarCollapsed ? 'expand' : 'collapse'} the menu`
       : undefined;
+    const activeToggleHint = isActive && enableActiveToggle
+      ? `Activate again to ${navbarCollapsed ? 'expand' : 'collapse'} the menu.`
+      : undefined;
+    const activeToggleExpanded = isActive && enableActiveToggle ? !navbarCollapsed : undefined;
     const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
       if (isActive && enableActiveToggle) {
         event.preventDefault();
-        setNavbarCollapsed((prev) => !prev);
+        toggleNavbarCollapsed();
         return;
       }
 
@@ -650,7 +663,7 @@ export function Layout() {
       }
 
       event.preventDefault();
-      setNavbarCollapsed((prev) => !prev);
+      toggleNavbarCollapsed();
     };
 
     if (collapsed) {
@@ -660,7 +673,8 @@ export function Layout() {
           to={item.href}
           title={activeToggleDescription ?? item.name}
           aria-label={item.name}
-          aria-description={activeToggleDescription}
+          aria-describedby={activeToggleHint ? activeToggleHintId : undefined}
+          aria-expanded={activeToggleExpanded}
           aria-current={isActive ? 'page' : undefined}
           onClick={handleClick}
           onKeyDown={handleKeyDown}
@@ -683,7 +697,8 @@ export function Layout() {
         key={item.id}
         to={item.href}
         title={activeToggleDescription}
-        aria-description={activeToggleDescription}
+        aria-describedby={activeToggleHint ? activeToggleHintId : undefined}
+        aria-expanded={activeToggleExpanded}
         aria-current={isActive ? 'page' : undefined}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -878,6 +893,9 @@ export function Layout() {
         Skip to main content
       </a>
       <div ref={mobileDrawerAnnouncementRef} className="sr-only" aria-live="polite" aria-atomic="true" />
+      <div id={activeToggleHintId} className="sr-only">
+        Activate again to {navbarCollapsed ? 'expand' : 'collapse'} the menu.
+      </div>
 
       <div className="flex h-full min-h-0 flex-col">
         <header
@@ -1045,13 +1063,11 @@ export function Layout() {
         <aside
           ref={desktopRailRef}
           className={clsx('hidden h-full min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
-          aria-label="Main navigation"
         >
           <div className="flex h-full min-h-0 w-full flex-col">
             <nav
               className={clsx('relative flex-1 min-h-0 overflow-y-auto py-4', navbarCollapsed ? 'px-2' : 'px-3')}
               aria-label="Main navigation"
-              aria-expanded={!navbarCollapsed}
             >
               {navbarCollapsed ? (
                 <>

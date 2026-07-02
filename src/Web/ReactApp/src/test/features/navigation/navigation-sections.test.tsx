@@ -65,7 +65,7 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 
 describe('Navigation rail sections', () => {
   const getDesktopNav = (container: HTMLElement) => {
-    const nav = container.querySelector('aside[aria-label="Main navigation"] nav[aria-label="Main navigation"]');
+    const nav = container.querySelector('aside nav[aria-label="Main navigation"]');
     expect(nav).not.toBeNull();
     return nav as HTMLElement;
   };
@@ -146,10 +146,11 @@ describe('Navigation rail sections', () => {
   });
 
   it('keeps the skip link and main navigation landmark available', () => {
-    renderLayout();
+    const { container } = renderLayout();
 
     expect(screen.getByRole('link', { name: /skip to main content/i })).toHaveAttribute('href', '#main-content');
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.getAllByRole('navigation', { name: 'Main navigation' })).toHaveLength(1);
+    expect(container.querySelector('aside[aria-label="Main navigation"]')).toBeNull();
   });
 
   it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
@@ -246,39 +247,53 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
 
     const overviewLink = within(desktopNav).getByRole('link', { name: 'Overview' });
-    expect(desktopNav).toHaveAttribute('aria-expanded', 'true');
+    const printersLink = within(desktopNav).getByRole('link', { name: 'Printers' });
+    const describedBy = overviewLink.getAttribute('aria-describedby');
+    expect(desktopNav).not.toHaveAttribute('aria-expanded');
+    expect(overviewLink).toHaveAttribute('aria-expanded', 'true');
     expect(overviewLink).toHaveAttribute('aria-current', 'page');
+    expect(overviewLink).toHaveAttribute('aria-describedby', describedBy);
     expect(overviewLink).toHaveAttribute('title', 'Overview — activate again to collapse the menu');
+    expect(printersLink).not.toHaveAttribute('aria-expanded');
+    expect(printersLink).not.toHaveAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)).toHaveTextContent('Activate again to collapse the menu.');
 
     fireEvent.click(overviewLink);
 
     await waitFor(() => {
-      expect(desktopNav).toHaveAttribute('aria-expanded', 'false');
       expect(localStorage.getItem('pf_navbar_collapsed')).toBe('true');
     });
+    expect(screen.getByText('Navigation collapsed to icons.')).toBeInTheDocument();
 
     const collapsedOverviewLink = within(desktopNav).getByRole('link', { name: 'Overview' });
+    expect(desktopNav).not.toHaveAttribute('aria-expanded');
+    expect(collapsedOverviewLink).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById(describedBy!)).toHaveTextContent('Activate again to expand the menu.');
     expect(collapsedOverviewLink).toHaveAttribute('title', 'Overview — activate again to expand the menu');
 
     fireEvent.keyDown(collapsedOverviewLink, { key: ' ' });
 
     await waitFor(() => {
-      expect(desktopNav).toHaveAttribute('aria-expanded', 'true');
       expect(localStorage.getItem('pf_navbar_collapsed')).toBe('false');
     });
+    expect(screen.getByText('Navigation expanded.')).toBeInTheDocument();
+    expect(within(desktopNav).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('does not toggle the desktop rail when clicking a non-active nav link', async () => {
     const { container } = renderLayout(['/dashboard']);
     const desktopNav = getDesktopNav(container);
     const printersLink = within(desktopNav).getByRole('link', { name: 'Printers' });
+    expect(printersLink).not.toHaveAttribute('aria-expanded');
 
     fireEvent.click(printersLink);
 
     await waitFor(() => {
-      expect(desktopNav).toHaveAttribute('aria-expanded', 'true');
+      expect(desktopNav).not.toHaveAttribute('aria-expanded');
       expect(localStorage.getItem('pf_navbar_collapsed')).toBe('false');
       expect(printersLink).toHaveAttribute('aria-current', 'page');
+      expect(printersLink).toHaveAttribute('aria-expanded', 'true');
     });
   });
 });
