@@ -817,12 +817,12 @@ export function Layout() {
                   draggingNavItemId === item.id && 'opacity-60'
                 )}
               >
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-pf-text-primary">{item.name}</span>
-                    <span className="block truncate text-pf-text-muted">{item.sectionName}</span>
+                <div className="flex flex-col gap-2">
+                  <span className="min-w-0 w-full">
+                    <span className="block break-words font-medium leading-snug text-pf-text-primary">{item.name}</span>
+                    <span className="block break-words text-pf-text-muted">{item.sectionName}</span>
                   </span>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex w-full items-center gap-1">
                     <Button
                       type="button"
                       variant="subtle"

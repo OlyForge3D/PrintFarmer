@@ -186,6 +186,28 @@ describe('Navigation rail sections', () => {
     expect(mobileNav.className).toContain('overscroll-contain');
   });
 
+  it('renders full customize-nav item and section labels above the controls', () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const desktopRail = desktopNav.parentElement as HTMLElement;
+
+    fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
+
+    const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
+    const inventoryMoveUp = within(customizePanel).getByRole('button', { name: 'Move Filament Inventory up' });
+    const inventoryRow = inventoryMoveUp.closest('[role="listitem"]');
+    expect(inventoryRow).not.toBeNull();
+
+    expect(within(inventoryRow as HTMLElement).getByText('Filament Inventory')).toBeInTheDocument();
+    expect(within(inventoryRow as HTMLElement).getByText('Printers')).toBeInTheDocument();
+
+    const labelBlock = within(inventoryRow as HTMLElement).getByText('Filament Inventory').parentElement;
+    expect(labelBlock?.className).toContain('w-full');
+    expect(labelBlock?.className).not.toContain('flex-1');
+    expect(within(inventoryRow as HTMLElement).getByText('Filament Inventory').className).not.toContain('truncate');
+    expect(within(inventoryRow as HTMLElement).getByText('Printers').className).not.toContain('truncate');
+  });
+
   it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
     renderLayout();
 
