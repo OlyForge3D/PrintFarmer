@@ -70,11 +70,11 @@ describe('Navigation rail sections', () => {
     return nav as HTMLElement;
   };
 
-  const renderLayout = () => {
+  const renderLayout = (initialEntries = ['/']) => {
     const queryClient = createTestQueryClient();
     return render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={initialEntries}>
           <Layout />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -219,16 +219,66 @@ describe('Navigation rail sections', () => {
     const railNav = screen.getByRole('navigation', { name: 'Main navigation' });
     const filesLink = within(railNav).getByRole('link', { name: 'Files' });
     expect(filesLink).toHaveAttribute('href', '/files');
+    expect(filesLink.className).toContain('h-9');
+    expect(filesLink.className).toContain('w-11');
     expect(within(railNav).getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/projects');
     expect(within(railNav).getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/dashboard');
+    expect(railNav.className).toContain('py-4');
+    expect(container.querySelector('div[aria-label="Files"][role="group"]')?.className).toContain('space-y-0.5');
 
     // The grouped section button + popover dialog behavior is gone.
     expect(screen.queryByRole('button', { name: 'Files' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /expand navigation rail|collapse navigation rail/i })).not.toBeInTheDocument();
 
     // Group dividers are preserved between sections in the collapsed rail.
     await waitFor(() => {
       expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBeGreaterThanOrEqual(1);
+    });
+    container.querySelectorAll('hr[aria-hidden="true"]').forEach((divider) => {
+      expect(divider.className).toContain('mx-3');
+      expect(divider.className).not.toContain('my-2');
+    });
+  });
+
+  it('toggles the desktop rail when activating the active nav link and persists both directions', async () => {
+    const { container } = renderLayout(['/dashboard']);
+    const desktopNav = getDesktopNav(container);
+
+    const overviewLink = within(desktopNav).getByRole('link', { name: 'Overview' });
+    expect(desktopNav).toHaveAttribute('aria-expanded', 'true');
+    expect(overviewLink).toHaveAttribute('aria-current', 'page');
+    expect(overviewLink).toHaveAttribute('title', 'Overview — activate again to collapse the menu');
+
+    fireEvent.click(overviewLink);
+
+    await waitFor(() => {
+      expect(desktopNav).toHaveAttribute('aria-expanded', 'false');
+      expect(localStorage.getItem('pf_navbar_collapsed')).toBe('true');
+    });
+
+    const collapsedOverviewLink = within(desktopNav).getByRole('link', { name: 'Overview' });
+    expect(collapsedOverviewLink).toHaveAttribute('title', 'Overview — activate again to expand the menu');
+
+    fireEvent.keyDown(collapsedOverviewLink, { key: ' ' });
+
+    await waitFor(() => {
+      expect(desktopNav).toHaveAttribute('aria-expanded', 'true');
+      expect(localStorage.getItem('pf_navbar_collapsed')).toBe('false');
+    });
+  });
+
+  it('does not toggle the desktop rail when clicking a non-active nav link', async () => {
+    const { container } = renderLayout(['/dashboard']);
+    const desktopNav = getDesktopNav(container);
+    const printersLink = within(desktopNav).getByRole('link', { name: 'Printers' });
+
+    fireEvent.click(printersLink);
+
+    await waitFor(() => {
+      expect(desktopNav).toHaveAttribute('aria-expanded', 'true');
+      expect(localStorage.getItem('pf_navbar_collapsed')).toBe('false');
+      expect(printersLink).toHaveAttribute('aria-current', 'page');
     });
   });
 });

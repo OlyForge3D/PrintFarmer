@@ -12,8 +12,6 @@ import {
   SettingsIcon,
   DashboardIcon,
   MenuIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   CloseIcon,
   GearIcon,
   ArrowUpIcon,
@@ -631,21 +629,43 @@ export function Layout() {
     pendingCustomizeMoveFocusRef.current = null;
   }, [customizeNavigationItems]);
 
-  const renderNavigationLink = (item: SectionedNavigationItem, collapsed = false, onNavigate?: () => void) => {
+  const renderNavigationLink = (item: SectionedNavigationItem, collapsed = false, onNavigate?: () => void, enableActiveToggle = false) => {
     const ItemIcon = item.icon;
     const isActive = isNavItemActive(item);
+    const activeToggleDescription = isActive && enableActiveToggle
+      ? `${item.name} — activate again to ${navbarCollapsed ? 'expand' : 'collapse'} the menu`
+      : undefined;
+    const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (isActive && enableActiveToggle) {
+        event.preventDefault();
+        setNavbarCollapsed((prev) => !prev);
+        return;
+      }
+
+      onNavigate?.();
+    };
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLAnchorElement>) => {
+      if (!isActive || !enableActiveToggle || event.key !== ' ') {
+        return;
+      }
+
+      event.preventDefault();
+      setNavbarCollapsed((prev) => !prev);
+    };
 
     if (collapsed) {
       return (
         <NavLink
           key={item.id}
           to={item.href}
-          title={item.name}
+          title={activeToggleDescription ?? item.name}
           aria-label={item.name}
+          aria-description={activeToggleDescription}
           aria-current={isActive ? 'page' : undefined}
-          onClick={onNavigate}
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
           className={clsx(
-            'flex h-11 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+            'flex h-9 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
             isActive
               ? 'bg-pf-accent-bg/18 text-pf-accent'
               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
@@ -662,8 +682,11 @@ export function Layout() {
       <NavLink
         key={item.id}
         to={item.href}
+        title={activeToggleDescription}
+        aria-description={activeToggleDescription}
         aria-current={isActive ? 'page' : undefined}
-        onClick={onNavigate}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
         className={clsx(
           'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
           isActive
@@ -679,21 +702,21 @@ export function Layout() {
     );
   };
 
-  const renderNavigationGroups = (groups: NavigationGroup[], collapsed = false, onNavigate?: () => void) => (
-    <div className={collapsed ? 'space-y-1' : 'space-y-1'}>
+  const renderNavigationGroups = (groups: NavigationGroup[], collapsed = false, onNavigate?: () => void, enableActiveToggle = false) => (
+    <div className="space-y-1">
       {groups.map((group, groupIndex) => (
         <Fragment key={`${group.header.name}-${groupIndex}`}>
           {groupIndex > 0 && (
-            <hr className={clsx('border-pf-border', collapsed ? 'mx-2 my-2' : 'mx-3')} aria-hidden="true" />
+            <hr className="mx-3 border-pf-border" aria-hidden="true" />
           )}
           {collapsed ? (
-            <div className="flex flex-col items-center space-y-1" aria-label={group.header.name} role="group">
-              {group.items.map((item) => renderNavigationLink(item, true, onNavigate))}
+            <div className="flex flex-col items-center space-y-0.5" aria-label={group.header.name} role="group">
+              {group.items.map((item) => renderNavigationLink(item, true, onNavigate, enableActiveToggle))}
             </div>
           ) : (
             <section aria-label={group.header.name} className="space-y-0.5">
               <div className="space-y-0.5">
-                {group.items.map((item) => renderNavigationLink(item, false, onNavigate))}
+                {group.items.map((item) => renderNavigationLink(item, false, onNavigate, enableActiveToggle))}
               </div>
             </section>
           )}
@@ -702,7 +725,7 @@ export function Layout() {
     </div>
   );
 
-  const renderHiddenNavigation = (collapsed = false, onNavigate?: () => void) => {
+  const renderHiddenNavigation = (collapsed = false, onNavigate?: () => void, enableActiveToggle = false) => {
     if (hiddenNavigationItems.length === 0) {
       return null;
     }
@@ -724,8 +747,8 @@ export function Layout() {
           {!collapsed && `${showHiddenNavigation ? 'Hide' : 'Show'} hidden (${hiddenNavigationItems.length})`}
         </Button>
         {showHiddenNavigation && (
-          <div className={collapsed ? 'flex flex-col items-center space-y-1' : 'space-y-0.5'} aria-label="Hidden navigation items" role="group">
-            {hiddenNavigationItems.map((item) => renderNavigationLink(item, collapsed, onNavigate))}
+          <div className={collapsed ? 'flex flex-col items-center space-y-0.5' : 'space-y-0.5'} aria-label="Hidden navigation items" role="group">
+            {hiddenNavigationItems.map((item) => renderNavigationLink(item, collapsed, onNavigate, enableActiveToggle))}
           </div>
         )}
       </div>
@@ -1026,19 +1049,20 @@ export function Layout() {
         >
           <div className="flex h-full min-h-0 w-full flex-col">
             <nav
-              className={clsx('relative flex-1 min-h-0 overflow-y-auto', navbarCollapsed ? 'px-2 py-2' : 'px-3 py-4')}
+              className={clsx('relative flex-1 min-h-0 overflow-y-auto py-4', navbarCollapsed ? 'px-2' : 'px-3')}
               aria-label="Main navigation"
+              aria-expanded={!navbarCollapsed}
             >
               {navbarCollapsed ? (
                 <>
-                  {renderNavigationGroups(allNavigationGroups, true)}
-                  {renderHiddenNavigation(true)}
+                  {renderNavigationGroups(allNavigationGroups, true, undefined, true)}
+                  {renderHiddenNavigation(true, undefined, true)}
                 </>
               ) : (
                 <>
                   {renderCustomizeNavigationPanel()}
-                  {renderNavigationGroups(allNavigationGroups)}
-                  {renderHiddenNavigation()}
+                  {renderNavigationGroups(allNavigationGroups, false, undefined, true)}
+                  {renderHiddenNavigation(false, undefined, true)}
                 </>
               )}
             </nav>
@@ -1103,18 +1127,6 @@ export function Layout() {
                 >
                   {!navbarCollapsed && (customizeNavigation ? 'Done customizing' : 'Customize')}
                 </Button>
-                <Button
-                  type="button"
-                  aria-label={navbarCollapsed ? 'Expand navigation rail' : 'Collapse navigation rail'}
-                  title={navbarCollapsed ? 'Expand navigation rail' : 'Collapse navigation rail'}
-                  variant="subtle"
-                  size="sm"
-                  className="w-full justify-center"
-                  onClick={() => {
-                    setNavbarCollapsed((prev) => !prev);
-                  }}
-                  iconCenter={navbarCollapsed ? <ChevronRightIcon className="h-5 w-5" /> : <ChevronLeftIcon className="h-5 w-5" />}
-                />
               </div>
             </div>
           </div>
