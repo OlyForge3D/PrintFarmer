@@ -790,6 +790,9 @@ public class MaintenanceController(
                     TotalJobsFailed = 0,
                     TotalFilamentUsedGrams = 0,
                     TotalFilamentUsedMeters = 0,
+
+                    // This non-persisted snapshot represents an existing printer with no accrued statistics yet.
+                    // MinValue dates serialize as "0001-01-01T00:00:00"; the frontend treats min/epoch dates as never-synced and renders an em dash.
                     LastSyncTime = default,
                     CreatedAt = default,
                     UpdatedAt = default

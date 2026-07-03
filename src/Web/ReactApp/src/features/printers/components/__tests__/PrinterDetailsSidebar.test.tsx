@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type Printer } from '@/types/api';
@@ -167,7 +167,10 @@ describe('PrinterDetailsSidebar', () => {
 
     fireEvent.click(screen.getByText('Statistics'));
 
-    expect(screen.getByText('Last sync')).toBeInTheDocument();
-    expect(screen.getByText('—')).toBeInTheDocument();
+    const lastSyncTerm = screen.getByText('Last sync');
+    const lastSyncRow = lastSyncTerm.closest('div');
+
+    expect(lastSyncRow).not.toBeNull();
+    expect(within(lastSyncRow!).getByText('—')).toBeInTheDocument();
   });
 });
