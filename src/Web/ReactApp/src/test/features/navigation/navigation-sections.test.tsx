@@ -91,8 +91,8 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('section[aria-label]')).toHaveLength(8);
-      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(7);
+      expect(desktopNav.querySelectorAll('section[aria-label]')).toHaveLength(7);
+      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(1);
     });
     expect(screen.queryByText('Dashboard', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
     expect(screen.queryByText('Admin', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
@@ -103,6 +103,20 @@ describe('Navigation rail sections', () => {
     expect(desktopNav.querySelector('a[href="/projects"]')).not.toBeNull();
     expect(desktopNav.querySelector('a[href="/admin/settings"]')).not.toBeNull();
     expect(desktopNav.querySelector('a[href="/admin/manage"]')).not.toBeNull();
+  });
+
+  it('renders exactly one divider immediately before the anchored Admin group', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(1);
+    });
+
+    const divider = desktopNav.querySelector('hr[aria-hidden="true"]');
+    expect(divider?.nextElementSibling).toHaveAttribute('aria-label', 'Admin');
+    expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
+    expect(within(desktopNav).getByRole('link', { name: 'Admin Console' })).toHaveAttribute('href', '/admin/manage');
   });
 
   it('renders each default desktop nav link once', async () => {
@@ -139,10 +153,12 @@ describe('Navigation rail sections', () => {
   it('hides the admin section for authenticated non-admin users', () => {
     mockUserRole = 'operator';
     const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
 
     expect(container.querySelector('a[href="/admin/settings"]')).toBeNull();
     expect(container.querySelector('a[href="/admin/manage"]')).toBeNull();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+    expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(0);
   });
 
   it('keeps the skip link and main navigation landmark available', () => {
@@ -206,6 +222,24 @@ describe('Navigation rail sections', () => {
     expect(labelBlock?.className).not.toContain('flex-1');
     expect(within(inventoryRow as HTMLElement).getByText('Filament Inventory').className).not.toContain('truncate');
     expect(within(inventoryRow as HTMLElement).getByText('Printers').className).not.toContain('truncate');
+  });
+
+  it('excludes anchored Admin links from customize controls while keeping them in the rail', () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const desktopRail = desktopNav.parentElement as HTMLElement;
+
+    expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
+    expect(within(desktopNav).getByRole('link', { name: 'System Settings' })).toHaveAttribute('href', '/admin/settings');
+    expect(within(desktopNav).getByRole('link', { name: 'Admin Console' })).toHaveAttribute('href', '/admin/manage');
+
+    fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
+
+    const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
+    expect(within(customizePanel).queryByText('Maintenance')).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByText('Admin Console')).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByRole('button', { name: 'Move Maintenance up' })).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByRole('button', { name: 'Move Admin Console down' })).not.toBeInTheDocument();
   });
 
   it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
@@ -287,11 +321,11 @@ describe('Navigation rail sections', () => {
     expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /expand navigation rail|collapse navigation rail/i })).not.toBeInTheDocument();
 
-    // Group dividers are preserved between sections in the collapsed rail.
+    // The only group divider is the boundary before the anchored Admin section.
     await waitFor(() => {
-      expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBeGreaterThanOrEqual(1);
+      expect(railNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(1);
     });
-    container.querySelectorAll('hr[aria-hidden="true"]').forEach((divider) => {
+    railNav.querySelectorAll('hr[aria-hidden="true"]').forEach((divider) => {
       expect(divider.className).toContain('mx-3');
       expect(divider.className).not.toContain('my-2');
     });
