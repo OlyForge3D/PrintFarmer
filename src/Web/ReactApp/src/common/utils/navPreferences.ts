@@ -7,6 +7,7 @@ export interface NavPreferenceItem {
   id: string;
   name: string;
   sectionName: string;
+  anchored?: boolean;
 }
 
 export interface NavPreferences {
@@ -95,6 +96,24 @@ const uniqueKnownIds = (ids: readonly string[], knownIds: ReadonlySet<string>) =
   });
 };
 
+const getAnchoredIds = (items: readonly NavPreferenceItem[]) => new Set(items.filter((item) => item.anchored).map((item) => item.id));
+
+const enforceAnchoredNavPreferences = (preferences: NavPreferences, items: readonly NavPreferenceItem[]): NavPreferences => {
+  const itemIds = items.map((item) => item.id);
+  const knownIds = new Set(itemIds);
+  const anchoredIds = getAnchoredIds(items);
+  const nonAnchoredIds = uniqueKnownIds(preferences.orderedItemIds, knownIds).filter((id) => !anchoredIds.has(id));
+  const missingNonAnchoredIds = itemIds.filter((id) => !anchoredIds.has(id) && !nonAnchoredIds.includes(id));
+  const canonicalAnchoredIds = itemIds.filter((id) => anchoredIds.has(id));
+
+  return {
+    ...preferences,
+    orderedItemIds: [...nonAnchoredIds, ...missingNonAnchoredIds, ...canonicalAnchoredIds],
+    hiddenItemIds: uniqueKnownIds(preferences.hiddenItemIds, knownIds).filter((id) => !anchoredIds.has(id)),
+    pinnedItemIds: uniqueKnownIds(preferences.pinnedItemIds, knownIds).filter((id) => !anchoredIds.has(id)),
+  };
+};
+
 export function getNavPreferencesStorageKey(userId?: string | null) {
   return `${NAV_PREFERENCES_STORAGE_KEY}:${userId ?? 'anonymous'}`;
 }
@@ -104,12 +123,12 @@ export function createDefaultNavPreferences(items: readonly NavPreferenceItem[],
   const knownIds = new Set(itemIds);
   const roleOrder = uniqueKnownIds(DEFAULT_ORDER_BY_ROLE[role], knownIds);
 
-  return {
+  return enforceAnchoredNavPreferences({
     version: NAV_PREFERENCES_VERSION,
     orderedItemIds: [...roleOrder, ...itemIds.filter((id) => !roleOrder.includes(id))],
     hiddenItemIds: [],
     pinnedItemIds: [],
-  };
+  }, items);
 }
 
 export function normalizeNavPreferences(
@@ -121,7 +140,7 @@ export function normalizeNavPreferences(
   const knownIds = new Set(items.map((item) => item.id));
   const orderedItemIds = uniqueKnownIds(preferences?.orderedItemIds ?? defaults.orderedItemIds, knownIds);
 
-  return {
+  return enforceAnchoredNavPreferences({
     version: NAV_PREFERENCES_VERSION,
     orderedItemIds: [
       ...orderedItemIds,
@@ -129,7 +148,7 @@ export function normalizeNavPreferences(
     ],
     hiddenItemIds: uniqueKnownIds(preferences?.hiddenItemIds ?? [], knownIds),
     pinnedItemIds: uniqueKnownIds(preferences?.pinnedItemIds ?? [], knownIds),
-  };
+  }, items);
 }
 
 export function resolveNavPreferences(
@@ -201,20 +220,33 @@ export function groupNavItemsByResolvedOrder<T extends NavPreferenceItem>(items:
   return groups;
 }
 
-export function moveNavItem(preferences: NavPreferences, itemId: string, targetIndex: number): NavPreferences {
+export function moveNavItem(
+  preferences: NavPreferences,
+  itemId: string,
+  targetIndex: number,
+  items?: readonly NavPreferenceItem[]
+): NavPreferences {
+  const anchoredIds = items ? getAnchoredIds(items) : new Set<string>();
+  if (anchoredIds.has(itemId)) {
+    return preferences;
+  }
+
   const currentIndex = preferences.orderedItemIds.indexOf(itemId);
   if (currentIndex < 0) {
     return preferences;
   }
 
   const nextOrder = preferences.orderedItemIds.filter((id) => id !== itemId);
-  const safeTargetIndex = Math.max(0, Math.min(targetIndex, nextOrder.length));
+  const lastAllowedIndex = items ? nextOrder.filter((id) => !anchoredIds.has(id)).length : nextOrder.length;
+  const safeTargetIndex = Math.max(0, Math.min(targetIndex, lastAllowedIndex));
   nextOrder.splice(safeTargetIndex, 0, itemId);
 
-  return {
+  const nextPreferences = {
     ...preferences,
     orderedItemIds: nextOrder,
   };
+
+  return items ? enforceAnchoredNavPreferences(nextPreferences, items) : nextPreferences;
 }
 
 export function setNavItemHidden(preferences: NavPreferences, itemId: string, hidden: boolean): NavPreferences {

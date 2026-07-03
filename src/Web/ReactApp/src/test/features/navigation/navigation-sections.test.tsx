@@ -91,8 +91,8 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('section[aria-label]')).toHaveLength(8);
-      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(7);
+      expect(desktopNav.querySelectorAll('section[aria-label]')).toHaveLength(7);
+      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(1);
     });
     expect(screen.queryByText('Dashboard', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
     expect(screen.queryByText('Admin', { selector: 'span.text-xs.font-semibold.uppercase.tracking-wider' })).not.toBeInTheDocument();
@@ -103,6 +103,20 @@ describe('Navigation rail sections', () => {
     expect(desktopNav.querySelector('a[href="/projects"]')).not.toBeNull();
     expect(desktopNav.querySelector('a[href="/admin/settings"]')).not.toBeNull();
     expect(desktopNav.querySelector('a[href="/admin/manage"]')).not.toBeNull();
+  });
+
+  it('renders exactly one divider immediately before the anchored Admin group', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(1);
+    });
+
+    const divider = desktopNav.querySelector('hr[aria-hidden="true"]');
+    expect(divider?.nextElementSibling).toHaveAttribute('aria-label', 'Admin');
+    expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
+    expect(within(desktopNav).getByRole('link', { name: 'Admin Console' })).toHaveAttribute('href', '/admin/manage');
   });
 
   it('renders each default desktop nav link once', async () => {
@@ -139,10 +153,12 @@ describe('Navigation rail sections', () => {
   it('hides the admin section for authenticated non-admin users', () => {
     mockUserRole = 'operator';
     const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
 
     expect(container.querySelector('a[href="/admin/settings"]')).toBeNull();
     expect(container.querySelector('a[href="/admin/manage"]')).toBeNull();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+    expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(0);
   });
 
   it('keeps the skip link and main navigation landmark available', () => {
@@ -151,6 +167,79 @@ describe('Navigation rail sections', () => {
     expect(screen.getByRole('link', { name: /skip to main content/i })).toHaveAttribute('href', '#main-content');
     expect(screen.getAllByRole('navigation', { name: 'Main navigation' })).toHaveLength(1);
     expect(container.querySelector('aside[aria-label="Main navigation"]')).toBeNull();
+  });
+
+  it('bounds desktop and mobile navigation so nav links scroll independently of pinned controls', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const desktopAside = container.querySelector('aside');
+    const desktopShell = desktopAside?.firstElementChild;
+    const desktopFooter = desktopNav.nextElementSibling;
+
+    expect(desktopAside?.className).toContain('max-h-full');
+    expect(desktopAside?.className).toContain('overflow-hidden');
+    expect(desktopShell?.className).toContain('max-h-full');
+    expect(desktopShell?.className).toContain('overflow-hidden');
+    expect(desktopNav.className).toContain('min-h-0');
+    expect(desktopNav.className).toContain('basis-0');
+    expect(desktopNav.className).toContain('overflow-y-auto');
+    expect(desktopNav.className).toContain('overscroll-contain');
+    expect(desktopFooter?.className).toContain('shrink-0');
+    expect(desktopFooter?.className).toContain('max-h-[40%]');
+    expect(desktopFooter?.className).toContain('overflow-y-auto');
+
+    const menuButton = screen.getByRole('button', { name: 'Open navigation menu' });
+    fireEvent.click(menuButton);
+
+    const mobileDrawer = await screen.findByRole('dialog', { name: 'Mobile navigation drawer' });
+    const mobileNav = within(mobileDrawer).getByRole('navigation', { name: 'Main navigation' });
+    expect(mobileDrawer.className).toContain('min-h-0');
+    expect(mobileDrawer.className).toContain('overflow-hidden');
+    expect(mobileDrawer.firstElementChild?.className).toContain('shrink-0');
+    expect(mobileNav.className).toContain('min-h-0');
+    expect(mobileNav.className).toContain('basis-0');
+    expect(mobileNav.className).toContain('overflow-y-auto');
+    expect(mobileNav.className).toContain('overscroll-contain');
+  });
+
+  it('renders full customize-nav item and section labels above the controls', () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const desktopRail = desktopNav.parentElement as HTMLElement;
+
+    fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
+
+    const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
+    const inventoryMoveUp = within(customizePanel).getByRole('button', { name: 'Move Filament Inventory up' });
+    const inventoryRow = inventoryMoveUp.closest('[role="listitem"]');
+    expect(inventoryRow).not.toBeNull();
+
+    expect(within(inventoryRow as HTMLElement).getByText('Filament Inventory')).toBeInTheDocument();
+    expect(within(inventoryRow as HTMLElement).getByText('Printers')).toBeInTheDocument();
+
+    const labelBlock = within(inventoryRow as HTMLElement).getByText('Filament Inventory').parentElement;
+    expect(labelBlock?.className).toContain('w-full');
+    expect(labelBlock?.className).not.toContain('flex-1');
+    expect(within(inventoryRow as HTMLElement).getByText('Filament Inventory').className).not.toContain('truncate');
+    expect(within(inventoryRow as HTMLElement).getByText('Printers').className).not.toContain('truncate');
+  });
+
+  it('excludes anchored Admin links from customize controls while keeping them in the rail', () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const desktopRail = desktopNav.parentElement as HTMLElement;
+
+    expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
+    expect(within(desktopNav).getByRole('link', { name: 'System Settings' })).toHaveAttribute('href', '/admin/settings');
+    expect(within(desktopNav).getByRole('link', { name: 'Admin Console' })).toHaveAttribute('href', '/admin/manage');
+
+    fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
+
+    const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
+    expect(within(customizePanel).queryByText('Maintenance')).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByText('Admin Console')).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByRole('button', { name: 'Move Maintenance up' })).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByRole('button', { name: 'Move Admin Console down' })).not.toBeInTheDocument();
   });
 
   it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
@@ -232,11 +321,11 @@ describe('Navigation rail sections', () => {
     expect(screen.queryByRole('dialog', { name: 'Files navigation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /expand navigation rail|collapse navigation rail/i })).not.toBeInTheDocument();
 
-    // Group dividers are preserved between sections in the collapsed rail.
+    // The only group divider is the boundary before the anchored Admin section.
     await waitFor(() => {
-      expect(container.querySelectorAll('hr[aria-hidden="true"]').length).toBeGreaterThanOrEqual(1);
+      expect(railNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(1);
     });
-    container.querySelectorAll('hr[aria-hidden="true"]').forEach((divider) => {
+    railNav.querySelectorAll('hr[aria-hidden="true"]').forEach((divider) => {
       expect(divider.className).toContain('mx-3');
       expect(divider.className).not.toContain('my-2');
     });

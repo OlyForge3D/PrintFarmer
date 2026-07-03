@@ -75,6 +75,7 @@ interface NavigationItem {
   /** Hide when platform-level model file support is disabled (ARM / Raspberry Pi) */
   requiresModelFiles?: boolean;
   matches?: (pathname: string) => boolean;
+  anchored?: true;
   isDivider?: false;
   isSectionHeader?: false;
 }
@@ -179,6 +180,7 @@ const navigation: NavigationElement[] = [
     href: '/maintenance',
     icon: WrenchIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
   },
   {
@@ -187,6 +189,7 @@ const navigation: NavigationElement[] = [
     href: '/locations/dashboard',
     icon: LocationIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname.startsWith('/locations')
   },
   {
@@ -195,6 +198,7 @@ const navigation: NavigationElement[] = [
     href: '/analytics',
     icon: TrendingUpIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
   },
   {
@@ -203,6 +207,7 @@ const navigation: NavigationElement[] = [
     href: '/auto-dispatch',
     icon: PlayIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname.startsWith('/auto-dispatch')
   },
   {
@@ -211,6 +216,7 @@ const navigation: NavigationElement[] = [
     href: '/catalog',
     icon: LayersIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname.startsWith('/catalog')
   },
   {
@@ -219,6 +225,7 @@ const navigation: NavigationElement[] = [
     href: '/admin/settings',
     icon: GearIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname.startsWith('/admin/settings')
   },
   {
@@ -227,6 +234,7 @@ const navigation: NavigationElement[] = [
     href: '/admin/manage',
     icon: DashboardIcon,
     requiredRole: 'farm_admin',
+    anchored: true,
     matches: (pathname) => pathname.startsWith('/admin/manage') || pathname.startsWith('/admin/system') || pathname.startsWith('/slice-jobs')
   },
 ];
@@ -295,7 +303,12 @@ function toPreferenceItem(item: SectionedNavigationItem): NavPreferenceItem {
     id: item.id,
     name: item.name,
     sectionName: item.sectionName,
+    anchored: item.anchored,
   };
+}
+
+function isAnchoredNavigationGroup(group: NavigationGroup) {
+  return group.items.some((item) => item.anchored);
 }
 
 function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup[] {
@@ -600,7 +613,8 @@ export function Layout() {
   const customizeNavigationItems = useMemo(
     () => resolvedNavPreferences.orderedItems
       .map((item) => navigationItemById.get(item.id))
-      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+      .filter((item): item is SectionedNavigationItem => Boolean(item))
+      .filter((item) => !item.anchored),
     [navigationItemById, resolvedNavPreferences.orderedItems]
   );
   const hiddenNavigationIds = useMemo(() => new Set(navPreferences.hiddenItemIds), [navPreferences.hiddenItemIds]);
@@ -614,11 +628,11 @@ export function Layout() {
       pendingCustomizeMoveFocusRef.current = { itemId, direction: focusDirection };
     }
 
-    updateNavPreferences((preferences) => moveNavItem(preferences, itemId, targetIndex));
+    updateNavPreferences((preferences) => moveNavItem(preferences, itemId, targetIndex, navPreferenceItems));
     if (item) {
       announceMobileDrawer(`Moved ${item.name} to position ${targetPosition} of ${customizeNavigationItems.length}.`);
     }
-  }, [announceMobileDrawer, customizeNavigationItems, updateNavPreferences]);
+  }, [announceMobileDrawer, customizeNavigationItems, navPreferenceItems, updateNavPreferences]);
 
   useEffect(() => {
     const pendingFocus = pendingCustomizeMoveFocusRef.current;
@@ -721,7 +735,7 @@ export function Layout() {
     <div className="space-y-1">
       {groups.map((group, groupIndex) => (
         <Fragment key={`${group.header.name}-${groupIndex}`}>
-          {groupIndex > 0 && (
+          {groupIndex > 0 && isAnchoredNavigationGroup(group) && (
             <hr className="mx-3 border-pf-border" aria-hidden="true" />
           )}
           {collapsed ? (
@@ -817,12 +831,12 @@ export function Layout() {
                   draggingNavItemId === item.id && 'opacity-60'
                 )}
               >
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-pf-text-primary">{item.name}</span>
-                    <span className="block truncate text-pf-text-muted">{item.sectionName}</span>
+                <div className="flex flex-col gap-2">
+                  <span className="min-w-0 w-full">
+                    <span className="block break-words font-medium leading-snug text-pf-text-primary">{item.name}</span>
+                    <span className="block break-words text-pf-text-muted">{item.sectionName}</span>
                   </span>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex w-full items-center gap-1">
                     <Button
                       type="button"
                       variant="subtle"
@@ -1017,11 +1031,11 @@ export function Layout() {
             aria-label="Mobile navigation drawer"
             tabIndex={-1}
             className={clsx(
-              'relative flex h-full w-[248px] max-w-[calc(100vw-1rem)] flex-col border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
+              'relative flex h-full min-h-0 w-[248px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
               sidebarOpen ? 'translate-x-0' : '-translate-x-full'
             )}
           >
-            <div className="flex items-center justify-between border-b border-pf-border px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-pf-border px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
                 <div className="min-w-0">
@@ -1039,7 +1053,7 @@ export function Layout() {
               />
             </div>
 
-            <nav className="flex-1 min-h-0 space-y-1 overflow-y-auto px-3 py-3" aria-label="Main navigation">
+            <nav className="min-h-0 flex-1 basis-0 space-y-1 overflow-y-auto overscroll-contain px-3 py-3" aria-label="Main navigation">
               <div className="mb-3 flex items-center gap-2">
                 <Button
                   type="button"
@@ -1062,11 +1076,11 @@ export function Layout() {
 
         <aside
           ref={desktopRailRef}
-          className={clsx('hidden h-full min-h-0 border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
+          className={clsx('hidden h-full max-h-full min-h-0 overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
         >
-          <div className="flex h-full min-h-0 w-full flex-col">
+          <div className="flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden">
             <nav
-              className={clsx('relative flex-1 min-h-0 overflow-y-auto py-4', navbarCollapsed ? 'px-2' : 'px-3')}
+              className={clsx('relative min-h-0 flex-1 basis-0 overflow-y-auto overscroll-contain py-4', navbarCollapsed ? 'px-2' : 'px-3')}
               aria-label="Main navigation"
             >
               {navbarCollapsed ? (
@@ -1083,7 +1097,7 @@ export function Layout() {
               )}
             </nav>
 
-            <div className="shrink-0 border-t border-pf-border p-2">
+            <div className="max-h-[40%] shrink-0 overflow-y-auto overscroll-contain border-t border-pf-border p-2">
               {!navbarCollapsed && pendingAttentionCount > 0 && (
                 <div className="mb-2 flex items-center justify-end rounded-lg border border-pf-border bg-pf-bg-2 px-3 py-2">
                   <Button

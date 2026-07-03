@@ -6,6 +6,7 @@ import {
   groupNavItemsByResolvedOrder,
   loadNavPreferences,
   moveNavItem,
+  NAV_PREFERENCES_VERSION,
   resolveNavPreferences,
   saveNavPreferences,
   setNavItemHidden,
@@ -20,7 +21,9 @@ const items: NavPreferenceItem[] = [
   { id: 'filament-inventory', name: 'Filament Inventory', sectionName: 'Printers' },
   { id: 'files', name: 'Files', sectionName: 'Files' },
   { id: 'scheduling', name: 'Scheduling', sectionName: 'Files' },
-  { id: 'auto-dispatch', name: 'Auto-Dispatch', sectionName: 'Admin' },
+  { id: 'maintenance', name: 'Maintenance', sectionName: 'Admin', anchored: true },
+  { id: 'locations', name: 'Locations', sectionName: 'Admin', anchored: true },
+  { id: 'auto-dispatch', name: 'Auto-Dispatch', sectionName: 'Admin', anchored: true },
 ];
 
 describe('navPreferences', () => {
@@ -33,7 +36,8 @@ describe('navPreferences', () => {
     const admin = createDefaultNavPreferences(items, 'admin');
     const operator = createDefaultNavPreferences(items, 'operator');
 
-    expect(admin.orderedItemIds.slice(0, 4)).toEqual(['overview', 'printers', 'print-queue', 'auto-dispatch']);
+    expect(admin.orderedItemIds.slice(0, 4)).toEqual(['overview', 'printers', 'print-queue', 'scheduling']);
+    expect(admin.orderedItemIds.slice(-3)).toEqual(['maintenance', 'locations', 'auto-dispatch']);
     expect(operator.orderedItemIds.slice(0, 4)).toEqual(['overview', 'print-queue', 'printers', 'scheduling']);
   });
 
@@ -93,6 +97,8 @@ describe('navPreferences', () => {
       'scheduling',
       'files',
       'filament-inventory',
+      'maintenance',
+      'locations',
       'auto-dispatch',
     ]);
   });
@@ -112,11 +118,46 @@ describe('navPreferences', () => {
       { sectionName: 'Dashboard', itemIds: ['print-queue'] },
       { sectionName: 'Files', itemIds: ['scheduling', 'files'] },
       { sectionName: 'Printers', itemIds: ['filament-inventory'] },
-      { sectionName: 'Admin', itemIds: ['auto-dispatch'] },
+      { sectionName: 'Admin', itemIds: ['maintenance', 'locations', 'auto-dispatch'] },
     ]);
     expect(groups.flatMap((group) => group.items.map((item) => item.id))).toEqual(
       resolved.regularItems.map((item) => item.id)
     );
+  });
+
+  it('anchors locked items at the end in canonical order and strips hidden or pinned stored state', () => {
+    const resolved = resolveNavPreferences(items, 'admin', {
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: ['auto-dispatch', 'files', 'maintenance', 'overview', 'locations'],
+      hiddenItemIds: ['maintenance', 'files', 'auto-dispatch'],
+      pinnedItemIds: ['locations', 'printers', 'auto-dispatch'],
+    });
+
+    expect(resolved.preferences.orderedItemIds.slice(-3)).toEqual(['maintenance', 'locations', 'auto-dispatch']);
+    expect(resolved.preferences.hiddenItemIds).toEqual(['files']);
+    expect(resolved.preferences.pinnedItemIds).toEqual(['printers']);
+    expect(resolved.hiddenItems.map((item) => item.id)).toEqual(['files']);
+    expect(resolved.favoriteItems.map((item) => item.id)).toEqual(['printers']);
+    expect(resolved.visibleItems.map((item) => item.id)).toEqual([
+      'overview',
+      'printers',
+      'print-queue',
+      'scheduling',
+      'filament-inventory',
+      'maintenance',
+      'locations',
+      'auto-dispatch',
+    ]);
+  });
+
+  it('does not move anchored items or allow regular items below the anchored block', () => {
+    const defaults = createDefaultNavPreferences(items, 'admin');
+    const anchoredMove = moveNavItem(defaults, 'locations', 0, items);
+    const regularMove = moveNavItem(defaults, 'overview', defaults.orderedItemIds.length, items);
+
+    expect(anchoredMove).toEqual(defaults);
+    expect(regularMove.orderedItemIds.slice(-4)).toEqual(['overview', 'maintenance', 'locations', 'auto-dispatch']);
+    expect(regularMove.orderedItemIds.at(-3)).toBe('maintenance');
   });
 
   it('keeps focus on the pressed move button when it remains enabled', () => {
