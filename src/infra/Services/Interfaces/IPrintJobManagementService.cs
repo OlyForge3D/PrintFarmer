@@ -329,4 +329,15 @@ public interface IPrintJobManagementService
     Task SeedHistoryFromPrintersAsync(
         List<string>? printerIds = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sync active external jobs (non-terminal states) from printer history APIs.
+    /// Uses the same dedupe and history-to-existing-job linking behavior as history seeding,
+    /// but focuses on ingesting and refreshing externally-started active jobs on a faster cadence.
+    /// </summary>
+    /// <param name="printerIds">Optional list of printer identifiers to sync from. If null, syncs from all enabled printers.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task SyncActiveExternalJobsFromPrintersAsync(
+        List<string>? printerIds = null,
+        CancellationToken cancellationToken = default);
 }

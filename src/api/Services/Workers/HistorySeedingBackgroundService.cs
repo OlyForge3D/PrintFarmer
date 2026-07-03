@@ -39,6 +39,27 @@ public class HistorySeedingSettings : IAppSetting
     [JsonPropertyName("initialDelaySeconds")]
     [SettingDisplay(Name = "Initial Delay (Seconds)", Description = "Delay before the first seeding run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 3)]
     public int InitialDelaySeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Whether active external job sync is enabled. Default: true
+    /// </summary>
+    [JsonPropertyName("activeSyncEnabled")]
+    [SettingDisplay(Name = "Active Sync Enabled", Description = "Enable faster sync for active external jobs.", InputType = SettingInputType.Boolean, Order = 4)]
+    public bool ActiveSyncEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Interval between active external sync runs in seconds. Default: 60
+    /// </summary>
+    [JsonPropertyName("activeSyncIntervalSeconds")]
+    [SettingDisplay(Name = "Active Sync Interval (Seconds)", Description = "Time between active external job sync runs.", InputType = SettingInputType.Number, MinValue = 15, MaxValue = 3600, Order = 5)]
+    public int ActiveSyncIntervalSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Initial delay before first active sync run in seconds. Default: 30
+    /// </summary>
+    [JsonPropertyName("activeSyncInitialDelaySeconds")]
+    [SettingDisplay(Name = "Active Sync Initial Delay (Seconds)", Description = "Delay before the first active external sync run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 6)]
+    public int ActiveSyncInitialDelaySeconds { get; set; } = 30;
 }
 
 /// <summary>
@@ -56,6 +77,7 @@ public class HistorySeedingBackgroundService(
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "HistorySeedingService";
+    private static readonly TimeSpan DisabledSettingsPollInterval = TimeSpan.FromSeconds(5);
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
@@ -79,15 +101,16 @@ public class HistorySeedingBackgroundService(
         {
             _logger.LogInformation("[HistorySeedingService] Disabled via configuration");
             _serviceMonitor.ReportEnabled(ServiceId, false);
-            return;
         }
+        else
+        {
+            _serviceMonitor.ReportEnabled(ServiceId, true);
+            _logger.LogInformation(
+                "History seeding service started. Interval: {SettingsIntervalMinutes}m, Initial delay: {SettingsInitialDelaySeconds}s (fetches all available history)", settings.IntervalMinutes, settings.InitialDelaySeconds);
 
-        _serviceMonitor.ReportEnabled(ServiceId, true);
-        _logger.LogInformation(
-            "History seeding service started. Interval: {SettingsIntervalMinutes}m, Initial delay: {SettingsInitialDelaySeconds}s (fetches all available history)", settings.IntervalMinutes, settings.InitialDelaySeconds);
-
-        // Initial delay to let the system stabilize
-        await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);
+            // Initial delay to let the system stabilize on enabled startup.
+            await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -98,7 +121,7 @@ public class HistorySeedingBackgroundService(
                 {
                     _logger.LogInformation("History seeding disabled, pausing service");
                     _serviceMonitor.ReportEnabled(ServiceId, false);
-                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); // Check again in 1 minute
+                    await Task.Delay(DisabledSettingsPollInterval, stoppingToken);
                     continue;
                 }
 
@@ -144,5 +167,105 @@ public class HistorySeedingBackgroundService(
             cancellationToken: cancellationToken);
 
         _logger.LogDebug("[HistorySeedingService] History seeding run completed");
+    }
+}
+
+/// <summary>
+/// Background service that periodically syncs active non-terminal external jobs from connected printers.
+/// This runs on a shorter cadence than history seeding to discover externally-started active work sooner.
+/// </summary>
+public class ActiveExternalJobSyncBackgroundService(
+    IServiceProvider serviceProvider,
+    ILogger<HistorySeedingSettings> logger,
+    IOptionsMonitor<HistorySeedingSettings> settingsMonitor,
+    IBackgroundServiceMonitor serviceMonitor) : BackgroundService
+{
+    private const string ServiceId = "ActiveExternalJobSyncService";
+    private static readonly TimeSpan DisabledSettingsPollInterval = TimeSpan.FromSeconds(5);
+    private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
+    private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        HistorySeedingSettings settings = _settingsMonitor.CurrentValue;
+
+        _serviceMonitor.Register(
+            ServiceId,
+            "Active External Job Sync",
+            "Syncs active external jobs from connected printers",
+            "Job Queue",
+            "pf-icon-history",
+            settings.ActiveSyncIntervalSeconds);
+        _serviceMonitor.ReportStarted(ServiceId);
+
+        if (!settings.ActiveSyncEnabled)
+        {
+            _logger.LogInformation("[ActiveExternalJobSyncService] Disabled via configuration");
+            _serviceMonitor.ReportEnabled(ServiceId, false);
+        }
+        else
+        {
+            _serviceMonitor.ReportEnabled(ServiceId, true);
+            _logger.LogInformation(
+                "Active external job sync service started. Interval: {SettingsActiveSyncIntervalSeconds}s, Initial delay: {SettingsActiveSyncInitialDelaySeconds}s", settings.ActiveSyncIntervalSeconds, settings.ActiveSyncInitialDelaySeconds);
+
+            await Task.Delay(TimeSpan.FromSeconds(settings.ActiveSyncInitialDelaySeconds), stoppingToken);
+        }
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                settings = _settingsMonitor.CurrentValue;
+                if (!settings.ActiveSyncEnabled)
+                {
+                    _logger.LogInformation("Active external job sync disabled, pausing service");
+                    _serviceMonitor.ReportEnabled(ServiceId, false);
+                    await Task.Delay(DisabledSettingsPollInterval, stoppingToken);
+                    continue;
+                }
+
+                _serviceMonitor.ReportEnabled(ServiceId, true);
+                await SyncActiveExternalJobsAsync(stoppingToken);
+                _serviceMonitor.ReportSuccess(ServiceId, settings.ActiveSyncIntervalSeconds);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[ActiveExternalJobSyncService] Error during active external job sync");
+                _serviceMonitor.ReportError(ServiceId, ex.Message);
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(settings.ActiveSyncIntervalSeconds), stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        _serviceMonitor.ReportStopped(ServiceId);
+        _logger.LogInformation("[ActiveExternalJobSyncService] Stopped");
+    }
+
+    private async Task SyncActiveExternalJobsAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("[ActiveExternalJobSyncService] Starting active external job sync run");
+
+        using IServiceScope scope = _serviceProvider.CreateScope();
+        IPrintJobManagementService jobService = scope.ServiceProvider.GetRequiredService<IPrintJobManagementService>();
+
+        await jobService.SyncActiveExternalJobsFromPrintersAsync(
+            printerIds: null,
+            cancellationToken: cancellationToken);
+
+        _logger.LogDebug("[ActiveExternalJobSyncService] Active external job sync run completed");
     }
 }

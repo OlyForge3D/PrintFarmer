@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
@@ -17,6 +18,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -67,6 +69,103 @@ public class PrintJobManagementService(
     private const int RecommendationMinScoredJobs = 25;
     private const int RecommendationMaxScoredJobs = 150;
     private static readonly TimeSpan RecommendationCacheDuration = TimeSpan.FromSeconds(45);
+
+    private sealed record HistorySyncOptions(
+        bool ActiveOnly,
+        bool AllowInitialBackfill,
+        bool UseSharedHistoryWatermark,
+        bool PersistHistoryWatermark,
+        bool UpdateKnownJobsOnIncremental,
+        string LogPrefix,
+        int InitialFetchLimit,
+        int IncrementalFetchLimit);
+
+    private static readonly HistorySyncOptions HistorySeedingOptions = new(
+        ActiveOnly: false,
+        AllowInitialBackfill: true,
+        UseSharedHistoryWatermark: true,
+        PersistHistoryWatermark: true,
+        UpdateKnownJobsOnIncremental: false,
+        LogPrefix: "HistorySeed",
+        InitialFetchLimit: 10000,
+        IncrementalFetchLimit: 1000);
+
+    private static readonly HistorySyncOptions ActiveExternalSyncOptions = new(
+        ActiveOnly: true,
+        AllowInitialBackfill: false,
+        UseSharedHistoryWatermark: false,
+        PersistHistoryWatermark: false,
+        UpdateKnownJobsOnIncremental: true,
+        LogPrefix: "ActiveExternalSync",
+        InitialFetchLimit: 1000,
+        IncrementalFetchLimit: 1000);
+
+    private static readonly ConcurrentDictionary<Guid, PrinterSyncLockState> PrinterHistorySyncLocks = new();
+    private static readonly TimeSpan PrinterHistorySyncLockIdleTtl = TimeSpan.FromMinutes(15);
+    private static int _historySyncReleaseCounter;
+
+    private sealed class PrinterSyncLockState
+    {
+        private int _referenceCount;
+        private int _retired;
+        private long _lastUsedUtcTicks = DateTime.UtcNow.Ticks;
+
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public static PrinterSyncLockState CreateWithReference()
+        {
+            var state = new PrinterSyncLockState();
+            state._referenceCount = 1;
+            return state;
+        }
+
+        public bool TryAddReference()
+        {
+            while (true)
+            {
+                if (Volatile.Read(ref _retired) == 1)
+                {
+                    return false;
+                }
+
+                int current = Volatile.Read(ref _referenceCount);
+                if (Interlocked.CompareExchange(ref _referenceCount, current + 1, current) == current)
+                {
+                    return true;
+                }
+            }
+        }
+
+        public int ReleaseReferenceAndMarkUsed()
+        {
+            Volatile.Write(ref _lastUsedUtcTicks, DateTime.UtcNow.Ticks);
+            return Interlocked.Decrement(ref _referenceCount);
+        }
+
+        public int ReferenceCount => Volatile.Read(ref _referenceCount);
+
+        public bool IsIdleFor(TimeSpan threshold, DateTime utcNow)
+        {
+            long idleTicks = utcNow.Ticks - Volatile.Read(ref _lastUsedUtcTicks);
+            return idleTicks >= threshold.Ticks;
+        }
+
+        public bool TryRetireIfUnused()
+        {
+            if (Interlocked.CompareExchange(ref _retired, 1, 0) != 0)
+            {
+                return false;
+            }
+
+            if (Volatile.Read(ref _referenceCount) == 0)
+            {
+                return true;
+            }
+
+            Volatile.Write(ref _retired, 0);
+            return false;
+        }
+    }
 
     // ============= QUERY OPERATIONS =============
 
@@ -1318,6 +1417,33 @@ public class PrintJobManagementService(
     {
         _logger.LogInformation("[HistorySeed] Starting history seeding (fetching all available history)");
 
+        await SyncHistoryFromPrintersInternalAsync(
+            options: HistorySeedingOptions,
+            printerIds: printerIds,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Sync active external jobs from printer history APIs.
+    /// Focuses on non-terminal jobs to quickly discover/update externally-started active work.
+    /// </summary>
+    public async Task SyncActiveExternalJobsFromPrintersAsync(
+        List<string>? printerIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("[ActiveExternalSync] Starting active external job sync (non-terminal focus)");
+
+        await SyncHistoryFromPrintersInternalAsync(
+            options: ActiveExternalSyncOptions,
+            printerIds: printerIds,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task SyncHistoryFromPrintersInternalAsync(
+        HistorySyncOptions options,
+        List<string>? printerIds,
+        CancellationToken cancellationToken)
+    {
         int totalAdded = 0;
         int totalUpdated = 0;
         int totalSkipped = 0;
@@ -1337,7 +1463,7 @@ public class PrintJobManagementService(
                 printers = printers.Where(p => filterIds.Contains(p.Id)).ToList();
             }
 
-            _logger.LogInformation("[HistorySeed] Processing {PrinterCount} printer(s)", printers.Count);
+            _logger.LogInformation("[{LogPrefix}] Processing {PrinterCount} printer(s)", options.LogPrefix, printers.Count);
 
             foreach (Printer printer in printers)
             {
@@ -1349,7 +1475,9 @@ public class PrintJobManagementService(
                 try
                 {
                     (int added, int updated, int skipped) = await SeedHistoryFromSinglePrinterAsync(
-                        printer, cancellationToken);
+                        printer,
+                        options,
+                        cancellationToken);
 
                     totalAdded += added;
                     totalUpdated += updated;
@@ -1357,23 +1485,27 @@ public class PrintJobManagementService(
                     printersProcessed++;
 
                     _logger.LogInformation(
-                        "[HistorySeed] Printer {PrinterName} ({PrinterId}): Added={Added}, Updated={Updated}, Skipped={Skipped}",
-                        printer.Name, printer.Id, added, updated, skipped);
+                        "[{LogPrefix}] Printer {PrinterName} ({PrinterId}): Added={Added}, Updated={Updated}, Skipped={Skipped}",
+                        options.LogPrefix, printer.Name, printer.Id, added, updated, skipped);
+                }
+                catch (DbUpdateException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[HistorySeed] Failed to seed history from printer {PrinterName} ({PrinterId})",
-                        printer.Name, printer.Id);
+                    _logger.LogWarning(ex, "[{LogPrefix}] Failed to sync history from printer {PrinterName} ({PrinterId})",
+                        options.LogPrefix, printer.Name, printer.Id);
                 }
             }
 
             _logger.LogInformation(
-                "[HistorySeed] Completed: Printers={PrintersProcessed}, Added={TotalAdded}, Updated={TotalUpdated}, Skipped={TotalSkipped}",
-                printersProcessed, totalAdded, totalUpdated, totalSkipped);
+                "[{LogPrefix}] Completed: Printers={PrintersProcessed}, Added={TotalAdded}, Updated={TotalUpdated}, Skipped={TotalSkipped}",
+                options.LogPrefix, printersProcessed, totalAdded, totalUpdated, totalSkipped);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[HistorySeed] Error seeding queue history");
+            _logger.LogError(ex, "[{LogPrefix}] Error syncing queue history", options.LogPrefix);
             throw;
         }
     }
@@ -1387,193 +1519,279 @@ public class PrintJobManagementService(
     /// </summary>
     private async Task<(int Added, int Updated, int Skipped)> SeedHistoryFromSinglePrinterAsync(
         Printer printer,
+        HistorySyncOptions options,
         CancellationToken cancellationToken)
     {
-        int added = 0;
-        int updated = 0;
-        int skipped = 0;
+        PrinterSyncLockState lockState = AcquirePrinterHistorySyncLock(printer.Id);
+        bool lockAcquired = false;
 
-        bool isInitialSeed = !printer.ServiceState?.LastHistorySeedUtc.HasValue ?? true;
-        DateTime? seedSinceUtc = printer.ServiceState?.LastHistorySeedUtc;
-        DateTime latestJobTimestamp = printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue;
-
-        // Get history from printer via PrintersService
-        // Pass 'since' for incremental seeding - Moonraker will filter server-side,
-        // OctoPrint will return all and we filter client-side below.
-        HistoryListResponse history = await _printersService.GetHistoryListAsync(
-            printer.Id,
-            limit: isInitialSeed ? 10000 : 1000, // Full fetch on initial, smaller on incremental
-            start: 0,
-            since: seedSinceUtc, // Pass last seed time for incremental fetching
-            before: null,
-            order: null,
-            cancellationToken);
-
-        if (history.Jobs.Length == 0)
+        try
         {
-            _logger.LogDebug("[HistorySeed] No history jobs from printer {PrinterName}", printer.Name);
-            return (0, 0, 0);
-        }
+            await lockState.Semaphore.WaitAsync(cancellationToken);
+            lockAcquired = true;
 
-        _logger.LogDebug(
-            "[HistorySeed] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial})",
-            history.Jobs.Length, printer.Name, isInitialSeed);
+            int added = 0;
+            int updated = 0;
+            int skipped = 0;
+            bool saveSucceeded = true;
 
-        // Get all existing seeded jobs for this printer to check for duplicates
-        HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
-            printer.Id, cancellationToken);
+            bool hasWatermark = options.UseSharedHistoryWatermark;
+            bool isInitialSeed = hasWatermark && options.AllowInitialBackfill && (!printer.ServiceState?.LastHistorySeedUtc.HasValue ?? true);
+            DateTime? seedSinceUtc = hasWatermark ? printer.ServiceState?.LastHistorySeedUtc : null;
+            DateTime latestJobTimestamp = hasWatermark
+                ? printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue
+                : DateTime.MinValue;
 
-        foreach (HistoryJob historyJob in history.Jobs)
-        {
-            if (cancellationToken.IsCancellationRequested)
+            // Get history from printer via PrintersService.
+            // Active sync intentionally does not participate in shared history watermark reads/writes.
+            HistoryListResponse history = await _printersService.GetHistoryListAsync(
+                printer.Id,
+                limit: isInitialSeed ? options.InitialFetchLimit : options.IncrementalFetchLimit,
+                start: 0,
+                since: seedSinceUtc,
+                before: null,
+                order: null,
+                cancellationToken);
+
+            if (history.Jobs.Length == 0)
             {
-                break;
+                _logger.LogDebug("[{LogPrefix}] No history jobs from printer {PrinterName}", options.LogPrefix, printer.Name);
+                return (0, 0, 0);
             }
 
-            // Skip jobs without a valid external ID
-            if (string.IsNullOrWhiteSpace(historyJob.JobId))
-            {
-                skipped++;
-                continue;
-            }
+            _logger.LogDebug(
+                "[{LogPrefix}] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial}, usesWatermark={UsesWatermark})",
+                options.LogPrefix, history.Jobs.Length, printer.Name, isInitialSeed, hasWatermark);
 
-            DateTime startTimeUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
-            DateTime? endTimeUtc = historyJob.EndTime.HasValue
-                ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
-                : null;
+            // Get all existing seeded jobs for this printer to check for duplicates
+            HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
+                printer.Id, cancellationToken);
 
-            // History seeding is intended for completed history/analytics. Skip non-terminal entries
-            // (e.g., in-progress/queued) to avoid creating duplicate active queue rows.
-            string statusNormalized = historyJob.Status?.ToLowerInvariant() ?? string.Empty;
-            bool isTerminalStatus = statusNormalized is "completed" or "cancelled" or "error";
-            if (!isTerminalStatus)
+            foreach (HistoryJob historyJob in history.Jobs)
             {
-                skipped++;
-                continue;
-            }
-
-            // On incremental seed, skip jobs older than or equal to last seed timestamp.
-            // This client-side filtering is needed for OctoPrint (which doesn't support server-side filtering).
-            // Moonraker already filters server-side via the 'since' parameter, but this acts as a safety net.
-            if (!isInitialSeed && seedSinceUtc.HasValue && startTimeUtc <= seedSinceUtc.Value)
-            {
-                skipped++;
-                continue;
-            }
-
-            // Track the latest job timestamp for updating LastHistorySeedUtc
-            if (startTimeUtc > latestJobTimestamp)
-            {
-                latestJobTimestamp = startTimeUtc;
-            }
-
-            try
-            {
-                if (existingExternalJobIds.Contains(historyJob.JobId))
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    // Job exists. First, try to clean up a previously-created duplicate (print initiated via PrintFarmer)
-                    // by linking the PrintFarmer job to the history external ID and removing the seeded duplicate.
-                    PrintJob? matchingExisting = await _repository.FindExistingJobForHistoryMatchAsync(
-                        printer.Id,
-                        historyJob.Filename,
-                        startTimeUtc,
-                        endTimeUtc,
-                        cancellationToken);
+                    break;
+                }
 
-                    PrintJob? seededJob = null;
-                    if (matchingExisting != null)
+                // Skip jobs without a valid external ID
+                if (string.IsNullOrWhiteSpace(historyJob.JobId))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                DateTime startTimeUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+                DateTime? endTimeUtc = historyJob.EndTime.HasValue
+                    ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
+                    : null;
+
+                PrintJobStatus mappedStatus = MapHistoryStatusToPrintJobStatus(historyJob.Status);
+
+                if (options.ActiveOnly && IsTerminalStatus(mappedStatus))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                // Ingest both terminal and non-terminal jobs so externally-started jobs can be tracked.
+                // Duplicate protection still relies on external-id dedupe and history-to-existing-job linking.
+
+                // On incremental seed, skip jobs older than or equal to last seed timestamp.
+                // This client-side filtering is needed for OctoPrint (which doesn't support server-side filtering).
+                // Moonraker already filters server-side via the 'since' parameter, but this acts as a safety net.
+                if (hasWatermark && !isInitialSeed && seedSinceUtc.HasValue && startTimeUtc <= seedSinceUtc.Value)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                // Track the latest job timestamp for updating LastHistorySeedUtc
+                if (hasWatermark && startTimeUtc > latestJobTimestamp)
+                {
+                    latestJobTimestamp = startTimeUtc;
+                }
+
+                try
+                {
+                    if (existingExternalJobIds.Contains(historyJob.JobId))
                     {
-                        seededJob = await _repository.GetByExternalIdAsync(
-                            printer.Id, historyJob.JobId, cancellationToken);
+                        // Job exists. First, try to clean up a previously-created duplicate (print initiated via PrintFarmer)
+                        // by linking the PrintFarmer job to the history external ID and removing the seeded duplicate.
+                        PrintJob? matchingExisting = await _repository.FindExistingJobForHistoryMatchAsync(
+                            printer.Id,
+                            historyJob.Filename,
+                            startTimeUtc,
+                            endTimeUtc,
+                            cancellationToken);
 
-                        if (seededJob != null && seededJob.Id != matchingExisting.Id)
+                        PrintJob? seededJob = null;
+                        if (matchingExisting != null)
+                        {
+                            seededJob = await _repository.GetByExternalIdAsync(
+                                printer.Id, historyJob.JobId, cancellationToken);
+
+                            if (seededJob != null && seededJob.Id != matchingExisting.Id)
+                            {
+                                matchingExisting.ExternalJobId = historyJob.JobId;
+                                matchingExisting.SourcePrinterId = printer.Id;
+                                UpdatePrintJobFromHistory(matchingExisting, historyJob);
+                                matchingExisting.UpdatedAt = DateTime.UtcNow;
+                                _repository.Remove(seededJob);
+                                updated++;
+                                continue;
+                            }
+                        }
+
+                        // Otherwise, update the seeded job only on initial seed (for completeness).
+                        if (isInitialSeed)
+                        {
+                            seededJob ??= await _repository.GetByExternalIdAsync(
+                                printer.Id, historyJob.JobId, cancellationToken);
+
+                            if (seededJob != null)
+                            {
+                                UpdatePrintJobFromHistory(seededJob, historyJob);
+                                seededJob.UpdatedAt = DateTime.UtcNow;
+                                updated++;
+                            }
+                        }
+                        else if (options.UpdateKnownJobsOnIncremental)
+                        {
+                            seededJob ??= await _repository.GetByExternalIdAsync(
+                                printer.Id, historyJob.JobId, cancellationToken);
+
+                            if (seededJob != null)
+                            {
+                                UpdatePrintJobFromHistory(seededJob, historyJob);
+                                seededJob.UpdatedAt = DateTime.UtcNow;
+                                updated++;
+                            }
+                            else
+                            {
+                                skipped++;
+                            }
+                        }
+                        else
+                        {
+                            // On incremental, skip already-known jobs
+                            skipped++;
+                        }
+                    }
+                    else
+                    {
+                        // Snapshot dedupe can go stale under overlapping runs. Re-check external id before insert.
+                        PrintJob? existingByExternalId = await _repository.GetByExternalIdAsync(
+                            printer.Id,
+                            historyJob.JobId,
+                            cancellationToken);
+
+                        if (existingByExternalId != null)
+                        {
+                            existingExternalJobIds.Add(historyJob.JobId);
+                            if (isInitialSeed || options.UpdateKnownJobsOnIncremental)
+                            {
+                                UpdatePrintJobFromHistory(existingByExternalId, historyJob);
+                                existingByExternalId.UpdatedAt = DateTime.UtcNow;
+                                updated++;
+                            }
+                            else
+                            {
+                                skipped++;
+                            }
+
+                            continue;
+                        }
+
+                        // If this print was initiated through PrintFarmer, it may already exist in our DB without
+                        // an ExternalJobId/SourcePrinterId link. In that case, update/link it instead of inserting a duplicate.
+                        PrintJob? matchingExisting = await _repository.FindExistingJobForHistoryMatchAsync(
+                            printer.Id,
+                            historyJob.Filename,
+                            startTimeUtc,
+                            endTimeUtc,
+                            cancellationToken);
+
+                        if (matchingExisting != null)
                         {
                             matchingExisting.ExternalJobId = historyJob.JobId;
                             matchingExisting.SourcePrinterId = printer.Id;
                             UpdatePrintJobFromHistory(matchingExisting, historyJob);
                             matchingExisting.UpdatedAt = DateTime.UtcNow;
-                            _repository.Remove(seededJob);
+                            existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
                             updated++;
                             continue;
                         }
-                    }
 
-                    // Otherwise, update the seeded job only on initial seed (for completeness).
-                    if (isInitialSeed)
-                    {
-                        seededJob ??= await _repository.GetByExternalIdAsync(
-                            printer.Id, historyJob.JobId, cancellationToken);
+                        // New job - create it
+                        PrintJob newJob = await CreatePrintJobFromHistoryAsync(historyJob, printer.Id, cancellationToken);
 
-                        if (seededJob != null)
-                        {
-                            UpdatePrintJobFromHistory(seededJob, historyJob);
-                            seededJob.UpdatedAt = DateTime.UtcNow;
-                            updated++;
-                        }
-                    }
-                    else
-                    {
-                        // On incremental, skip already-known jobs
-                        skipped++;
-                    }
-                }
-                else
-                {
-                    // If this print was initiated through PrintFarmer, it may already exist in our DB without
-                    // an ExternalJobId/SourcePrinterId link. In that case, update/link it instead of inserting a duplicate.
-                    PrintJob? matchingExisting = await _repository.FindExistingJobForHistoryMatchAsync(
-                        printer.Id,
-                        historyJob.Filename,
-                        startTimeUtc,
-                        endTimeUtc,
-                        cancellationToken);
-
-                    if (matchingExisting != null)
-                    {
-                        matchingExisting.ExternalJobId = historyJob.JobId;
-                        matchingExisting.SourcePrinterId = printer.Id;
-                        UpdatePrintJobFromHistory(matchingExisting, historyJob);
-                        matchingExisting.UpdatedAt = DateTime.UtcNow;
-                        existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
-                        updated++;
-                        continue;
-                    }
-
-                    // New job - create it
-                    PrintJob newJob = await CreatePrintJobFromHistoryAsync(historyJob, printer.Id, cancellationToken);
-
-                    // Using sync Add() is intentional - we're batching multiple entities and calling SaveChangesAsync at the end.
-                    // AddAsync() is only needed when the entity has value-generated properties requiring DB interaction.
+                        // Using sync Add() is intentional - we're batching multiple entities and calling SaveChangesAsync at the end.
+                        // AddAsync() is only needed when the entity has value-generated properties requiring DB interaction.
 #pragma warning disable CA1849 // Call async methods when in an async method
-                    _repository.Add(newJob);
+                        _repository.Add(newJob);
 #pragma warning restore CA1849
-                    existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
-                    added++;
+                        existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
+                        added++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[{LogPrefix}] Failed to process history job {JobId}", options.LogPrefix, historyJob.JobId);
+                    skipped++;
                 }
             }
-            catch (Exception ex)
+
+            // Save all changes for this printer
+            if (added > 0 || updated > 0)
             {
-                _logger.LogWarning(ex, "[HistorySeed] Failed to process history job {JobId}", historyJob.JobId);
-                skipped++;
+                try
+                {
+                    await _repository.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateException ex) when (IsLikelyDuplicateExternalJobConflict(ex))
+                {
+                    saveSucceeded = false;
+                    _logger.LogWarning(
+                        ex,
+                        "[{LogPrefix}] Ignoring duplicate history ingest conflict for printer {PrinterName} ({PrinterId}); overlapping ingest attempt detected",
+                        options.LogPrefix,
+                        printer.Name,
+                        printer.Id);
+
+                    // Reset tracked state so a failed insert/update from this printer
+                    // cannot poison later SaveChanges calls in the same sync run.
+                    _repository.ClearTrackedChanges();
+                }
+            }
+
+            // Update the printer's last seed timestamp only when this sync mode owns the shared watermark.
+            if (saveSucceeded
+                && options.PersistHistoryWatermark
+                && latestJobTimestamp > (printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue))
+            {
+                await _repository.UpdatePrinterLastHistorySeedAsync(printer.Id, latestJobTimestamp, cancellationToken);
+                _logger.LogDebug(
+                    "[{LogPrefix}] Updated LastHistorySeedUtc for printer {PrinterName} to {Timestamp}",
+                    options.LogPrefix,
+                    printer.Name,
+                    latestJobTimestamp);
+            }
+
+            return (added, updated, skipped);
+        }
+        finally
+        {
+            if (lockAcquired)
+            {
+                lockState.Semaphore.Release();
+            }
+
+            if (lockState.ReleaseReferenceAndMarkUsed() == 0)
+            {
+                TryCleanupStalePrinterHistorySyncLocks();
             }
         }
-
-        // Save all changes for this printer
-        if (added > 0 || updated > 0)
-        {
-            await _repository.SaveChangesAsync(cancellationToken);
-        }
-
-        // Update the printer's last seed timestamp if we processed any jobs
-        if (latestJobTimestamp > (printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue))
-        {
-            await _repository.UpdatePrinterLastHistorySeedAsync(printer.Id, latestJobTimestamp, cancellationToken);
-            _logger.LogDebug(
-                "[HistorySeed] Updated LastHistorySeedUtc for printer {PrinterName} to {Timestamp}",
-                printer.Name, latestJobTimestamp);
-        }
-
-        return (added, updated, skipped);
     }
 
     /// <summary>
@@ -1683,8 +1901,133 @@ public class PrintJobManagementService(
             "in_progress" or "printing" => PrintJobStatus.Printing,
             "paused" => PrintJobStatus.Paused,
             "standby" or "ready" => PrintJobStatus.Queued,
-            _ => PrintJobStatus.Completed // Default for unknown statuses from history
+            _ => PrintJobStatus.Queued // Unknown external states must remain non-terminal
         };
+    }
+
+    private static PrinterSyncLockState AcquirePrinterHistorySyncLock(Guid printerId)
+    {
+        while (true)
+        {
+            PrinterSyncLockState created = PrinterSyncLockState.CreateWithReference();
+            PrinterSyncLockState state = PrinterHistorySyncLocks.GetOrAdd(printerId, created);
+
+            if (ReferenceEquals(state, created))
+            {
+                return state;
+            }
+
+            if (state.TryAddReference())
+            {
+                return state;
+            }
+
+            PrinterHistorySyncLocks.TryRemove(new KeyValuePair<Guid, PrinterSyncLockState>(printerId, state));
+        }
+    }
+
+    private static void TryCleanupStalePrinterHistorySyncLocks()
+    {
+        if (Interlocked.Increment(ref _historySyncReleaseCounter) % 64 != 0)
+        {
+            return;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        foreach (KeyValuePair<Guid, PrinterSyncLockState> entry in PrinterHistorySyncLocks)
+        {
+            PrinterSyncLockState state = entry.Value;
+            if (state.ReferenceCount != 0 || !state.IsIdleFor(PrinterHistorySyncLockIdleTtl, now))
+            {
+                continue;
+            }
+
+            if (!state.TryRetireIfUnused())
+            {
+                continue;
+            }
+
+            PrinterHistorySyncLocks.TryRemove(new KeyValuePair<Guid, PrinterSyncLockState>(entry.Key, state));
+        }
+    }
+
+    private static bool IsLikelyDuplicateExternalJobConflict(DbUpdateException ex)
+    {
+        if (TryGetInnerIntProperty(ex, "Microsoft.Data.SqlClient.SqlException", "Number", out int sqlServerNumber)
+            && (sqlServerNumber == 2601 || sqlServerNumber == 2627))
+        {
+            return true;
+        }
+
+        if (TryGetInnerStringProperty(ex, "Npgsql.PostgresException", "SqlState", out string? sqlState)
+            && string.Equals(sqlState, "23505", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (TryGetInnerIntProperty(ex, "Microsoft.Data.Sqlite.SqliteException", "SqliteErrorCode", out int sqliteErrorCode)
+            && sqliteErrorCode == 19)
+        {
+            return true;
+        }
+
+        string fullMessage = ex.ToString();
+        if (fullMessage.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("SQLite Error 19", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (TryGetInnerIntProperty(ex, "MySqlConnector.MySqlException", "Number", out int mySqlNumber)
+            && mySqlNumber == 1062)
+        {
+            return true;
+        }
+
+        if (fullMessage.Contains("Duplicate entry", StringComparison.OrdinalIgnoreCase)
+            && fullMessage.Contains("for key", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetInnerIntProperty(DbUpdateException ex, string exceptionTypeFullName, string propertyName, out int value)
+    {
+        value = 0;
+        Exception? inner = ex.InnerException;
+        if (inner == null || !string.Equals(inner.GetType().FullName, exceptionTypeFullName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        object? property = inner.GetType().GetProperty(propertyName)?.GetValue(inner);
+        if (property is int intValue)
+        {
+            value = intValue;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetInnerStringProperty(DbUpdateException ex, string exceptionTypeFullName, string propertyName, out string? value)
+    {
+        value = null;
+        Exception? inner = ex.InnerException;
+        if (inner == null || !string.Equals(inner.GetType().FullName, exceptionTypeFullName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        value = inner.GetType().GetProperty(propertyName)?.GetValue(inner)?.ToString();
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool IsTerminalStatus(PrintJobStatus status)
+    {
+        return status is PrintJobStatus.Completed or PrintJobStatus.Failed or PrintJobStatus.Cancelled;
     }
 
     /// <summary>

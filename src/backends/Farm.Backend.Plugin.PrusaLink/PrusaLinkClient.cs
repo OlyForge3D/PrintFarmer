@@ -23,7 +23,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsControlOperations,
     ISupportsMovement,
     ISupportsTemperatureControl,
-    ISupportsFilamentUsageQuery
+    ISupportsFilamentUsageQuery,
+    ISupportsHistory
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly ILogger<PrusaLinkClient>? _logger;
@@ -40,6 +41,35 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         _apiClient = apiClient;
         _logger = logger;
     }
+
+    public async Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryListAsync(baseUrl, limit, start, since, credential, ct);
+
+    public async Task<HistoryJob?> GetHistoryJobAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryJobAsync(baseUrl, jobId, credential, ct);
+
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(
+        string baseUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryTotalsAsync(baseUrl, credential, ct);
+
+    public async Task<bool> DeleteHistoryJobAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.DeleteHistoryJobAsync(baseUrl, jobId, credential, ct);
 
     public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
@@ -630,7 +660,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         try
         {
-            PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, credential, ct);
+            Farm.Infrastructure.Contracts.Printers.PrusaLink.PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, credential, ct);
             VersionInfo versionInfo = await _apiClient.GetVersionAsync(baseUrl, credential, ct);
 
             return new PrinterInformation

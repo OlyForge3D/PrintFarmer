@@ -57,6 +57,11 @@ public interface IPrintJobManagementRepository
     /// </summary>
     Task SaveChangesAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Clears currently tracked entities from the underlying change tracker.
+    /// </summary>
+    void ClearTrackedChanges();
+
     // ============= FILTERED QUERIES =============
 
     /// <summary>

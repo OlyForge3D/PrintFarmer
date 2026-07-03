@@ -42,6 +42,9 @@ public static class BackgroundServicesStartup
         services.Configure<Farm.Web.Api.Services.Workers.HistorySeedingSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.HistorySeedingSettings.SectionName));
         services.AddHostedService<Farm.Web.Api.Services.Workers.HistorySeedingBackgroundService>();
 
+        // Active External Job Sync - faster cadence for non-terminal externally-started jobs
+        services.AddHostedService<Farm.Web.Api.Services.Workers.ActiveExternalJobSyncBackgroundService>();
+
         // Register asset service for OrcaSlicer printer images and bed textures
         services.AddSingleton<IAssetService, AssetService>();
 
