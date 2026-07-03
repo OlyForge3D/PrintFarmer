@@ -77,6 +77,11 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);
 
+    public void ClearTrackedChanges()
+    {
+        _context.ChangeTracker.Clear();
+    }
+
     // ============= FILTERED QUERIES =============
     public async Task<List<PrintJob>> GetFilteredJobsAsync(
         PrintJobStatus? filterStatus = null,
@@ -484,6 +489,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     {
         return await _context.Printers
             .AsNoTracking()
+            .Include(p => p.ServiceState)
             .Where(p => p.IsEnabled)
             .ToListAsync(ct);
     }

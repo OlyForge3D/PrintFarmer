@@ -77,6 +77,7 @@ public class HistorySeedingBackgroundService(
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "HistorySeedingService";
+    private static readonly TimeSpan DisabledSettingsPollInterval = TimeSpan.FromSeconds(5);
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
@@ -100,15 +101,16 @@ public class HistorySeedingBackgroundService(
         {
             _logger.LogInformation("[HistorySeedingService] Disabled via configuration");
             _serviceMonitor.ReportEnabled(ServiceId, false);
-            return;
         }
+        else
+        {
+            _serviceMonitor.ReportEnabled(ServiceId, true);
+            _logger.LogInformation(
+                "History seeding service started. Interval: {SettingsIntervalMinutes}m, Initial delay: {SettingsInitialDelaySeconds}s (fetches all available history)", settings.IntervalMinutes, settings.InitialDelaySeconds);
 
-        _serviceMonitor.ReportEnabled(ServiceId, true);
-        _logger.LogInformation(
-            "History seeding service started. Interval: {SettingsIntervalMinutes}m, Initial delay: {SettingsInitialDelaySeconds}s (fetches all available history)", settings.IntervalMinutes, settings.InitialDelaySeconds);
-
-        // Initial delay to let the system stabilize
-        await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);
+            // Initial delay to let the system stabilize on enabled startup.
+            await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -119,7 +121,7 @@ public class HistorySeedingBackgroundService(
                 {
                     _logger.LogInformation("History seeding disabled, pausing service");
                     _serviceMonitor.ReportEnabled(ServiceId, false);
-                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); // Check again in 1 minute
+                    await Task.Delay(DisabledSettingsPollInterval, stoppingToken);
                     continue;
                 }
 
@@ -179,6 +181,7 @@ public class ActiveExternalJobSyncBackgroundService(
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "ActiveExternalJobSyncService";
+    private static readonly TimeSpan DisabledSettingsPollInterval = TimeSpan.FromSeconds(5);
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
@@ -201,14 +204,15 @@ public class ActiveExternalJobSyncBackgroundService(
         {
             _logger.LogInformation("[ActiveExternalJobSyncService] Disabled via configuration");
             _serviceMonitor.ReportEnabled(ServiceId, false);
-            return;
         }
+        else
+        {
+            _serviceMonitor.ReportEnabled(ServiceId, true);
+            _logger.LogInformation(
+                "Active external job sync service started. Interval: {SettingsActiveSyncIntervalSeconds}s, Initial delay: {SettingsActiveSyncInitialDelaySeconds}s", settings.ActiveSyncIntervalSeconds, settings.ActiveSyncInitialDelaySeconds);
 
-        _serviceMonitor.ReportEnabled(ServiceId, true);
-        _logger.LogInformation(
-            "Active external job sync service started. Interval: {SettingsActiveSyncIntervalSeconds}s, Initial delay: {SettingsActiveSyncInitialDelaySeconds}s", settings.ActiveSyncIntervalSeconds, settings.ActiveSyncInitialDelaySeconds);
-
-        await Task.Delay(TimeSpan.FromSeconds(settings.ActiveSyncInitialDelaySeconds), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(settings.ActiveSyncInitialDelaySeconds), stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -219,7 +223,7 @@ public class ActiveExternalJobSyncBackgroundService(
                 {
                     _logger.LogInformation("Active external job sync disabled, pausing service");
                     _serviceMonitor.ReportEnabled(ServiceId, false);
-                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                    await Task.Delay(DisabledSettingsPollInterval, stoppingToken);
                     continue;
                 }
 

@@ -681,7 +681,8 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     {
         HttpClient client = GetClientForCredentials(credentials);
         string normalizedBaseUrl = baseUrl.TrimEnd('/');
-        HttpRequestMessage request = CreateRequest(HttpMethod.Get, $"{normalizedBaseUrl}/api/history", credentials);
+        string requestUrl = $"{normalizedBaseUrl}/api/history";
+        HttpRequestMessage request = CreateRequest(HttpMethod.Get, requestUrl, credentials);
 
         List<string> queryParams = [];
         if (limit.HasValue)
@@ -696,7 +697,8 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
         if (queryParams.Count > 0)
         {
-            request.RequestUri = new Uri($"{normalizedBaseUrl}/api/history?{string.Join("&", queryParams)}");
+            requestUrl = $"{normalizedBaseUrl}/api/history?{string.Join("&", queryParams)}";
+            request.RequestUri = new Uri(requestUrl);
         }
 
         try
@@ -704,6 +706,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             using HttpResponseMessage response = await client.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
             {
+                _logger.LogWarning(
+                    "PrusaLink history request failed: HTTP {StatusCode} for {RequestUrl} (limit={Limit}, start={Start}, since={Since})",
+                    (int)response.StatusCode,
+                    requestUrl,
+                    limit,
+                    start,
+                    since);
                 return new HistoryListResponse { Count = 0, Jobs = [] };
             }
 
@@ -711,6 +720,10 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             HistoryListResponse? parsed = ParseOctoPrintHistoryList(content);
             if (parsed == null)
             {
+                _logger.LogWarning(
+                    "PrusaLink history response parse failed for {RequestUrl} (payloadLength={PayloadLength})",
+                    requestUrl,
+                    content.Length);
                 return new HistoryListResponse { Count = 0, Jobs = [] };
             }
 
@@ -725,8 +738,19 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
             return parsed;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "PrusaLink history request threw for {RequestUrl} (limit={Limit}, start={Start}, since={Since})",
+                requestUrl,
+                limit,
+                start,
+                since);
             return new HistoryListResponse { Count = 0, Jobs = [] };
         }
     }
@@ -837,7 +861,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
             return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };
         }
-        catch
+        catch (JsonException)
         {
             return null;
         }
@@ -850,7 +874,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             using JsonDocument doc = JsonDocument.Parse(jobJson);
             return ParseOctoPrintJobElement(doc.RootElement);
         }
-        catch
+        catch (JsonException)
         {
             return null;
         }
@@ -909,7 +933,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
             return job;
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
