@@ -284,7 +284,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
   const sidebarShellClassName = layout === 'content'
-    ? `w-full max-w-sm overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+    ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
     : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
 
   // Show loading state while fetching printer data
@@ -640,7 +640,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       </div>
 
       {/* Scrollable Content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
         {/* Statistics */}
         <CollapsibleSection
           title="Statistics"
