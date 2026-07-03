@@ -1442,15 +1442,8 @@ public class PrintJobManagementService(
                 ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
                 : null;
 
-            // History seeding is intended for completed history/analytics. Skip non-terminal entries
-            // (e.g., in-progress/queued) to avoid creating duplicate active queue rows.
-            string statusNormalized = historyJob.Status?.ToLowerInvariant() ?? string.Empty;
-            bool isTerminalStatus = statusNormalized is "completed" or "cancelled" or "error";
-            if (!isTerminalStatus)
-            {
-                skipped++;
-                continue;
-            }
+            // Ingest both terminal and non-terminal jobs so externally-started jobs can be tracked.
+            // Duplicate protection still relies on external-id dedupe and history-to-existing-job linking.
 
             // On incremental seed, skip jobs older than or equal to last seed timestamp.
             // This client-side filtering is needed for OctoPrint (which doesn't support server-side filtering).

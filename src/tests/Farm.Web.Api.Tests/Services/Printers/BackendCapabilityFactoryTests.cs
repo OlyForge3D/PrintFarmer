@@ -65,6 +65,17 @@ public class BackendCapabilityFactoryTests
     }
 
     [Fact]
+    public void PrusaLink_ClientShouldAdvertiseHistoryCapability()
+    {
+        var factory = new BackendCapabilityFactory(_clientFactory, _mockLogger.Object);
+
+        bool supportsHistory = factory.TryGetHistoryClientTyped(PrinterBackend.PrusaLink, out ISupportsHistory? historyClient);
+
+        Assert.True(supportsHistory);
+        Assert.NotNull(historyClient);
+    }
+
+    [Fact]
     public void OctoPrint_ClientShouldImplementISupportsFileList()
     {
         // Arrange
@@ -180,6 +191,7 @@ public class BackendCapabilityFactoryTests
         prusaLinkClient.As<ISupportsStartPrint>();
         prusaLinkClient.As<ISupportsCamera>();
         prusaLinkClient.As<ISupportsPrinterInformation>();
+        prusaLinkClient.As<ISupportsHistory>();
 
         var octoPrintClient = new Mock<IOctoPrintClient>();
         octoPrintClient.As<ISupportsFileDownload>();
@@ -240,7 +252,8 @@ public class BackendCapabilityFactoryTests
                 typeof(ISupportsFileUpload),
                 typeof(ISupportsStartPrint),
                 typeof(ISupportsCamera),
-                typeof(ISupportsPrinterInformation)
+                typeof(ISupportsPrinterInformation),
+                typeof(ISupportsHistory)
             },
             PrinterBackend.OctoPrint => new[]
             {
