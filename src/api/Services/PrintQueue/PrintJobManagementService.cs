@@ -68,6 +68,30 @@ public class PrintJobManagementService(
     private const int RecommendationMaxScoredJobs = 150;
     private static readonly TimeSpan RecommendationCacheDuration = TimeSpan.FromSeconds(45);
 
+    private sealed record HistorySyncOptions(
+        bool ActiveOnly,
+        bool AllowInitialBackfill,
+        bool UpdateKnownJobsOnIncremental,
+        string LogPrefix,
+        int InitialFetchLimit,
+        int IncrementalFetchLimit);
+
+    private static readonly HistorySyncOptions HistorySeedingOptions = new(
+        ActiveOnly: false,
+        AllowInitialBackfill: true,
+        UpdateKnownJobsOnIncremental: false,
+        LogPrefix: "HistorySeed",
+        InitialFetchLimit: 10000,
+        IncrementalFetchLimit: 1000);
+
+    private static readonly HistorySyncOptions ActiveExternalSyncOptions = new(
+        ActiveOnly: true,
+        AllowInitialBackfill: false,
+        UpdateKnownJobsOnIncremental: true,
+        LogPrefix: "ActiveExternalSync",
+        InitialFetchLimit: 1000,
+        IncrementalFetchLimit: 1000);
+
     // ============= QUERY OPERATIONS =============
 
     /// <summary>
@@ -1318,6 +1342,33 @@ public class PrintJobManagementService(
     {
         _logger.LogInformation("[HistorySeed] Starting history seeding (fetching all available history)");
 
+        await SyncHistoryFromPrintersInternalAsync(
+            options: HistorySeedingOptions,
+            printerIds: printerIds,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Sync active external jobs from printer history APIs.
+    /// Focuses on non-terminal jobs to quickly discover/update externally-started active work.
+    /// </summary>
+    public async Task SyncActiveExternalJobsFromPrintersAsync(
+        List<string>? printerIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("[ActiveExternalSync] Starting active external job sync (non-terminal focus)");
+
+        await SyncHistoryFromPrintersInternalAsync(
+            options: ActiveExternalSyncOptions,
+            printerIds: printerIds,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task SyncHistoryFromPrintersInternalAsync(
+        HistorySyncOptions options,
+        List<string>? printerIds,
+        CancellationToken cancellationToken)
+    {
         int totalAdded = 0;
         int totalUpdated = 0;
         int totalSkipped = 0;
@@ -1337,7 +1388,7 @@ public class PrintJobManagementService(
                 printers = printers.Where(p => filterIds.Contains(p.Id)).ToList();
             }
 
-            _logger.LogInformation("[HistorySeed] Processing {PrinterCount} printer(s)", printers.Count);
+            _logger.LogInformation("[{LogPrefix}] Processing {PrinterCount} printer(s)", options.LogPrefix, printers.Count);
 
             foreach (Printer printer in printers)
             {
@@ -1349,7 +1400,9 @@ public class PrintJobManagementService(
                 try
                 {
                     (int added, int updated, int skipped) = await SeedHistoryFromSinglePrinterAsync(
-                        printer, cancellationToken);
+                        printer,
+                        options,
+                        cancellationToken);
 
                     totalAdded += added;
                     totalUpdated += updated;
@@ -1357,23 +1410,23 @@ public class PrintJobManagementService(
                     printersProcessed++;
 
                     _logger.LogInformation(
-                        "[HistorySeed] Printer {PrinterName} ({PrinterId}): Added={Added}, Updated={Updated}, Skipped={Skipped}",
-                        printer.Name, printer.Id, added, updated, skipped);
+                        "[{LogPrefix}] Printer {PrinterName} ({PrinterId}): Added={Added}, Updated={Updated}, Skipped={Skipped}",
+                        options.LogPrefix, printer.Name, printer.Id, added, updated, skipped);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[HistorySeed] Failed to seed history from printer {PrinterName} ({PrinterId})",
-                        printer.Name, printer.Id);
+                    _logger.LogWarning(ex, "[{LogPrefix}] Failed to sync history from printer {PrinterName} ({PrinterId})",
+                        options.LogPrefix, printer.Name, printer.Id);
                 }
             }
 
             _logger.LogInformation(
-                "[HistorySeed] Completed: Printers={PrintersProcessed}, Added={TotalAdded}, Updated={TotalUpdated}, Skipped={TotalSkipped}",
-                printersProcessed, totalAdded, totalUpdated, totalSkipped);
+                "[{LogPrefix}] Completed: Printers={PrintersProcessed}, Added={TotalAdded}, Updated={TotalUpdated}, Skipped={TotalSkipped}",
+                options.LogPrefix, printersProcessed, totalAdded, totalUpdated, totalSkipped);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[HistorySeed] Error seeding queue history");
+            _logger.LogError(ex, "[{LogPrefix}] Error syncing queue history", options.LogPrefix);
             throw;
         }
     }
@@ -1387,13 +1440,14 @@ public class PrintJobManagementService(
     /// </summary>
     private async Task<(int Added, int Updated, int Skipped)> SeedHistoryFromSinglePrinterAsync(
         Printer printer,
+        HistorySyncOptions options,
         CancellationToken cancellationToken)
     {
         int added = 0;
         int updated = 0;
         int skipped = 0;
 
-        bool isInitialSeed = !printer.ServiceState?.LastHistorySeedUtc.HasValue ?? true;
+        bool isInitialSeed = options.AllowInitialBackfill && (!printer.ServiceState?.LastHistorySeedUtc.HasValue ?? true);
         DateTime? seedSinceUtc = printer.ServiceState?.LastHistorySeedUtc;
         DateTime latestJobTimestamp = printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue;
 
@@ -1402,7 +1456,7 @@ public class PrintJobManagementService(
         // OctoPrint will return all and we filter client-side below.
         HistoryListResponse history = await _printersService.GetHistoryListAsync(
             printer.Id,
-            limit: isInitialSeed ? 10000 : 1000, // Full fetch on initial, smaller on incremental
+            limit: isInitialSeed ? options.InitialFetchLimit : options.IncrementalFetchLimit,
             start: 0,
             since: seedSinceUtc, // Pass last seed time for incremental fetching
             before: null,
@@ -1411,13 +1465,13 @@ public class PrintJobManagementService(
 
         if (history.Jobs.Length == 0)
         {
-            _logger.LogDebug("[HistorySeed] No history jobs from printer {PrinterName}", printer.Name);
+            _logger.LogDebug("[{LogPrefix}] No history jobs from printer {PrinterName}", options.LogPrefix, printer.Name);
             return (0, 0, 0);
         }
 
         _logger.LogDebug(
-            "[HistorySeed] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial})",
-            history.Jobs.Length, printer.Name, isInitialSeed);
+            "[{LogPrefix}] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial})",
+            options.LogPrefix, history.Jobs.Length, printer.Name, isInitialSeed);
 
         // Get all existing seeded jobs for this printer to check for duplicates
         HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
@@ -1441,6 +1495,14 @@ public class PrintJobManagementService(
             DateTime? endTimeUtc = historyJob.EndTime.HasValue
                 ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
                 : null;
+
+            PrintJobStatus mappedStatus = MapHistoryStatusToPrintJobStatus(historyJob.Status);
+
+            if (options.ActiveOnly && IsTerminalStatus(mappedStatus))
+            {
+                skipped++;
+                continue;
+            }
 
             // Ingest both terminal and non-terminal jobs so externally-started jobs can be tracked.
             // Duplicate protection still relies on external-id dedupe and history-to-existing-job linking.
@@ -1504,6 +1566,22 @@ public class PrintJobManagementService(
                             updated++;
                         }
                     }
+                    else if (options.UpdateKnownJobsOnIncremental)
+                    {
+                        seededJob ??= await _repository.GetByExternalIdAsync(
+                            printer.Id, historyJob.JobId, cancellationToken);
+
+                        if (seededJob != null)
+                        {
+                            UpdatePrintJobFromHistory(seededJob, historyJob);
+                            seededJob.UpdatedAt = DateTime.UtcNow;
+                            updated++;
+                        }
+                        else
+                        {
+                            skipped++;
+                        }
+                    }
                     else
                     {
                         // On incremental, skip already-known jobs
@@ -1546,7 +1624,7 @@ public class PrintJobManagementService(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[HistorySeed] Failed to process history job {JobId}", historyJob.JobId);
+                _logger.LogWarning(ex, "[{LogPrefix}] Failed to process history job {JobId}", options.LogPrefix, historyJob.JobId);
                 skipped++;
             }
         }
@@ -1562,8 +1640,8 @@ public class PrintJobManagementService(
         {
             await _repository.UpdatePrinterLastHistorySeedAsync(printer.Id, latestJobTimestamp, cancellationToken);
             _logger.LogDebug(
-                "[HistorySeed] Updated LastHistorySeedUtc for printer {PrinterName} to {Timestamp}",
-                printer.Name, latestJobTimestamp);
+                "[{LogPrefix}] Updated LastHistorySeedUtc for printer {PrinterName} to {Timestamp}",
+                options.LogPrefix, printer.Name, latestJobTimestamp);
         }
 
         return (added, updated, skipped);
@@ -1678,6 +1756,11 @@ public class PrintJobManagementService(
             "standby" or "ready" => PrintJobStatus.Queued,
             _ => PrintJobStatus.Completed // Default for unknown statuses from history
         };
+    }
+
+    private static bool IsTerminalStatus(PrintJobStatus status)
+    {
+        return status is PrintJobStatus.Completed or PrintJobStatus.Failed or PrintJobStatus.Cancelled;
     }
 
     /// <summary>
