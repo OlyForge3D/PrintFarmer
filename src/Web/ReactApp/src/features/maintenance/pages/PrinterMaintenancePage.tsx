@@ -9,7 +9,7 @@ import { apiClient } from '@/services/api';
 import type { 
   CreateMaintenanceLogRequest
 } from '@/types/maintenance';
-import type { Printer } from '@/types/api';
+import type { ApiError, Printer } from '@/types/api';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
 import { 
   WrenchIcon, 
@@ -22,6 +22,18 @@ import {
 } from '@heroicons/react/24/outline';
 import { formatDistanceToNow, format } from 'date-fns';
 import { LogMaintenanceModal } from '../components/LogMaintenanceModal';
+
+function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
+  const statusCode = typeof error === 'object' && error
+    ? (error as ApiError).statusCode ?? (error as { response?: { status?: number } }).response?.status
+    : undefined;
+
+  if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+    return false;
+  }
+
+  return failureCount < 2;
+}
 
 /**
  * Printer-specific maintenance page showing:
@@ -52,6 +64,7 @@ export function PrinterMaintenancePage() {
     queryKey: ['printerStatistics', printerId],
     queryFn: () => maintenanceService.getPrinterStatistics(printerId!),
     enabled: !!printerId,
+    retry: shouldRetryStatisticsQuery,
   });
 
   // Fetch maintenance logs (history)

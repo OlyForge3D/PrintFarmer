@@ -763,6 +763,7 @@ public class MaintenanceController(
 
     /// <summary>
     /// Gets cumulative statistics for a specific printer.
+    /// Existing printers without accrued statistics return an empty, non-persisted snapshot.
     /// </summary>
     [HttpGet("printers/{printerId:guid}/statistics")]
     [ProducesResponseType(typeof(PrinterStatistics), 200)]
@@ -774,7 +775,28 @@ public class MaintenanceController(
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(printerId, ct);
             if (stats == null)
             {
-                return NotFound($"Statistics not found for printer {printerId}");
+                Printer? printer = await _printersService.FindByIdAsync(printerId, ct);
+                if (printer is null)
+                {
+                    return NotFound($"Printer not found: {printerId}");
+                }
+
+                return Ok(new PrinterStatistics
+                {
+                    Id = printerId,
+                    PrinterId = printerId,
+                    TotalPrintHours = 0,
+                    TotalJobsCompleted = 0,
+                    TotalJobsFailed = 0,
+                    TotalFilamentUsedGrams = 0,
+                    TotalFilamentUsedMeters = 0,
+
+                    // This non-persisted snapshot represents an existing printer with no accrued statistics yet.
+                    // MinValue dates serialize as "0001-01-01T00:00:00"; the frontend treats min/epoch dates as never-synced and renders an em dash.
+                    LastSyncTime = default,
+                    CreatedAt = default,
+                    UpdatedAt = default
+                });
             }
 
             return Ok(stats);
