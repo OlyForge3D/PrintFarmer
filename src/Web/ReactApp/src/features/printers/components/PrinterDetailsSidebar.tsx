@@ -6,7 +6,7 @@ import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
-import { PrinterBackend, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
+import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import {
@@ -106,6 +106,33 @@ const sidebarAnimationStyles = `
   }
 `;
 
+const neverSyncedCutoff = new Date('1970-01-01T00:00:00.000Z').getTime();
+
+function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
+  const statusCode = typeof error === 'object' && error
+    ? (error as ApiError).statusCode ?? (error as { response?: { status?: number } }).response?.status
+    : undefined;
+
+  if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+    return false;
+  }
+
+  return failureCount < 2;
+}
+
+function formatLastSyncTime(lastSyncTime?: string | null) {
+  if (!lastSyncTime) {
+    return '—';
+  }
+
+  const timestamp = Date.parse(lastSyncTime);
+  if (!Number.isFinite(timestamp) || timestamp <= neverSyncedCutoff) {
+    return '—';
+  }
+
+  return new Date(timestamp).toLocaleString();
+}
+
 // Inject animation styles (once)
 if (typeof document !== 'undefined') {
   const styleId = 'pf-printer-sidebar-animations';
@@ -187,6 +214,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     staleTime: 60_000,
     gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,
+    retry: shouldRetryStatisticsQuery,
   });
 
   const printerVersionQuery = useQuery({
@@ -683,7 +711,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <div className="col-span-2">
                 <dt className="text-xs text-pf-text-secondary">Last sync</dt>
                 <dd className="text-pf-text-primary">
-                  {printerStatisticsQuery.data.lastSyncTime ? new Date(printerStatisticsQuery.data.lastSyncTime).toLocaleString() : '—'}
+                  {formatLastSyncTime(printerStatisticsQuery.data.lastSyncTime)}
                 </dd>
               </div>
             </dl>
