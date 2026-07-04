@@ -47,7 +47,7 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
                 guard let windowScene = UIApplication.shared.connectedScenes
                     .compactMap({ $0 as? UIWindowScene }).first,
                       let rootVC = windowScene.windows.first?.rootViewController else {
-                    continuation.resume(returning: .error(.notSupported))
+                    coordinator.resume(returning: .error(.notSupported))
                     return
                 }
 
