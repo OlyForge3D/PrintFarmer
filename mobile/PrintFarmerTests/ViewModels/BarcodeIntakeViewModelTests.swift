@@ -30,8 +30,9 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.pendingUnknownBarcode, "4006381333931")
         XCTAssertTrue(viewModel.importedThisSession.isEmpty)
 
-        await viewModel.importUnknownBarcode(filamentId: 8)
+        let succeeded = await viewModel.importUnknownBarcode(filamentId: 8)
 
+        XCTAssertTrue(succeeded)
         XCTAssertEqual(service.saveMappingCalls.count, 1)
         XCTAssertEqual(service.saveMappingCalls.first?.barcode, "4006381333931")
         XCTAssertEqual(service.saveMappingCalls.first?.filamentId, 8)
@@ -39,6 +40,39 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [77])
         XCTAssertNil(viewModel.pendingUnknownBarcode)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testUnknownBarcodeImportFailureKeepsPendingBarcodeAndSurfacesError() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentToResolve = nil
+        service.filamentToSave = makeFilament(id: 8)
+        service.importError = NetworkError.serverError(500)
+
+        await viewModel.handleScannedBarcode("ABC/DEF 12")
+        let succeeded = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "ABC/DEF 12")
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(viewModel.importedThisSession.isEmpty)
+        XCTAssertFalse(viewModel.isBusy)
+    }
+
+    @MainActor
+    func testScanNextScannerErrorDoesNotWedgeScanningState() async throws {
+        let service = MockBarcodeIntakeService()
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .error(.notSupported)
+        let viewModel = BarcodeIntakeViewModel()
+        viewModel.configure(barcodeService: service, scanner: scanner)
+
+        viewModel.scanNext()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(scanner.barcodeScanCallCount, 1)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertEqual(viewModel.errorMessage, SpoolScanError.notSupported.localizedDescription)
     }
 
     @MainActor
