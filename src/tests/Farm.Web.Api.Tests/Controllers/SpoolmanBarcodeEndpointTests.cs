@@ -1,8 +1,17 @@
-﻿using Farm.Infrastructure;
+﻿using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -55,6 +64,40 @@ public class SpoolmanBarcodeEndpointTests
         ActionResult<SpoolmanFilamentDto> result = await controller.GetFilamentByBarcodeAsync("   ", CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_QueryCodeWithSlashPercentAndSpace_ReturnsOkWithFilament()
+    {
+        const string barcode = "ABC/DEF 12%3";
+        SpoolmanFilamentDto filament = CreateFilament(44, barcode);
+        Mock<ISpoolmanService> routedSpoolmanServiceMock = new();
+        routedSpoolmanServiceMock
+            .Setup(s => s.GetFilamentByBarcodeAsync(barcode, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(filament);
+
+        await using WebApplicationFactory<Program> factory = CustomWebApplicationFactory
+            .CreateWithIsolatedDatabase()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ISpoolmanService>();
+                    services.AddSingleton(routedSpoolmanServiceMock.Object);
+                });
+            });
+        using HttpClient client = await CreateAuthenticatedClientAsync(factory);
+
+        HttpResponseMessage response = await client.GetAsync($"/api/spoolman/filaments/by-barcode?code={Uri.EscapeDataString(barcode)}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        SpoolmanFilamentDto? value = await response.Content.ReadFromJsonAsync<SpoolmanFilamentDto>();
+        Assert.NotNull(value);
+        Assert.Equal(44, value.Id);
+        Assert.Equal(barcode, value.ArticleNumber);
+        routedSpoolmanServiceMock.Verify(
+            s => s.GetFilamentByBarcodeAsync(barcode, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -152,4 +195,51 @@ public class SpoolmanBarcodeEndpointTests
             Comment: null,
             MultiColorHexes: null,
             ExternalId: null);
+
+    private static async Task<HttpClient> CreateAuthenticatedClientAsync(
+        WebApplicationFactory<Program> factory,
+        string username = "test-admin",
+        string email = "test@example.com",
+        string password = "TestPassword123!")
+    {
+        using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            IPasswordHashingService passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+
+            User? existingUser = context.Users.FirstOrDefault(u => u.Username == username);
+            if (existingUser is null)
+            {
+                context.Users.Add(new User
+                {
+                    Id = Guid.NewGuid(),
+                    Username = username,
+                    Email = email,
+                    PasswordHash = passwordHasher.HashPassword(password),
+                    FirstName = "Test",
+                    LastName = "Admin",
+                    IsActive = true,
+                    EmailConfirmed = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                await context.SaveChangesAsync();
+            }
+        }
+
+        using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+            AuthenticationResult result = await authService.AuthenticateAsync(username, password);
+            Assert.True(result.Success);
+            Assert.False(string.IsNullOrEmpty(result.Token));
+
+            HttpClient client = factory.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false,
+            });
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", result.Token);
+            return client;
+        }
+    }
 }
