@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BC1000000000000000000001 /* BarcodeScannerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000001 /* BarcodeScannerProtocol.swift */; };
+		BC1000000000000000000002 /* BarcodeIntakeServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000002 /* BarcodeIntakeServiceProtocol.swift */; };
+		BC1000000000000000000003 /* BarcodeScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000003 /* BarcodeScannerService.swift */; };
+		BC1000000000000000000004 /* BarcodeIntakeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000004 /* BarcodeIntakeService.swift */; };
+		BC1000000000000000000005 /* DemoBarcodeIntakeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000005 /* DemoBarcodeIntakeService.swift */; };
+		BC1000000000000000000006 /* BarcodeIntakeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000006 /* BarcodeIntakeViewModel.swift */; };
+		BC1000000000000000000007 /* BarcodeIntakeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000007 /* BarcodeIntakeView.swift */; };
+		BC1000000000000000000008 /* MockBarcodeIntakeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000008 /* MockBarcodeIntakeService.swift */; };
+		BC1000000000000000000009 /* BarcodeIntakeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2000000000000000000009 /* BarcodeIntakeViewModelTests.swift */; };
+		BC100000000000000000000A /* BarcodeIntakeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */; };
 		D610P4000000000000000002 /* ServerManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000001 /* ServerManagementViewModel.swift */; };
 		D610P4000000000000000004 /* ServerManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000003 /* ServerManagementViews.swift */; };
 		D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000005 /* ServerManagementViewModelTests.swift */; };
@@ -438,6 +448,16 @@
 		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
 		A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisabledControlStyle.swift; sourceTree = "<group>"; };
 		D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSectionSnapshotTests.swift; sourceTree = "<group>"; };
+		BC2000000000000000000001 /* BarcodeScannerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeScannerProtocol.swift; sourceTree = "<group>"; };
+		BC2000000000000000000002 /* BarcodeIntakeServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeServiceProtocol.swift; sourceTree = "<group>"; };
+		BC2000000000000000000003 /* BarcodeScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeScannerService.swift; sourceTree = "<group>"; };
+		BC2000000000000000000004 /* BarcodeIntakeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeService.swift; sourceTree = "<group>"; };
+		BC2000000000000000000005 /* DemoBarcodeIntakeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoBarcodeIntakeService.swift; sourceTree = "<group>"; };
+		BC2000000000000000000006 /* BarcodeIntakeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeViewModel.swift; sourceTree = "<group>"; };
+		BC2000000000000000000007 /* BarcodeIntakeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeView.swift; sourceTree = "<group>"; };
+		BC2000000000000000000008 /* MockBarcodeIntakeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockBarcodeIntakeService.swift; sourceTree = "<group>"; };
+		BC2000000000000000000009 /* BarcodeIntakeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeViewModelTests.swift; sourceTree = "<group>"; };
+		BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -464,6 +484,7 @@
 			isa = PBXGroup;
 			children = (
 				013F7A319FAE93072F4272D2 /* AddSpoolView.swift */,
+				BC2000000000000000000007 /* BarcodeIntakeView.swift */,
 				E1D4E5F6A7B8C9D0E1F2A3B4 /* NFCScanButton.swift */,
 				E1F6A7B8C9D0E1F2A3B4C5D6 /* NFCWriteView.swift */,
 				E1B2C3D4E5F6A7B8C9D0E1F2 /* QRScannerView.swift */,
@@ -487,6 +508,7 @@
 			isa = PBXGroup;
 			children = (
 				6E4E6FB4888EBB6541E982BC /* MockAPIClient.swift */,
+				BC2000000000000000000008 /* MockBarcodeIntakeService.swift */,
 				5D49DAAAE1D5A8AC05429321 /* MockAuthService.swift */,
 				6B199518AF445724CE1C3213 /* MockJobService.swift */,
 				A9C4C4D554DEEE8404DCF48B /* MockNotificationService.swift */,
@@ -521,6 +543,8 @@
 			isa = PBXGroup;
 			children = (
 				9FB00D1FA66F23705042FF95 /* Demo */,
+				BC2000000000000000000004 /* BarcodeIntakeService.swift */,
+				BC2000000000000000000003 /* BarcodeScannerService.swift */,
 				3DDD6FCA23053FB398C63F95 /* APIClient.swift */,
 				8D809C1522119BD07956A1A7 /* AuthService.swift */,
 				CAA04408A2539F908022484D /* JobService.swift */,
@@ -600,6 +624,8 @@
 				288048764D1B47272B433307 /* PrinterServiceProtocol.swift */,
 				2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */,
 				809149B9D7E0B339296A7E1E /* SignalRServiceProtocol.swift */,
+				BC2000000000000000000002 /* BarcodeIntakeServiceProtocol.swift */,
+				BC2000000000000000000001 /* BarcodeScannerProtocol.swift */,
 				D21023EEB533787E494E2B82 /* SpoolServiceProtocol.swift */,
 				EOXFREPV2L15HYWN1T3VOVNC /* SpoolScannerProtocol.swift */,
 				10120F9FBE4ED41F47B5FDBB /* StatisticsServiceProtocol.swift */,
@@ -625,6 +651,7 @@
 			isa = PBXGroup;
 			children = (
 				F2B1C2D3E4F5A6B7C8D9E0F1 /* AddSpoolViewModelTests.swift */,
+				BC2000000000000000000009 /* BarcodeIntakeViewModelTests.swift */,
 				1706B0E2CB9F9ADFA2B914EB /* AuthViewModelTests.swift */,
 				8A79AB745B0C9E1AF64A943D /* DashboardViewModelTests.swift */,
 				CB279A2CAF8BE1C1BD61D6B2 /* JobDetailViewModelTests.swift */,
@@ -847,6 +874,7 @@
 			isa = PBXGroup;
 			children = (
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
+				BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */,
 				D61000000000000000000005 /* ServerRegistryTests.swift */,
 				D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */,
 				A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */,
@@ -879,6 +907,7 @@
 			isa = PBXGroup;
 			children = (
 				34D860B7B852D3B6814A7CAF /* AddSpoolViewModel.swift */,
+				BC2000000000000000000006 /* BarcodeIntakeViewModel.swift */,
 				AC9740564FFEA02088E0E2C8 /* AuthViewModel.swift */,
 				AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */,
 				F9121CFE5C6DFAB79CD12B21 /* JobDetailViewModel.swift */,
@@ -956,6 +985,7 @@
 				30E9A5E9738ADA190A83354C /* DemoMaintenanceService.swift */,
 				1B96F411A0F4B4EA6AABB11B /* DemoAutoDispatchService.swift */,
 				B702C279B165D2E4C7F09452 /* DemoJobAnalyticsService.swift */,
+				BC2000000000000000000005 /* DemoBarcodeIntakeService.swift */,
 				3D8EE4961761DA7DC5DF17E6 /* DemoPredictiveService.swift */,
 				4E5C58A71BE0E413E9B4F00F /* DemoFailureDetectionService.swift */,
 				7B2964C5D45A5CE3875411C5 /* DemoDispatchService.swift */,
@@ -1085,6 +1115,9 @@
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
 				BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */,
+				BC1000000000000000000008 /* MockBarcodeIntakeService.swift in Sources */,
+				BC1000000000000000000009 /* BarcodeIntakeViewModelTests.swift in Sources */,
+				BC100000000000000000000A /* BarcodeIntakeServiceTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
@@ -1119,6 +1152,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BC1000000000000000000001 /* BarcodeScannerProtocol.swift in Sources */,
+				BC1000000000000000000002 /* BarcodeIntakeServiceProtocol.swift in Sources */,
+				BC1000000000000000000003 /* BarcodeScannerService.swift in Sources */,
+				BC1000000000000000000004 /* BarcodeIntakeService.swift in Sources */,
+				BC1000000000000000000005 /* DemoBarcodeIntakeService.swift in Sources */,
+				BC1000000000000000000006 /* BarcodeIntakeViewModel.swift in Sources */,
+				BC1000000000000000000007 /* BarcodeIntakeView.swift in Sources */,
 				82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */,
 				20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */,
 				9E95C65470445D11D1AC62E4 /* AuthServiceProtocol.swift in Sources */,

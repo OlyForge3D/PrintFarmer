@@ -113,6 +113,55 @@ struct SpoolmanFilament: Codable, Identifiable, Sendable {
     let externalId: String?
 }
 
+struct SpoolmanFilamentRequest: Codable, Sendable {
+    var name: String?
+    var material: String
+    var colorHex: String?
+    var vendor: String?
+    var density: Double?
+    var diameter: Double?
+    var weight: Double?
+    var spoolWeight: Double?
+    var price: Double?
+    var settingsExtruderTemp: Int?
+    var settingsBedTemp: Int?
+    var articleNumber: String?
+    var comment: String?
+    var multiColorHexes: String?
+
+    init(
+        name: String? = nil,
+        material: String,
+        colorHex: String? = nil,
+        vendor: String? = nil,
+        density: Double? = nil,
+        diameter: Double? = nil,
+        weight: Double? = nil,
+        spoolWeight: Double? = nil,
+        price: Double? = nil,
+        settingsExtruderTemp: Int? = nil,
+        settingsBedTemp: Int? = nil,
+        articleNumber: String? = nil,
+        comment: String? = nil,
+        multiColorHexes: String? = nil
+    ) {
+        self.name = name
+        self.material = material
+        self.colorHex = colorHex
+        self.vendor = vendor
+        self.density = density
+        self.diameter = diameter
+        self.weight = weight
+        self.spoolWeight = spoolWeight
+        self.price = price
+        self.settingsExtruderTemp = settingsExtruderTemp
+        self.settingsBedTemp = settingsBedTemp
+        self.articleNumber = articleNumber
+        self.comment = comment
+        self.multiColorHexes = multiColorHexes
+    }
+}
+
 // MARK: - Spoolman Vendor (matches SpoolmanVendorDto)
 
 struct SpoolmanVendor: Codable, Identifiable, Sendable {
