@@ -195,6 +195,45 @@ public class SpoolmanController(
     }
 
     /// <summary>
+    /// Resolves a known barcode to a filament and creates a new Spoolman spool for that filament.
+    /// </summary>
+    /// <param name="request">Barcode and optional spool fields to pass through to Spoolman.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The created spool.</returns>
+    /// <response code="201">Returns the created spool.</response>
+    /// <response code="400">If the barcode is empty.</response>
+    /// <response code="404">If no filament has the requested barcode in articleNumber.</response>
+    /// <response code="500">If Spoolman import fails unexpectedly.</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("spools/by-barcode")]
+    [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<SpoolmanSpoolDto>> CreateSpoolByBarcodeAsync(
+        [FromBody] SpoolmanImportSpoolByBarcodeRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Barcode))
+        {
+            return BadRequest(new { message = "Barcode is required" });
+        }
+
+        try
+        {
+            SpoolmanSpoolDto? result = await spoolman.CreateSpoolByBarcodeAsync(request, ct);
+            return result is null
+                ? NotFound(new { message = $"No filament found for barcode '{request.Barcode.Trim()}'." })
+                : StatusCode(StatusCodes.Status201Created, result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", request.Barcode, ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Import failed. Check server logs for details." });
+        }
+    }
+
+    /// <summary>
     /// Updates a single spool in Spoolman by its ID.
     /// Only non-null fields in the request body are applied (PATCH semantics).
     /// </summary>
@@ -498,6 +537,90 @@ public class SpoolmanController(
         };
 
         return Ok(await spoolman.ListFilamentsPagedAsync(queryParams, ct));
+    }
+
+    /// <summary>
+    /// Resolves a scanned retail barcode to the filament whose articleNumber exactly matches it.
+    /// </summary>
+    /// <param name="code">URL-encoded barcode value.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The matching filament.</returns>
+    /// <response code="200">Returns the first matching filament, ordered by lowest ID.</response>
+    /// <response code="400">If the barcode is empty.</response>
+    /// <response code="404">If the barcode is unknown.</response>
+    /// <response code="500">If resolution fails unexpectedly.</response>
+    [HttpGet("filaments/by-barcode/{code}")]
+    [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<SpoolmanFilamentDto>> GetFilamentByBarcodeAsync(
+        string code,
+        CancellationToken ct)
+    {
+        string barcode = Uri.UnescapeDataString(code ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(barcode))
+        {
+            return BadRequest(new { message = "Barcode is required" });
+        }
+
+        try
+        {
+            SpoolmanFilamentDto? result = await spoolman.GetFilamentByBarcodeAsync(barcode.Trim(), ct);
+            return result is null
+                ? NotFound(new { message = $"No filament found for barcode '{barcode.Trim()}'." })
+                : Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resolving filament by barcode {Barcode}: {Message}", barcode, ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Barcode lookup failed. Check server logs for details." });
+        }
+    }
+
+    /// <summary>
+    /// Saves a barcode mapping by setting the target filament's articleNumber field in Spoolman.
+    /// Duplicate articleNumbers are allowed; lookup resolves collisions deterministically to the lowest filament ID.
+    /// </summary>
+    /// <param name="request">Barcode and target filament ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The updated filament.</returns>
+    /// <response code="200">Returns the updated filament.</response>
+    /// <response code="400">If the barcode or filament ID is invalid.</response>
+    /// <response code="404">If the target filament does not exist.</response>
+    /// <response code="500">If saving fails unexpectedly.</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("barcodes")]
+    [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<SpoolmanFilamentDto>> SaveBarcodeMappingAsync(
+        [FromBody] SpoolmanBarcodeMappingRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Barcode))
+        {
+            return BadRequest(new { message = "Barcode is required" });
+        }
+
+        if (request.FilamentId is null or <= 0)
+        {
+            return BadRequest(new { message = "FilamentId is required" });
+        }
+
+        try
+        {
+            SpoolmanFilamentDto? result = await spoolman.SaveBarcodeMappingAsync(request.FilamentId.Value, request.Barcode.Trim(), ct);
+            return result is null
+                ? NotFound(new { message = $"Filament {request.FilamentId.Value} not found." })
+                : Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Barcode mapping failed. Check server logs for details." });
+        }
     }
 
     /// <summary>
