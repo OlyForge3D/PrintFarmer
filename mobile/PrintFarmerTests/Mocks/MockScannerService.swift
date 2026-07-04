@@ -8,6 +8,7 @@ final class MockScannerService: SpoolScannerProtocol, BarcodeScannerProtocol, @u
     var scanResultToReturn: SpoolScanResult = .cancelled
     var barcodeScanResultToReturn: BarcodeScanResult = .cancelled
     var mockIsAvailable: Bool = true
+    var barcodeScanDelayNanoseconds: UInt64 = 0
     var scanCallCount = 0
     var barcodeScanCallCount = 0
 
@@ -20,6 +21,9 @@ final class MockScannerService: SpoolScannerProtocol, BarcodeScannerProtocol, @u
 
     func scanBarcode() async -> BarcodeScanResult {
         barcodeScanCallCount += 1
+        if barcodeScanDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: barcodeScanDelayNanoseconds)
+        }
         return barcodeScanResultToReturn
     }
 
@@ -27,6 +31,7 @@ final class MockScannerService: SpoolScannerProtocol, BarcodeScannerProtocol, @u
         scanResultToReturn = .cancelled
         barcodeScanResultToReturn = .cancelled
         mockIsAvailable = true
+        barcodeScanDelayNanoseconds = 0
         scanCallCount = 0
         barcodeScanCallCount = 0
     }
