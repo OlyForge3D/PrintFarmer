@@ -18,6 +18,7 @@ final class ServiceContainer: @unchecked Sendable {
     var notificationService: any NotificationServiceProtocol
     var signalRService: any SignalRServiceProtocol
     var spoolService: any SpoolServiceProtocol
+    var barcodeIntakeService: any BarcodeIntakeServiceProtocol
     var maintenanceService: any MaintenanceServiceProtocol
     var autoPrintService: any AutoDispatchServiceProtocol
     var jobAnalyticsService: any JobAnalyticsServiceProtocol
@@ -27,6 +28,7 @@ final class ServiceContainer: @unchecked Sendable {
     var activeServerGeneration = 0
     #if canImport(UIKit)
     var qrScannerService: QRSpoolScannerService?
+    var barcodeScannerService: BarcodeScannerService?
     var nfcService: NFCService?
     #endif
 
@@ -96,9 +98,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.dispatchService = DispatchService(apiClient: client)
         self.failureDetectionService = FailureDetectionService(apiClient: client)
         self.signalRService = signalRServiceFactory(resolvedURL, client)
+        self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
         self.activeServerID = activeServer?.id
         #if canImport(UIKit)
         self.qrScannerService = QRSpoolScannerService()
+        self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
         PushNotificationManager.shared.configure(notificationService: self.notificationService)
         #endif
@@ -124,6 +128,7 @@ final class ServiceContainer: @unchecked Sendable {
             notificationService: DemoNotificationService(),
             signalRService: DemoSignalRService(),
             spoolService: DemoSpoolService(),
+            barcodeIntakeService: DemoBarcodeIntakeService(),
             maintenanceService: DemoMaintenanceService(),
             autoPrintService: DemoAutoDispatchService(),
             jobAnalyticsService: DemoJobAnalyticsService(),
@@ -144,6 +149,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.notificationService = DemoNotificationService()
         self.signalRService = DemoSignalRService()
         self.spoolService = DemoSpoolService()
+        self.barcodeIntakeService = DemoBarcodeIntakeService()
         self.maintenanceService = DemoMaintenanceService()
         self.autoPrintService = DemoAutoDispatchService()
         self.jobAnalyticsService = DemoJobAnalyticsService()
@@ -154,6 +160,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
         self.qrScannerService = nil
+        self.barcodeScannerService = nil
         self.nfcService = nil
         #endif
     }
@@ -274,9 +281,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.dispatchService = DispatchService(apiClient: client)
         self.failureDetectionService = FailureDetectionService(apiClient: client)
         self.signalRService = signalRServiceFactory(baseURL, client)
+        self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
         self.activeServerID = server?.id
         #if canImport(UIKit)
         self.qrScannerService = QRSpoolScannerService()
+        self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
         PushNotificationManager.shared.configure(notificationService: self.notificationService)
         #endif
@@ -311,6 +320,7 @@ final class ServiceContainer: @unchecked Sendable {
         notificationService: any NotificationServiceProtocol,
         signalRService: any SignalRServiceProtocol,
         spoolService: any SpoolServiceProtocol,
+        barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         maintenanceService: any MaintenanceServiceProtocol,
         autoPrintService: any AutoDispatchServiceProtocol,
         jobAnalyticsService: any JobAnalyticsServiceProtocol,
@@ -344,6 +354,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.notificationService = notificationService
         self.signalRService = signalRService
         self.spoolService = spoolService
+        self.barcodeIntakeService = barcodeIntakeService
         self.maintenanceService = maintenanceService
         self.autoPrintService = autoPrintService
         self.jobAnalyticsService = jobAnalyticsService
@@ -352,6 +363,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.failureDetectionService = failureDetectionService
         #if canImport(UIKit)
         self.qrScannerService = nil
+        self.barcodeScannerService = nil
         self.nfcService = nil
         #endif
     }

@@ -5,7 +5,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>PrintFarmer uses the camera to scan QR codes on filament spools for quick inventory management.</string>
+	<string>PrintFarmer uses the camera to scan barcodes and QR codes on filament spools for quick inventory management.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PrintFarmer connects to your local network to communicate with your 3D printer farm server.</string>
 	<key>NSBonjourServices</key>
