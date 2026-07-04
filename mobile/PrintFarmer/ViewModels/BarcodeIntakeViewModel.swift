@@ -74,15 +74,17 @@ final class BarcodeIntakeViewModel {
         isBusy = false
     }
 
-    func importUnknownBarcode(with filament: SpoolmanFilament) async {
+    @discardableResult
+    func importUnknownBarcode(with filament: SpoolmanFilament) async -> Bool {
         await importUnknownBarcode(filamentId: filament.id)
     }
 
-    func importUnknownBarcode(filamentId: Int) async {
-        guard let barcode = pendingUnknownBarcode else { return }
+    @discardableResult
+    func importUnknownBarcode(filamentId: Int) async -> Bool {
+        guard let barcode = pendingUnknownBarcode else { return false }
         guard let barcodeService else {
             errorMessage = "Barcode intake service not available"
-            return
+            return false
         }
 
         isBusy = true
@@ -93,12 +95,15 @@ final class BarcodeIntakeViewModel {
             let spool = try await barcodeService.importSpool(barcode: barcode, fields: SpoolImportFields())
             importedThisSession.insert(spool, at: 0)
             pendingUnknownBarcode = nil
+            isBusy = false
+            return true
         } catch {
             logger.warning("Unknown barcode resolution failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
 
         isBusy = false
+        return false
     }
 
     func skipUnknownBarcode() {

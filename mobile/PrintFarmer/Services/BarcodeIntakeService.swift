@@ -11,7 +11,7 @@ actor BarcodeIntakeService: BarcodeIntakeServiceProtocol {
 
     func resolveFilament(barcode: String) async throws -> SpoolmanFilament? {
         do {
-            return try await apiClient.get("/api/spoolman/filaments/by-barcode/\(Self.encodedPathSegment(barcode))")
+            return try await apiClient.get("/api/spoolman/filaments/by-barcode?code=\(Self.encodedQueryValue(barcode))")
         } catch NetworkError.notFound {
             return nil
         }
@@ -31,9 +31,9 @@ actor BarcodeIntakeService: BarcodeIntakeServiceProtocol {
         )
     }
 
-    private static func encodedPathSegment(_ value: String) -> String {
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/")
+    private static func encodedQueryValue(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ":#[]@!$&'()*+,;=/?% ")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }

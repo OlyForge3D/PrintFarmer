@@ -115,9 +115,9 @@ struct SpoolmanFilament: Codable, Identifiable, Sendable {
 
 struct SpoolmanFilamentRequest: Codable, Sendable {
     var name: String?
+    var vendorId: Int?
     var material: String
     var colorHex: String?
-    var vendor: String?
     var density: Double?
     var diameter: Double?
     var weight: Double?
@@ -128,12 +128,13 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
     var articleNumber: String?
     var comment: String?
     var multiColorHexes: String?
+    var externalId: String?
 
     init(
         name: String? = nil,
+        vendorId: Int? = nil,
         material: String,
         colorHex: String? = nil,
-        vendor: String? = nil,
         density: Double? = nil,
         diameter: Double? = nil,
         weight: Double? = nil,
@@ -143,12 +144,13 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
         settingsBedTemp: Int? = nil,
         articleNumber: String? = nil,
         comment: String? = nil,
-        multiColorHexes: String? = nil
+        multiColorHexes: String? = nil,
+        externalId: String? = nil
     ) {
         self.name = name
+        self.vendorId = vendorId
         self.material = material
         self.colorHex = colorHex
-        self.vendor = vendor
         self.density = density
         self.diameter = diameter
         self.weight = weight
@@ -159,6 +161,7 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
         self.articleNumber = articleNumber
         self.comment = comment
         self.multiColorHexes = multiColorHexes
+        self.externalId = externalId
     }
 }
 

@@ -92,7 +92,8 @@ struct BarcodeIntakeView: View {
                         barcode: barcode,
                         spoolService: services.spoolService,
                         onSelectFilament: { filament in
-                            await viewModel.importUnknownBarcode(with: filament)
+                            let succeeded = await viewModel.importUnknownBarcode(with: filament)
+                            return succeeded ? nil : viewModel.errorMessage ?? "Import failed. Please try again."
                         }
                     )
                     .interactiveDismissDisabled(viewModel.isBusy)
@@ -113,7 +114,7 @@ struct BarcodeIntakeView: View {
 private struct UnknownBarcodeView: View {
     let barcode: String
     let spoolService: any SpoolServiceProtocol
-    let onSelectFilament: @MainActor (SpoolmanFilament) async -> Void
+    let onSelectFilament: @MainActor (SpoolmanFilament) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var filaments: [SpoolmanFilament] = []
@@ -126,7 +127,7 @@ private struct UnknownBarcodeView: View {
     @State private var showCreateForm = false
     @State private var filamentName = ""
     @State private var selectedMaterial = ""
-    @State private var selectedVendor = ""
+    @State private var selectedVendorId: Int?
     @State private var colorHex = "#10b981"
     @State private var totalWeightG: Double = 1000
     @State private var spoolWeightG: Double = 200
@@ -143,7 +144,7 @@ private struct UnknownBarcodeView: View {
     }
 
     private var canCreateFilament: Bool {
-        !selectedMaterial.isEmpty
+        !filamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !selectedMaterial.isEmpty
     }
 
     var body: some View {
@@ -230,17 +231,18 @@ private struct UnknownBarcodeView: View {
             }
 
             if vendors.isEmpty {
-                TextField("Vendor (optional)", text: $selectedVendor)
+                Text("No vendors available")
+                    .foregroundStyle(Color.pfTextSecondary)
             } else {
-                Picker("Vendor", selection: $selectedVendor) {
-                    Text("None").tag("")
-                    ForEach(vendors, id: \.name) { vendor in
-                        Text(vendor.name).tag(vendor.name)
+                Picker("Vendor", selection: $selectedVendorId) {
+                    Text("None").tag(Optional<Int>.none)
+                    ForEach(vendors) { vendor in
+                        Text(vendor.name).tag(Optional(vendor.id))
                     }
                 }
             }
 
-            TextField("Filament Name (optional)", text: $filamentName)
+            TextField("Filament Name", text: $filamentName)
             TextField("Color Hex", text: $colorHex)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
@@ -340,9 +342,13 @@ private struct UnknownBarcodeView: View {
     private func selectFilament(_ filament: SpoolmanFilament) {
         isSaving = true
         Task { @MainActor in
-            await onSelectFilament(filament)
-            isSaving = false
-            dismiss()
+            if let importError = await onSelectFilament(filament) {
+                errorMessage = importError
+                isSaving = false
+            } else {
+                isSaving = false
+                dismiss()
+            }
         }
     }
 
@@ -351,19 +357,24 @@ private struct UnknownBarcodeView: View {
         errorMessage = nil
         Task { @MainActor in
             do {
+                let trimmedName = filamentName.trimmingCharacters(in: .whitespacesAndNewlines)
                 let request = SpoolmanFilamentRequest(
-                    name: filamentName.isEmpty ? nil : filamentName,
+                    name: trimmedName,
+                    vendorId: selectedVendorId,
                     material: selectedMaterial,
                     colorHex: colorHex.isEmpty ? nil : colorHex,
-                    vendor: selectedVendor.isEmpty ? nil : selectedVendor,
                     weight: totalWeightG > 0 ? totalWeightG : nil,
                     spoolWeight: spoolWeightG > 0 ? spoolWeightG : nil,
                     articleNumber: barcode
                 )
                 let filament = try await spoolService.createFilament(request)
-                await onSelectFilament(filament)
-                isSaving = false
-                dismiss()
+                if let importError = await onSelectFilament(filament) {
+                    errorMessage = importError
+                    isSaving = false
+                } else {
+                    isSaving = false
+                    dismiss()
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 isSaving = false

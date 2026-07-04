@@ -12,8 +12,10 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
     }
 
     func scanBarcode() async -> BarcodeScanResult {
-        let supported = await MainActor.run { DataScannerViewController.isSupported }
-        guard supported else {
+        let available = await MainActor.run {
+            DataScannerViewController.isSupported && DataScannerViewController.isAvailable
+        }
+        guard available else {
             return .error(.notSupported)
         }
 
@@ -51,7 +53,13 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
 
                 let topVC = Self.topViewController(from: rootVC)
                 topVC.present(scanner, animated: true) {
-                    try? scanner.startScanning()
+                    do {
+                        try scanner.startScanning()
+                    } catch {
+                        scanner.dismiss(animated: true) {
+                            coordinator.resume(returning: .error(.notSupported))
+                        }
+                    }
                 }
             }
         }
@@ -90,11 +98,9 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
             if case .barcode(let barcode) = item,
                let payload = barcode.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
                !payload.isEmpty {
-                hasResumed = true
                 dataScanner.stopScanning()
                 dataScanner.dismiss(animated: true) { [weak self] in
-                    self?.continuation?.resume(returning: .barcode(payload))
-                    self?.continuation = nil
+                    self?.resume(returning: .barcode(payload))
                 }
                 return
             }
@@ -102,12 +108,16 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
     }
 
     func dataScannerDidCancel(_ dataScanner: DataScannerViewController) {
+        dataScanner.dismiss(animated: true) { [weak self] in
+            self?.resume(returning: .cancelled)
+        }
+    }
+
+    func resume(returning result: BarcodeScanResult) {
         guard !hasResumed else { return }
         hasResumed = true
-        dataScanner.dismiss(animated: true) { [weak self] in
-            self?.continuation?.resume(returning: .cancelled)
-            self?.continuation = nil
-        }
+        continuation?.resume(returning: result)
+        continuation = nil
     }
 }
 #endif
