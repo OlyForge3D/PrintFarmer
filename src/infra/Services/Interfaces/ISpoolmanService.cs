@@ -58,6 +58,12 @@ public interface ISpoolmanService
     Task<SpoolmanPagedResult<SpoolmanFilamentDto>> ListFilamentsPagedAsync(SpoolmanFilamentQueryParams queryParams, CancellationToken ct);
 
     /// <summary>
+    /// Gets the filament whose articleNumber exactly matches the scanned barcode.
+    /// Returns the lowest-ID filament if duplicate articleNumbers exist.
+    /// </summary>
+    Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);
+
+    /// <summary>
     /// Gets a specific filament type by its ID from the configured Spoolman server.
     /// </summary>
     /// <param name="filamentId">The unique identifier of the filament type to retrieve</param>
@@ -139,6 +145,17 @@ public interface ISpoolmanService
     /// Updates an existing filament in Spoolman by its ID.
     /// </summary>
     Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Stores a barcode mapping on a filament by setting its articleNumber field.
+    /// Duplicate mappings are allowed and resolved deterministically by barcode lookup.
+    /// </summary>
+    Task<SpoolmanFilamentDto?> SaveBarcodeMappingAsync(int filamentId, string barcode, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a barcode to a filament and creates a spool for the resolved filament.
+    /// </summary>
+    Task<SpoolmanSpoolDto?> CreateSpoolByBarcodeAsync(SpoolmanImportSpoolByBarcodeRequest request, CancellationToken ct);
 
     /// <summary>
     /// Bulk-updates multiple filaments in Spoolman. Only non-null fields in the request are applied.

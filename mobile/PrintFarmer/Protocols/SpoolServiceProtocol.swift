@@ -10,6 +10,7 @@ protocol SpoolServiceProtocol: Sendable {
     func updateSpool(id: Int, _ request: SpoolmanSpoolRequest) async throws -> SpoolmanSpool
     func deleteSpool(id: Int) async throws
     func listFilaments() async throws -> [SpoolmanFilament]
+    func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament
     func listVendors() async throws -> [SpoolmanVendor]
     func listMaterials() async throws -> [SpoolmanMaterial]
     func listAvailableMaterials() async throws -> [String]

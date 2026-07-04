@@ -39,6 +39,10 @@ actor SpoolService: SpoolServiceProtocol {
         try await apiClient.get("/api/spoolman/filaments")
     }
 
+    func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
+        try await apiClient.post("/api/spoolman/filaments", body: request)
+    }
+
     func listVendors() async throws -> [SpoolmanVendor] {
         try await apiClient.get("/api/spoolman/vendors")
     }

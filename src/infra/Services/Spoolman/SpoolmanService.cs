@@ -416,6 +416,89 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct)
+    {
+        string trimmedBarcode = barcode.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedBarcode))
+        {
+            return null;
+        }
+
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return null;
+        }
+
+        const int pageSize = 500;
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+        var matches = new List<SpoolmanFilamentDto>();
+        bool useArticleNumberFilter = true;
+        int offset = 0;
+
+        while (true)
+        {
+            SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(
+                baseUrl,
+                useArticleNumberFilter ? trimmedBarcode : null,
+                pageSize,
+                offset,
+                ct);
+
+            if (page is null)
+            {
+                if (useArticleNumberFilter)
+                {
+                    logger.LogDebug("Spoolman article_number filament filter failed; falling back to full filament scan.");
+                    useArticleNumberFilter = false;
+                    offset = 0;
+                    matches.Clear();
+                    continue;
+                }
+
+                return null;
+            }
+
+            foreach (SpoolmanFilamentDto filament in page.Items)
+            {
+                if (string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal))
+                {
+                    matches.Add(filament);
+                }
+            }
+
+            if (page.Items.Count == 0 || page.Items.Count < pageSize)
+            {
+                break;
+            }
+
+            if (page.TotalCount > 0 && offset + page.Items.Count >= page.TotalCount)
+            {
+                break;
+            }
+
+            offset += pageSize;
+        }
+
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        SpoolmanFilamentDto first = matches.OrderBy(f => f.Id).First();
+        if (matches.Count > 1)
+        {
+            logger.LogWarning(
+                "Barcode {Barcode} matched {Count} Spoolman filaments; returning filament {FilamentId}.",
+                trimmedBarcode,
+                matches.Count,
+                first.Id);
+        }
+
+        return first;
+    }
+
     /// <summary>
     /// Builds the Spoolman /api/v1/filament URL with query parameters for server-side pagination, filtering, and sorting.
     /// </summary>
@@ -455,6 +538,63 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         string url = $"{baseUrl}/api/v1/filament";
         return parts.Count > 0 ? $"{url}?{string.Join('&', parts)}" : url;
+    }
+
+    private async Task<SpoolmanPagedResult<SpoolmanFilamentDto>?> FetchBarcodeFilamentPageAsync(
+        string baseUrl,
+        string? articleNumber,
+        int limit,
+        int offset,
+        CancellationToken ct)
+    {
+        List<string> parts =
+        [
+            $"limit={limit}",
+            $"offset={offset}",
+        ];
+
+        if (!string.IsNullOrWhiteSpace(articleNumber))
+        {
+            parts.Add($"article_number={Uri.EscapeDataString(articleNumber)}");
+        }
+
+        string url = $"{baseUrl}/api/v1/filament?{string.Join('&', parts)}";
+
+        using HttpRequestMessage req = new(HttpMethod.Get, url);
+        req.Headers.Accept.ParseAdd("application/json");
+        using HttpResponseMessage resp = await http.SendAsync(req, ct);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Spoolman barcode filament lookup returned {StatusCode}", resp.StatusCode);
+            return null;
+        }
+
+        int totalCount = 0;
+        if (resp.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? values))
+        {
+            string? headerValue = values.FirstOrDefault();
+            if (!string.IsNullOrEmpty(headerValue))
+            {
+                _ = int.TryParse(headerValue, CultureInfo.InvariantCulture, out totalCount);
+            }
+        }
+
+        using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
+        if (doc is null)
+        {
+            logger.LogWarning("Spoolman barcode filament lookup returned invalid JSON");
+            return null;
+        }
+
+        List<SpoolmanFilamentDto> items = new();
+        foreach (JsonElement item in SpoolmanJsonParser.EnumerateItems(doc.RootElement))
+        {
+            ct.ThrowIfCancellationRequested();
+            items.Add(SpoolmanJsonParser.ParseFilament(item));
+        }
+
+        return new SpoolmanPagedResult<SpoolmanFilamentDto>(items, totalCount);
     }
 
     /// <inheritdoc/>
@@ -614,6 +754,68 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         string json = await response.Content.ReadAsStringAsync(cts.Token);
         using JsonDocument doc = JsonDocument.Parse(json);
         return SpoolmanJsonParser.ParseFilament(doc.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto?> SaveBarcodeMappingAsync(int filamentId, string barcode, CancellationToken ct)
+    {
+        string trimmedBarcode = barcode.Trim();
+        if (filamentId <= 0 || string.IsNullOrWhiteSpace(trimmedBarcode))
+        {
+            return null;
+        }
+
+        SpoolmanFilamentDto? target = await GetFilamentByIdAsync(filamentId, ct);
+        if (target is null)
+        {
+            return null;
+        }
+
+        SpoolmanFilamentDto? existing = await GetFilamentByBarcodeAsync(trimmedBarcode, ct);
+        if (existing is not null && existing.Id != filamentId)
+        {
+            logger.LogWarning(
+                "Barcode {Barcode} is already assigned to Spoolman filament {ExistingFilamentId}; also assigning it to filament {FilamentId}.",
+                trimmedBarcode,
+                existing.Id,
+                filamentId);
+        }
+
+        return await UpdateFilamentInSpoolmanAsync(
+            filamentId,
+            new SpoolmanCreateFilamentRequest { ArticleNumber = trimmedBarcode },
+            ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanSpoolDto?> CreateSpoolByBarcodeAsync(SpoolmanImportSpoolByBarcodeRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.Barcode))
+        {
+            return null;
+        }
+
+        SpoolmanFilamentDto? filament = await GetFilamentByBarcodeAsync(request.Barcode.Trim(), ct);
+        if (filament is null)
+        {
+            return null;
+        }
+
+        SpoolmanSpoolRequest spoolRequest = new()
+        {
+            FilamentId = filament.Id,
+            RemainingWeight = request.RemainingWeight,
+            InitialWeight = request.InitialWeight,
+            SpoolWeight = request.SpoolWeight,
+            Location = request.Location,
+            LotNumber = request.LotNumber,
+            Price = request.Price,
+            Comment = request.Comment,
+        };
+
+        return await CreateSpoolInSpoolmanAsync(spoolRequest, ct);
     }
 
     /// <inheritdoc/>

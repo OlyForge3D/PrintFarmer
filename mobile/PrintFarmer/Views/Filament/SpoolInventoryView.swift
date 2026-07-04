@@ -12,6 +12,7 @@ struct SpoolInventoryView: View {
     @Environment(AppRouter.self) private var router
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
+    @State private var showBarcodeIntake = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -80,6 +81,13 @@ struct SpoolInventoryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
                         Button {
+                            showBarcodeIntake = true
+                        } label: {
+                            Image(systemName: "barcode.viewfinder")
+                        }
+                        .accessibilityLabel("Barcode intake")
+
+                        Button {
                             viewModel.handleNFCScan()
                         } label: {
                             Image(systemName: "wave.3.right")
@@ -119,6 +127,13 @@ struct SpoolInventoryView: View {
             }
             .sheet(isPresented: $showAddSpool) {
                 AddSpoolView()
+                    .onDisappear {
+                        let task = Task { await viewModel.loadSpools() }
+                        activeTasks.append(task)
+                    }
+            }
+            .sheet(isPresented: $showBarcodeIntake) {
+                BarcodeIntakeView()
                     .onDisappear {
                         let task = Task { await viewModel.loadSpools() }
                         activeTasks.append(task)

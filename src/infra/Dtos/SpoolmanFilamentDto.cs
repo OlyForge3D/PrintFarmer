@@ -68,6 +68,16 @@ public record SpoolmanCreateFilamentRequest
 }
 
 /// <summary>
+/// Request to associate a retail barcode with a Spoolman filament by storing it in articleNumber.
+/// </summary>
+public record SpoolmanBarcodeMappingRequest
+{
+    public string? Barcode { get; init; }
+
+    public int? FilamentId { get; init; }
+}
+
+/// <summary>
 /// Request to bulk-update a set of filaments in Spoolman.
 /// Only non-null fields are applied to each filament.
 /// </summary>
