@@ -542,23 +542,23 @@ public class SpoolmanController(
     /// <summary>
     /// Resolves a scanned retail barcode to the filament whose articleNumber exactly matches it.
     /// </summary>
-    /// <param name="code">URL-encoded barcode value.</param>
+    /// <param name="code">Barcode value from the query string.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The matching filament.</returns>
     /// <response code="200">Returns the first matching filament, ordered by lowest ID.</response>
     /// <response code="400">If the barcode is empty.</response>
     /// <response code="404">If the barcode is unknown.</response>
     /// <response code="500">If resolution fails unexpectedly.</response>
-    [HttpGet("filaments/by-barcode/{code}")]
+    [HttpGet("filaments/by-barcode")]
     [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<SpoolmanFilamentDto>> GetFilamentByBarcodeAsync(
-        string code,
+        [FromQuery] string? code,
         CancellationToken ct)
     {
-        string barcode = Uri.UnescapeDataString(code ?? string.Empty);
+        string barcode = code ?? string.Empty;
         if (string.IsNullOrWhiteSpace(barcode))
         {
             return BadRequest(new { message = "Barcode is required" });

@@ -62,6 +62,35 @@ public class SpoolmanBarcodeServiceTests
     }
 
     [Fact]
+    public async Task GetFilamentByBarcodeAsync_SpecialCharacters_EncodesOutboundArticleNumber()
+    {
+        const string barcode = "ABC/DEF 12%3&x=y";
+        Uri? requestedUri = null;
+        using ServiceHarness harness = CreateService(req =>
+        {
+            requestedUri = req.RequestUri;
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                object[] filaments =
+                [
+                    new { id = 9, name = "Special", article_number = barcode, material = "PLA" },
+                ];
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync(barcode, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(9, result.Id);
+        Assert.Equal(barcode, result.ArticleNumber);
+        Assert.NotNull(requestedUri);
+        Assert.Contains("article_number=ABC%2FDEF%2012%253%26x%3Dy", requestedUri.Query);
+    }
+
+    [Fact]
     public async Task SaveBarcodeMappingAsync_ValidRequest_PatchesArticleNumber()
     {
         string? patchPayload = null;
