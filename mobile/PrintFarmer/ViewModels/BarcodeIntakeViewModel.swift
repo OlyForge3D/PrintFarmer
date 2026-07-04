@@ -32,9 +32,9 @@ final class BarcodeIntakeViewModel {
         errorMessage = nil
 
         Task {
+            defer { isScanning = false }
             let result = await scanner.scanBarcode()
             guard isViewActive else { return }
-            isScanning = false
             switch result {
             case .barcode(let barcode):
                 await handleScannedBarcode(barcode)

@@ -76,6 +76,46 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testScanNextCompletedWhileInactiveResetsScanningStateAndIgnoresResult() async throws {
+        let service = MockBarcodeIntakeService()
+        service.filamentToResolve = makeFilament(id: 7)
+        service.spoolToImport = makeSpool(id: 42, filamentId: 7)
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .barcode("012345678905")
+        scanner.barcodeScanDelayNanoseconds = 20_000_000
+        let viewModel = BarcodeIntakeViewModel()
+        viewModel.configure(barcodeService: service, scanner: scanner)
+
+        viewModel.scanNext()
+        viewModel.isViewActive = false
+
+        try await Task.sleep(nanoseconds: 75_000_000)
+        XCTAssertEqual(scanner.barcodeScanCallCount, 1)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertTrue(service.resolveBarcodes.isEmpty)
+        XCTAssertTrue(service.importCalls.isEmpty)
+        XCTAssertTrue(viewModel.importedThisSession.isEmpty)
+        XCTAssertNil(viewModel.lastScannedBarcode)
+    }
+
+    @MainActor
+    func testScanNextCancelledScanResetsScanningState() async throws {
+        let service = MockBarcodeIntakeService()
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .cancelled
+        let viewModel = BarcodeIntakeViewModel()
+        viewModel.configure(barcodeService: service, scanner: scanner)
+
+        viewModel.scanNext()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(scanner.barcodeScanCallCount, 1)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(service.resolveBarcodes.isEmpty)
+    }
+
+    @MainActor
     func testResolveErrorSurfacesMessageWithoutAbortingSession() async {
         let (viewModel, service) = makeSubject()
         service.resolveError = NetworkError.serverError(500)

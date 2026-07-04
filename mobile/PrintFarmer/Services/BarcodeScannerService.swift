@@ -2,6 +2,7 @@
 import Foundation
 @preconcurrency import VisionKit
 import AVFoundation
+import UIKit
 
 // MARK: - Barcode Scanner Service
 
@@ -41,11 +42,12 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
                     isHighlightingEnabled: true
                 )
                 scanner.delegate = coordinator
+                scanner.presentationController?.delegate = coordinator
 
                 guard let windowScene = UIApplication.shared.connectedScenes
                     .compactMap({ $0 as? UIWindowScene }).first,
                       let rootVC = windowScene.windows.first?.rootViewController else {
-                    continuation.resume(returning: .error(.notSupported))
+                    coordinator.resume(returning: .error(.notSupported))
                     return
                 }
 
@@ -83,13 +85,18 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
 // MARK: - Barcode Scan Coordinator
 
 @MainActor
-private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerDelegate {
+private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerDelegate, UIAdaptivePresentationControllerDelegate {
     nonisolated(unsafe) static var associatedKey: UInt8 = 0
     private var continuation: CheckedContinuation<BarcodeScanResult, Never>?
     private var hasResumed = false
 
     init(continuation: CheckedContinuation<BarcodeScanResult, Never>) {
         self.continuation = continuation
+    }
+
+    deinit {
+        guard !hasResumed else { return }
+        continuation?.resume(returning: .cancelled)
     }
 
     func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
@@ -111,6 +118,10 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
         dataScanner.dismiss(animated: true) { [weak self] in
             self?.resume(returning: .cancelled)
         }
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        resume(returning: .cancelled)
     }
 
     func resume(returning result: BarcodeScanResult) {
