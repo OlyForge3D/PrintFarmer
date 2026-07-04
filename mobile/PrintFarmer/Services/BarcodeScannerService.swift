@@ -7,6 +7,7 @@ import UIKit
 // MARK: - Barcode Scanner Service
 
 final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
+    @MainActor private var activeScanCoordinator: BarcodeScanCoordinator?
 
     var isAvailable: Bool {
         true
@@ -35,7 +36,13 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
 
         return await withCheckedContinuation { continuation in
             Task { @MainActor in
-                let coordinator = BarcodeScanCoordinator(continuation: continuation)
+                let coordinator = BarcodeScanCoordinator(
+                    continuation: continuation,
+                    onResume: { [weak self] coordinator in
+                        self?.releaseActiveScanCoordinator(coordinator)
+                    }
+                )
+                retainActiveScanCoordinator(coordinator)
                 let scanner = DataScannerViewController(
                     recognizedDataTypes: [.barcode(symbologies: [.ean13, .ean8, .upce, .code128, .code39, .qr])],
                     qualityLevel: .balanced,
@@ -68,6 +75,19 @@ final class BarcodeScannerService: BarcodeScannerProtocol, @unchecked Sendable {
     }
 
     @MainActor
+    private func retainActiveScanCoordinator(_ coordinator: BarcodeScanCoordinator) {
+        // NOTE: UIKit only weakly retains presentation delegates, and scanner-associated objects can disappear during dismiss.
+        // Keep the coordinator alive until resume releases it so a valid barcode is not converted to a deinit cancellation.
+        activeScanCoordinator = coordinator
+    }
+
+    @MainActor
+    private func releaseActiveScanCoordinator(_ coordinator: BarcodeScanCoordinator) {
+        guard activeScanCoordinator === coordinator else { return }
+        activeScanCoordinator = nil
+    }
+
+    @MainActor
     private static func topViewController(from root: UIViewController) -> UIViewController {
         if let presented = root.presentedViewController {
             return topViewController(from: presented)
@@ -89,9 +109,14 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
     nonisolated(unsafe) static var associatedKey: UInt8 = 0
     private var continuation: CheckedContinuation<BarcodeScanResult, Never>?
     private var hasResumed = false
+    private var onResume: ((BarcodeScanCoordinator) -> Void)?
 
-    init(continuation: CheckedContinuation<BarcodeScanResult, Never>) {
+    init(
+        continuation: CheckedContinuation<BarcodeScanResult, Never>,
+        onResume: @escaping (BarcodeScanCoordinator) -> Void
+    ) {
         self.continuation = continuation
+        self.onResume = onResume
     }
 
     deinit {
@@ -106,8 +131,8 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
                let payload = barcode.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
                !payload.isEmpty {
                 dataScanner.stopScanning()
-                dataScanner.dismiss(animated: true) { [weak self] in
-                    self?.resume(returning: .barcode(payload))
+                dataScanner.dismiss(animated: true) {
+                    self.resume(returning: .barcode(payload))
                 }
                 return
             }
@@ -115,8 +140,8 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
     }
 
     func dataScannerDidCancel(_ dataScanner: DataScannerViewController) {
-        dataScanner.dismiss(animated: true) { [weak self] in
-            self?.resume(returning: .cancelled)
+        dataScanner.dismiss(animated: true) {
+            self.resume(returning: .cancelled)
         }
     }
 
@@ -129,6 +154,8 @@ private final class BarcodeScanCoordinator: NSObject, DataScannerViewControllerD
         hasResumed = true
         continuation?.resume(returning: result)
         continuation = nil
+        onResume?(self)
+        onResume = nil
     }
 }
 #endif
