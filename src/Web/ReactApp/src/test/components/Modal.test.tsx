@@ -567,24 +567,80 @@ describe('Modal', () => {
       const user = userEvent.setup();
       render(
         <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
-          <button type="button" style={{ display: 'none' }}>Hidden action</button>
+          <button type="button" style={{ display: 'none' }}>Display-hidden action</button>
+          <button type="button" style={{ visibility: 'hidden' }}>Visibility-hidden action</button>
           <button type="button">Visible first</button>
           <button type="button">Visible second</button>
         </Modal>
       );
 
-      const hiddenAction = screen.getByText('Hidden action');
+      const displayHiddenAction = screen.getByText('Display-hidden action');
+      const visibilityHiddenAction = screen.getByText('Visibility-hidden action');
       const visibleFirst = screen.getByRole('button', { name: 'Visible first' });
       const visibleSecond = screen.getByRole('button', { name: 'Visible second' });
 
       await waitFor(() => expect(visibleFirst).toHaveFocus());
-      expect(hiddenAction).not.toHaveFocus();
+      expect(displayHiddenAction).not.toHaveFocus();
+      expect(visibilityHiddenAction).not.toHaveFocus();
 
       await user.tab();
       expect(visibleSecond).toHaveFocus();
 
       await user.tab();
       expect(visibleFirst).toHaveFocus();
+    });
+
+    it('should reject zero-size focusables but keep layoutless jsdom controls focusable', async () => {
+      const user = userEvent.setup();
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <button type="button" data-autofocus>Zero-size action</button>
+          <button type="button">Visible first</button>
+          <button type="button">Visible second</button>
+        </Modal>
+      );
+
+      const zeroSizeAction = screen.getByRole('button', { name: 'Zero-size action' });
+      const visibleFirst = screen.getByRole('button', { name: 'Visible first' });
+      const visibleSecond = screen.getByRole('button', { name: 'Visible second' });
+      Object.defineProperties(zeroSizeAction, {
+        offsetWidth: { configurable: true, value: 0 },
+        offsetHeight: { configurable: true, value: 0 },
+      });
+      Object.defineProperty(zeroSizeAction, 'getClientRects', {
+        configurable: true,
+        value: () => [{ width: 0, height: 0 }] as unknown as DOMRectList,
+      });
+
+      await waitFor(() => expect(visibleFirst).toHaveFocus());
+      expect(zeroSizeAction).not.toHaveFocus();
+
+      await user.tab();
+      expect(visibleSecond).toHaveFocus();
+
+      await user.tab();
+      expect(visibleFirst).toHaveFocus();
+    });
+
+    it('should keep fixed-position focusables when they have rendered size', async () => {
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <button type="button" data-autofocus style={{ position: 'fixed' }}>Fixed action</button>
+          <button type="button">Visible action</button>
+        </Modal>
+      );
+
+      const fixedAction = screen.getByRole('button', { name: 'Fixed action' });
+      Object.defineProperties(fixedAction, {
+        offsetWidth: { configurable: true, value: 0 },
+        offsetHeight: { configurable: true, value: 0 },
+      });
+      Object.defineProperty(fixedAction, 'getClientRects', {
+        configurable: true,
+        value: () => [{ width: 24, height: 12 }] as unknown as DOMRectList,
+      });
+
+      await waitFor(() => expect(fixedAction).toHaveFocus());
     });
   });
 

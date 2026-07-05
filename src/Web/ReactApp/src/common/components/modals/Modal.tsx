@@ -44,11 +44,16 @@ function isElementRendered(element: HTMLElement) {
     return false;
   }
 
-  if (navigator.userAgent.includes('jsdom')) {
-    return true;
+  const clientRects = Array.from(element.getClientRects());
+  const hasRenderedSize = element.offsetWidth > 0
+    || element.offsetHeight > 0
+    || clientRects.some((rect) => rect.width > 0 || rect.height > 0);
+
+  if (!hasRenderedSize) {
+    return clientRects.length === 0;
   }
 
-  return style.position === 'fixed' || element.getClientRects().length > 0 || element.offsetWidth > 0 || element.offsetHeight > 0;
+  return style.position === 'fixed' || element.offsetParent !== null;
 }
 
 function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
