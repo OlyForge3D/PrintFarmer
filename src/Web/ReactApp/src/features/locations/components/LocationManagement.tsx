@@ -446,7 +446,6 @@ export const LocationManagement: React.FC<LocationManagementProps> = ({
           </>
         }
       >
-        {/* TODO(a11y): Shared Modal needs focus trap and focus restore support. */}
         <div className="space-y-4">
           <p className="text-sm text-pf-text-secondary">
             Choose a new parent location. Select none to move this location to the top level.

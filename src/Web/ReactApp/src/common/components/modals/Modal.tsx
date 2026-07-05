@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, type ButtonVariant } from '@/common/components/ui/Button';
@@ -13,6 +13,147 @@ const sizeClasses: Record<ModalSize, string> = {
   xl: 'max-w-xl',
   full: 'max-w-7xl',
 };
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[contenteditable="true"]',
+  'summary',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+interface ManagedSiblingState {
+  inert: string | null;
+  ariaHidden: string | null;
+}
+
+const modalStack: HTMLElement[] = [];
+const managedSiblingState = new Map<HTMLElement, ManagedSiblingState>();
+let bodyScrollLockCount = 0;
+let previousBodyOverflow: string | null = null;
+
+function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) {
+    return [];
+  }
+
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+    if (
+      element.hasAttribute('disabled') ||
+      element.getAttribute('aria-hidden') === 'true' ||
+      element.closest('[hidden], [aria-hidden="true"]')
+    ) {
+      return false;
+    }
+
+    return element.tabIndex >= 0;
+  });
+}
+
+function restoreSiblingState(element: HTMLElement) {
+  const previousState = managedSiblingState.get(element);
+  if (!previousState) {
+    return;
+  }
+
+  if (previousState.inert === null) {
+    element.removeAttribute('inert');
+  } else {
+    element.setAttribute('inert', previousState.inert);
+  }
+
+  if (previousState.ariaHidden === null) {
+    element.removeAttribute('aria-hidden');
+  } else {
+    element.setAttribute('aria-hidden', previousState.ariaHidden);
+  }
+
+  managedSiblingState.delete(element);
+}
+
+function hideSiblingFromModal(element: HTMLElement) {
+  if (!managedSiblingState.has(element)) {
+    managedSiblingState.set(element, {
+      inert: element.getAttribute('inert'),
+      ariaHidden: element.getAttribute('aria-hidden'),
+    });
+  }
+
+  element.setAttribute('inert', '');
+  element.setAttribute('aria-hidden', 'true');
+}
+
+function applyBackgroundInertState() {
+  const activeModal = modalStack.at(-1);
+
+  if (!activeModal) {
+    for (const element of Array.from(managedSiblingState.keys())) {
+      restoreSiblingState(element);
+    }
+    return;
+  }
+
+  const bodyChildren = Array.from(document.body.children).filter(
+    (element): element is HTMLElement => element instanceof HTMLElement,
+  );
+
+  for (const element of bodyChildren) {
+    if (element === activeModal) {
+      restoreSiblingState(element);
+    } else {
+      hideSiblingFromModal(element);
+    }
+  }
+
+  for (const element of Array.from(managedSiblingState.keys())) {
+    if (!element.isConnected) {
+      managedSiblingState.delete(element);
+    }
+  }
+}
+
+function registerModalRoot(element: HTMLElement) {
+  if (!modalStack.includes(element)) {
+    modalStack.push(element);
+  }
+
+  applyBackgroundInertState();
+}
+
+function unregisterModalRoot(element: HTMLElement) {
+  const index = modalStack.lastIndexOf(element);
+  if (index !== -1) {
+    modalStack.splice(index, 1);
+  }
+
+  restoreSiblingState(element);
+  applyBackgroundInertState();
+}
+
+function getActiveModalRoot() {
+  return modalStack.at(-1) ?? null;
+}
+
+function lockBodyScroll() {
+  if (bodyScrollLockCount === 0) {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  bodyScrollLockCount += 1;
+}
+
+function unlockBodyScroll() {
+  bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
+
+  if (bodyScrollLockCount === 0) {
+    document.body.style.overflow = previousBodyOverflow ?? '';
+    previousBodyOverflow = null;
+  }
+}
 
 export interface ModalProps {
   /** Whether the modal is open */
@@ -100,6 +241,10 @@ export function Modal({
   closeButtonClassName,
   className,
 }: ModalProps) {
+  const modalRootRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+
   // Compute width class - explicit width takes precedence, then size, then default
   const widthClass = width ?? (size ? sizeClasses[size] : 'max-w-2xl');
 
@@ -113,12 +258,83 @@ export function Modal({
     [closeOnBackdrop, isDisabled, onClose]
   );
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const modalRoot = modalRootRef.current;
+    if (!modalRoot) return;
+
+    previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    registerModalRoot(modalRoot);
+
+    const frame = window.requestAnimationFrame(() => {
+      const focusTarget = getFocusableElements(modalRoot)[0] ?? modalRoot;
+      focusTarget.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      unregisterModalRoot(modalRoot);
+
+      const previouslyFocusedElement = previouslyFocusedElementRef.current;
+      if (previouslyFocusedElement?.isConnected) {
+        window.requestAnimationFrame(() => previouslyFocusedElement.focus());
+      }
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') {
+        return;
+      }
+
+      const modalRoot = modalRootRef.current;
+      if (!modalRoot || modalRoot !== getActiveModalRoot()) {
+        return;
+      }
+
+      const focusableElements = getFocusableElements(modalRoot);
+      if (focusableElements.length === 0) {
+        e.preventDefault();
+        modalRoot.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const containsFocus = activeElement ? modalRoot.contains(activeElement) : false;
+
+      if (e.shiftKey) {
+        if (!containsFocus || activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+        return;
+      }
+
+      if (!containsFocus || activeElement === lastElement) {
+        e.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
   // Handle Escape key globally with stopPropagation to prevent parent modals from closing
   useEffect(() => {
     if (!isOpen || isDisabled || !closeOnEscape) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && modalRootRef.current === getActiveModalRoot()) {
         e.preventDefault();
         e.stopPropagation();
         onClose();
@@ -132,10 +348,12 @@ export function Modal({
   // Lock body scroll when modal is open
   useEffect(() => {
     if (isOpen) {
-      document.body.style.overflow = 'hidden';
+      lockBodyScroll();
     }
     return () => {
-      document.body.style.overflow = '';
+      if (isOpen) {
+        unlockBodyScroll();
+      }
     };
   }, [isOpen]);
 
@@ -145,11 +363,13 @@ export function Modal({
 
   return createPortal(
     <div 
+      ref={modalRootRef}
       className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
-      aria-labelledby={title ? 'modal-title' : undefined}
+      aria-labelledby={title ? titleId : undefined}
+      tabIndex={-1}
     >
       <div 
         className={clsx(
@@ -170,7 +390,7 @@ export function Modal({
                 </div>
               )}
               {title && (
-                <h2 id="modal-title" className="text-lg font-semibold text-pf-text-primary">
+                <h2 id={titleId} className="text-lg font-semibold text-pf-text-primary">
                   {title}
                 </h2>
               )}

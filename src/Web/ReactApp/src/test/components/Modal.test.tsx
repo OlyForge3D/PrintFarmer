@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom';
+import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Modal } from '@/common/components/modals/Modal';
 
 describe('Modal', () => {
@@ -316,6 +318,124 @@ describe('Modal', () => {
       );
 
       expect(document.body.style.overflow).toBe('');
+    });
+
+    it('should move focus to the first focusable element when opened', async () => {
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} title="Focusable Modal">
+          <button type="button">First action</button>
+        </Modal>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Close modal' })).toHaveFocus();
+      });
+    });
+
+    it('should move focus to the dialog container when there are no focusable children', async () => {
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <p>Content only</p>
+        </Modal>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toHaveFocus();
+      });
+    });
+
+    it('should trap Tab and Shift+Tab within the dialog', async () => {
+      const user = userEvent.setup();
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <button type="button">First action</button>
+          <button type="button">Second action</button>
+        </Modal>
+      );
+
+      const firstAction = screen.getByRole('button', { name: 'First action' });
+      const secondAction = screen.getByRole('button', { name: 'Second action' });
+
+      await waitFor(() => expect(firstAction).toHaveFocus());
+
+      await user.tab();
+      expect(secondAction).toHaveFocus();
+
+      await user.tab();
+      expect(firstAction).toHaveFocus();
+
+      await user.tab({ shift: true });
+      expect(secondAction).toHaveFocus();
+    });
+
+    it('should keep focus on the dialog container when trapping with no focusable children', async () => {
+      const user = userEvent.setup();
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <p>Content only</p>
+        </Modal>
+      );
+
+      const dialog = screen.getByRole('dialog');
+      await waitFor(() => expect(dialog).toHaveFocus());
+
+      await user.tab();
+      expect(dialog).toHaveFocus();
+    });
+
+    it('should restore focus to the previously focused trigger when closed', async () => {
+      const user = userEvent.setup();
+
+      function ModalHarness() {
+        const [isOpen, setIsOpen] = useState(false);
+
+        return (
+          <>
+            <button type="button" onClick={() => setIsOpen(true)}>
+              Open modal
+            </button>
+            <Modal isOpen={isOpen} onClose={() => setIsOpen(false)}>
+              <p>Content</p>
+            </Modal>
+          </>
+        );
+      }
+
+      render(<ModalHarness />);
+
+      const openButton = screen.getByRole('button', { name: 'Open modal' });
+      await user.click(openButton);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Close modal' })).toHaveFocus());
+
+      await user.click(screen.getByRole('button', { name: 'Close modal' }));
+
+      await waitFor(() => {
+        expect(openButton).toHaveFocus();
+      });
+    });
+
+    it('should mark background body siblings inert and aria-hidden while open', () => {
+      const background = document.createElement('button');
+      background.type = 'button';
+      background.textContent = 'Background action';
+      document.body.appendChild(background);
+
+      const { unmount } = render(
+        <Modal isOpen={true} onClose={vi.fn()}>
+          <p>Content</p>
+        </Modal>
+      );
+
+      expect(background).toHaveAttribute('inert');
+      expect(background).toHaveAttribute('aria-hidden', 'true');
+      expect(screen.getByRole('dialog')).not.toHaveAttribute('inert');
+      expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-hidden');
+
+      unmount();
+
+      expect(background).not.toHaveAttribute('inert');
+      expect(background).not.toHaveAttribute('aria-hidden');
+      background.remove();
     });
   });
 
