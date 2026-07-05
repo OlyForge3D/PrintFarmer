@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Tasks;
 using FluentValidation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -10,6 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/tasks")]
+[Authorize]
 public class TasksController(IUserTaskService taskService, IValidator<CreateManualTaskDto> createManualTaskValidator) : ControllerBase
 {
     private readonly IUserTaskService _taskService = taskService ?? throw new ArgumentNullException(nameof(taskService));

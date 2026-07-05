@@ -34,6 +34,7 @@ public class AuthController(
     private readonly ILogger<AuthController> _logger = logger;
 
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -56,6 +57,7 @@ public class AuthController(
     }
 
     [HttpPost("register")]
+    [AllowAnonymous]
     public async Task<ActionResult<AuthenticationResult>> RegisterAsync([FromBody] RegisterRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

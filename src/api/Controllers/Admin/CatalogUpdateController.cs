@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -11,6 +12,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 [ApiController]
 [Route("api/admin/catalog")]
 [Tags("Admin - Catalog Updates")]
+[Authorize(Roles = "farm_admin")]
 public class CatalogUpdateController : ControllerBase
 {
     private readonly ICatalogUpdateService _updateService;

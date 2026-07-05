@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -11,6 +12,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 [ApiController]
 [Route("api/admin/data")]
 [Tags("Admin - Data Management")]
+[Authorize(Roles = "farm_admin")]
 public class AdminDataController : ControllerBase
 {
     private readonly IDataExportService _exportService;
@@ -188,14 +190,13 @@ public class AdminDataController : ControllerBase
     /// <summary>
     /// Reload seed data from YAML files (re-run seeding process)
     /// </summary>
-    /// <param name="ct">Cancellation token</param>
     /// <returns>Success status</returns>
     /// <response code="200">Seed data reload completed successfully</response>
     /// <response code="500">If there was an error during seed reload</response>
     [HttpPost("seed/reload")]
     [ProducesResponseType(200)]
     [ProducesResponseType(500)]
-    public async Task<IActionResult> ReloadSeedDataAsync(CancellationToken ct)
+    public async Task<IActionResult> ReloadSeedDataAsync()
     {
         try
         {

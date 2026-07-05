@@ -71,6 +71,10 @@ public static class AuthenticationStartup
         // Add Authorization with custom policies
         services.AddAuthorization(options =>
         {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build();
+
             options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
             options.AddPolicy("RequireAdmin", policy =>
             {
