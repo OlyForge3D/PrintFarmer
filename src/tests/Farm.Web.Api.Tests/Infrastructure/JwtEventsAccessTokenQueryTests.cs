@@ -1,10 +1,13 @@
-using System.Text.Encodings.Web;
-using Farm.Web.Api;
+﻿using Farm.Web.Api;
+using Farm.Web.Api.Startup;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Infrastructure;
@@ -67,5 +70,39 @@ public class JwtEventsAccessTokenQueryTests
     {
         string? token = await RunOnMessageReceivedAsync("/api/printers", queryString: null, authHeader: "Bearer header-token");
         Assert.Equal("header-token", token);
+    }
+
+    [Fact]
+    public async Task AddPrintFarmerAuthentication_Production_RegistersHubQueryAccessTokenReader()
+    {
+        ServiceCollection services = new();
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "0123456789abcdef0123456789abcdef",
+                ["Jwt:Issuer"] = "PrintFarmer",
+                ["Jwt:Audience"] = "PrintFarmer"
+            })
+            .Build();
+        Mock<IWebHostEnvironment> environment = new();
+        environment.SetupGet(e => e.EnvironmentName).Returns("Production");
+
+        _ = services.AddLogging();
+        _ = services.AddPrintFarmerAuthentication(configuration, environment.Object);
+        using ServiceProvider provider = services.BuildServiceProvider();
+        JwtBearerOptions options = provider.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>().Get("Bearer");
+
+        DefaultHttpContext httpContext = new();
+        httpContext.Request.Path = "/hubs/maintenance";
+        httpContext.Request.QueryString = new QueryString("?access_token=prod-query-token");
+        AuthenticationScheme scheme = new(
+            JwtBearerDefaults.AuthenticationScheme,
+            displayName: null,
+            handlerType: typeof(JwtBearerHandler));
+        MessageReceivedContext context = new(httpContext, scheme, options);
+
+        await options.Events.OnMessageReceived(context);
+
+        Assert.Equal("prod-query-token", context.Token);
     }
 }

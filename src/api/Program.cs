@@ -371,7 +371,7 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.MapOpenApi();
+    _ = app.MapOpenApi().AllowAnonymous();
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -424,10 +424,12 @@ app.UseAuthorization();
 
 // Configure API routing and SignalR hubs
 app.MapControllers();
-app.MapHub<PrinterHub>("/hubs/printers");
-app.MapHub<HarvestHub>("/hubs/harvest");
-app.MapHub<MaintenanceHub>("/hubs/maintenance");
-app.MapHub<NfcHub>("/hubs/nfc");
+
+// Hub authentication tightening is tracked separately; current React clients connect without tokens.
+app.MapHub<PrinterHub>("/hubs/printers").AllowAnonymous();
+app.MapHub<HarvestHub>("/hubs/harvest").AllowAnonymous();
+app.MapHub<MaintenanceHub>("/hubs/maintenance").AllowAnonymous();
+app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
 if (slicerModuleEnabled)
@@ -482,7 +484,7 @@ try
 {
     if (app.Services.GetService<MeterProvider>() != null)
     {
-        _ = app.MapPrometheusScrapingEndpoint();
+        _ = app.MapPrometheusScrapingEndpoint().AllowAnonymous();
     }
 }
 catch
@@ -687,7 +689,7 @@ if (isMonolithMode)
     string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        _ = app.MapFallbackToFile("index.html");
+        _ = app.MapFallbackToFile("index.html").AllowAnonymous();
     }
 }
 
