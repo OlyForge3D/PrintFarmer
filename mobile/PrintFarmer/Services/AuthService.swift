@@ -32,7 +32,7 @@ actor AuthService: AuthServiceProtocol {
     }
 
     /// Authenticate against a Printfarmer server.
-    /// Sets the API client's base URL and stores the JWT for the active server on success.
+    /// Stores the JWT and applies it to the shared API client for the active server on success.
     func login(serverURL: String, username: String, password: String) async throws -> AuthResponse {
         guard let normalizedURL = APIClient.normalizedServerURLString(serverURL),
               let url = URL(string: normalizedURL) else {
@@ -57,6 +57,9 @@ actor AuthService: AuthServiceProtocol {
             ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
             serverId: server.id
         )
+        await apiClient.updateBaseURL(server.baseURL)
+        await apiClient.setAccessToken(token)
+        await registerTokenExpiryChecker()
         await activate(server)
         return response
     }
