@@ -2848,7 +2848,7 @@ export class ApiClient {
   }
 
   async removePrinterFromLocation(printerId: string): Promise<Record<string, unknown>> {
-    const response = await this.client.post(`/printers/${printerId}/location/remove`, {});
+    const response = await this.client.delete(`/printers/${printerId}/location`);
     return response.data;
   }
 
