@@ -24,6 +24,8 @@ const FOCUSABLE_SELECTOR = [
   'summary',
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
+const AUTOFOCUS_SELECTOR = '[data-autofocus], [autofocus]';
+const MODAL_OWNED_SELECTOR = '[data-sonner-toaster], [data-modal-keep-live], [data-modal-portal]';
 
 interface ManagedSiblingState {
   inert: string | null;
@@ -35,6 +37,20 @@ const managedSiblingState = new Map<HTMLElement, ManagedSiblingState>();
 let bodyScrollLockCount = 0;
 let previousBodyOverflow: string | null = null;
 
+function isElementRendered(element: HTMLElement) {
+  const style = window.getComputedStyle(element);
+
+  if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
+    return false;
+  }
+
+  if (navigator.userAgent.includes('jsdom')) {
+    return true;
+  }
+
+  return style.position === 'fixed' || element.getClientRects().length > 0 || element.offsetWidth > 0 || element.offsetHeight > 0;
+}
+
 function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
   if (!container) {
     return [];
@@ -44,7 +60,8 @@ function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
     if (
       element.hasAttribute('disabled') ||
       element.getAttribute('aria-hidden') === 'true' ||
-      element.closest('[hidden], [aria-hidden="true"]')
+      element.closest('[hidden], [aria-hidden="true"]') ||
+      !isElementRendered(element)
     ) {
       return false;
     }
@@ -96,21 +113,37 @@ function applyBackgroundInertState() {
     return;
   }
 
-  const bodyChildren = Array.from(document.body.children).filter(
-    (element): element is HTMLElement => element instanceof HTMLElement,
-  );
+  const hiddenThisPass = new Set<HTMLElement>();
 
-  for (const element of bodyChildren) {
-    if (element === activeModal) {
-      restoreSiblingState(element);
-    } else {
-      hideSiblingFromModal(element);
+  const applyToChildren = (container: ParentNode) => {
+    for (const child of Array.from(container.children)) {
+      if (!(child instanceof HTMLElement)) {
+        continue;
+      }
+
+      if (child === activeModal || child.matches(MODAL_OWNED_SELECTOR)) {
+        restoreSiblingState(child);
+        continue;
+      }
+
+      if (child.contains(activeModal) || child.querySelector(MODAL_OWNED_SELECTOR)) {
+        restoreSiblingState(child);
+        applyToChildren(child);
+        continue;
+      }
+
+      hideSiblingFromModal(child);
+      hiddenThisPass.add(child);
     }
-  }
+  };
+
+  applyToChildren(document.body);
 
   for (const element of Array.from(managedSiblingState.keys())) {
     if (!element.isConnected) {
       managedSiblingState.delete(element);
+    } else if (!hiddenThisPass.has(element)) {
+      restoreSiblingState(element);
     }
   }
 }
@@ -271,7 +304,14 @@ export function Modal({
     registerModalRoot(modalRoot);
 
     const frame = window.requestAnimationFrame(() => {
-      const focusTarget = getFocusableElements(modalRoot)[0] ?? modalRoot;
+      if (document.activeElement instanceof HTMLElement && modalRoot.contains(document.activeElement)) {
+        return;
+      }
+
+      const focusableElements = getFocusableElements(modalRoot);
+      const focusTarget = focusableElements.find((element) => element.matches(AUTOFOCUS_SELECTOR))
+        ?? focusableElements[0]
+        ?? modalRoot;
       focusTarget.focus();
     });
 
@@ -310,6 +350,10 @@ export function Modal({
       const lastElement = focusableElements[focusableElements.length - 1];
       const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const containsFocus = activeElement ? modalRoot.contains(activeElement) : false;
+      // Body-portaled modal-owned UI (for example dropdowns) manages its own focus movement.
+      if (!containsFocus && activeElement?.closest(MODAL_OWNED_SELECTOR)) {
+        return;
+      }
 
       if (e.shiftKey) {
         if (!containsFocus || activeElement === firstElement) {

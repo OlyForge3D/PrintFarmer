@@ -320,15 +320,41 @@ describe('Modal', () => {
       expect(document.body.style.overflow).toBe('');
     });
 
-    it('should move focus to the first focusable element when opened', async () => {
+    it('should move focus to the first focusable element when no child requests focus', async () => {
       render(
-        <Modal isOpen={true} onClose={vi.fn()} title="Focusable Modal">
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
           <button type="button">First action</button>
         </Modal>
       );
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Close modal' })).toHaveFocus();
+        expect(screen.getByRole('button', { name: 'First action' })).toHaveFocus();
+      });
+    });
+
+    it('should preserve focus when a child input uses native autoFocus', async () => {
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} title="Autofocus Modal">
+          <input aria-label="Search" autoFocus />
+        </Modal>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus();
+      });
+      expect(screen.getByRole('button', { name: 'Close modal' })).not.toHaveFocus();
+    });
+
+    it('should prefer data-autofocus when no child already has focus', async () => {
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} title="Data Autofocus Modal">
+          <button type="button">First action</button>
+          <button type="button" data-autofocus>Preferred action</button>
+        </Modal>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Preferred action' })).toHaveFocus();
       });
     });
 
@@ -436,6 +462,129 @@ describe('Modal', () => {
       expect(background).not.toHaveAttribute('inert');
       expect(background).not.toHaveAttribute('aria-hidden');
       background.remove();
+    });
+
+    it('should keep toaster and modal live opt-out nodes interactive while open', async () => {
+      const user = userEvent.setup();
+      const background = document.createElement('button');
+      background.type = 'button';
+      background.textContent = 'Background action';
+      const toaster = document.createElement('div');
+      toaster.setAttribute('data-sonner-toaster', '');
+      const toastAction = document.createElement('button');
+      toastAction.type = 'button';
+      toastAction.textContent = 'Undo';
+      const onToastAction = vi.fn();
+      toastAction.addEventListener('click', onToastAction);
+      toaster.appendChild(toastAction);
+      const keepLive = document.createElement('div');
+      keepLive.setAttribute('data-modal-keep-live', '');
+      keepLive.textContent = 'Live region';
+      document.body.append(background, toaster, keepLive);
+
+      const { unmount } = render(
+        <Modal isOpen={true} onClose={vi.fn()}>
+          <p>Content</p>
+        </Modal>
+      );
+
+      expect(background).toHaveAttribute('inert');
+      expect(background).toHaveAttribute('aria-hidden', 'true');
+      expect(toaster).not.toHaveAttribute('inert');
+      expect(toaster).not.toHaveAttribute('aria-hidden');
+      expect(keepLive).not.toHaveAttribute('inert');
+      expect(keepLive).not.toHaveAttribute('aria-hidden');
+
+      await user.click(toastAction);
+      expect(onToastAction).toHaveBeenCalledTimes(1);
+
+      unmount();
+
+      expect(background).not.toHaveAttribute('inert');
+      expect(background).not.toHaveAttribute('aria-hidden');
+      background.remove();
+      toaster.remove();
+      keepLive.remove();
+    });
+
+    it('should keep nested toaster nodes live while inerting other root content', () => {
+      const appRoot = document.createElement('div');
+      const appButton = document.createElement('button');
+      appButton.type = 'button';
+      appButton.textContent = 'App action';
+      const toaster = document.createElement('div');
+      toaster.setAttribute('data-sonner-toaster', '');
+      toaster.textContent = 'Toast';
+      appRoot.append(appButton, toaster);
+      document.body.appendChild(appRoot);
+
+      const { unmount } = render(
+        <Modal isOpen={true} onClose={vi.fn()}>
+          <p>Content</p>
+        </Modal>
+      );
+
+      expect(appRoot).not.toHaveAttribute('inert');
+      expect(appRoot).not.toHaveAttribute('aria-hidden');
+      expect(appButton).toHaveAttribute('inert');
+      expect(appButton).toHaveAttribute('aria-hidden', 'true');
+      expect(toaster).not.toHaveAttribute('inert');
+      expect(toaster).not.toHaveAttribute('aria-hidden');
+
+      unmount();
+
+      expect(appButton).not.toHaveAttribute('inert');
+      expect(appButton).not.toHaveAttribute('aria-hidden');
+      appRoot.remove();
+    });
+
+    it('should not pull focus back from a modal-owned body portal on Tab', async () => {
+      const portal = document.createElement('div');
+      portal.setAttribute('data-modal-portal', '');
+      const portalButton = document.createElement('button');
+      portalButton.type = 'button';
+      portalButton.textContent = 'Portal action';
+      portal.appendChild(portalButton);
+      document.body.appendChild(portal);
+
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <button type="button">First action</button>
+          <button type="button">Second action</button>
+        </Modal>
+      );
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'First action' })).toHaveFocus());
+
+      portalButton.focus();
+      fireEvent.keyDown(document, { key: 'Tab' });
+
+      expect(portalButton).toHaveFocus();
+      portal.remove();
+    });
+
+    it('should exclude CSS-hidden focusable elements from initial focus and Tab cycle', async () => {
+      const user = userEvent.setup();
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} showCloseButton={false}>
+          <button type="button" style={{ display: 'none' }}>Hidden action</button>
+          <button type="button">Visible first</button>
+          <button type="button">Visible second</button>
+        </Modal>
+      );
+
+      const hiddenAction = screen.getByText('Hidden action');
+      const visibleFirst = screen.getByRole('button', { name: 'Visible first' });
+      const visibleSecond = screen.getByRole('button', { name: 'Visible second' });
+
+      await waitFor(() => expect(visibleFirst).toHaveFocus());
+      expect(hiddenAction).not.toHaveFocus();
+
+      await user.tab();
+      expect(visibleSecond).toHaveFocus();
+
+      await user.tab();
+      expect(visibleFirst).toHaveFocus();
     });
   });
 
