@@ -26,6 +26,7 @@ export interface LocationStats {
   totalPrinters: number;
   online: number;
   offline: number;
+  attention: number;
   printing: number;
   idle: number;
   activeJobs: number;
@@ -34,19 +35,24 @@ export interface LocationStats {
 export function computeStats(printers: LocationSubtreePrinter[]): LocationStats {
   const online = printers.filter(p => p.isOnline);
   const printing = online.filter(p => p.currentState === 'Printing');
+  const attentionStates = new Set(['Paused', 'Error', 'Failed', 'Cancelled', 'Cancelling', 'Offline']);
   const idle = online.filter(p => 
     p.currentState === 'Idle' || 
     p.currentState === 'Ready' || 
     p.currentState === 'Operational'
   );
+  const attention = printers.filter((printer) => (
+    !printer.isOnline || attentionStates.has(printer.currentState ?? '')
+  ));
 
   return {
     totalPrinters: printers.length,
     online: online.length,
     offline: printers.length - online.length,
+    attention: attention.length,
     printing: printing.length,
     idle: idle.length,
-    activeJobs: printing.length,
+    activeJobs: printers.filter((printer) => Boolean(printer.currentJobName)).length || printing.length,
   };
 }
 

@@ -35,7 +35,6 @@ import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
-import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
@@ -196,7 +195,6 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'hardware.nfc': <NfcDevicesPage />,
   'hardware.printer-groups': <PrinterGroupsPage embedded />,
   'hardware.nfc-bindings': <NfcBindingsPage embedded />,
-  'hardware.locations': <LocationManagementAdminPage />,
   'hardware.custom-fields': <CustomFieldsAdminPage />,
   'operations.status': <SystemStatusPage />,
   'operations.workers': (

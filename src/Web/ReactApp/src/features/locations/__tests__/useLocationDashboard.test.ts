@@ -26,6 +26,7 @@ describe('computeStats', () => {
       totalPrinters: 0,
       online: 0,
       offline: 0,
+      attention: 0,
       printing: 0,
       idle: 0,
       activeJobs: 0,
@@ -44,6 +45,7 @@ describe('computeStats', () => {
     expect(stats.totalPrinters).toBe(4);
     expect(stats.online).toBe(3);
     expect(stats.offline).toBe(1);
+    expect(stats.attention).toBe(1);
     expect(stats.printing).toBe(1);
     expect(stats.idle).toBe(2);
     expect(stats.activeJobs).toBe(1);

@@ -33,6 +33,9 @@ vi.mock('@/common/components/ui', () => ({
   Badge: ({ children, variant, size, className }: { children: React.ReactNode; variant?: string; size?: string; className?: string }) => (
     <span data-testid="badge" data-variant={variant} data-size={size} className={className}>{children}</span>
   ),
+  Button: ({ children, onClick, className, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => (
+    <button className={className} onClick={onClick} {...rest}>{children}</button>
+  ),
 }));
 
 vi.mock('@/common/components/icons/MdiIcons', () => ({
@@ -107,8 +110,7 @@ describe('LocationPrinterList', () => {
   it('calls onPrinterClick when a printer card is clicked', () => {
     const onClick = vi.fn();
     render(<LocationPrinterList printers={printers} onPrinterClick={onClick} />);
-    const cards = screen.getAllByTestId('card-body');
-    fireEvent.click(cards[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Prusa MK4/i }));
     expect(onClick).toHaveBeenCalledWith('p1');
   });
 
