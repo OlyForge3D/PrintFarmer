@@ -13,13 +13,13 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/filaman")]
 [Tags("FilamentManager")]
+[AllowAnonymous] // FilamentManager firmware has no PrintFarmer user session; this exposes only minimal printer selector data.
 public class FilaManController(IPrintersService printersService) : ControllerBase
 {
     /// <summary>
     /// Returns a minimal list of enabled printers (id, name, backend).
     /// Called by FilamentManager firmware to populate its printer selector.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("printers")]
     [ProducesResponseType(typeof(FilaManPrinterDto[]), 200)]
     public async Task<ActionResult<FilaManPrinterDto[]>> GetPrintersAsync(CancellationToken ct)

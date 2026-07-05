@@ -12,6 +12,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/system")]
+[AllowAnonymous] // Frontend reads capabilities and feature flags before login to decide which UI to render.
 public class SystemCapabilitiesController(
     IConfiguration configuration,
     IFeatureFlagService featureFlagService) : ControllerBase
@@ -71,7 +72,6 @@ public class SystemCapabilitiesController(
     /// </summary>
     /// <returns>Dictionary of feature keys and their enabled states.</returns>
     [HttpGet("feature-flags")]
-    [AllowAnonymous]
     [ResponseCache(Duration = 300)]
     [ProducesResponseType(typeof(Dictionary<string, bool>), StatusCodes.Status200OK)]
     public ActionResult<Dictionary<string, bool>> GetFeatureFlags()

@@ -17,12 +17,12 @@ public class AdminDataControllerTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         // Create a fresh factory for each test to ensure database isolation
-        _factory = new CustomWebApplicationFactory();
-        _client = _factory.CreateClient();
+        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
 
         // Ensure database is reset to a known baseline state.
         // Note: the application seeds baseline catalog data on startup.
         await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -31,6 +31,31 @@ public class AdminDataControllerTests : IAsyncLifetime
         {
             await _factory.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task ExportFull_Unauthenticated_Returns401()
+    {
+        using HttpClient anon = _factory!.CreateClient();
+        HttpResponseMessage response = await anon.GetAsync("/api/admin/data/export/full");
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ExportFull_NonAdminRole_Returns403()
+    {
+        using HttpClient nonAdmin = await _factory!.CreateAuthenticatedClientAsync(
+            username: "admin-data-nonadmin",
+            email: "admin-data-nonadmin@example.com");
+        HttpResponseMessage response = await nonAdmin.GetAsync("/api/admin/data/export/full");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task ExportFull_Admin_Returns200()
+    {
+        HttpResponseMessage response = await _client!.GetAsync("/api/admin/data/export/full");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]

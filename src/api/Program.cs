@@ -317,7 +317,8 @@ if (slicerModuleEnabled)
 // to ensure the database schema exists before any SettingsService queries run.
 
 // Early liveness endpoint (process up) + readiness separate
-app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
+app.MapGet("/livez", () => Results.Ok(new { status = "alive" }))
+    .AllowAnonymous();
 
 // Deferred console redirection (avoids blocking early host binding). Enable via ENABLE_CONSOLE_REDIRECTION=true
 if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION"), "true", StringComparison.OrdinalIgnoreCase))
@@ -370,7 +371,7 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.MapOpenApi();
+    _ = app.MapOpenApi().AllowAnonymous();
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -423,10 +424,12 @@ app.UseAuthorization();
 
 // Configure API routing and SignalR hubs
 app.MapControllers();
-app.MapHub<PrinterHub>("/hubs/printers");
-app.MapHub<HarvestHub>("/hubs/harvest");
-app.MapHub<MaintenanceHub>("/hubs/maintenance");
-app.MapHub<NfcHub>("/hubs/nfc");
+
+// Hub authentication tightening is tracked separately; current React clients connect without tokens.
+app.MapHub<PrinterHub>("/hubs/printers").AllowAnonymous();
+app.MapHub<HarvestHub>("/hubs/harvest").AllowAnonymous();
+app.MapHub<MaintenanceHub>("/hubs/maintenance").AllowAnonymous();
+app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
 if (slicerModuleEnabled)
@@ -481,7 +484,7 @@ try
 {
     if (app.Services.GetService<MeterProvider>() != null)
     {
-        _ = app.MapPrometheusScrapingEndpoint();
+        _ = app.MapPrometheusScrapingEndpoint().AllowAnonymous();
     }
 }
 catch
@@ -502,7 +505,7 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     {
         await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
-});
+}).AllowAnonymous();
 
 // Alias route for clients expecting the comprehensive health endpoint under /api prefix
 app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
@@ -511,7 +514,7 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
     {
         await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
-});
+}).AllowAnonymous();
 
 // Minimal API for network discovery settings
 // Helper: Map between model and DTO
@@ -552,7 +555,8 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 });
 
 // Basic health endpoint for UI ping and tests
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }))
+    .AllowAnonymous();
 
 // Build version endpoint (uses /api/system/version to avoid conflict with OctoPrint-compat /api/version)
 app.MapGet("/api/system/version", () =>
@@ -580,7 +584,7 @@ app.MapGet("/api/system/version", () =>
         runtime = RuntimeInformation.FrameworkDescription,
         timestamp = DateTime.UtcNow,
     });
-});
+}).AllowAnonymous();
 
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
 
@@ -685,7 +689,7 @@ if (isMonolithMode)
     string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        _ = app.MapFallbackToFile("index.html");
+        _ = app.MapFallbackToFile("index.html").AllowAnonymous();
     }
 }
 

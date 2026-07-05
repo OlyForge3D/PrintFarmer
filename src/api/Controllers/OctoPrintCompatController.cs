@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api")]
-[AllowAnonymous]
+[AllowAnonymous] // Uses the OctoPrint API-key filter instead of PrintFarmer bearer auth for slicer compatibility.
 [OctoPrintApiKey] // Validates API key based on OctoPrintSettings.RequireApiKey
 public class OctoPrintCompatController : ControllerBase
 {

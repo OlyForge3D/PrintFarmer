@@ -2,6 +2,7 @@
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Slicer.Module.Api.Controllers;
@@ -11,6 +12,9 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/slicers")]
+
+// Slicer workers authenticate through the slicer API-key filters, not PrintFarmer bearer tokens.
+[AllowAnonymous]
 [RequireSlicerApiKey]
 public class SlicersController(ISlicersService service) : ControllerBase
 {
