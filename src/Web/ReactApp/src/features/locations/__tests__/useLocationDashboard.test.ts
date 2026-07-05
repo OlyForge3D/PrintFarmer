@@ -19,6 +19,17 @@ const makeNode = (overrides: Partial<LocationTreeNode> = {}): LocationTreeNode =
   ...overrides,
 });
 
+const makePrinter = (overrides: Partial<LocationSubtreePrinter> = {}): LocationSubtreePrinter => ({
+  printerId: 'p1',
+  printerName: 'Printer 1',
+  locationId: 'loc-1',
+  locationName: 'Rack 1',
+  isOnline: true,
+  status: 'Idle',
+  currentJobName: null,
+  ...overrides,
+});
+
 describe('computeStats', () => {
   it('returns zeros for empty array', () => {
     const stats = computeStats([]);
@@ -35,24 +46,24 @@ describe('computeStats', () => {
 
   it('computes correct counts for mixed statuses', () => {
     const printers = [
-      { isOnline: true, currentState: 'Printing' },
-      { isOnline: true, currentState: 'Idle' },
-      { isOnline: true, currentState: 'Ready' },
-      { isOnline: false, currentState: 'Disconnected' },
-    ] as LocationSubtreePrinter[];
+      makePrinter({ printerId: 'printing', status: 'Printing', currentJobName: 'gearbox.gcode' }),
+      makePrinter({ printerId: 'idle', status: 'Idle' }),
+      makePrinter({ printerId: 'paused', status: 'Paused' }),
+      makePrinter({ printerId: 'offline', isOnline: false, status: 'Disconnected' }),
+    ];
 
     const stats = computeStats(printers);
     expect(stats.totalPrinters).toBe(4);
     expect(stats.online).toBe(3);
     expect(stats.offline).toBe(1);
-    expect(stats.attention).toBe(1);
+    expect(stats.attention).toBe(2);
     expect(stats.printing).toBe(1);
-    expect(stats.idle).toBe(2);
+    expect(stats.idle).toBe(1);
     expect(stats.activeJobs).toBe(1);
   });
 
-  it('counts Operational state as idle', () => {
-    const printers = [{ isOnline: true, currentState: 'Operational' }] as LocationSubtreePrinter[];
+  it('counts canonical Idle status as idle', () => {
+    const printers = [makePrinter({ status: 'Idle' })];
     const stats = computeStats(printers);
     expect(stats.idle).toBe(1);
   });

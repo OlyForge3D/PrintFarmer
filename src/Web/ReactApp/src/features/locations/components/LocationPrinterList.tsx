@@ -7,10 +7,8 @@ export interface LocationPrinterListPrinter {
   id: string;
   name: string;
   isOnline: boolean;
-  state?: string | null;
-  progress?: number | null;
-  hotendTemp?: number | null;
-  bedTemp?: number | null;
+  status: string;
+  currentJobName?: string | null;
 }
 
 interface LocationPrinterListProps {
@@ -30,14 +28,9 @@ const STATUS_BADGE_VARIANT: Record<string, 'success' | 'error' | 'primary' | 'wa
 
 function getPrinterStatusKey(printer: LocationPrinterListPrinter): string {
   if (!printer.isOnline) return 'offline';
-  if (printer.state === 'Printing') return 'printing';
-  if (printer.state === 'Idle' || printer.state === 'Ready' || printer.state === 'Operational') return 'idle';
+  if (printer.status === 'Printing') return 'printing';
+  if (printer.status === 'Idle') return 'idle';
   return 'online';
-}
-
-function formatTemp(temp: number | null | undefined): string {
-  if (temp === undefined || temp === null) return '—';
-  return `${Math.round(temp)}°C`;
 }
 
 export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
@@ -165,24 +158,16 @@ function PrinterRowContent({
           <p className="truncate font-medium text-pf-text-primary">
             {printer.name}
           </p>
-          {printer.state && (
+          {printer.status && (
             <p className="text-sm text-pf-text-secondary">
-              {printer.state}
-              {printer.progress !== undefined && printer.progress !== null && printer.progress > 0
-                ? ` — ${Math.round(printer.progress)}%`
-                : ''}
+              {printer.status}
+              {printer.currentJobName ? ` — ${printer.currentJobName}` : ''}
             </p>
           )}
         </div>
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-4">
-        {printer.isOnline && (
-          <div className="hidden gap-3 text-sm text-pf-text-secondary md:flex">
-            <span title="Hotend">🔥 {formatTemp(printer.hotendTemp)}</span>
-            <span title="Bed">🛏️ {formatTemp(printer.bedTemp)}</span>
-          </div>
-        )}
         <Badge variant={STATUS_BADGE_VARIANT[statusKey] ?? 'default'} size="sm">
           {statusKey}
         </Badge>

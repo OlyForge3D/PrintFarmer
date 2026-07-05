@@ -41,22 +41,18 @@ const mockPrinters = [
     printerName: 'Printer One',
     locationId: 'loc-1',
     locationName: 'Warehouse A',
-    backendType: 'Moonraker',
     isOnline: true,
-    currentState: 'Printing',
+    status: 'Printing',
     currentJobName: 'gearbox.gcode',
-    progressPercent: 42,
   },
   {
     printerId: 'p2',
     printerName: 'Printer Two',
     locationId: 'loc-2',
     locationName: 'Room 1',
-    backendType: 'Moonraker',
     isOnline: false,
-    currentState: 'Offline',
+    status: 'Offline',
     currentJobName: null,
-    progressPercent: null,
   },
 ];
 
@@ -175,7 +171,9 @@ describe('LocationDashboardPage', () => {
     renderPage();
 
     expect(screen.getAllByText('Printer One').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Printing — 42%/)).toBeInTheDocument();
+    expect(screen.getByText(/Printing — gearbox\.gcode/)).toBeInTheDocument();
+    expect(screen.queryByText(/0%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/42%/)).not.toBeInTheDocument();
     expect(screen.queryByText('undefined')).not.toBeInTheDocument();
   });
 

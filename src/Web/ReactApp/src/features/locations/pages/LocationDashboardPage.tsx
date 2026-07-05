@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Badge, Button, Card, ProgressBar, Spinner, Tabs } from '@/common/components/ui';
+import { Badge, Button, Card, Spinner, Tabs } from '@/common/components/ui';
 import {
   AlertIcon,
   EditIcon,
@@ -60,8 +60,8 @@ function toPrinterListItem(printer: LocationSubtreePrinter): LocationPrinterList
     id: printer.printerId,
     name: printer.printerName,
     isOnline: printer.isOnline,
-    state: printer.currentState,
-    progress: printer.progressPercent,
+    status: printer.status,
+    currentJobName: printer.currentJobName,
   };
 }
 
@@ -124,7 +124,7 @@ export const LocationDashboardPage: React.FC = () => {
     [subtreePrinters],
   );
   const activeJobs = useMemo(
-    () => subtreePrinters.filter((printer) => printer.currentJobName || printer.currentState === 'Printing'),
+    () => subtreePrinters.filter((printer) => printer.currentJobName || printer.status === 'Printing'),
     [subtreePrinters],
   );
   const directPrinterCount = selectedNode
@@ -339,12 +339,11 @@ export const LocationDashboardPage: React.FC = () => {
                             <div>
                               <p className="font-medium text-pf-text-primary">{printer.printerName}</p>
                               <p className="text-sm text-pf-text-secondary">
-                                {printer.currentJobName || 'Printing'} · {printer.locationName}
+                               {printer.currentJobName || 'Printing'} · {printer.locationName ?? 'Unassigned'}
                               </p>
                             </div>
-                            <Badge variant="primary">{Math.round(printer.progressPercent ?? 0)}%</Badge>
+                            <Badge variant="primary">{printer.status}</Badge>
                           </div>
-                          <ProgressBar value={printer.progressPercent ?? 0} className="mt-3" label={`${printer.printerName} job progress`} />
                         </div>
                       ))}
                     </div>
