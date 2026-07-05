@@ -46,6 +46,24 @@ public class MappedEndpointAnonymousAccessTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SlicerRegistryHubNegotiate_Unauthenticated_ReturnsOk()
+    {
+        using HttpClient anon = _factory.CreateClient();
+        HttpResponseMessage response = await anon.PostAsync("/hubs/slicer-registry/negotiate?negotiateVersion=1", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task SlicerProgressHubNegotiate_Unauthenticated_ReturnsOk()
+    {
+        using HttpClient anon = _factory.CreateClient();
+        HttpResponseMessage response = await anon.PostAsync("/hubs/slicers/negotiate?negotiateVersion=1", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Metrics_Unauthenticated_ReturnsOk()
     {
         using HttpClient anon = _factory.CreateClient();
