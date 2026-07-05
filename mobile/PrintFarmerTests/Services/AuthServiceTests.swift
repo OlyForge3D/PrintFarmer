@@ -137,6 +137,34 @@ final class AuthServiceTests: XCTestCase {
         XCTAssertEqual(captured.value(forHTTPHeaderField: "Authorization"), "Bearer " + token)
     }
 
+    func testLoginTokenExpiryCheckerUsesLoggedInServerAfterActiveServerChanges() async throws {
+        let loggedInServer = try addServer(displayName: "First", urlString: "https://first.example.com", active: true)
+        let otherServer = try addServer(displayName: "Second", urlString: "https://second.example.com")
+        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+
+        let response = try await authService.login(
+            serverURL: loggedInServer.normalizedURLString,
+            username: "admin",
+            password: "password123"
+        )
+
+        credentialsStore.save(
+            ServerCredentials(accessToken: "expired-other-token", expiresAt: Date(timeIntervalSince1970: 0)),
+            serverId: otherServer.id
+        )
+        try setActiveServer(otherServer.id)
+
+        MockURLProtocol.reset()
+        MockAPIClient.stubResponse(json: TestJSON.userDTO)
+        let user: UserDTO = try await apiClient.get("/api/auth/me")
+
+        let captured = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let token = try XCTUnwrap(response.token)
+        XCTAssertEqual(user.username, "admin")
+        XCTAssertEqual(captured.url?.host, loggedInServer.baseURL.host)
+        XCTAssertEqual(captured.value(forHTTPHeaderField: "Authorization"), "Bearer " + token)
+    }
+
     func testLoginNormalizesTrailingSlash() async throws {
         MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
