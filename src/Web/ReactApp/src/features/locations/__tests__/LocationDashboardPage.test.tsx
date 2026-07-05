@@ -50,11 +50,39 @@ const mockPrinters = [
     printerName: 'Printer Two',
     locationId: 'loc-2',
     locationName: 'Room 1',
+    isOnline: true,
+    status: 'Printing',
+    currentJobName: null,
+  },
+  {
+    printerId: 'p3',
+    printerName: 'Printer Three',
+    locationId: 'loc-2',
+    locationName: 'Room 1',
+    isOnline: true,
+    status: 'Paused',
+    currentJobName: 'paused.gcode',
+  },
+  {
+    printerId: 'p4',
+    printerName: 'Printer Four',
+    locationId: 'loc-2',
+    locationName: 'Room 1',
     isOnline: false,
     status: 'Offline',
     currentJobName: null,
   },
 ];
+
+const mockStats = {
+  totalPrinters: 4,
+  online: 3,
+  offline: 1,
+  attention: 2,
+  printing: 2,
+  idle: 0,
+  activeJobs: 3,
+};
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
@@ -83,19 +111,13 @@ vi.mock('@/features/locations/hooks/useLocationDashboard', () => ({
     error: null,
   }),
   useLocationStats: () => ({
-    stats: {
-      totalPrinters: 2,
-      online: 1,
-      offline: 1,
-      attention: 1,
-      printing: 1,
-      idle: 0,
-      activeJobs: 1,
-    },
+    stats: mockStats,
     isLoading: false,
     error: null,
   }),
   useSignalRPrinterUpdates: vi.fn(),
+  isActiveJob: (printer: { status: string; currentJobName?: string | null }) =>
+    printer.status === 'Printing' || Boolean(printer.currentJobName?.trim()),
   findNode: vi.fn((nodes: typeof mockLocationTree, id: string) => {
     if (id === 'loc-1') return nodes[0];
     if (id === 'loc-2') return nodes[0].children[0];
@@ -175,6 +197,15 @@ describe('LocationDashboardPage', () => {
     expect(screen.queryByText(/0%/)).not.toBeInTheDocument();
     expect(screen.queryByText(/42%/)).not.toBeInTheDocument();
     expect(screen.queryByText('undefined')).not.toBeInTheDocument();
+  });
+
+  it('renders the same number of active-job rows as the activeJobs summary count', () => {
+    const { container } = renderPage();
+    const activeJobDetails = Array.from(container.querySelectorAll('p')).filter((element) =>
+      element.textContent?.includes(' · '),
+    );
+
+    expect(activeJobDetails).toHaveLength(mockStats.activeJobs);
   });
 
   it('lets location selection drive the detail panel', () => {

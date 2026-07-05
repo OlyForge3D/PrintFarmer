@@ -5,7 +5,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { LocationSubtreePrinter, Printer } from '@/types/api';
 import { apiClient } from '@/services/api';
-import { computeStats, useLocationPrinters } from '../hooks/useLocationDashboard';
+import { computeStats, isActiveJob, useLocationPrinters } from '../hooks/useLocationDashboard';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -74,6 +74,21 @@ describe('useLocationDashboard', () => {
       attention: 2,
       activeJobs: 1,
     });
+  });
+
+  it('counts active jobs with the same predicate as the page list', () => {
+    const printers = [
+      makeSubtreePrinter({ printerId: 'printing-with-job', status: 'Printing', currentJobName: 'gearbox.gcode' }),
+      makeSubtreePrinter({ printerId: 'printing-without-job', status: 'Printing', currentJobName: null }),
+      makeSubtreePrinter({ printerId: 'paused-with-job', status: 'Paused', currentJobName: 'paused.gcode' }),
+      makeSubtreePrinter({ printerId: 'idle-with-whitespace-job', status: 'Idle', currentJobName: '   ' }),
+    ];
+
+    const stats = computeStats(printers);
+    const listedActiveJobs = printers.filter(isActiveJob);
+
+    expect(stats.activeJobs).toBe(3);
+    expect(stats.activeJobs).toBe(listedActiveJobs.length);
   });
 
   it('loads all printers for All Locations so unassigned printers are included once', async () => {

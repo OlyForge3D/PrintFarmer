@@ -42,6 +42,10 @@ function hasStatus(printer: LocationSubtreePrinter, statuses: ReadonlySet<string
   return statuses.has(printer.status);
 }
 
+export function isActiveJob(printer: LocationSubtreePrinter): boolean {
+  return hasStatus(printer, PRINTING_STATUSES) || Boolean(printer.currentJobName?.trim());
+}
+
 function toLocationSubtreePrinter(printer: Printer): LocationSubtreePrinter {
   return {
     printerId: printer.id,
@@ -69,7 +73,7 @@ export function computeStats(printers: LocationSubtreePrinter[]): LocationStats 
     attention: attention.length,
     printing: printing.length,
     idle: idle.length,
-    activeJobs: printers.filter((printer) => Boolean(printer.currentJobName)).length || printing.length,
+    activeJobs: printers.filter(isActiveJob).length,
   };
 }
 

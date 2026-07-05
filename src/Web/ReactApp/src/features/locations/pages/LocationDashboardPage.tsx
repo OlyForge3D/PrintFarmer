@@ -20,6 +20,7 @@ import {
   useLocationStats,
   useSignalRPrinterUpdates,
   findNode,
+  isActiveJob,
 } from '@/features/locations/hooks/useLocationDashboard';
 import type { Location, LocationSubtreePrinter, LocationTreeNode } from '@/types/api';
 
@@ -124,7 +125,7 @@ export const LocationDashboardPage: React.FC = () => {
     [subtreePrinters],
   );
   const activeJobs = useMemo(
-    () => subtreePrinters.filter((printer) => printer.currentJobName || printer.status === 'Printing'),
+    () => subtreePrinters.filter(isActiveJob),
     [subtreePrinters],
   );
   const directPrinterCount = selectedNode

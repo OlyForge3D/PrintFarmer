@@ -3,6 +3,7 @@ import {
   computeStats,
   collectLocationIds,
   findNode,
+  isActiveJob,
 } from '../hooks/useLocationDashboard';
 import type { LocationTreeNode, LocationSubtreePrinter } from '@/types/api';
 
@@ -60,6 +61,21 @@ describe('computeStats', () => {
     expect(stats.printing).toBe(1);
     expect(stats.idle).toBe(1);
     expect(stats.activeJobs).toBe(1);
+  });
+
+  it('counts active jobs with the same predicate as the page list', () => {
+    const printers = [
+      makePrinter({ printerId: 'printing-with-job', status: 'Printing', currentJobName: 'gearbox.gcode' }),
+      makePrinter({ printerId: 'printing-without-job', status: 'Printing', currentJobName: null }),
+      makePrinter({ printerId: 'paused-with-job', status: 'Paused', currentJobName: 'paused.gcode' }),
+      makePrinter({ printerId: 'idle-with-whitespace-job', status: 'Idle', currentJobName: '   ' }),
+    ];
+
+    const stats = computeStats(printers);
+    const listedActiveJobs = printers.filter(isActiveJob);
+
+    expect(stats.activeJobs).toBe(3);
+    expect(stats.activeJobs).toBe(listedActiveJobs.length);
   });
 
   it('counts canonical Idle status as idle', () => {
