@@ -1,11 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { Card, Input, Badge, Select } from '@/common/components/ui';
+import { Badge, Button, Card, Input, Select } from '@/common/components/ui';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
-import type { Printer } from '@/types/api';
 import clsx from 'clsx';
 
+export interface LocationPrinterListPrinter {
+  id: string;
+  name: string;
+  isOnline: boolean;
+  status: string;
+  currentJobName?: string | null;
+}
+
 interface LocationPrinterListProps {
-  printers: Printer[];
+  printers: LocationPrinterListPrinter[];
   isLoading?: boolean;
   onPrinterClick?: (printerId: string) => void;
 }
@@ -19,16 +26,11 @@ const STATUS_BADGE_VARIANT: Record<string, 'success' | 'error' | 'primary' | 'wa
   idle: 'warning',
 };
 
-function getPrinterStatusKey(printer: Printer): string {
+function getPrinterStatusKey(printer: LocationPrinterListPrinter): string {
   if (!printer.isOnline) return 'offline';
-  if (printer.state === 'Printing') return 'printing';
-  if (printer.state === 'Idle' || printer.state === 'Ready' || printer.state === 'Operational') return 'idle';
+  if (printer.status === 'Printing') return 'printing';
+  if (printer.status === 'Idle') return 'idle';
   return 'online';
-}
-
-function formatTemp(temp: number | undefined): string {
-  if (temp === undefined || temp === null) return '—';
-  return `${Math.round(temp)}°C`;
 }
 
 export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
@@ -62,7 +64,9 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <Card key={i}>
-            <Card.Body className="h-16 pf-animate-skeleton pf-skeleton rounded" />
+            <Card.Body>
+              <div className="h-16 pf-animate-skeleton pf-skeleton rounded" />
+            </Card.Body>
           </Card>
         ))}
       </div>
@@ -108,55 +112,21 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
             const statusKey = getPrinterStatusKey(printer);
             return (
               <Card key={printer.id}>
-                <Card.Body
-                  className={clsx(
-                    'flex items-center justify-between p-3 gap-4',
-                    onPrinterClick && 'cursor-pointer hover:bg-pf-bg-1 transition-colors',
-                  )}
-                  onClick={() => onPrinterClick?.(printer.id)}
-                  role={onPrinterClick ? 'button' : undefined}
-                  tabIndex={onPrinterClick ? 0 : undefined}
-                  onKeyDown={e => {
-                    if (onPrinterClick && (e.key === 'Enter' || e.key === ' ')) {
-                      e.preventDefault();
-                      onPrinterClick(printer.id);
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={clsx(
-                        'w-2.5 h-2.5 rounded-full flex-shrink-0',
-                        printer.isOnline ? 'bg-pf-success' : 'bg-pf-error',
-                      )}
-                      aria-hidden="true"
-                    />
-                    <div className="min-w-0">
-                      <p className="font-medium text-pf-text-primary truncate">
-                        {printer.name}
-                      </p>
-                      {printer.state && (
-                        <p className="text-sm text-pf-text-secondary">
-                          {printer.state}
-                          {printer.progress !== undefined && printer.progress > 0
-                            ? ` — ${Math.round(printer.progress)}%`
-                            : ''}
-                        </p>
-                      )}
+                <Card.Body>
+                  {onPrinterClick ? (
+                    <Button
+                      type="button"
+                      variant="unstyled"
+                      className="flex w-full items-center justify-between gap-4 rounded p-3 text-left transition-colors hover:bg-pf-bg-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
+                      onClick={() => onPrinterClick(printer.id)}
+                    >
+                      <PrinterRowContent printer={printer} statusKey={statusKey} />
+                    </Button>
+                  ) : (
+                    <div className="flex items-center justify-between gap-4 p-3">
+                      <PrinterRowContent printer={printer} statusKey={statusKey} />
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 flex-shrink-0">
-                    {printer.isOnline && (
-                      <div className="hidden md:flex gap-3 text-sm text-pf-text-secondary">
-                        <span title="Hotend">🔥 {formatTemp(printer.hotendTemp)}</span>
-                        <span title="Bed">🛏️ {formatTemp(printer.bedTemp)}</span>
-                      </div>
-                    )}
-                    <Badge variant={STATUS_BADGE_VARIANT[statusKey] ?? 'default'} size="sm">
-                      {statusKey}
-                    </Badge>
-                  </div>
+                  )}
                 </Card.Body>
               </Card>
             );
@@ -166,3 +136,42 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
     </div>
   );
 };
+
+function PrinterRowContent({
+  printer,
+  statusKey,
+}: {
+  printer: LocationPrinterListPrinter;
+  statusKey: string;
+}) {
+  return (
+    <>
+      <div className="flex min-w-0 items-center gap-3">
+        <div
+          className={clsx(
+            'h-2.5 w-2.5 flex-shrink-0 rounded-full',
+            printer.isOnline ? 'bg-pf-success' : 'bg-pf-error',
+          )}
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <p className="truncate font-medium text-pf-text-primary">
+            {printer.name}
+          </p>
+          {printer.status && (
+            <p className="text-sm text-pf-text-secondary">
+              {printer.status}
+              {printer.currentJobName ? ` — ${printer.currentJobName}` : ''}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-shrink-0 items-center gap-4">
+        <Badge variant={STATUS_BADGE_VARIANT[statusKey] ?? 'default'} size="sm">
+          {statusKey}
+        </Badge>
+      </div>
+    </>
+  );
+}

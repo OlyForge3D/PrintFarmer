@@ -325,13 +325,11 @@ export interface UpdateLocationRequest {
 export interface LocationSubtreePrinter {
   printerId: string;
   printerName: string;
-  locationId: string;
-  locationName: string;
-  backendType: string;
+  locationId: string | null;
+  locationName: string | null;
   isOnline: boolean;
-  currentState?: string | null;
+  status: string;
   currentJobName?: string | null;
-  progressPercent?: number | null;
 }
 
 /** Request DTO for moving a location. Matches backend MoveLocationDto. */

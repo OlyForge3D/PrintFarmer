@@ -1,8 +1,20 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LocationManagement } from '@/features/catalog/components/LocationManagement';
+import { LocationManagement } from '@/features/locations/components/LocationManagement';
 import type { Location, LocationTreeNode } from '@/services/locationService';
+
+const invalidateQueriesMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@tanstack/react-query', async () => {
+  const actual = await vi.importActual<typeof import('@tanstack/react-query')>('@tanstack/react-query');
+  return {
+    ...actual,
+    useQueryClient: () => ({
+    invalidateQueries: invalidateQueriesMock,
+    }),
+  };
+});
 
 const mockLocations: Location[] = [
   {
@@ -85,7 +97,7 @@ vi.mock('@/services/printerLocationService', () => ({
   },
 }));
 
-vi.mock('@/common/components/LocationTreePicker', () => ({
+vi.mock('@/features/locations/components/LocationTreePicker', () => ({
   LocationTreePicker: ({ onChange, value, label }: {
     onChange: (id: string | null) => void;
     value?: string | null;
@@ -109,6 +121,7 @@ const { locationService } = await import('@/services/locationService') as typeof
 describe('LocationManagement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateQueriesMock.mockClear();
     vi.mocked(locationService.getAllLocations).mockResolvedValue(mockLocations);
     vi.mocked(locationService.getLocationTree).mockResolvedValue(mockTree);
   });
@@ -215,8 +228,10 @@ describe('LocationManagement', () => {
     });
 
     // Click the collapse button on Warehouse
-    const collapseBtn = screen.getByLabelText('Collapse');
+    const collapseBtn = screen.getByLabelText('Collapse Warehouse');
+    expect(collapseBtn).toHaveAttribute('aria-expanded', 'true');
     await user.click(collapseBtn);
+    expect(collapseBtn).toHaveAttribute('aria-expanded', 'false');
 
     // After collapsing, Rack A row should be hidden
     expect(screen.queryByText(/^Rack A$/)).not.toBeInTheDocument();
@@ -257,6 +272,10 @@ describe('LocationManagement', () => {
     expect(locationService.createLocation).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'New Location' }),
     );
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'tree'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'all-printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(expect.objectContaining({ predicate: expect.any(Function) }));
   });
 
   it('opens edit form when Edit button is clicked', async () => {
@@ -299,6 +318,7 @@ describe('LocationManagement', () => {
       'loc-1',
       expect.objectContaining({ name: 'Updated Warehouse' }),
     );
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'tree'] });
   });
 
   it('opens add child form when "+ Child" button is clicked', async () => {
@@ -332,6 +352,31 @@ describe('LocationManagement', () => {
     await waitFor(() => {
       expect(screen.getByText('Delete Location?')).toBeInTheDocument();
     });
+  });
+
+  it('invalidates dashboard queries after delete is confirmed', async () => {
+    vi.mocked(locationService.deleteLocation).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    render(<LocationManagement />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Rack A/).length).toBeGreaterThanOrEqual(1);
+    });
+
+    const enabledDelete = screen
+      .getAllByRole('button', { name: 'Delete' })
+      .find((btn) => !(btn as HTMLButtonElement).disabled);
+    expect(enabledDelete).toBeDefined();
+    await user.click(enabledDelete!);
+    const confirmDeleteButton = screen.getAllByRole('button', { name: 'Delete' }).at(-1);
+    expect(confirmDeleteButton).toBeDefined();
+    await user.click(confirmDeleteButton!);
+
+    await waitFor(() => {
+      expect(locationService.deleteLocation).toHaveBeenCalledWith('loc-2');
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'tree'] });
   });
 
   it('disables Delete button for nodes with children', async () => {
@@ -409,11 +454,65 @@ describe('LocationManagement', () => {
     await user.click(screen.getByText('Add Location'));
     await user.click(screen.getByText('Create'));
 
-    // The name field uses HTML required validation; the component also
-    // checks for empty name and sets error
     await waitFor(() => {
       expect(locationService.createLocation).not.toHaveBeenCalled();
     });
+    expect(screen.getAllByRole('alert')[0]).toHaveTextContent('Location name is required');
+    expect(screen.getByLabelText('Location Name *')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByText('Location name is required').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not reopen or reset create form when only the initial parent changes', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <LocationManagement embedded autoOpenCreateToken={1} initialParentId="loc-1" />,
+    );
+
+    expect(await screen.findByText('Create New Location')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Location Name *'), 'Draft location');
+
+    rerender(<LocationManagement embedded autoOpenCreateToken={1} initialParentId="loc-2" />);
+
+    expect(screen.getByDisplayValue('Draft location')).toBeInTheDocument();
+    expect(screen.getByTestId('picker-value')).toHaveTextContent('loc-1');
+  });
+
+  it('opens a fresh create form when the auto-open token changes', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <LocationManagement embedded autoOpenCreateToken={1} initialParentId="loc-1" />,
+    );
+
+    expect(await screen.findByText('Create New Location')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Location Name *'), 'Draft location');
+
+    rerender(<LocationManagement embedded autoOpenCreateToken={2} initialParentId="loc-2" />);
+
+    expect(screen.getByLabelText('Location Name *')).toHaveValue('');
+    expect(screen.getByTestId('picker-value')).toHaveTextContent('loc-2');
+  });
+
+  it('invalidates dashboard queries after moving a location', async () => {
+    vi.mocked(locationService.moveLocation).mockResolvedValue(mockLocations[1]);
+
+    const user = userEvent.setup();
+    render(<LocationManagement />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Rack A/).length).toBeGreaterThanOrEqual(1);
+    });
+
+    const moveButtons = screen.getAllByRole('button', { name: 'Move' });
+    await user.click(moveButtons[1]);
+    await user.click(screen.getByRole('button', { name: 'Move location' }));
+
+    await waitFor(() => {
+      expect(locationService.moveLocation).toHaveBeenCalledWith('loc-2', { newParentId: 'loc-1' });
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'tree'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'all-printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(expect.objectContaining({ predicate: expect.any(Function) }));
   });
 
   it('shows path column in tree table', async () => {

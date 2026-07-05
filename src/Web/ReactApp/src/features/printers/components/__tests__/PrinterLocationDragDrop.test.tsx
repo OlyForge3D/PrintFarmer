@@ -1,8 +1,20 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import type { Location } from '@/services/locationService';
 import type { Printer } from '@/services/printerLocationService';
+
+const invalidateQueriesMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@tanstack/react-query', async () => {
+  const actual = await vi.importActual<typeof import('@tanstack/react-query')>('@tanstack/react-query');
+  return {
+    ...actual,
+    useQueryClient: () => ({
+    invalidateQueries: invalidateQueriesMock,
+    }),
+  };
+});
 
 const mockLocations: Location[] = [
   {
@@ -64,6 +76,7 @@ const { printerLocationService } = await import('@/services/printerLocationServi
 describe('PrinterLocationDragDrop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateQueriesMock.mockClear();
     vi.mocked(locationService.getAllLocations).mockResolvedValue(mockLocations);
     vi.mocked(printerLocationService.getAllPrinters).mockResolvedValue(mockPrinters);
   });
@@ -206,10 +219,51 @@ describe('PrinterLocationDragDrop', () => {
     render(<PrinterLocationDragDrop />);
 
     await waitFor(() => {
-      // The PrinterCard component renders printer.backendUrl which maps
-      // to serverUrl on the service type — verify card renders at all
+      // The PrinterCard component renders the service-normalized serverUrl.
       expect(screen.getByText('Voron 2.4')).toBeInTheDocument();
       expect(screen.getByText('Bambu X1C')).toBeInTheDocument();
     });
+  });
+
+  it('invalidates dashboard queries after assigning a printer to a location', async () => {
+    vi.mocked(printerLocationService.assignPrinterToLocation).mockResolvedValue({
+      ...mockPrinters[1],
+      locationId: 'loc-2',
+    });
+    render(<PrinterLocationDragDrop />);
+
+    const dataTransfer = { effectAllowed: '', dropEffect: '' };
+    const printerCard = await screen.findByText('Voron 2.4');
+    fireEvent.dragStart(printerCard.closest('[draggable]')!, { dataTransfer });
+    fireEvent.drop(screen.getByText('Lab').closest('div')!, { dataTransfer });
+
+    await waitFor(() => {
+      expect(printerLocationService.assignPrinterToLocation).toHaveBeenCalledWith('p-2', 'loc-2');
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'tree'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'all-printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(expect.objectContaining({ predicate: expect.any(Function) }));
+  });
+
+  it('invalidates dashboard queries after unassigning a printer', async () => {
+    vi.mocked(printerLocationService.unassignPrinterFromLocation).mockResolvedValue({
+      ...mockPrinters[0],
+      locationId: undefined,
+    });
+    render(<PrinterLocationDragDrop />);
+
+    const dataTransfer = { effectAllowed: '', dropEffect: '' };
+    const printerCard = await screen.findByText('Prusa MK4');
+    fireEvent.dragStart(printerCard.closest('[draggable]')!, { dataTransfer });
+    fireEvent.drop(screen.getByText('Unassigned Printers (2)').closest('div')!, { dataTransfer });
+
+    await waitFor(() => {
+      expect(printerLocationService.unassignPrinterFromLocation).toHaveBeenCalledWith('p-1');
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'tree'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['locations', 'all-printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['printers'] });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(expect.objectContaining({ predicate: expect.any(Function) }));
   });
 });

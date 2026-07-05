@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
+import { queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { locationService, findNode } from '@/services/locationService';
-import type { LocationTreeNode, LocationSubtreePrinter } from '@/types/api';
+import type { LocationTreeNode, LocationSubtreePrinter, Printer } from '@/types/api';
 import { printerSignalRService } from '@/services/printer-signalr';
 
 export { findNode };
@@ -18,6 +19,7 @@ export function collectLocationIds(node: LocationTreeNode): string[] {
 
 export const locationDashboardKeys = {
   tree: ['locations', 'tree'] as const,
+  allPrinters: ['locations', 'all-printers'] as const,
   subtreePrinters: (locationId: string) => ['locations', locationId, 'subtree-printers'] as const,
   stats: (locationId: string) => ['locations', locationId, 'stats'] as const,
 } as const;
@@ -26,27 +28,52 @@ export interface LocationStats {
   totalPrinters: number;
   online: number;
   offline: number;
+  attention: number;
   printing: number;
   idle: number;
   activeJobs: number;
 }
 
+const PRINTING_STATUSES = new Set(['Printing']);
+const IDLE_STATUSES = new Set(['Idle']);
+const ATTENTION_STATUSES = new Set(['Paused', 'Error', 'Offline', 'Shutdown', 'Halted', 'Disconnected', 'Cancelled']);
+
+function hasStatus(printer: LocationSubtreePrinter, statuses: ReadonlySet<string>): boolean {
+  return statuses.has(printer.status);
+}
+
+export function isActiveJob(printer: LocationSubtreePrinter): boolean {
+  return hasStatus(printer, PRINTING_STATUSES) || Boolean(printer.currentJobName?.trim());
+}
+
+function toLocationSubtreePrinter(printer: Printer): LocationSubtreePrinter {
+  return {
+    printerId: printer.id,
+    printerName: printer.name,
+    locationId: printer.location?.id ?? null,
+    locationName: printer.location?.name ?? null,
+    isOnline: printer.isOnline,
+    status: printer.state ?? (printer.isOnline ? 'Idle' : 'Offline'),
+    currentJobName: printer.jobName ?? null,
+  };
+}
+
 export function computeStats(printers: LocationSubtreePrinter[]): LocationStats {
   const online = printers.filter(p => p.isOnline);
-  const printing = online.filter(p => p.currentState === 'Printing');
-  const idle = online.filter(p => 
-    p.currentState === 'Idle' || 
-    p.currentState === 'Ready' || 
-    p.currentState === 'Operational'
-  );
+  const printing = online.filter(p => hasStatus(p, PRINTING_STATUSES));
+  const idle = online.filter(p => hasStatus(p, IDLE_STATUSES));
+  const attention = printers.filter((printer) => (
+    !printer.isOnline || hasStatus(printer, ATTENTION_STATUSES)
+  ));
 
   return {
     totalPrinters: printers.length,
     online: online.length,
     offline: printers.length - online.length,
+    attention: attention.length,
     printing: printing.length,
     idle: idle.length,
-    activeJobs: printing.length,
+    activeJobs: printers.filter(isActiveJob).length,
   };
 }
 
@@ -60,17 +87,11 @@ export function useLocationTree() {
 
 export function useLocationPrinters(locationId: string | null) {
   return useQuery({
-    queryKey: locationId ? locationDashboardKeys.subtreePrinters(locationId) : ['locations', 'all-printers'],
+    queryKey: locationId ? locationDashboardKeys.subtreePrinters(locationId) : locationDashboardKeys.allPrinters,
     queryFn: async () => {
       if (!locationId) {
-        // When no location selected, get all printers by fetching subtree for root locations
-        const tree = await locationService.getLocationTree();
-        const allPrinters: LocationSubtreePrinter[] = [];
-        for (const root of tree) {
-          const printers = await apiClient.getLocationSubtreePrinters(root.id);
-          allPrinters.push(...printers);
-        }
-        return allPrinters;
+        const printers = await apiClient.getPrinters();
+        return printers.map(toLocationSubtreePrinter);
       }
       return apiClient.getLocationSubtreePrinters(locationId);
     },
@@ -108,4 +129,16 @@ export function useSignalRPrinterUpdates() {
       unsubscribe();
     };
   }, [handleUpdate]);
+}
+
+export function invalidateLocationDashboardQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: locationDashboardKeys.tree });
+  queryClient.invalidateQueries({ queryKey: locationDashboardKeys.allPrinters });
+  queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+  queryClient.invalidateQueries({
+    predicate: (query) =>
+      Array.isArray(query.queryKey) &&
+      query.queryKey[0] === 'locations' &&
+      query.queryKey.includes('subtree-printers'),
+  });
 }

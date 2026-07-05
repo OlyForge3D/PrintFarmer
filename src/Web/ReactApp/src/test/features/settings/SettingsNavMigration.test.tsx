@@ -33,14 +33,25 @@ function LegacySettingsRedirect({
   return <Navigate to={nextLocation} replace />;
 }
 
+function SystemSettingsEchoOrLocationsRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  if (params.get('tab') === 'hardware' && params.get('sub') === 'locations') {
+    return <Navigate to="/locations/dashboard" replace />;
+  }
+
+  return <LocationEcho testId="settings-location" />;
+}
+
 function renderRedirect(from: string) {
   return render(
     <MemoryRouter initialEntries={[from]}>
       <Routes>
         <Route path="/settings" element={<LocationEcho testId="settings-location" />} />
-        <Route path="/admin/settings" element={<LocationEcho testId="settings-location" />} />
+        <Route path="/admin/settings" element={<SystemSettingsEchoOrLocationsRedirect />} />
         <Route path="/admin/manage" element={<LocationEcho testId="settings-location" />} />
         <Route path="/analytics" element={<LocationEcho testId="analytics-location" />} />
+        <Route path="/locations/dashboard" element={<LocationEcho testId="locations-location" />} />
         <Route path="/profile/api-keys" element={<LocationEcho testId="api-keys-location" />} />
         <Route path="/nfc-bindings" element={<LocationEcho testId="nfc-bindings-location" />} />
         <Route path="/printer-groups" element={<LocationEcho testId="printer-groups-location" />} />
@@ -50,7 +61,7 @@ function renderRedirect(from: string) {
         <Route path="/cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="/cameras/:tabId" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="/nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
-        <Route path="/locations" element={<Navigate to="/admin/settings?tab=hardware&sub=locations" replace />} />
+        <Route path="/locations" element={<Navigate to="/locations/dashboard" replace />} />
         <Route path="/users" element={<Navigate to="/admin/manage?tab=users&sub=accounts" replace />} />
         <Route path="/statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="/statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
@@ -83,7 +94,6 @@ describe('Settings nav migration redirects', () => {
     { from: '/cameras', expected: '/admin/settings?tab=hardware&sub=cameras', label: '/cameras → system cameras' },
     { from: '/cameras/manage', expected: '/admin/settings?tab=hardware&sub=cameras', label: '/cameras/:tabId → system cameras' },
     { from: '/nfc-devices', expected: '/admin/settings?tab=hardware&sub=nfc', label: '/nfc-devices → system nfc devices' },
-    { from: '/locations', expected: '/admin/settings?tab=hardware&sub=locations', label: '/locations → system locations' },
     { from: '/users', expected: '/admin/manage?tab=users&sub=accounts', label: '/users → admin accounts' },
     { from: '/admin', expected: '/admin/settings', label: '/admin → admin landing' },
     { from: '/admin/system', expected: '/admin/manage?tab=operations&sub=status', label: '/admin/system → admin status' },
@@ -117,6 +127,18 @@ describe('Settings nav migration redirects', () => {
     { from: '/statistics', expected: '/analytics?lens=production', label: '/statistics → /analytics?lens=production' },
     { from: '/statistics/costs', expected: '/analytics?lens=cost', label: '/statistics/costs → /analytics?lens=cost' },
   ];
+
+  const locationsRedirectCases = [
+    { from: '/locations', expected: '/locations/dashboard', label: '/locations → unified location dashboard' },
+    { from: '/admin/settings?tab=hardware&sub=locations', expected: '/locations/dashboard', label: 'legacy settings locations deep link → unified location dashboard' },
+  ];
+
+  locationsRedirectCases.forEach(({ from, expected, label }) => {
+    it(`redirects ${label}`, () => {
+      renderRedirect(from);
+      expect(screen.getByTestId('locations-location')).toHaveTextContent(expected);
+    });
+  });
 
   analyticsRedirectCases.forEach(({ from, expected, label }) => {
     it(`redirects ${label}`, () => {

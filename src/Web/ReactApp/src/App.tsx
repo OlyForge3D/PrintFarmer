@@ -120,6 +120,16 @@ function LegacySystemTabRedirect() {
   return <Navigate to={target} replace />;
 }
 
+function SystemSettingsRoute() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  if (params.get('tab') === 'hardware' && params.get('sub') === 'locations') {
+    return <Navigate to="/locations/dashboard" replace />;
+  }
+
+  return <SettingsShell routeScope="system" />;
+}
+
 /**
  * Route-level gate that blocks access to a feature when platform
  * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
@@ -228,7 +238,7 @@ function AuthenticatedAppRoutes() {
         <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
         <Route path="analytics" element={<AnalyticsHubPage />} />
         <Route path="scheduling" element={<SchedulingPage />} />
-        <Route path="locations" element={<Navigate to="/admin/settings?tab=hardware&sub=locations" replace />} />
+        <Route path="locations" element={<Navigate to="/locations/dashboard" replace />} />
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/manage?tab=users&sub=accounts" replace /></ProtectedRoute>} />
@@ -248,7 +258,7 @@ function AuthenticatedAppRoutes() {
         <Route path="profile/passkeys" element={<PasskeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route index element={<Navigate to="/admin/settings" replace />} />
-          <Route path="settings" element={<SettingsShell routeScope="system" />} />
+          <Route path="settings" element={<SystemSettingsRoute />} />
           <Route path="manage" element={<SettingsShell routeScope="admin" />} />
           <Route path="printers" element={<Navigate to="/printers" replace />} />
           <Route path="workers" element={<LegacySettingsRedirect to="/admin/manage?tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />

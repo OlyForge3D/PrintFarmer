@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useOptimistic, useTransition, useCallback } from 'react';
+import React, { useState, useEffect, useOptimistic, useTransition, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import type { Location, LocationTreeNode, CreateLocationRequest, UpdateLocationRequest } from '@/types/api';
 import { locationService } from '@/services/locationService';
+import { invalidateLocationDashboardQueries } from '@/features/locations/hooks/useLocationDashboard';
 import { LocationTreePicker } from '@/features/locations/components/LocationTreePicker';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { Modal } from '@/common/components/modals/Modal';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import { Button, Input, Textarea, FormField } from '@/common/components/ui';
 
@@ -14,6 +17,7 @@ interface TreeRowViewProps {
   onToggle: (id: string) => void;
   onEdit: (location: LocationTreeNode) => void;
   onAddChild: (parentId: string) => void;
+  onMove: (location: LocationTreeNode) => void;
   onDelete: (id: string) => void;
   deletingId: string | null;
 }
@@ -25,6 +29,7 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
   onToggle,
   onEdit,
   onAddChild,
+  onMove,
   onDelete,
   deletingId,
 }) => {
@@ -47,7 +52,8 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
                 variant="unstyled"
                 className="mr-2 w-5 h-5 flex items-center justify-center text-pf-text-secondary hover:text-pf-text-primary"
                 onClick={() => onToggle(node.id)}
-                aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                aria-expanded={isExpanded}
+                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.name}`}
               >
                 {isExpanded ? '▾' : '▸'}
               </Button>
@@ -76,6 +82,7 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
         <td className="px-6 py-3 whitespace-nowrap text-sm font-medium space-x-2">
           <Button onClick={() => onEdit(node)} variant="subtle" size="sm">Edit</Button>
           <Button onClick={() => onAddChild(node.id)} variant="subtle" size="sm">+ Child</Button>
+          <Button onClick={() => onMove(node)} variant="subtle" size="sm">Move</Button>
           <Button
             onClick={() => onDelete(node.id)}
             variant="subtle"
@@ -97,6 +104,7 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
             onToggle={onToggle}
             onEdit={onEdit}
             onAddChild={onAddChild}
+            onMove={onMove}
             onDelete={onDelete}
             deletingId={deletingId}
           />
@@ -105,10 +113,23 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
   );
 };
 
+interface LocationManagementProps {
+  embedded?: boolean;
+  showAssignments?: boolean;
+  autoOpenCreateToken?: number;
+  initialParentId?: string | null;
+}
+
 /**
  * LocationManagement Component - Manage printer locations as a tree hierarchy
  */
-export const LocationManagement: React.FC = () => {
+export const LocationManagement: React.FC<LocationManagementProps> = ({
+  embedded = false,
+  showAssignments = true,
+  autoOpenCreateToken = 0,
+  initialParentId = null,
+}) => {
+  const queryClient = useQueryClient();
   const [locations, setLocations] = useState<Location[]>([]);
   const [tree, setTree] = useState<LocationTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
@@ -121,6 +142,8 @@ export const LocationManagement: React.FC = () => {
     parentId: null,
   });
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [movingLocation, setMovingLocation] = useState<LocationTreeNode | null>(null);
+  const [moveParentId, setMoveParentId] = useState<string | null>(null);
 
   const [, startTransition] = useTransition();
   const [optimisticLocations, addOptimisticDelete] = useOptimistic<Location[], string>(
@@ -129,6 +152,13 @@ export const LocationManagement: React.FC = () => {
   );
 
   const [locationToDelete, setLocationToDelete] = useState<string | null>(null);
+  const initialParentIdRef = useRef<string | null>(initialParentId);
+  const previousAutoOpenCreateTokenRef = useRef(0);
+  const nameError = error === 'Location name is required' ? error : undefined;
+
+  useEffect(() => {
+    initialParentIdRef.current = initialParentId;
+  }, [initialParentId]);
 
   const loadData = useCallback(async () => {
     try {
@@ -155,6 +185,19 @@ export const LocationManagement: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (autoOpenCreateToken <= 0) return;
+    if (autoOpenCreateToken === previousAutoOpenCreateTokenRef.current) return;
+    previousAutoOpenCreateTokenRef.current = autoOpenCreateToken;
+    const parentId = initialParentIdRef.current;
+    setEditingId(null);
+    setFormData({ name: '', description: '', parentId: parentId ?? null });
+    setShowForm(true);
+    if (parentId) {
+      setExpandedIds((prev) => new Set([...prev, parentId]));
+    }
+  }, [autoOpenCreateToken]);
+
   const handleToggle = useCallback((id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -180,6 +223,7 @@ export const LocationManagement: React.FC = () => {
       } else {
         await locationService.createLocation(formData);
       }
+      invalidateLocationDashboardQueries(queryClient);
 
       setFormData({ name: '', description: '', parentId: null });
       setEditingId(null);
@@ -210,6 +254,11 @@ export const LocationManagement: React.FC = () => {
     setExpandedIds((prev) => new Set([...prev, parentId]));
   };
 
+  const handleMove = (node: LocationTreeNode) => {
+    setMovingLocation(node);
+    setMoveParentId(node.parentId ?? null);
+  };
+
   const handleDelete = (id: string) => {
     setLocationToDelete(id);
   };
@@ -225,11 +274,30 @@ export const LocationManagement: React.FC = () => {
         addOptimisticDelete(id);
         setError(null);
         await locationService.deleteLocation(id);
+        invalidateLocationDashboardQueries(queryClient);
         await loadData();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to delete location');
       }
     });
+  };
+
+  const confirmMove = async () => {
+    if (!movingLocation) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      await locationService.moveLocation(movingLocation.id, { newParentId: moveParentId });
+      invalidateLocationDashboardQueries(queryClient);
+      setMovingLocation(null);
+      setMoveParentId(null);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move location');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
@@ -241,16 +309,16 @@ export const LocationManagement: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-3xl font-bold">Printer Locations</h2>
+        <h2 className={clsx(embedded ? 'text-xl' : 'text-3xl', 'font-bold text-pf-text-primary')}>Printer Locations</h2>
         {!showForm && (
-          <Button onClick={() => { setFormData({ name: '', description: '', parentId: null }); setShowForm(true); }}>
+          <Button onClick={() => { setFormData({ name: '', description: '', parentId: initialParentId ?? null }); setShowForm(true); }}>
             Add Location
           </Button>
         )}
       </div>
 
       {error && (
-        <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
+        <div role="alert" className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
           {error}
         </div>
       )}
@@ -260,8 +328,8 @@ export const LocationManagement: React.FC = () => {
           <h2 className="text-xl font-semibold mb-4 text-pf-text-primary">
             {editingId ? 'Edit Location' : 'Create New Location'}
           </h2>
-          <form onSubmit={handleCreateOrUpdate} className="space-y-4">
-            <FormField label="Location Name" htmlFor="loc-name" required>
+          <form onSubmit={handleCreateOrUpdate} className="space-y-4" noValidate>
+            <FormField label="Location Name" htmlFor="loc-name" required error={nameError}>
               <Input
                 id="loc-name"
                 type="text"
@@ -269,6 +337,8 @@ export const LocationManagement: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g., Warehouse A"
                 required
+                invalid={!!nameError}
+                aria-invalid={!!nameError}
               />
             </FormField>
 
@@ -332,6 +402,7 @@ export const LocationManagement: React.FC = () => {
                     onToggle={handleToggle}
                     onEdit={handleEdit}
                     onAddChild={handleAddChild}
+                    onMove={handleMove}
                     onDelete={handleDelete}
                     deletingId={locationToDelete}
                   />
@@ -342,7 +413,7 @@ export const LocationManagement: React.FC = () => {
         )}
       </div>
 
-      {optimisticLocations.length > 0 && (
+      {showAssignments && optimisticLocations.length > 0 && (
         <div className="border-t pt-8 mt-8">
           <PrinterLocationDragDrop key={optimisticLocations.length} locations={optimisticLocations} />
         </div>
@@ -358,6 +429,37 @@ export const LocationManagement: React.FC = () => {
         onConfirm={confirmDelete}
         onCancel={() => setLocationToDelete(null)}
       />
+
+      <Modal
+        isOpen={!!movingLocation}
+        onClose={() => setMovingLocation(null)}
+        title={movingLocation ? `Move ${movingLocation.name}` : 'Move location'}
+        size="md"
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setMovingLocation(null)} disabled={loading}>
+              Cancel
+            </Button>
+            <Button type="button" variant="primary" onClick={confirmMove} disabled={loading}>
+              {loading ? 'Moving...' : 'Move location'}
+            </Button>
+          </>
+        }
+      >
+        {/* TODO(a11y): Shared Modal needs focus trap and focus restore support. */}
+        <div className="space-y-4">
+          <p className="text-sm text-pf-text-secondary">
+            Choose a new parent location. Select none to move this location to the top level.
+          </p>
+          <LocationTreePicker
+            value={moveParentId}
+            onChange={setMoveParentId}
+            label="New parent location"
+            placeholder="None (top-level)"
+            excludeId={movingLocation?.id}
+          />
+        </div>
+      </Modal>
     </div>
   );
 };
