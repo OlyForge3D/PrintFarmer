@@ -2,6 +2,11 @@
 
 All notable changes to PrintFarmer iOS will be documented in this file.
 
+## [v1.0-beta.78] — 2026-07-05
+
+### Fixed
+- **Login on multi-server builds** — Signing in with valid credentials no longer bounces straight back to the login screen. The access token is now applied to the API client immediately on login (previously it was only wired up when switching to a *different* server, so logging into the already-selected server left the client unauthenticated). The token-expiry check is also now scoped to the specific server you logged into.
+
 ## [v1.0-beta.76] — 2026-07-05
 
 ### Added

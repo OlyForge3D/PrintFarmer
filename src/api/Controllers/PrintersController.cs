@@ -3426,6 +3426,7 @@ public class PrintersController(
     /// <returns>Session ID for tracking discovery progress.</returns>
     /// <response code="200">Discovery started successfully.</response>
     /// <response code="500">Failed to start discovery.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -3465,6 +3466,7 @@ public class PrintersController(
     /// <returns>Cancellation confirmation.</returns>
     /// <response code="200">Discovery cancelled successfully.</response>
     /// <response code="500">Failed to cancel discovery.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("discover/{sessionId}/cancel")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -3505,6 +3507,7 @@ public class PrintersController(
     /// <response code="200">Printer assigned to location successfully.</response>
     /// <response code="404">Printer or location not found.</response>
     /// <response code="500">Failed to assign printer to location.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
@@ -3552,6 +3555,7 @@ public class PrintersController(
     /// <response code="204">Printer unassigned from location successfully.</response>
     /// <response code="404">Printer not found.</response>
     /// <response code="500">Failed to unassign printer from location.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
