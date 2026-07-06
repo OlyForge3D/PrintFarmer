@@ -124,7 +124,7 @@
   <ItemGroup>
     <PackageReference Include="IDisposableAnalyzers" Version="4.0.8" PrivateAssets="all" />
     <PackageReference Include="Microsoft.VisualStudio.Threading" Version="17.14.15" PrivateAssets="all" />
-    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.28.0.143324" PrivateAssets="all" />
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.24.0.138807" PrivateAssets="all" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556" PrivateAssets="all" />
     <!-- Global overrides for vulnerable transitive dependencies -->
     <!-- These fix high-severity vulnerabilities in packages pulled in by Refit, SignalR, etc. -->
