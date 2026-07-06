@@ -139,3 +139,9 @@ snapshots/
 .qa/
 layout_diff.txt
 /*.yaml
+
+# Misplaced Squad outputs — Squad state belongs under .squad/, never the repo root
+/decisions/
+/decisions.md
+/agents/
+/orchestration-log/
