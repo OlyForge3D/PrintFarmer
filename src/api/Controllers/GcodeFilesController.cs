@@ -148,6 +148,8 @@ public class GcodeFilesController(
     [FromQuery] Guid? harvestId = null,
     [FromQuery] Guid? printerId = null)
     {
+        _ = harvestId;
+
         try
         {
             GcodeFileListResponse response = await gcodeFilesService.QueryAsync(

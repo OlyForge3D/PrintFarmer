@@ -18,6 +18,8 @@ public static class DataProtectionStartup
         IWebHostEnvironment environment,
         string contentRootPath)
     {
+        _ = environment;
+
         var keysDirectoryPath = Environment.GetEnvironmentVariable("DATAPROTECTION_KEYS_PATH");
 
         if (string.IsNullOrWhiteSpace(keysDirectoryPath))

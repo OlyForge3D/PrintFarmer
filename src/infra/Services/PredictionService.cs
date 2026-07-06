@@ -100,7 +100,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             Confidence = confidence,
             SampleSize = similarJobs.Count,
             VariancePercent = variancePercent,
-            Note = GeneratePredictionNote(confidence, similarJobs.Count, material, modelId)
+            Note = GeneratePredictionNote(confidence, similarJobs.Count, material)
         };
     }
 
@@ -440,10 +440,8 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <param name="confidence">The confidence level of the prediction.</param>
     /// <param name="sampleSize">Number of historical samples used.</param>
     /// <param name="material">Material type if available.</param>
-    /// <param name="modelId">Printer model ID if available.</param>
     /// <returns>Human-readable prediction note.</returns>
-#pragma warning disable S1172 // Parameter is reserved for future implementation
-    private static string GeneratePredictionNote(ConfidenceLevel confidence, int sampleSize, string? material, Guid? modelId)
+    private static string GeneratePredictionNote(ConfidenceLevel confidence, int sampleSize, string? material)
     {
         string materialStr = !string.IsNullOrWhiteSpace(material) ? $" {material}" : string.Empty;
         return confidence switch
@@ -453,7 +451,6 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             _ => $"Based on {sampleSize}{materialStr} job(s). Limited historical data - actual time may vary."
         };
     }
-#pragma warning restore S1172
 }
 
 /// <summary>

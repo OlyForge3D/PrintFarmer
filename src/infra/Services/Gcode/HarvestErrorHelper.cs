@@ -21,6 +21,8 @@ public static class HarvestErrorHelper
     /// <param name="failedResource">Optional identifier for the resource that failed.</param>
     public static string CategorizeError(Exception ex, string? failedResource = null)
     {
+        _ = failedResource;
+
         return ex switch
         {
             HttpRequestException => nameof(HarvestErrorType.ConnectionError),

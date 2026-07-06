@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -447,6 +447,7 @@ public sealed class PrintablesOAuthService(
                 ["redirect_uri"] = _options.RedirectUri,
                 ["code_verifier"] = codeVerifier,
             }
+
 !)
         };
 
@@ -538,6 +539,7 @@ public sealed class PrintablesOAuthService(
                 ["client_id"] = _options.ClientId,
                 ["client_secret"] = _options.ClientSecret,
             }
+
 !)
         };
 

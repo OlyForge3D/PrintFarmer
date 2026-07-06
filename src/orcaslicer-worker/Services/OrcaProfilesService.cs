@@ -625,8 +625,8 @@ public class OrcaProfilesService : ISlicerProfilesService
             return typeof(T).Name switch
             {
                 nameof(MachineProfileDto) => ParseMachineProfile(resolvedProfile, filePath) as T,
-                nameof(FilamentProfileDto) => ParseFilamentProfile(resolvedProfile, filePath) as T,
-                nameof(ProcessProfileDto) => ParseProcessProfile(resolvedProfile, filePath) as T,
+                nameof(FilamentProfileDto) => ParseFilamentProfile(resolvedProfile) as T,
+                nameof(ProcessProfileDto) => ParseProcessProfile(resolvedProfile) as T,
                 _ => null
             };
         }
@@ -1234,8 +1234,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
-#pragma warning disable S1172 // Unused parameters are required by interface
-    private FilamentProfileDto? ParseFilamentProfile(JsonElement root, string filePath)
+    private FilamentProfileDto? ParseFilamentProfile(JsonElement root)
     {
         FilamentProfileDto profile = new FilamentProfileDto();
 
@@ -1375,10 +1374,8 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         return profile;
     }
-#pragma warning restore S1172
 
-#pragma warning disable S1172 // Unused parameters are required by interface
-    private ProcessProfileDto? ParseProcessProfile(JsonElement root, string filePath)
+    private ProcessProfileDto? ParseProcessProfile(JsonElement root)
     {
         ProcessProfileDto profile = new ProcessProfileDto();
 
@@ -1521,7 +1518,6 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         return profile;
     }
-#pragma warning restore S1172
 
     private static int ParseProcessPrintSpeed(JsonElement root, int fallback)
     {

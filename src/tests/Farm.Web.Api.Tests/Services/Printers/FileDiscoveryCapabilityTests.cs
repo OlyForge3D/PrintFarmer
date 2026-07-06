@@ -306,6 +306,9 @@ public class FileDiscoveryCapabilityTests
         PrinterBackend backend,
         Type requiredCapability)
     {
+        _ = clientFactory;
+        _ = requiredCapability;
+
         // If factory says backend has capability, the client must implement it
         if (factory.TryGetFileListClient(backend, out IBackendClient? client))
         {

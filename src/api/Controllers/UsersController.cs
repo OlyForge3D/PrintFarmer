@@ -50,6 +50,8 @@ public class UsersController(
     [HttpGet("{id:guid}", Name = "GetUserById")]
     public async Task<ActionResult<UserDto>> GetUserAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         UserDto? user = await _authService.GetUserWithRolesAndPermissionsAsync(id);
         return user == null ? NotFound() : Ok(user);
     }
@@ -274,7 +276,8 @@ public class UsersController(
             userId,
             adminUserId,
             request.Reason ?? "Revoked by administrator",
-            ipAddress);
+            ipAddress,
+            ct);
 
         _logger.LogInformation("Admin {AdminUserId} revoked {RevokedCount} sessions for user {UserId}", adminUserId, revokedCount, userId);
 
@@ -305,7 +308,7 @@ public class UsersController(
             return NotFound(new { error = $"User {userId} not found" });
         }
 
-        List<RevokedToken> revokedTokens = await _tokenRevocation.GetUserRevokedTokensAsync(userId);
+        List<RevokedToken> revokedTokens = await _tokenRevocation.GetUserRevokedTokensAsync(userId, ct);
 
         IEnumerable<RevokedTokenDto> dtos = revokedTokens.Select(rt => new RevokedTokenDto
         {
