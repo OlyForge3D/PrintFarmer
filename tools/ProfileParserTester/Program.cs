@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Services;
-using Farm.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -21,8 +19,8 @@ class ProfileParserTester
             builder.SetMinimumLevel(LogLevel.Information);
         });
         
-        // Register a simple logging service
-        services.AddSingleton<IUnifiedLoggingService>(sp => new NullLoggingService());
+        // Register the logger required by OrcaProfilesService
+        services.AddSingleton<ILogger>(sp => sp.GetRequiredService<ILogger<OrcaProfilesService>>());
         
         // Register the OrcaProfilesService
         services.AddSingleton<OrcaProfilesService>();

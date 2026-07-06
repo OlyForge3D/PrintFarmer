@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
   </ItemGroup>
 </Project>
