@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
@@ -73,6 +74,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 It.IsAny<string>(),
@@ -165,6 +168,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(["ext-active-2"]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 "external-active.gcode",
@@ -240,6 +245,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 It.IsAny<string>(),
@@ -319,6 +326,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 "external-job.gcode",
@@ -416,6 +425,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 "linked-job.gcode",
@@ -504,6 +515,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(["dup-99"]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 "dup.gcode",
@@ -539,6 +552,181 @@ public class PrintJobManagementServiceHistorySeedingTests
 
         Assert.Equal(PrintJobStatus.Completed, seededJob.Status);
         Assert.Equal("dup-99", seededJob.ExternalJobId);
+    }
+
+    [Fact]
+    public async Task SeedHistoryFromPrintersAsync_WhenTwoExternalHistoryJobsSharePrinterAndStart_InsertsSingleStoredJob()
+    {
+        string dbName = $"HistoryStartDedupe_{Guid.NewGuid():N}";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = TruncateToSecond(DateTime.UtcNow.AddMinutes(-30));
+        long startUnix = new DateTimeOffset(startUtc).ToUnixTimeSeconds();
+
+        await using AppDbContext db = new(options);
+        db.Printers.Add(CreateEnabledPrinter(printerId, "Start Dedupe Printer"));
+        await db.SaveChangesAsync();
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 2,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "same-start-1",
+                    Filename = "same-start-a.gcode",
+                    Status = "completed",
+                    StartTime = startUnix,
+                    EndTime = startUnix + 60,
+                    FilamentUsed = 400,
+                    Metadata = []
+                },
+                new HistoryJob
+                {
+                    JobId = "same-start-2",
+                    Filename = "same-start-b.gcode",
+                    Status = "completed",
+                    StartTime = startUnix,
+                    EndTime = startUnix + 90,
+                    FilamentUsed = 450,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintersService> printersService = CreateHistoryListMock(printerId, historyResponse);
+        PrintJobManagementService service = CreateService(new EfPrintJobManagementRepository(db), printersService);
+
+        await service.SeedHistoryFromPrintersAsync();
+
+        List<PrintJob> storedJobs = await db.PrintJobs
+            .Where(j => j.AssignedPrinterId == printerId && j.ActualStartTime == startUtc)
+            .ToListAsync();
+        PrintJob storedJob = Assert.Single(storedJobs);
+        Assert.Equal("same-start-1", storedJob.ExternalJobId);
+        Assert.True(storedJob.WasSeededFromHistory);
+    }
+
+    [Fact]
+    public async Task SeedHistoryFromPrintersAsync_WhenTwoExternalHistoryJobsHaveMissingStart_InsertsBothStoredJobs()
+    {
+        string dbName = $"HistoryMissingStartDedupe_{Guid.NewGuid():N}";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+
+        Guid printerId = Guid.NewGuid();
+
+        await using AppDbContext db = new(options);
+        db.Printers.Add(CreateEnabledPrinter(printerId, "Missing Start Printer"));
+        await db.SaveChangesAsync();
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 2,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "missing-start-1",
+                    Filename = "missing-start-a.gcode",
+                    Status = "completed",
+                    StartTime = 0,
+                    EndTime = null,
+                    FilamentUsed = 400,
+                    Metadata = []
+                },
+                new HistoryJob
+                {
+                    JobId = "missing-start-2",
+                    Filename = "missing-start-b.gcode",
+                    Status = "completed",
+                    StartTime = 0,
+                    EndTime = null,
+                    FilamentUsed = 450,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintersService> printersService = CreateHistoryListMock(printerId, historyResponse);
+        PrintJobManagementService service = CreateService(new EfPrintJobManagementRepository(db), printersService);
+
+        await service.SeedHistoryFromPrintersAsync();
+
+        List<string?> storedExternalIds = await db.PrintJobs
+            .Where(j => j.AssignedPrinterId == printerId)
+            .OrderBy(j => j.ExternalJobId)
+            .Select(j => j.ExternalJobId)
+            .ToListAsync();
+
+        Assert.Equal(["missing-start-1", "missing-start-2"], storedExternalIds);
+    }
+
+    [Fact]
+    public async Task SeedHistoryFromPrintersAsync_WhenExternalIdAbsentJobAlreadyHasSamePrinterStartSecond_DoesNotInsertDuplicateStoredJob()
+    {
+        string dbName = $"HistoryNullExternalStartDedupe_{Guid.NewGuid():N}";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = TruncateToSecond(DateTime.UtcNow.AddMinutes(-45));
+        long startUnix = new DateTimeOffset(startUtc).ToUnixTimeSeconds();
+
+        PrintJob existingExternalIdAbsentJob = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "already-tracked",
+            AssignedPrinterId = printerId,
+            Status = PrintJobStatus.Completed,
+            ActualStartTime = startUtc.AddTicks(TimeSpan.TicksPerMillisecond),
+            ActualEndTime = startUtc.AddMinutes(10),
+            CreatedAt = startUtc,
+            UpdatedAt = startUtc.AddMinutes(10),
+            QueuedAt = startUtc
+        };
+
+        await using AppDbContext db = new(options);
+        db.Printers.Add(CreateEnabledPrinter(printerId, "External Id Absent Printer"));
+        db.PrintJobs.Add(existingExternalIdAbsentJob);
+        await db.SaveChangesAsync();
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 1,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "history-after-null-external",
+                    Filename = "different-name.gcode",
+                    Status = "completed",
+                    StartTime = startUnix,
+                    EndTime = startUnix + 600,
+                    FilamentUsed = 300,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintersService> printersService = CreateHistoryListMock(printerId, historyResponse);
+        PrintJobManagementService service = CreateService(new EfPrintJobManagementRepository(db), printersService);
+
+        await service.SeedHistoryFromPrintersAsync();
+
+        List<PrintJob> storedJobs = await db.PrintJobs
+            .Where(j => j.AssignedPrinterId == printerId)
+            .ToListAsync();
+        PrintJob storedJob = Assert.Single(storedJobs);
+        Assert.Equal(existingExternalIdAbsentJob.Id, storedJob.Id);
+        Assert.Null(storedJob.ExternalJobId);
+        Assert.False(storedJob.WasSeededFromHistory);
     }
 
     [Fact]
@@ -593,6 +781,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(["active-77"]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 "active-job.gcode",
@@ -671,6 +861,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
                 "terminal-job.gcode",
@@ -752,6 +944,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.GetByExternalIdAsync(printerId, "dup-overlap-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
@@ -824,6 +1018,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.GetByExternalIdAsync(printerId, "unknown-db-error-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
@@ -924,6 +1120,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([firstPrinter, secondPrinter]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.GetByExternalIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
@@ -1021,6 +1219,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.GetByExternalIdAsync(printerId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
@@ -1117,6 +1317,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             .ReturnsAsync([printer]);
         repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
         repository.Setup(r => r.GetByExternalIdAsync(printerId, "unknown-state-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
@@ -1254,8 +1456,15 @@ public class PrintJobManagementServiceHistorySeedingTests
         Mock<IPrintJobManagementRepository> repository,
         Mock<IPrintersService> printersService)
     {
+        return CreateService(repository.Object, printersService);
+    }
+
+    private static PrintJobManagementService CreateService(
+        IPrintJobManagementRepository repository,
+        Mock<IPrintersService> printersService)
+    {
         return new PrintJobManagementService(
-            repository.Object,
+            repository,
             NullLogger<PrintJobManagementService>.Instance,
             printersService.Object,
             Mock.Of<IStoragePathService>(),
@@ -1270,5 +1479,41 @@ public class PrintJobManagementServiceHistorySeedingTests
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
             dispatchScorer: Mock.Of<IDispatchScorer>(),
             settingsService: Mock.Of<ISettingsService>());
+    }
+
+    private static Mock<IPrintersService> CreateHistoryListMock(Guid printerId, HistoryListResponse historyResponse)
+    {
+        Mock<IPrintersService> printersService = new();
+        printersService.Setup(p => p.GetHistoryListAsync(
+                printerId,
+                10000,
+                0,
+                null,
+                null,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyResponse);
+
+        return printersService;
+    }
+
+    private static Printer CreateEnabledPrinter(Guid printerId, string name)
+    {
+        return new Printer
+        {
+            Id = printerId,
+            Name = name,
+            ServerUrl = "http://printer.local",
+            BackendPort = 80,
+            Backend = (int)PrinterBackend.PrusaLink,
+            IsEnabled = true,
+            ManufacturerId = Guid.NewGuid(),
+            ModelId = Guid.NewGuid()
+        };
+    }
+
+    private static DateTime TruncateToSecond(DateTime value)
+    {
+        return value.AddTicks(-(value.Ticks % TimeSpan.TicksPerSecond));
     }
 }

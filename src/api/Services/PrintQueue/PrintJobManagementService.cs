@@ -1406,7 +1406,8 @@ public class PrintJobManagementService(
     /// Seed print job history from printer history APIs.
     /// Fetches all available history (up to 10,000 jobs per printer) since the
     /// ISupportsHistory interface doesn't support date filtering.
-    /// Jobs are identified by (ExternalJobId, SourcePrinterId) composite key.
+    /// Jobs are identified by (ExternalJobId, SourcePrinterId) composite key and
+    /// same-printer/same-start-time duplicate checks.
     /// Existing jobs are updated, new jobs are inserted (AddOrUpdate semantics).
     /// </summary>
     /// <param name="printerIds">Optional list of printer identifiers to seed from. If null, seeds from all printers.</param>
@@ -1563,8 +1564,11 @@ public class PrintJobManagementService(
                 "[{LogPrefix}] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial}, usesWatermark={UsesWatermark})",
                 options.LogPrefix, history.Jobs.Length, printer.Name, isInitialSeed, hasWatermark);
 
-            // Get all existing seeded jobs for this printer to check for duplicates
+            // Get all existing seeded jobs and actual start times for this printer to check for duplicates.
+            // History providers report start times as Unix seconds, so exact UTC-second matching is stable here.
             HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
+                printer.Id, cancellationToken);
+            HashSet<DateTime> existingActualStartTimes = await _repository.GetActualStartTimesForPrinterAsync(
                 printer.Id, cancellationToken);
 
             foreach (HistoryJob historyJob in history.Jobs)
@@ -1582,6 +1586,7 @@ public class PrintJobManagementService(
                 }
 
                 DateTime startTimeUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+                bool hasValidStartTime = startTimeUtc > DateTime.UnixEpoch;
                 DateTime? endTimeUtc = historyJob.EndTime.HasValue
                     ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
                     : null;
@@ -1637,6 +1642,11 @@ public class PrintJobManagementService(
                                 matchingExisting.SourcePrinterId = printer.Id;
                                 UpdatePrintJobFromHistory(matchingExisting, historyJob);
                                 matchingExisting.UpdatedAt = DateTime.UtcNow;
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 _repository.Remove(seededJob);
                                 updated++;
                                 continue;
@@ -1653,6 +1663,11 @@ public class PrintJobManagementService(
                             {
                                 UpdatePrintJobFromHistory(seededJob, historyJob);
                                 seededJob.UpdatedAt = DateTime.UtcNow;
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 updated++;
                             }
                         }
@@ -1665,6 +1680,11 @@ public class PrintJobManagementService(
                             {
                                 UpdatePrintJobFromHistory(seededJob, historyJob);
                                 seededJob.UpdatedAt = DateTime.UtcNow;
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 updated++;
                             }
                             else
@@ -1693,6 +1713,11 @@ public class PrintJobManagementService(
                             {
                                 UpdatePrintJobFromHistory(existingByExternalId, historyJob);
                                 existingByExternalId.UpdatedAt = DateTime.UtcNow;
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 updated++;
                             }
                             else
@@ -1719,7 +1744,18 @@ public class PrintJobManagementService(
                             UpdatePrintJobFromHistory(matchingExisting, historyJob);
                             matchingExisting.UpdatedAt = DateTime.UtcNow;
                             existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
+                            if (hasValidStartTime)
+                            {
+                                existingActualStartTimes.Add(startTimeUtc);
+                            }
+
                             updated++;
+                            continue;
+                        }
+
+                        if (hasValidStartTime && existingActualStartTimes.Contains(startTimeUtc))
+                        {
+                            skipped++;
                             continue;
                         }
 
@@ -1732,6 +1768,11 @@ public class PrintJobManagementService(
                         _repository.Add(newJob);
 #pragma warning restore CA1849
                         existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
+                        if (hasValidStartTime)
+                        {
+                            existingActualStartTimes.Add(startTimeUtc);
+                        }
+
                         added++;
                     }
                 }
