@@ -3,7 +3,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.FeatureFlags;
@@ -194,6 +196,13 @@ if (slicerModuleEnabled)
 }
 
 builder.Services.AddEndpointsApiExplorer();
+
+// Native OpenAPI builds schemas from Http.Json metadata. MVC controller serialization is configured separately.
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolver = (options.SerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
+        .WithAddedModifier(PruneOpenApiMaintenanceNavigationProperties);
+});
 
 // .NET 10 native OpenAPI - auto-detects JWT Bearer security from authentication configuration
 builder.Services.AddOpenApi();
@@ -792,6 +801,46 @@ else
         Console.WriteLine("Program.cs: StartAsync failed in Testing environment: " + ex.Message);
 #pragma warning restore CA1303
         throw;
+    }
+}
+
+static void PruneOpenApiMaintenanceNavigationProperties(JsonTypeInfo jsonTypeInfo)
+{
+    if (jsonTypeInfo.Kind != JsonTypeInfoKind.Object)
+    {
+        return;
+    }
+
+    string[] propertiesToRemove = jsonTypeInfo.Type switch
+    {
+        Type type when type == typeof(MaintenanceAlert) =>
+        [
+            "printer",
+            "printerMaintenanceSchedule",
+            "maintenanceTask"
+        ],
+        Type type when type == typeof(MaintenanceLog) =>
+        [
+            "printer",
+            "printerMaintenanceSchedule",
+            "resolvedAlert",
+            "maintenanceTask"
+        ],
+        Type type when type == typeof(PrinterStatistics) =>
+        [
+            "printer"
+        ],
+        _ => []
+    };
+
+    foreach (string propertyName in propertiesToRemove)
+    {
+        JsonPropertyInfo? property = jsonTypeInfo.Properties.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase));
+        if (property is not null)
+        {
+            _ = jsonTypeInfo.Properties.Remove(property);
+        }
     }
 }
 
