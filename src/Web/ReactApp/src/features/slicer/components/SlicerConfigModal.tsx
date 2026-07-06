@@ -89,13 +89,25 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
 
   // Validate model when modal opens
   React.useEffect(() => {
+    let ignore = false;
+
     if (isOpen && modelFile) {
       slicerService.validateModel(modelFile)
-        .then(setValidationResult)
+        .then(result => {
+          if (!ignore) {
+            setValidationResult(result);
+          }
+        })
         .catch(error => {
-          setValidationResult({ valid: false, issues: [`Validation failed: ${error.message}`] });
+          if (!ignore) {
+            setValidationResult({ valid: false, issues: [`Validation failed: ${error.message}`] });
+          }
         });
     }
+
+    return () => {
+      ignore = true;
+    };
   }, [isOpen, modelFile]);
 
   const handleSlice = async () => {
