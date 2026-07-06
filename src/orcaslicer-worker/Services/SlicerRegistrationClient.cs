@@ -96,14 +96,18 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             string json = JsonSerializer.Serialize(registrationDto);
             StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            // Add API key header if configured
-            string? apiKey = _configuration["SlicerRegistry:ApiKey"];
-            if (!string.IsNullOrEmpty(apiKey))
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/register")
             {
-                _httpClient.DefaultRequestHeaders.Add("X-Slicer-ApiKey", apiKey);
+                Content = content
+            };
+
+            string? apiKey = GetRegistrationApiKey();
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                request.Headers.Add("X-Slicer-ApiKey", apiKey);
             }
 
-            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/slicers/register", content, cancellationToken);
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -210,5 +214,14 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 
         [System.Text.Json.Serialization.JsonPropertyName("apiKey")]
         public string ApiKey { get; init; } = string.Empty;
+    }
+
+    private string? GetRegistrationApiKey()
+    {
+        return _configuration["SlicerRegistry:ApiKey"]
+            ?? _configuration["WorkerAuth:SharedApiKey"]
+            ?? _configuration["WorkerAuth:SharedKey"]
+            ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY")
+            ?? Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY");
     }
 }

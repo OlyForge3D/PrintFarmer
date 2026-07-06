@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Net;
 using System.Net.Http;
-using System.Text;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -33,6 +33,22 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
 
     private HttpClient CreateClient() => _factory.CreateClient();
 
+    private static HttpRequestMessage CreateJsonRequest(HttpMethod method, string url, object? body = null, string? apiKey = "test-worker-key")
+    {
+        HttpRequestMessage request = new HttpRequestMessage(method, url);
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.Add("X-Slicer-ApiKey", apiKey);
+        }
+
+        return request;
+    }
+
     [Fact]
     public async Task WorkerRegistration_ShouldSucceed_AndAppearInList()
     {
@@ -52,13 +68,11 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
             Tags = "test,integration"
         };
 
-        string json = JsonSerializer.Serialize(registrationDto);
-        StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-
         // Act - Register
         _output.WriteLine("Registering test worker...");
         using HttpClient client = CreateClient();
-        HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", content);
+        using HttpRequestMessage registerRequest = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", registrationDto);
+        HttpResponseMessage registerResponse = await client.SendAsync(registerRequest);
 
         // Assert - Registration succeeded
         _ = registerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -77,7 +91,8 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
         _output.WriteLine($"Worker registered with ID: {registrationResponse.Id}");
 
         // Act - List workers
-        HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
+        using HttpRequestMessage listRequest = CreateJsonRequest(HttpMethod.Get, "/api/slicers");
+        HttpResponseMessage listResponse = await client.SendAsync(listRequest);
 
         // Assert - Worker appears in list
         _ = listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -91,6 +106,11 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
 
         _ = workers.Should().NotBeNull();
         _ = workers.Should().Contain(w => w.Id == registrationResponse.Id && w.Name == "test-orca-worker");
+        using JsonDocument listDocument = JsonDocument.Parse(listJson);
+        foreach (JsonElement element in listDocument.RootElement.EnumerateArray())
+        {
+            _ = element.TryGetProperty("apiKey", out JsonElement _).Should().BeFalse();
+        }
     }
 
     [Fact]
@@ -107,10 +127,9 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
             Tags = "test"
         };
 
-        string registerJson = JsonSerializer.Serialize(registrationDto);
-        StringContent registerContent = new StringContent(registerJson, Encoding.UTF8, "application/json");
         using HttpClient client = CreateClient();
-        HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", registerContent);
+        using HttpRequestMessage registerRequest = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", registrationDto);
+        HttpResponseMessage registerResponse = await client.SendAsync(registerRequest);
         string registerResult = await registerResponse.Content.ReadAsStringAsync();
         RegistrationResult? registration = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
         {
@@ -127,21 +146,16 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
             FreeSlots = 0
         };
 
-        string heartbeatJson = JsonSerializer.Serialize(heartbeatDto);
-        StringContent heartbeatContent = new StringContent(heartbeatJson, Encoding.UTF8, "application/json");
-
-        // Add API key header
-        client.DefaultRequestHeaders.Clear();
-        client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
-
-        HttpResponseMessage heartbeatResponse = await client.PostAsync($"/api/slicers/{registration.Id}/heartbeat", heartbeatContent);
+        using HttpRequestMessage heartbeatRequest = CreateJsonRequest(HttpMethod.Post, $"/api/slicers/{registration.Id}/heartbeat", heartbeatDto, registration.ApiKey);
+        HttpResponseMessage heartbeatResponse = await client.SendAsync(heartbeatRequest);
 
         // Assert - Heartbeat succeeded
         _ = heartbeatResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
         _output.WriteLine("Heartbeat sent successfully");
 
         // Verify worker status was updated
-        HttpResponseMessage getResponse = await client.GetAsync($"/api/slicers/{registration.Id}");
+        using HttpRequestMessage getRequest = CreateJsonRequest(HttpMethod.Get, $"/api/slicers/{registration.Id}", apiKey: registration.ApiKey);
+        HttpResponseMessage getResponse = await client.SendAsync(getRequest);
         _ = getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string workerJson = await getResponse.Content.ReadAsStringAsync();
@@ -168,10 +182,9 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
             Tags = "test"
         };
 
-        string registerJson = JsonSerializer.Serialize(registrationDto);
-        StringContent registerContent = new StringContent(registerJson, Encoding.UTF8, "application/json");
         using HttpClient client = CreateClient();
-        HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", registerContent);
+        using HttpRequestMessage registerRequest = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", registrationDto);
+        HttpResponseMessage registerResponse = await client.SendAsync(registerRequest);
         string registerResult = await registerResponse.Content.ReadAsStringAsync();
         RegistrationResult? registration = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
         {
@@ -181,18 +194,16 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
         _ = registration.Should().NotBeNull();
         _output.WriteLine($"Registered worker: {registration!.Id}");
 
-        // Act - Deregister
-        client.DefaultRequestHeaders.Clear();
-        client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
-
-        HttpResponseMessage deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
+        using HttpRequestMessage deregisterRequest = CreateJsonRequest(HttpMethod.Post, $"/api/slicers/{registration.Id}/deregister", apiKey: registration.ApiKey);
+        HttpResponseMessage deregisterResponse = await client.SendAsync(deregisterRequest);
 
         // Assert - Deregistration succeeded
         _ = deregisterResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
         _output.WriteLine("Worker deregistered successfully");
 
         // Verify worker no longer appears in list
-        HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
+        using HttpRequestMessage listRequest = CreateJsonRequest(HttpMethod.Get, "/api/slicers");
+        HttpResponseMessage listResponse = await client.SendAsync(listRequest);
         string listJson = await listResponse.Content.ReadAsStringAsync();
         SlicerServiceDto[]? workers = JsonSerializer.Deserialize<SlicerServiceDto[]>(listJson, new JsonSerializerOptions
         {
@@ -201,6 +212,94 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
 
         _ = workers.Should().NotBeNull();
         _ = workers.Should().NotContain(w => w.Id == registration.Id);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_MissingSharedKey_ReturnsUnauthorized()
+    {
+        using HttpClient client = CreateClient();
+        using HttpRequestMessage request = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", new RegisterSlicerDto
+        {
+            Name = "missing-key-worker",
+            SlicerType = 1,
+            Version = "1.0.0",
+            Host = "http://test:8080",
+            MaxConcurrentJobs = 1
+        }, apiKey: null);
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_InvalidSharedKey_ReturnsUnauthorized()
+    {
+        using HttpClient client = CreateClient();
+        using HttpRequestMessage request = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", new RegisterSlicerDto
+        {
+            Name = "invalid-key-worker",
+            SlicerType = 1,
+            Version = "1.0.0",
+            Host = "http://test:8080",
+            MaxConcurrentJobs = 1
+        }, apiKey: "wrong-key");
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HeartbeatAsync_InvalidServiceKey_ReturnsUnauthorized()
+    {
+        using HttpClient client = CreateClient();
+        using HttpRequestMessage registerRequest = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", new RegisterSlicerDto
+        {
+            Name = "invalid-service-key-worker",
+            SlicerType = 1,
+            Version = "1.0.0",
+            Host = "http://test:8080",
+            MaxConcurrentJobs = 1
+        });
+        HttpResponseMessage registerResponse = await client.SendAsync(registerRequest);
+        RegistrationResult? registration = await registerResponse.Content.ReadFromJsonAsync<RegistrationResult>();
+
+        using HttpRequestMessage heartbeatRequest = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/slicers/{registration!.Id}/heartbeat",
+            new HeartbeatDto { Status = "Online", FreeSlots = 1 },
+            apiKey: "wrong-service-key");
+
+        HttpResponseMessage response = await client.SendAsync(heartbeatRequest);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HeartbeatAsync_MissingServiceKey_ReturnsUnauthorized()
+    {
+        using HttpClient client = CreateClient();
+        using HttpRequestMessage registerRequest = CreateJsonRequest(HttpMethod.Post, "/api/slicers/register", new RegisterSlicerDto
+        {
+            Name = "missing-service-key-worker",
+            SlicerType = 1,
+            Version = "1.0.0",
+            Host = "http://test:8080",
+            MaxConcurrentJobs = 1
+        });
+        HttpResponseMessage registerResponse = await client.SendAsync(registerRequest);
+        RegistrationResult? registration = await registerResponse.Content.ReadFromJsonAsync<RegistrationResult>();
+
+        using HttpRequestMessage heartbeatRequest = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/slicers/{registration!.Id}/heartbeat",
+            new HeartbeatDto { Status = "Online", FreeSlots = 1 },
+            apiKey: null);
+
+        HttpResponseMessage response = await client.SendAsync(heartbeatRequest);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     private class RegistrationResult

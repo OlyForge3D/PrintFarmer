@@ -229,10 +229,18 @@ Docker Compose brings up 3 worker containers with corresponding keys.
 
 **Endpoint**: `POST /api/slicers/register`
 **Location**: `src/api/Controllers/SlicersController.cs`
-**Authentication**: 
-- Checks for `X-Slicer-ApiKey` header
-- Validates against static registry key (for registration) OR service-specific key (for updates)
-- Stores ApiKey in `SlicerService` record for future operations
+**Authentication**:
+- Checks for `X-Slicer-ApiKey` (legacy/current worker header) and
+  `X-Slicer-Api-Key` (compatibility header).
+- `GET /api/slicers` and `POST /api/slicers/register` require the configured
+  shared registration key (`WorkerAuth:SharedApiKey`, `WorkerAuth:SharedKey`,
+  `SlicerRegistry:ApiKey`, `WORKER_SHARED_API_KEY`, or
+  `SLICER_REGISTRATION_KEY`).
+- Per-service lifecycle endpoints (`GET /api/slicers/{id}`, heartbeat,
+  deregister, rotate-key) require the generated key stored on that
+  `SlicerService.ApiKey` record.
+- Read endpoints return a redacted DTO and do not include `apiKey`; register
+  and rotate-key responses still return the newly issued key to the worker.
 
 **Response**: 
 ```json
@@ -250,8 +258,10 @@ The worker registration flow is implemented in three files:
 - Registers SlicerRegistrationClient and RegistrationBackgroundService as hosted services
 
 **2. `src/orcaslicer-worker/Services/SlicerRegistrationClient.cs`** - HTTP communication
-- Reads SlicerRegistry:ApiKey from configuration
-- Sends X-Slicer-ApiKey header with registration requests
+- Reads `SlicerRegistry:ApiKey`, then falls back to `WorkerAuth:SharedApiKey`,
+  `WorkerAuth:SharedKey`, `WORKER_SHARED_API_KEY`, and
+  `SLICER_REGISTRATION_KEY` for registration.
+- Sends `X-Slicer-ApiKey` header with registration and lifecycle requests.
 
 **3. `src/orcaslicer-worker/Services/RegistrationBackgroundService.cs`** - Lifecycle management
 - Automatically calls RegisterAsync() on startup

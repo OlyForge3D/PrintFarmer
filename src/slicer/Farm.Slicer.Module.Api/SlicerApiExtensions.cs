@@ -56,6 +56,7 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
         _ = services.AddSingleton<IWorkerAuthService, WorkerAuthService>();
+        _ = services.AddScoped<Filters.ISlicerApiKeyValidator, SlicerApiKeyValidator>();
 
         // Artifact services
         _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
