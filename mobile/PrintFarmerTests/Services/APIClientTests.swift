@@ -416,6 +416,27 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testMethodNotAllowedResponseHasActionableMessage() async {
+        MockAPIClient.stubResponse(json: "{}", statusCode: 405)
+
+        do {
+            let _: SpoolmanFilament = try await apiClient.get("/api/spoolman/filaments/by-barcode?code=STALE")
+            XCTFail("Expected NetworkError.methodNotAllowed")
+        } catch let error as NetworkError {
+            guard case .methodNotAllowed = error else {
+                XCTFail("Expected .methodNotAllowed, got \(error)")
+                return
+            }
+
+            XCTAssertEqual(
+                error.errorDescription,
+                "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     // MARK: - Network Errors
 
     func testNoConnectionThrowsNetworkError() async {
@@ -501,6 +522,39 @@ final class APIClientTests: XCTestCase {
             } else {
                 XCTFail("Expected .decodingFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testDecodingFailureDescriptionIncludesPathTypeAndServerVersionHint() async {
+        MockAPIClient.stubResponse(
+            json: """
+            {
+              "id": "not-an-int",
+              "name": "Bad Spool",
+              "material": "PLA",
+              "inUse": true
+            }
+            """
+        )
+
+        do {
+            let _: SpoolmanSpool = try await apiClient.get("/api/spoolman/spools/501")
+            XCTFail("Expected NetworkError.decodingFailed")
+        } catch let error as NetworkError {
+            guard case .decodingFailed = error else {
+                XCTFail("Expected .decodingFailed, got \(error)")
+                return
+            }
+
+            let description = error.errorDescription ?? ""
+            XCTAssertTrue(description.contains("Failed to decode response for SpoolmanSpool"))
+            XCTAssertTrue(description.contains("typeMismatch"))
+            XCTAssertTrue(description.contains("id"))
+            XCTAssertTrue(description.contains("expected Int"))
+            XCTAssertTrue(description.contains("server version may be incompatible"))
+            XCTAssertTrue(description.contains("update the server"))
         } catch {
             XCTFail("Unexpected error type: \(error)")
         }

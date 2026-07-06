@@ -379,7 +379,7 @@ struct SpoolInventoryRowView: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextPrimary)
 
-                    if spool.inUse ?? false {
+                    if spool.inUse {
                         Image(systemName: "printer.fill")
                             .font(.caption2)
                             .foregroundStyle(Color.pfAccent)
