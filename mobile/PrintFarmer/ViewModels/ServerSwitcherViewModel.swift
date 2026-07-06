@@ -3,6 +3,7 @@ import Foundation
 struct ServerSwitcherMenuItem: Identifiable, Equatable {
     let id: UUID
     let displayName: String
+    let normalizedURLString: String
     let isActive: Bool
 
     var accessibilityLabel: String {
@@ -38,6 +39,7 @@ struct ServerSwitcherViewModel {
                 displayName: duplicateDisplayNames.contains(server.displayName)
                     ? disambiguatedDisplayName(for: server)
                     : server.displayName,
+                normalizedURLString: server.normalizedURLString,
                 isActive: server.id == activeServerID
             )
         }
