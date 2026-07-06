@@ -96,14 +96,18 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             string json = JsonSerializer.Serialize(registrationDto);
             StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            // Add API key header if configured
-            string? apiKey = _configuration["SlicerRegistry:ApiKey"];
-            if (!string.IsNullOrEmpty(apiKey))
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/register")
             {
-                _httpClient.DefaultRequestHeaders.Add("X-Slicer-ApiKey", apiKey);
+                Content = content
+            };
+
+            string? apiKey = ResolveRegistrationApiKey(_configuration);
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                request.Headers.Add("X-Slicer-ApiKey", apiKey);
             }
 
-            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/slicers/register", content, cancellationToken);
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -210,5 +214,20 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 
         [System.Text.Json.Serialization.JsonPropertyName("apiKey")]
         public string ApiKey { get; init; } = string.Empty;
+    }
+
+    internal static string? ResolveRegistrationApiKey(IConfiguration configuration)
+    {
+        return FirstNonBlank(
+            configuration["WorkerAuth:SharedKey"],
+            configuration["WorkerAuth:SharedApiKey"],
+            configuration["SlicerRegistry:ApiKey"],
+            Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY"),
+            Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY"));
+    }
+
+    private static string? FirstNonBlank(params string?[] candidates)
+    {
+        return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
     }
 }

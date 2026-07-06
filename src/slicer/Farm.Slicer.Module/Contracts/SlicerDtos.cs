@@ -42,3 +42,39 @@ public class HeartbeatDto
 
     public int? FreeSlots { get; set; }
 }
+
+/// <summary>
+/// Redacted slicer worker registration response for read endpoints.
+/// </summary>
+public class SlicerServiceResponseDto
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public int SlicerType { get; set; }
+
+    public string? Version { get; set; }
+
+    public string? Host { get; set; }
+
+    public string? UiManifestUrl { get; set; }
+
+    public string? CapabilitiesJson { get; set; }
+
+    public int MaxConcurrentJobs { get; set; }
+
+    public string? Status { get; set; }
+
+    public DateTime LastSeen { get; set; }
+
+    public DateTime? ApiKeyRotatedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+
+    public DateTime UpdatedAt { get; set; }
+
+    public string? Tags { get; set; }
+
+    public string? InstanceId { get; set; }
+}
