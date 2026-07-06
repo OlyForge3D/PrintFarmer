@@ -41,6 +41,7 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         let viewModel = ServerSwitcherViewModel(servers: registry.servers, activeServerID: registry.activeServerID)
 
         XCTAssertEqual(viewModel.items.map(\.displayName), ["Home Farm", "Shop Farm"])
+        XCTAssertEqual(viewModel.items.map(\.normalizedURLString), ["https://home.example.com", "https://shop.example.com"])
         XCTAssertEqual(viewModel.items.map(\.isActive), [false, true])
         XCTAssertEqual(viewModel.items[1].accessibilityLabel, "Shop Farm, active server")
     }
@@ -85,5 +86,22 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         try viewModel.activate(shop.id, registry: registry)
 
         XCTAssertEqual(registry.activeServerID, shop.id)
+    }
+
+    func testActivatingServerAllowsLoginFormToReflectSelectedServer() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let home = try registry.add(displayName: "Home Farm", baseURL: URL(string: "https://home.example.com")!)
+        let shop = try registry.add(displayName: "Shop Farm", baseURL: URL(string: "http://100.64.0.10:5245")!, makeActiveIfNeeded: false)
+        try registry.setActive(id: home.id)
+        let viewModel = ServerSwitcherViewModel(servers: registry.servers, activeServerID: registry.activeServerID)
+
+        try viewModel.activate(shop.id, registry: registry)
+        let loginViewModel = LoginViewModel(activeServer: registry.activeServer)
+
+        XCTAssertEqual(registry.activeServerID, shop.id)
+        XCTAssertEqual(loginViewModel.serverURL, "http://100.64.0.10:5245")
+        XCTAssertEqual(loginViewModel.normalizedServerURL, "http://100.64.0.10:5245")
+        XCTAssertEqual(loginViewModel.usernameOrEmail, "")
+        XCTAssertFalse(loginViewModel.isServerURLExpanded)
     }
 }
