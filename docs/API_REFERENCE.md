@@ -36,10 +36,22 @@ Generic wrapper for paging: items, totalCount, page, pageSize, totalPages.
 ### AuthenticationResult
 Result of login/registration containing JWT token & user metadata.
 
+### BarcodeScanLogDto
+Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include
+`id`, `timestamp`, `barcode`, `action`, `outcome`, `httpStatus`,
+`matchedFilamentId`, `createdSpoolId`, `userId`, and `message`.
+
 (Extend with additional DTO details as needed.)
+
+## Spoolman Barcode Diagnostics
+
+- `GET /api/spoolman/barcodes/scan-logs?limit=` returns recent barcode scan
+  diagnostics newest first. Requires `farm_admin`; `limit` defaults to 100 and
+  accepts 1-500.
+- Logging is disabled by default. Enable the Spoolman setting
+  `barcodeScanDebugLoggingEnabled` to persist scan attempts and outcomes.
 
 ## Notes
 - All timestamps are ISO 8601 UTC where possible.
 - Pagination: new endpoints adopt `page` & `pageSize` query parameters with maximum pageSize 500.
 - Filtering: search parameters perform case-sensitive substring matching unless stated otherwise.
-
