@@ -725,6 +725,44 @@ public class JobQueueAnalyticsController(
         }
     }
 
+    /// <summary>
+    /// Remove existing duplicate history jobs created before the harvest-time dedup guard.
+    /// Duplicates are seeded history jobs that share the same printer and the same whole-second
+    /// actual start time. Native (non-seeded) jobs are always retained. Defaults to a dry run
+    /// that only reports what would be removed; pass <c>dryRun=false</c> to actually delete.
+    /// </summary>
+    /// <param name="dryRun">When true (default), reports duplicates without deleting them.</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
+    [HttpPost("history/deduplicate")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(DeduplicateHistoryResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> DeduplicateHistoryAsync(
+        [FromQuery] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            DeduplicateHistoryResultDto result =
+                await _printJobManagementService.DeduplicateSeededHistoryAsync(dryRun, cancellationToken);
+
+            _logger.LogInformation(
+                "History deduplication {Mode} completed: {Groups} group(s), {Jobs} job(s)",
+                dryRun ? "dry-run" : "cleanup",
+                result.DuplicateGroups,
+                result.JobsRemoved);
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deduplicating queue history");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to deduplicate history" });
+        }
+    }
+
     // ============= TIMELINE & ANALYTICS ENDPOINTS (Phase 3C) =============
 
     /// <summary>

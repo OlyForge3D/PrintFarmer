@@ -1835,6 +1835,97 @@ public class PrintJobManagementService(
         }
     }
 
+    /// <inheritdoc />
+    public async Task<DeduplicateHistoryResultDto> DeduplicateSeededHistoryAsync(
+        bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        List<HistoryDuplicateCandidate> candidates =
+            await _repository.GetHistoryDuplicateCandidatesAsync(cancellationToken);
+
+        DeduplicateHistoryResultDto result = new() { DryRun = dryRun };
+        List<Guid> idsToRemove = new();
+
+        IEnumerable<IGrouping<(Guid PrinterId, DateTime Start), HistoryDuplicateCandidate>> groups = candidates
+            .Where(c => (c.SourcePrinterId ?? c.AssignedPrinterId) != null)
+            .GroupBy(c => (
+                PrinterId: (c.SourcePrinterId ?? c.AssignedPrinterId)!.Value,
+                Start: TruncateToSecond(c.ActualStartTime)));
+
+        foreach (IGrouping<(Guid PrinterId, DateTime Start), HistoryDuplicateCandidate> group in groups)
+        {
+            List<HistoryDuplicateCandidate> members = group.ToList();
+            if (members.Count < 2)
+            {
+                continue;
+            }
+
+            // Retain the most authoritative row: prefer a native (non-seeded) job, then one with an
+            // external id, then the earliest-created; only seeded rows are ever removed.
+            HistoryDuplicateCandidate survivor = members
+                .OrderBy(c => c.WasSeededFromHistory ? 1 : 0)
+                .ThenBy(c => string.IsNullOrWhiteSpace(c.ExternalJobId) ? 1 : 0)
+                .ThenBy(c => c.CreatedAt)
+                .ThenBy(c => c.Id)
+                .First();
+
+            List<Guid> removable = members
+                .Where(c => c.Id != survivor.Id && c.WasSeededFromHistory)
+                .Select(c => c.Id)
+                .ToList();
+
+            if (removable.Count == 0)
+            {
+                continue;
+            }
+
+            result.DuplicateGroups++;
+            idsToRemove.AddRange(removable);
+            result.Groups.Add(new DeduplicateHistoryGroupDto
+            {
+                PrinterId = group.Key.PrinterId,
+                StartTimeUtc = group.Key.Start,
+                RetainedJobId = survivor.Id,
+                RemovedJobIds = removable
+            });
+        }
+
+        result.JobsRemoved = idsToRemove.Count;
+
+        if (dryRun || idsToRemove.Count == 0)
+        {
+            _logger.LogInformation(
+                "History dedup {Mode}: {Groups} duplicate group(s), {Jobs} seeded duplicate job(s){Suffix}",
+                dryRun ? "dry-run" : "cleanup",
+                result.DuplicateGroups,
+                result.JobsRemoved,
+                dryRun ? " would be removed" : " removed");
+            return result;
+        }
+
+        // Removing the retained row's duplicates is safe against re-seeding: the survivor keeps the
+        // same whole-second start time, so the harvest-time start-time guard blocks re-insertion.
+        List<PrintJob> jobsToRemove = await _repository.GetByIdsAsync(idsToRemove, cancellationToken);
+        foreach (PrintJob job in jobsToRemove)
+        {
+            _repository.Remove(job);
+        }
+
+        await _repository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "History dedup cleanup: removed {Jobs} seeded duplicate job(s) across {Groups} group(s)",
+            result.JobsRemoved,
+            result.DuplicateGroups);
+
+        return result;
+    }
+
+    private static DateTime TruncateToSecond(DateTime value)
+    {
+        return value.AddTicks(-(value.Ticks % TimeSpan.TicksPerSecond));
+    }
+
     /// <summary>
     /// Creates a new PrintJob entity from a HistoryJob record.
     /// </summary>

@@ -331,6 +331,20 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Remove existing duplicate history jobs that were created before the harvest-time
+    /// dedup guard existed. Duplicates are jobs sharing the same printer
+    /// (<c>SourcePrinterId</c> or <c>AssignedPrinterId</c>) and the
+    /// same whole-second <c>ActualStartTime</c> (post-epoch only). Only
+    /// history-seeded rows are removed; a native (non-seeded) job in a group is always retained.
+    /// </summary>
+    /// <param name="dryRun">When true, no rows are deleted; the result reports what would be removed.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    /// <returns>A summary of the duplicate groups found and jobs removed.</returns>
+    Task<DeduplicateHistoryResultDto> DeduplicateSeededHistoryAsync(
+        bool dryRun = true,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Sync active external jobs (non-terminal states) from printer history APIs.
     /// Uses the same dedupe and history-to-existing-job linking behavior as history seeding,
     /// but focuses on ingesting and refreshing externally-started active jobs on a faster cadence.

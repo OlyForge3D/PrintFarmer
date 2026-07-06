@@ -527,6 +527,23 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .ToHashSet();
     }
 
+    public async Task<List<HistoryDuplicateCandidate>> GetHistoryDuplicateCandidatesAsync(CancellationToken ct = default)
+    {
+        // Post-epoch guard mirrors the harvest dedup: start-less jobs (epoch) are never duplicates.
+        return await _context.PrintJobs
+            .AsNoTracking()
+            .Where(pj => pj.ActualStartTime.HasValue && pj.ActualStartTime.Value > DateTime.UnixEpoch)
+            .Select(pj => new HistoryDuplicateCandidate(
+                pj.Id,
+                pj.SourcePrinterId,
+                pj.AssignedPrinterId,
+                pj.ActualStartTime!.Value,
+                pj.WasSeededFromHistory,
+                pj.ExternalJobId,
+                pj.CreatedAt))
+            .ToListAsync(ct);
+    }
+
     public async Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default)
     {
         return await _context.PrintJobs

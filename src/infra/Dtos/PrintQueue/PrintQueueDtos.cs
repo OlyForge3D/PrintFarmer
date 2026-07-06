@@ -307,6 +307,61 @@ public class SeedQueueHistoryRequest
 // ============= RESPONSE DTOs =============
 
 /// <summary>
+/// Result of a seeded-history duplicate cleanup run. Duplicates are jobs that share
+/// the same printer and the same whole-second <c>ActualStartTime</c> (mirroring the
+/// harvest-time dedup guard). Only history-seeded rows are removed; native jobs are kept.
+/// </summary>
+public class DeduplicateHistoryResultDto
+{
+    /// <summary>
+    /// When true, no rows were deleted; the result reports what would have been removed.
+    /// </summary>
+    public bool DryRun { get; set; }
+
+    /// <summary>
+    /// Number of duplicate groups (printer + whole-second start) that had at least one
+    /// removable seeded duplicate.
+    /// </summary>
+    public int DuplicateGroups { get; set; }
+
+    /// <summary>
+    /// Number of seeded duplicate jobs removed (or that would be removed in a dry run).
+    /// </summary>
+    public int JobsRemoved { get; set; }
+
+    /// <summary>
+    /// Per-group detail of the retained job and the removed duplicates.
+    /// </summary>
+    public List<DeduplicateHistoryGroupDto> Groups { get; set; } = new();
+}
+
+/// <summary>
+/// Detail of a single duplicate group processed by the seeded-history cleanup.
+/// </summary>
+public class DeduplicateHistoryGroupDto
+{
+    /// <summary>
+    /// Effective printer the duplicate jobs belong to (source printer, else assigned printer).
+    /// </summary>
+    public Guid PrinterId { get; set; }
+
+    /// <summary>
+    /// Whole-second UTC start time shared by the jobs in this group.
+    /// </summary>
+    public DateTime StartTimeUtc { get; set; }
+
+    /// <summary>
+    /// The job retained as the canonical record for this group.
+    /// </summary>
+    public Guid RetainedJobId { get; set; }
+
+    /// <summary>
+    /// The seeded duplicate jobs removed (or that would be removed in a dry run).
+    /// </summary>
+    public List<Guid> RemovedJobIds { get; set; } = new();
+}
+
+/// <summary>
 /// Result of bulk queue operations
 /// </summary>
 public class QueueBulkOperationResultDto
