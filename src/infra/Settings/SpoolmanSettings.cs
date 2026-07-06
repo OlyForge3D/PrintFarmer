@@ -17,4 +17,11 @@ public class SpoolmanSettings : IAppSetting
         InputType = SettingInputType.Url)]
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; set; } = string.Empty;
+
+    [SettingDisplay(
+        Name = "Barcode scan debug logging",
+        Description = "Record barcode scan attempts and outcomes in the backend database for diagnostics.",
+        InputType = SettingInputType.Boolean)]
+    [JsonPropertyName("barcodeScanDebugLoggingEnabled")]
+    public bool BarcodeScanDebugLoggingEnabled { get; set; }
 }
