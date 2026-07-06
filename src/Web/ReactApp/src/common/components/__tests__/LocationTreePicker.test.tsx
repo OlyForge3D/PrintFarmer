@@ -107,10 +107,11 @@ describe('LocationTreePicker', () => {
     });
   });
 
-  it('shows required indicator when required is true', () => {
+  it('shows required indicator when required is true', async () => {
     render(<LocationTreePicker {...defaultProps} required />);
 
     expect(screen.getByText('*')).toBeInTheDocument();
+    expect(await screen.findByText('Select a location...')).toBeInTheDocument();
   });
 
   it('shows loading state while fetching tree', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { STLViewer } from './STLViewer';
 
 // Since STLViewer uses Complex Three.js rendering, we test the exposed behavior
@@ -11,10 +11,11 @@ describe('STLViewer Component', () => {
     expect(container).toBeInTheDocument();
   });
 
-  it('accepts File prop', () => {
+  it('accepts File prop', async () => {
     const file = new File(['test'], 'model.stl', { type: 'application/octet-stream' });
     const { container } = render(<STLViewer file={file} />);
     expect(container).toBeInTheDocument();
+    expect(await screen.findByText('Error Loading Model')).toBeInTheDocument();
   });
 
   it('accepts ArrayBuffer prop', () => {
@@ -48,19 +49,23 @@ describe('STLViewer Component', () => {
     expect(container).toBeInTheDocument();
   });
 
-  it('accepts onMeshLoaded callback', () => {
+  it('accepts onMeshLoaded callback', async () => {
     const callback = vi.fn();
     const file = new File(['test'], 'model.stl', { type: 'application/octet-stream' });
     const { container } = render(<STLViewer file={file} onMeshLoaded={callback} />);
     expect(container).toBeInTheDocument();
+    expect(await screen.findByText('Error Loading Model')).toBeInTheDocument();
   });
 
-  it('component structure is stable', () => {
+  it('component structure is stable', async () => {
     const file = new File(['test'], 'model.stl', { type: 'application/octet-stream' });
     const { container: container1 } = render(<STLViewer file={file} />);
     const { container: container2 } = render(<STLViewer file={file} />);
     
     expect(container1).toBeInTheDocument();
     expect(container2).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('Error Loading Model')).toHaveLength(2);
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { SlicerConfigModal } from '@/features/slicer/components/SlicerConfigModal';
 
 // Mock the slicerService
@@ -25,14 +26,27 @@ const defaultProps = {
   onSliceComplete: vi.fn(),
 };
 
+type SlicerConfigModalProps = ComponentProps<typeof SlicerConfigModal>;
+
+const renderSlicerConfigModal = async (props: Partial<SlicerConfigModalProps> = {}) => {
+  const mergedProps = { ...defaultProps, ...props };
+  const result = render(<SlicerConfigModal {...mergedProps} />);
+
+  if (mergedProps.isOpen && mergedProps.modelFile) {
+    await screen.findByText('Model validation passed');
+  }
+
+  return result;
+};
+
 describe('SlicerConfigModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe('Modal open/close', () => {
-    it('renders modal content when isOpen is true', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('renders modal content when isOpen is true', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByText('Configure Slicing')).toBeInTheDocument();
     });
 
@@ -41,17 +55,17 @@ describe('SlicerConfigModal', () => {
       expect(screen.queryByText('Configure Slicing')).not.toBeInTheDocument();
     });
 
-    it('calls onClose when Cancel button is clicked', () => {
+    it('calls onClose when Cancel button is clicked', async () => {
       const onClose = vi.fn();
-      render(<SlicerConfigModal {...defaultProps} onClose={onClose} />);
+      await renderSlicerConfigModal({ onClose });
       fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
       expect(onClose).toHaveBeenCalled();
     });
   });
 
   describe('Dark theme — no hardcoded colors (PFarm1-5o5)', () => {
-    it('does not use hardcoded gray-* Tailwind classes in rendered output', () => {
-      const { container } = render(<SlicerConfigModal {...defaultProps} />);
+    it('does not use hardcoded gray-* Tailwind classes in rendered output', async () => {
+      const { container } = await renderSlicerConfigModal();
       const allElements = container.querySelectorAll('*');
       const grayViolations: string[] = [];
 
@@ -70,8 +84,8 @@ describe('SlicerConfigModal', () => {
       expect(grayViolations).toEqual([]);
     });
 
-    it('model info section uses pf-* tokens instead of bg-gray-50', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('model info section uses pf-* tokens instead of bg-gray-50', async () => {
+      await renderSlicerConfigModal();
       // The "Model Information" section
       const modelInfoHeading = screen.getByText('Model Information');
       const modelInfoSection = modelInfoHeading.closest('div');
@@ -83,8 +97,8 @@ describe('SlicerConfigModal', () => {
       }
     });
 
-    it('form labels use pf-* text tokens instead of text-gray-700', () => {
-      const { container } = render(<SlicerConfigModal {...defaultProps} />);
+    it('form labels use pf-* text tokens instead of text-gray-700', async () => {
+      const { container } = await renderSlicerConfigModal();
       const labels = container.querySelectorAll('label');
 
       labels.forEach((label) => {
@@ -95,8 +109,8 @@ describe('SlicerConfigModal', () => {
       });
     });
 
-    it('select elements use pf-* border tokens instead of border-gray-300', () => {
-      const { container } = render(<SlicerConfigModal {...defaultProps} />);
+    it('select elements use pf-* border tokens instead of border-gray-300', async () => {
+      const { container } = await renderSlicerConfigModal();
       const selects = container.querySelectorAll('select');
 
       selects.forEach((select) => {
@@ -104,8 +118,8 @@ describe('SlicerConfigModal', () => {
       });
     });
 
-    it('input elements use pf-* border tokens instead of border-gray-300', () => {
-      const { container } = render(<SlicerConfigModal {...defaultProps} />);
+    it('input elements use pf-* border tokens instead of border-gray-300', async () => {
+      const { container } = await renderSlicerConfigModal();
       const inputs = container.querySelectorAll('input[type="number"]');
 
       inputs.forEach((input) => {
@@ -113,8 +127,8 @@ describe('SlicerConfigModal', () => {
       });
     });
 
-    it('range sliders do not use bg-gray-200', () => {
-      const { container } = render(<SlicerConfigModal {...defaultProps} />);
+    it('range sliders do not use bg-gray-200', async () => {
+      const { container } = await renderSlicerConfigModal();
       const ranges = container.querySelectorAll('input[type="range"]');
 
       ranges.forEach((range) => {
@@ -122,54 +136,54 @@ describe('SlicerConfigModal', () => {
       });
     });
 
-    it('no element uses hardcoded blue-500 for focus rings (should use pf-accent)', () => {
-      const { container } = render(<SlicerConfigModal {...defaultProps} />);
+    it('no element uses hardcoded blue-500 for focus rings (should use pf-accent)', async () => {
+      const { container } = await renderSlicerConfigModal();
       const focusBlueElements = container.querySelectorAll('[class*="focus:ring-blue-500"]');
       expect(focusBlueElements.length).toBe(0);
     });
   });
 
   describe('UI library components (PFarm1-5o5)', () => {
-    it('renders slicer engine radio buttons', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('renders slicer engine radio buttons', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByText('PrusaSlicer')).toBeInTheDocument();
       expect(screen.getByText('OrcaSlicer')).toBeInTheDocument();
     });
 
-    it('renders quality and material selectors', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('renders quality and material selectors', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByLabelText(/print quality preset/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/material type/i)).toBeInTheDocument();
     });
 
-    it('renders temperature and speed controls', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('renders temperature and speed controls', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByLabelText(/nozzle temperature/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/bed temperature/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/infill percentage/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/print speed/i)).toBeInTheDocument();
     });
 
-    it('renders support structure toggle', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('renders support structure toggle', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByLabelText(/enable support structures/i)).toBeInTheDocument();
     });
   });
 
   describe('Content rendering', () => {
-    it('shows model file name', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('shows model file name', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByText('model.stl')).toBeInTheDocument();
     });
 
-    it('shows available printers', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('shows available printers', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByText('Printer One')).toBeInTheDocument();
       expect(screen.getByText('Printer Two')).toBeInTheDocument();
     });
 
-    it('shows Slice & Queue Print button', () => {
-      render(<SlicerConfigModal {...defaultProps} />);
+    it('shows Slice & Queue Print button', async () => {
+      await renderSlicerConfigModal();
       expect(screen.getByRole('button', { name: /slice.*queue/i })).toBeInTheDocument();
     });
 

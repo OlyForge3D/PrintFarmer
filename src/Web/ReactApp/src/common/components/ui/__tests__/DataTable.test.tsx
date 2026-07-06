@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import type { ReactElement } from 'react';
 import { DataTable, DataTableColumn } from '../DataTable';
 
 interface TestItem {
@@ -38,8 +39,16 @@ const mockColumns: DataTableColumn<TestItem>[] = [
 ];
 
 describe('DataTable', () => {
-  it('should render table with data', () => {
-    render(
+  const renderAndFlushRows = async (ui: ReactElement) => {
+    const result = render(ui);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    return result;
+  };
+
+  it('should render table with data', async () => {
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -68,8 +77,8 @@ describe('DataTable', () => {
     expect(screen.getByText('No items found')).toBeInTheDocument();
   });
 
-  it('should handle sortable columns', () => {
-    render(
+  it('should handle sortable columns', async () => {
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -81,8 +90,8 @@ describe('DataTable', () => {
     expect(nameHeader).toBeInTheDocument();
   });
 
-  it('should render with default sort column', () => {
-    render(
+  it('should render with default sort column', async () => {
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -97,12 +106,12 @@ describe('DataTable', () => {
     expect(rows.length).toBe(4);
   });
 
-  it('should render actions column when renderActions provided', () => {
+  it('should render actions column when renderActions provided', async () => {
     const mockRenderActions = vi.fn((item: TestItem) => (
       <button>Edit {item.name}</button>
     ));
 
-    render(
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -118,10 +127,10 @@ describe('DataTable', () => {
     expect(screen.getByText('Edit Item C')).toBeInTheDocument();
   });
 
-  it('should support row selection callback', () => {
+  it('should support row selection callback', async () => {
     const onRowSelect = vi.fn();
 
-    render(
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -136,8 +145,8 @@ describe('DataTable', () => {
     expect(table).toBeInTheDocument();
   });
 
-  it('should enable keyboard navigation when specified', () => {
-    render(
+  it('should enable keyboard navigation when specified', async () => {
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -151,8 +160,8 @@ describe('DataTable', () => {
     expect(rows.length).toBeGreaterThan(1);
   });
 
-  it('should apply custom className', () => {
-    const { container } = render(
+  it('should apply custom className', async () => {
+    const { container } = await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -165,7 +174,7 @@ describe('DataTable', () => {
     expect(table).toHaveClass('custom-table-class');
   });
 
-  it('should render column with custom headerClassName', () => {
+  it('should render column with custom headerClassName', async () => {
     const columnsWithCustomClass: DataTableColumn<TestItem>[] = [
       {
         key: 'name',
@@ -175,7 +184,7 @@ describe('DataTable', () => {
       },
     ];
 
-    render(
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={columnsWithCustomClass}
@@ -199,8 +208,8 @@ describe('DataTable', () => {
     expect(screen.getByText('No data available.')).toBeInTheDocument();
   });
 
-  it('should render with custom actions width', () => {
-    render(
+  it('should render with custom actions width', async () => {
+    await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -214,8 +223,8 @@ describe('DataTable', () => {
     expect(actionsHeader).toHaveClass('w-32');
   });
 
-  it('should use getRowKey for unique keys', () => {
-    const { container } = render(
+  it('should use getRowKey for unique keys', async () => {
+    const { container } = await renderAndFlushRows(
       <DataTable
         data={mockData}
         columns={mockColumns}

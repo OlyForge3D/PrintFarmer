@@ -34,18 +34,21 @@ describe('LocationSelector', () => {
     render(<LocationSelector {...defaultProps} />);
 
     expect(screen.getByText('Location')).toBeInTheDocument();
+    expect(await screen.findByText('No location (unassigned)')).toBeInTheDocument();
   });
 
   it('passes custom label to LocationTreePicker', async () => {
     render(<LocationSelector {...defaultProps} label="Assign To" />);
 
     expect(screen.getByText('Assign To')).toBeInTheDocument();
+    expect(await screen.findByText('No location (unassigned)')).toBeInTheDocument();
   });
 
   it('renders required indicator when required', async () => {
     render(<LocationSelector {...defaultProps} required />);
 
     expect(screen.getByText('*')).toBeInTheDocument();
+    expect(await screen.findByText('Select a location')).toBeInTheDocument();
   });
 
   it('shows "Select a location" placeholder when required', async () => {

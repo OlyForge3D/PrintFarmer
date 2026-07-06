@@ -9,6 +9,16 @@ vi.mock('./STLViewer', () => ({
 }));
 
 describe('STLPreviewModal Component', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      blob: vi.fn().mockResolvedValue(new Blob(['test'])),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('does not render when isOpen is false', () => {
     render(
       <STLPreviewModal
@@ -35,7 +45,7 @@ describe('STLPreviewModal Component', () => {
     expect(screen.getByText('model.stl')).toBeInTheDocument();
   });
 
-  it('renders when isOpen is true with URL', () => {
+  it('renders when isOpen is true with URL', async () => {
     render(
       <STLPreviewModal
         isOpen={true}
@@ -47,6 +57,7 @@ describe('STLPreviewModal Component', () => {
 
     expect(screen.getByText(/STL Model Preview/i)).toBeInTheDocument();
     expect(screen.getByText('model.stl')).toBeInTheDocument();
+    expect(await screen.findByText('STL')).toBeInTheDocument();
   });
 
   it('calls onClose when close button is clicked', () => {
