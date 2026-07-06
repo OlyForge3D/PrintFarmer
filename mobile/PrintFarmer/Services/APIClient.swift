@@ -631,11 +631,14 @@ actor APIClient {
             }
             // Non-optional type with empty body is an error
             throw NetworkError.decodingFailed(
-                DecodingError.dataCorrupted(
-                    DecodingError.Context(
-                        codingPath: [],
-                        debugDescription: "Empty response body for non-optional type \(T.self)"
-                    )
+                ResponseDecodingFailure(
+                    error: DecodingError.dataCorrupted(
+                        DecodingError.Context(
+                            codingPath: [],
+                            debugDescription: "Empty response body for non-optional type \(T.self)"
+                        )
+                    ),
+                    targetType: T.self
                 )
             )
         }
@@ -648,7 +651,7 @@ actor APIClient {
             print("⚠️ [APIClient] Decode failed for \(T.self) at \(request.url?.path ?? "?"): \(error)")
             print("⚠️ [APIClient] Response body preview: \(preview)")
             #endif
-            throw NetworkError.decodingFailed(error)
+            throw NetworkError.decodingFailed(ResponseDecodingFailure(error: error, targetType: T.self))
         }
     }
 
@@ -716,6 +719,8 @@ actor APIClient {
             throw NetworkError.forbidden
         case 404:
             throw NetworkError.notFound
+        case 405:
+            throw NetworkError.methodNotAllowed
         case 409:
             throw NetworkError.conflict
         case 400...499:
@@ -731,12 +736,70 @@ actor APIClient {
 
 // MARK: - Errors
 
+struct ResponseDecodingFailure: Error, Sendable {
+    let targetType: String
+    let kind: String
+    let codingPath: String
+    let expectedType: String
+    let debugDescription: String
+
+    init(error: Error, targetType: Any.Type) {
+        self.targetType = String(describing: targetType)
+
+        guard let decodingError = error as? DecodingError else {
+            self.kind = "unknown"
+            self.codingPath = "<root>"
+            self.expectedType = String(describing: targetType)
+            self.debugDescription = error.localizedDescription
+            return
+        }
+
+        switch decodingError {
+        case .keyNotFound(let key, let context):
+            self.kind = "keyNotFound"
+            self.codingPath = Self.formatPath(context.codingPath + [key])
+            self.expectedType = "required key '\(key.stringValue)'"
+            self.debugDescription = context.debugDescription
+        case .typeMismatch(let type, let context):
+            self.kind = "typeMismatch"
+            self.codingPath = Self.formatPath(context.codingPath)
+            self.expectedType = String(describing: type)
+            self.debugDescription = context.debugDescription
+        case .valueNotFound(let type, let context):
+            self.kind = "valueNotFound"
+            self.codingPath = Self.formatPath(context.codingPath)
+            self.expectedType = String(describing: type)
+            self.debugDescription = context.debugDescription
+        case .dataCorrupted(let context):
+            self.kind = "dataCorrupted"
+            self.codingPath = Self.formatPath(context.codingPath)
+            self.expectedType = String(describing: targetType)
+            self.debugDescription = context.debugDescription
+        @unknown default:
+            self.kind = "unknown"
+            self.codingPath = "<root>"
+            self.expectedType = String(describing: targetType)
+            self.debugDescription = error.localizedDescription
+        }
+    }
+
+    var userMessage: String {
+        "Failed to decode response for \(targetType): \(kind) at \(codingPath); expected \(expectedType); \(debugDescription).\nYour PrintFarmer server version may be incompatible; update the server."
+    }
+
+    private static func formatPath(_ codingPath: [CodingKey]) -> String {
+        guard !codingPath.isEmpty else { return "<root>" }
+        return codingPath.map(\.stringValue).joined(separator: ".")
+    }
+}
+
 enum NetworkError: LocalizedError, Sendable {
     case invalidURL(String)
     case invalidResponse
     case unauthorized
     case forbidden
     case notFound
+    case methodNotAllowed
     case conflict
     case noConnection
     case timeout
@@ -744,7 +807,7 @@ enum NetworkError: LocalizedError, Sendable {
     case clientError(Int, APIError?)
     case serverError(Int)
     case unexpectedStatus(Int)
-    case decodingFailed(Error)
+    case decodingFailed(ResponseDecodingFailure)
     case transportError(URLError)
     case authFailed(String)
     case staleServerResponse
@@ -756,6 +819,8 @@ enum NetworkError: LocalizedError, Sendable {
         case .unauthorized: return "Authentication required"
         case .forbidden: return "Access denied"
         case .notFound: return "Resource not found"
+        case .methodNotAllowed:
+            return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
         case .conflict: return "Conflict — resource was modified"
         case .noConnection: return "No internet connection"
         case .timeout: return "Request timed out"
@@ -764,7 +829,7 @@ enum NetworkError: LocalizedError, Sendable {
             return apiError?.detail ?? apiError?.message ?? apiError?.title ?? "Client error (\(code))"
         case .serverError(let code): return "Server error (\(code))"
         case .unexpectedStatus(let code): return "Unexpected status (\(code))"
-        case .decodingFailed(let error): return "Failed to decode response: \(error.localizedDescription)"
+        case .decodingFailed(let failure): return failure.userMessage
         case .transportError(let error):
             let tlsSummary = TLSDiagnostics.recentSummary()
             let base: String

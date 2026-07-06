@@ -197,6 +197,9 @@ public static class ServiceCollectionExtensions
         // Farm settings service (consolidates farm-wide config access)
         _ = services.AddScoped<Farm.Infrastructure.Services.IFarmSettingsService, Farm.Infrastructure.Services.FarmSettingsService>();
 
+        // Optional barcode scan diagnostics
+        _ = services.AddScoped<IBarcodeScanLogService, Farm.Infrastructure.Services.Spoolman.BarcodeScanLogService>();
+
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
         _ = services.AddSingleton(autoDispatchTrigger);

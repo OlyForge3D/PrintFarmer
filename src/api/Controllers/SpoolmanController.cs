@@ -1,8 +1,10 @@
 ﻿using System.Globalization;
 using System.Net.Http;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
@@ -22,6 +24,7 @@ namespace Farm.Web.Api.Controllers;
 public class SpoolmanController(
     ISpoolmanService spoolman,
     ISettingsService settingsService,
+    IBarcodeScanLogService barcodeScanLogService,
     ILogger<SpoolmanController> logger) : ControllerBase
 {
     private readonly ISettingsService _settingsService = settingsService;
@@ -222,13 +225,42 @@ public class SpoolmanController(
         try
         {
             SpoolmanSpoolDto? result = await spoolman.CreateSpoolByBarcodeAsync(request, ct);
-            return result is null
-                ? NotFound(new { message = $"No filament found for barcode '{request.Barcode.Trim()}'." })
-                : StatusCode(StatusCodes.Status201Created, result);
+            if (result is null)
+            {
+                await LogBarcodeScanAsync(
+                    request.Barcode.Trim(),
+                    BarcodeScanAction.Import,
+                    BarcodeScanOutcome.NotFound,
+                    StatusCodes.Status404NotFound,
+                    null,
+                    null,
+                    $"No filament found for barcode '{request.Barcode.Trim()}'.");
+
+                return NotFound(new { message = $"No filament found for barcode '{request.Barcode.Trim()}'." });
+            }
+
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Import,
+                BarcodeScanOutcome.Imported,
+                StatusCodes.Status201Created,
+                result.FilamentId,
+                result.Id,
+                "Spool imported from barcode.");
+
+            return StatusCode(StatusCodes.Status201Created, result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", request.Barcode, ex.Message);
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Import,
+                BarcodeScanOutcome.Error,
+                StatusCodes.Status500InternalServerError,
+                null,
+                null,
+                "Import failed. Check server logs for details.");
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Import failed. Check server logs for details." });
         }
     }
@@ -567,13 +599,42 @@ public class SpoolmanController(
         try
         {
             SpoolmanFilamentDto? result = await spoolman.GetFilamentByBarcodeAsync(barcode.Trim(), ct);
-            return result is null
-                ? NotFound(new { message = $"No filament found for barcode '{barcode.Trim()}'." })
-                : Ok(result);
+            if (result is null)
+            {
+                await LogBarcodeScanAsync(
+                    barcode.Trim(),
+                    BarcodeScanAction.Resolve,
+                    BarcodeScanOutcome.NotFound,
+                    StatusCodes.Status404NotFound,
+                    null,
+                    null,
+                    $"No filament found for barcode '{barcode.Trim()}'.");
+
+                return NotFound(new { message = $"No filament found for barcode '{barcode.Trim()}'." });
+            }
+
+            await LogBarcodeScanAsync(
+                barcode.Trim(),
+                BarcodeScanAction.Resolve,
+                BarcodeScanOutcome.Resolved,
+                StatusCodes.Status200OK,
+                result.Id,
+                null,
+                "Barcode resolved to filament.");
+
+            return Ok(result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error resolving filament by barcode {Barcode}: {Message}", barcode, ex.Message);
+            await LogBarcodeScanAsync(
+                barcode.Trim(),
+                BarcodeScanAction.Resolve,
+                BarcodeScanOutcome.Error,
+                StatusCodes.Status500InternalServerError,
+                null,
+                null,
+                "Barcode lookup failed. Check server logs for details.");
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Barcode lookup failed. Check server logs for details." });
         }
     }
@@ -612,15 +673,65 @@ public class SpoolmanController(
         try
         {
             SpoolmanFilamentDto? result = await spoolman.SaveBarcodeMappingAsync(request.FilamentId.Value, request.Barcode.Trim(), ct);
-            return result is null
-                ? NotFound(new { message = $"Filament {request.FilamentId.Value} not found." })
-                : Ok(result);
+            if (result is null)
+            {
+                await LogBarcodeScanAsync(
+                    request.Barcode.Trim(),
+                    BarcodeScanAction.Mapping,
+                    BarcodeScanOutcome.NotFound,
+                    StatusCodes.Status404NotFound,
+                    request.FilamentId.Value,
+                    null,
+                    $"Filament {request.FilamentId.Value} not found.");
+
+                return NotFound(new { message = $"Filament {request.FilamentId.Value} not found." });
+            }
+
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Mapping,
+                BarcodeScanOutcome.Mapped,
+                StatusCodes.Status200OK,
+                result.Id,
+                null,
+                "Barcode mapped to filament.");
+
+            return Ok(result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, ex.Message);
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Mapping,
+                BarcodeScanOutcome.Error,
+                StatusCodes.Status500InternalServerError,
+                request.FilamentId,
+                null,
+                "Barcode mapping failed. Check server logs for details.");
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Barcode mapping failed. Check server logs for details." });
         }
+    }
+
+    /// <summary>
+    /// Returns recent backend barcode scan diagnostic entries.
+    /// </summary>
+    [Authorize(Roles = "farm_admin")]
+    [HttpGet("barcodes/scan-logs")]
+    [ProducesResponseType(typeof(IReadOnlyList<BarcodeScanLogDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IReadOnlyList<BarcodeScanLogDto>>> GetBarcodeScanLogsAsync(
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        int requestedLimit = limit ?? 100;
+        if (requestedLimit is < 1 or > 500)
+        {
+            return BadRequest(new { message = "limit must be between 1 and 500." });
+        }
+
+        IReadOnlyList<BarcodeScanLog> logs = await barcodeScanLogService.GetRecentAsync(requestedLimit, ct);
+        return Ok(logs.Select(ToDto).ToList());
     }
 
     /// <summary>
@@ -1100,6 +1211,43 @@ public class SpoolmanController(
             });
         }
     }
+
+    private async Task LogBarcodeScanAsync(
+        string barcode,
+        BarcodeScanAction action,
+        BarcodeScanOutcome outcome,
+        int httpStatus,
+        int? matchedFilamentId,
+        int? createdSpoolId,
+        string message)
+    {
+        ClaimsPrincipal? user = HttpContext?.User;
+        await barcodeScanLogService.LogAsync(new BarcodeScanLog
+        {
+            Timestamp = DateTime.UtcNow,
+            Barcode = barcode,
+            Action = action,
+            Outcome = outcome,
+            HttpStatus = httpStatus,
+            MatchedFilamentId = matchedFilamentId,
+            CreatedSpoolId = createdSpoolId,
+            UserId = user?.FindFirstValue(ClaimTypes.NameIdentifier) ?? user?.FindFirstValue("sub"),
+            Message = message,
+        });
+    }
+
+    private static BarcodeScanLogDto ToDto(BarcodeScanLog log)
+        => new(
+            log.Id,
+            log.Timestamp,
+            log.Barcode,
+            log.Action,
+            log.Outcome,
+            log.HttpStatus,
+            log.MatchedFilamentId,
+            log.CreatedSpoolId,
+            log.UserId,
+            log.Message);
 
     #region CSV Helpers
 

@@ -39,6 +39,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
+    public DbSet<BarcodeScanLog> BarcodeScanLogs => Set<BarcodeScanLog>();
+
     // Tags
     public DbSet<Tag> Tags => Set<Tag>();
 

@@ -17,7 +17,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.9")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -188,6 +188,62 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("UserBalanceId");
 
                     b.ToTable("BalanceTransactions");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BarcodeScanLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Barcode")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("CreatedSpoolId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("HttpStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MatchedFilamentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Action");
+
+                    b.HasIndex("Barcode");
+
+                    b.HasIndex("Outcome");
+
+                    b.HasIndex("Timestamp");
+
+                    b.ToTable("BarcodeScanLogs");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>

@@ -20,6 +20,7 @@ public class SpoolmanControllerTests
 {
     private readonly Mock<ISpoolmanService> _spoolmanServiceMock;
     private readonly Mock<ISettingsService> _settingsServiceMock;
+    private readonly Mock<IBarcodeScanLogService> _barcodeScanLogServiceMock;
     private readonly Mock<ILogger<SpoolmanController>> _loggerMock;
     private readonly SpoolmanController _controller;
 
@@ -27,10 +28,12 @@ public class SpoolmanControllerTests
     {
         _spoolmanServiceMock = new Mock<ISpoolmanService>();
         _settingsServiceMock = new Mock<ISettingsService>();
+        _barcodeScanLogServiceMock = new Mock<IBarcodeScanLogService>();
         _loggerMock = new Mock<ILogger<SpoolmanController>>();
         _controller = new SpoolmanController(
             _spoolmanServiceMock.Object,
             _settingsServiceMock.Object,
+            _barcodeScanLogServiceMock.Object,
             _loggerMock.Object);
     }
 
