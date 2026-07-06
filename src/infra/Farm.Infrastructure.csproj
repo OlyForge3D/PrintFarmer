@@ -24,7 +24,7 @@
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.16.0" />
     <PackageReference Include="WebPush" Version="1.0.13" />
-    <PackageReference Include="Lucene.Net" Version="4.8.0-beta00017" />
+    <PackageReference Include="Lucene.Net" Version="4.8.0-beta00018" />
     <PackageReference Include="Lucene.Net.QueryParser" Version="4.8.0-beta00017" />
     <PackageReference Include="YamlDotNet" Version="16.2.1" />
     <!-- Note: Newtonsoft.Json, WebSocket packages, and Refit are globally overridden in Directory.Build.props -->
