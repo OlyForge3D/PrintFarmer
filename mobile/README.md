@@ -76,6 +76,28 @@ Existing installs that saved a single legacy URL under `pf_server_url` migrate
 that URL into the server registry on first launch and make it the initial active
 server.
 
+## TestFlight Betas
+
+The iOS beta line is authoritative for TestFlight versions. Use `v1.0-beta.N`
+tags for beta releases; the repo-root `VERSION` file is not used to derive iOS
+beta marketing versions.
+
+To cut an on-demand internal beta from GitHub Actions:
+
+```bash
+gh workflow run testflight-beta.yml -f environment=internal
+```
+
+The workflow creates and pushes the next `v1.0-beta.N` tag from the latest beta
+tag series unless `marketing_version` or `beta_number` inputs are supplied.
+
+The canonical tag-based method is:
+
+```bash
+git tag -a v1.0-beta.<N> -m "PrintFarmer iOS beta v1.0-beta.<N>"
+git push origin v1.0-beta.<N>
+```
+
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
