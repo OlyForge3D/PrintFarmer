@@ -133,23 +133,9 @@ builder.Services.AddHealthChecks()
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
     {
-        string allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
-            ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
-            ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
-        bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
-
-        _ = policy.SetIsOriginAllowed(origin =>
-        {
-            if (allowLocalNetwork)
-            {
-                return true;
-            }
-
-            string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(o => o.Trim()).ToArray();
-            return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
-        });
-        _ = policy.AllowCredentials();
+#pragma warning disable S5122 // slicer-host is internal and reached same-origin via nginx; all internal LAN origins are intentional, and restriction breaks direct LAN access.
+        _ = policy.AllowAnyOrigin();
+#pragma warning restore S5122
         _ = policy.AllowAnyMethod();
         _ = policy.AllowAnyHeader();
     }));

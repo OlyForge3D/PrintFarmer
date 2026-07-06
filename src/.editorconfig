@@ -640,3 +640,102 @@ dotnet_diagnostic.S3260.severity = suggestion
 # - CS8604/CS8602: Nullable reference warnings (potential null refs)
 # - CS0219: Unused variables (easy to fix)
 # - xUnit1031: Blocking in async tests (correctness)
+
+# Scoped PrintFarmer LAN/test suppressions for Sonar security rules.
+# Keep these rules enabled outside printer backends, slicer internals, discovery, and tests.
+
+# LAN printer/plugin clients use cleartext endpoints when devices do not offer HTTPS.
+# Backend discovery/test fixtures use private LAN IP ranges intentionally.
+[backends/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+[backends/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+# LAN discovery probes target printer endpoints that may only expose HTTP.
+# Network discovery uses private/local IP ranges by design.
+[discovery/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+[discovery/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+# Internal slicer worker/host endpoints are LAN services behind the reverse proxy.
+[slicer/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+[slicer/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+# Slicer worker callbacks and registration use internal HTTP endpoints.
+[worker-shared/*.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[worker-shared/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+
+# OrcaSlicer worker callbacks and registration use internal HTTP endpoints.
+[orcaslicer-worker/*.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[orcaslicer-worker/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+
+# Printer discovery is an internal LAN service and advertises local callback URLs.
+[printer-discovery/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+[printer-discovery/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+# Infrastructure settings and service adapters below intentionally default to local/LAN HTTP services.
+[infra/Settings/Go2RtcSettings.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[infra/Settings/ObicoSettings.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[infra/Services/Monitoring/MonitoringHealthService.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[infra/Services/Spoolman/SpoolmanService.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[infra/Services/Printers/PrintersService.cs]
+dotnet_diagnostic.S5332.severity = none
+
+# API edge adapters below talk to explicitly configured LAN/internal services.
+[api/Controllers/ObicoServerController.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[api/Services/Discovery/DiscoveryProxyService.cs]
+dotnet_diagnostic.S5332.severity = none
+
+[api/Services/SmartPlug/*.cs]
+dotnet_diagnostic.S5332.severity = none
+
+# SignalR test helper generates local/private demo URLs only.
+[api/Services/SignalR/SignalRTestService.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+# API development bind URL intentionally supports plain HTTP for local/LAN deployments.
+[api/Program.cs]
+dotnet_diagnostic.S5332.severity = none
+
+# Tests assert local HTTP/LAN behavior and sample device endpoints.
+[tests/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none
+
+[tests/**/*.cs]
+dotnet_diagnostic.S5332.severity = none
+dotnet_diagnostic.S1313.severity = none

@@ -35,14 +35,16 @@ public class MonitoringController(
             isSecure = true;
         }
 
+#pragma warning disable S2092 // Secure follows Request.IsHttps / X-Forwarded-Proto; hardcoding true breaks plain-HTTP LAN session cookies.
         var cookieOptions = new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,
+            Secure = isSecure,
             SameSite = SameSiteMode.Lax,
             Path = "/",
             MaxAge = TimeSpan.FromMinutes(15),
         };
+#pragma warning restore S2092
 
         Response.Cookies.Append("pf_monitoring_session", token, cookieOptions);
 
