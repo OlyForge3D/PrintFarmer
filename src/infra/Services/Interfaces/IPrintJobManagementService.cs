@@ -321,7 +321,7 @@ public interface IPrintJobManagementService
     /// <summary>
     /// Seed print job history from printer history APIs.
     /// Fetches all available history (up to 10,000 jobs per printer) and uses
-    /// (ExternalJobId, SourcePrinterId) composite key to prevent duplicates.
+    /// (ExternalJobId, SourcePrinterId) plus same-printer/same-start-time checks to prevent duplicates.
     /// Existing jobs are updated, new jobs are inserted (AddOrUpdate semantics).
     /// </summary>
     /// <param name="printerIds">Optional list of printer identifiers to seed from. If null, seeds from all enabled printers.</param>

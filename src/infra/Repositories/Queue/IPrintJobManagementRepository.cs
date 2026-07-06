@@ -220,6 +220,11 @@ public interface IPrintJobManagementRepository
     Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Get known actual start times for a specific printer (for duplicate detection during history seeding).
+    /// </summary>
+    Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
     /// Get a job by external job ID and source printer ID (for history seeding updates).
     /// </summary>
     Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default);
