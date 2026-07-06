@@ -868,6 +868,7 @@ public class PrintersController(
             Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
             p.Id,
             p.Name,
+            p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             primaryToolhead?.NozzleModel?.Diameter ?? 0.4,  // Nozzle diameter from NozzleModel
             primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
@@ -882,8 +883,7 @@ public class PrintersController(
             p.MaxPrintSpeed,
             p.CurrentMaterial,
             p.CurrentSpoolId,
-            p.IsAvailable,
-            p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow);
+            p.IsAvailable);
 
         // Map toolheads to DTOs with hardware tracking fields
         ToolheadDto[]? toolheadDtos = p.Toolheads?.OrderBy(t => t.Index).Select(t => new ToolheadDto(

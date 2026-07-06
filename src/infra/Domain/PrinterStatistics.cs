@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -21,6 +22,7 @@ public class PrinterStatistics
     /// <summary>
     /// Navigation property to the printer
     /// </summary>
+    [JsonIgnore]
     public Printer Printer { get; set; } = null!;
 
     /// <summary>

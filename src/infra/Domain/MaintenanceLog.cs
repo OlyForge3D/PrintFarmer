@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -18,6 +19,7 @@ public class MaintenanceLog
     /// <summary>
     /// Navigation property to printer
     /// </summary>
+    [JsonIgnore]
     public Printer Printer { get; set; } = null!;
 
     /// <summary>
@@ -28,6 +30,7 @@ public class MaintenanceLog
     /// <summary>
     /// Navigation property to printer maintenance schedule deployment
     /// </summary>
+    [JsonIgnore]
     public PrinterMaintenanceSchedule? PrinterMaintenanceSchedule { get; set; }
 
     /// <summary>
@@ -38,6 +41,7 @@ public class MaintenanceLog
     /// <summary>
     /// Navigation property to resolved alert
     /// </summary>
+    [JsonIgnore]
     public MaintenanceAlert? ResolvedAlert { get; set; }
 
     /// <summary>
@@ -48,6 +52,7 @@ public class MaintenanceLog
     /// <summary>
     /// Navigation property to maintenance task
     /// </summary>
+    [JsonIgnore]
     public MaintenanceTask? MaintenanceTask { get; set; }
 
     /// <summary>
