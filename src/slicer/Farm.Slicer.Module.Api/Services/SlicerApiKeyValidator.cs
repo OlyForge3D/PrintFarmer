@@ -20,11 +20,12 @@ public sealed class SlicerApiKeyValidator(
     IHostEnvironment env,
     ILogger<SlicerApiKeyValidator> logger) : ISlicerApiKeyValidator
 {
-    private readonly string? _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
-        ?? configuration.GetSection(WorkerAuthSettings.SectionName)["SharedApiKey"]
-        ?? configuration["SlicerRegistry:ApiKey"]
-        ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY")
-        ?? Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY");
+    private readonly string? _sharedKey = FirstNonBlank(
+        configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"],
+        configuration.GetSection(WorkerAuthSettings.SectionName)["SharedApiKey"],
+        configuration["SlicerRegistry:ApiKey"],
+        Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY"),
+        Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY"));
 
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly IHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
@@ -73,5 +74,10 @@ public sealed class SlicerApiKeyValidator(
         byte[] expectedBytes = Encoding.UTF8.GetBytes(expected);
         return presentedBytes.Length == expectedBytes.Length
             && CryptographicOperations.FixedTimeEquals(presentedBytes, expectedBytes);
+    }
+
+    private static string? FirstNonBlank(params string?[] candidates)
+    {
+        return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
     }
 }

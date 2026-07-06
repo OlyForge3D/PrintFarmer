@@ -101,7 +101,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 Content = content
             };
 
-            string? apiKey = GetRegistrationApiKey();
+            string? apiKey = ResolveRegistrationApiKey(_configuration);
             if (!string.IsNullOrWhiteSpace(apiKey))
             {
                 request.Headers.Add("X-Slicer-ApiKey", apiKey);
@@ -216,12 +216,18 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         public string ApiKey { get; init; } = string.Empty;
     }
 
-    private string? GetRegistrationApiKey()
+    internal static string? ResolveRegistrationApiKey(IConfiguration configuration)
     {
-        return _configuration["SlicerRegistry:ApiKey"]
-            ?? _configuration["WorkerAuth:SharedApiKey"]
-            ?? _configuration["WorkerAuth:SharedKey"]
-            ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY")
-            ?? Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY");
+        return FirstNonBlank(
+            configuration["WorkerAuth:SharedKey"],
+            configuration["WorkerAuth:SharedApiKey"],
+            configuration["SlicerRegistry:ApiKey"],
+            Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY"),
+            Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY"));
+    }
+
+    private static string? FirstNonBlank(params string?[] candidates)
+    {
+        return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
     }
 }
