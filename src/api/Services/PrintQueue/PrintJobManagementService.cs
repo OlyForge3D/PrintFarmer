@@ -1586,6 +1586,7 @@ public class PrintJobManagementService(
                 }
 
                 DateTime startTimeUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+                bool hasValidStartTime = startTimeUtc > DateTime.UnixEpoch;
                 DateTime? endTimeUtc = historyJob.EndTime.HasValue
                     ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
                     : null;
@@ -1641,7 +1642,11 @@ public class PrintJobManagementService(
                                 matchingExisting.SourcePrinterId = printer.Id;
                                 UpdatePrintJobFromHistory(matchingExisting, historyJob);
                                 matchingExisting.UpdatedAt = DateTime.UtcNow;
-                                existingActualStartTimes.Add(startTimeUtc);
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 _repository.Remove(seededJob);
                                 updated++;
                                 continue;
@@ -1658,7 +1663,11 @@ public class PrintJobManagementService(
                             {
                                 UpdatePrintJobFromHistory(seededJob, historyJob);
                                 seededJob.UpdatedAt = DateTime.UtcNow;
-                                existingActualStartTimes.Add(startTimeUtc);
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 updated++;
                             }
                         }
@@ -1671,7 +1680,11 @@ public class PrintJobManagementService(
                             {
                                 UpdatePrintJobFromHistory(seededJob, historyJob);
                                 seededJob.UpdatedAt = DateTime.UtcNow;
-                                existingActualStartTimes.Add(startTimeUtc);
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 updated++;
                             }
                             else
@@ -1700,7 +1713,11 @@ public class PrintJobManagementService(
                             {
                                 UpdatePrintJobFromHistory(existingByExternalId, historyJob);
                                 existingByExternalId.UpdatedAt = DateTime.UtcNow;
-                                existingActualStartTimes.Add(startTimeUtc);
+                                if (hasValidStartTime)
+                                {
+                                    existingActualStartTimes.Add(startTimeUtc);
+                                }
+
                                 updated++;
                             }
                             else
@@ -1727,12 +1744,16 @@ public class PrintJobManagementService(
                             UpdatePrintJobFromHistory(matchingExisting, historyJob);
                             matchingExisting.UpdatedAt = DateTime.UtcNow;
                             existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
-                            existingActualStartTimes.Add(startTimeUtc);
+                            if (hasValidStartTime)
+                            {
+                                existingActualStartTimes.Add(startTimeUtc);
+                            }
+
                             updated++;
                             continue;
                         }
 
-                        if (existingActualStartTimes.Contains(startTimeUtc))
+                        if (hasValidStartTime && existingActualStartTimes.Contains(startTimeUtc))
                         {
                             skipped++;
                             continue;
@@ -1747,7 +1768,11 @@ public class PrintJobManagementService(
                         _repository.Add(newJob);
 #pragma warning restore CA1849
                         existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
-                        existingActualStartTimes.Add(startTimeUtc);
+                        if (hasValidStartTime)
+                        {
+                            existingActualStartTimes.Add(startTimeUtc);
+                        }
+
                         added++;
                     }
                 }

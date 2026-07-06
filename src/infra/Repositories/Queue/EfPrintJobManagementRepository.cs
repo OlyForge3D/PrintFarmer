@@ -516,13 +516,15 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
     public async Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default)
     {
-        List<DateTime> startTimes = await _context.PrintJobs
+        List<DateTime> rawStartTimes = await _context.PrintJobs
             .AsNoTracking()
             .Where(pj => (pj.SourcePrinterId == printerId || pj.AssignedPrinterId == printerId) && pj.ActualStartTime.HasValue)
             .Select(pj => pj.ActualStartTime!.Value)
             .ToListAsync(ct);
 
-        return startTimes.ToHashSet();
+        return rawStartTimes
+            .Select(startTime => startTime.AddTicks(-(startTime.Ticks % TimeSpan.TicksPerSecond)))
+            .ToHashSet();
     }
 
     public async Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default)

@@ -612,7 +612,63 @@ public class PrintJobManagementServiceHistorySeedingTests
     }
 
     [Fact]
-    public async Task SeedHistoryFromPrintersAsync_WhenExternalIdAbsentJobAlreadyHasSamePrinterAndStart_DoesNotInsertDuplicateStoredJob()
+    public async Task SeedHistoryFromPrintersAsync_WhenTwoExternalHistoryJobsHaveMissingStart_InsertsBothStoredJobs()
+    {
+        string dbName = $"HistoryMissingStartDedupe_{Guid.NewGuid():N}";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+
+        Guid printerId = Guid.NewGuid();
+
+        await using AppDbContext db = new(options);
+        db.Printers.Add(CreateEnabledPrinter(printerId, "Missing Start Printer"));
+        await db.SaveChangesAsync();
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 2,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "missing-start-1",
+                    Filename = "missing-start-a.gcode",
+                    Status = "completed",
+                    StartTime = 0,
+                    EndTime = null,
+                    FilamentUsed = 400,
+                    Metadata = []
+                },
+                new HistoryJob
+                {
+                    JobId = "missing-start-2",
+                    Filename = "missing-start-b.gcode",
+                    Status = "completed",
+                    StartTime = 0,
+                    EndTime = null,
+                    FilamentUsed = 450,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintersService> printersService = CreateHistoryListMock(printerId, historyResponse);
+        PrintJobManagementService service = CreateService(new EfPrintJobManagementRepository(db), printersService);
+
+        await service.SeedHistoryFromPrintersAsync();
+
+        List<string?> storedExternalIds = await db.PrintJobs
+            .Where(j => j.AssignedPrinterId == printerId)
+            .OrderBy(j => j.ExternalJobId)
+            .Select(j => j.ExternalJobId)
+            .ToListAsync();
+
+        Assert.Equal(["missing-start-1", "missing-start-2"], storedExternalIds);
+    }
+
+    [Fact]
+    public async Task SeedHistoryFromPrintersAsync_WhenExternalIdAbsentJobAlreadyHasSamePrinterStartSecond_DoesNotInsertDuplicateStoredJob()
     {
         string dbName = $"HistoryNullExternalStartDedupe_{Guid.NewGuid():N}";
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
@@ -629,7 +685,7 @@ public class PrintJobManagementServiceHistorySeedingTests
             Name = "already-tracked",
             AssignedPrinterId = printerId,
             Status = PrintJobStatus.Completed,
-            ActualStartTime = startUtc,
+            ActualStartTime = startUtc.AddTicks(TimeSpan.TicksPerMillisecond),
             ActualEndTime = startUtc.AddMinutes(10),
             CreatedAt = startUtc,
             UpdatedAt = startUtc.AddMinutes(10),
@@ -665,9 +721,10 @@ public class PrintJobManagementServiceHistorySeedingTests
         await service.SeedHistoryFromPrintersAsync();
 
         List<PrintJob> storedJobs = await db.PrintJobs
-            .Where(j => j.AssignedPrinterId == printerId && j.ActualStartTime == startUtc)
+            .Where(j => j.AssignedPrinterId == printerId)
             .ToListAsync();
         PrintJob storedJob = Assert.Single(storedJobs);
+        Assert.Equal(existingExternalIdAbsentJob.Id, storedJob.Id);
         Assert.Null(storedJob.ExternalJobId);
         Assert.False(storedJob.WasSeededFromHistory);
     }
