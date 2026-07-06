@@ -88,6 +88,24 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         XCTAssertEqual(registry.activeServerID, shop.id)
     }
 
+    func testActivateSingleInactiveServerSetsActiveAndUpdatesLoginForm() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(displayName: "Only Farm", baseURL: URL(string: "https://only.example.com")!, makeActiveIfNeeded: false)
+        let viewModel = ServerSwitcherViewModel(servers: registry.servers, activeServerID: registry.activeServerID)
+
+        XCTAssertNil(registry.activeServerID)
+        XCTAssertFalse(viewModel.items[0].isActive)
+        XCTAssertEqual(viewModel.items[0].accessibilityLabel, "Only Farm, switch server")
+
+        try viewModel.activate(server.id, registry: registry)
+        let loginViewModel = LoginViewModel(activeServer: registry.activeServer)
+
+        XCTAssertEqual(registry.activeServerID, server.id)
+        XCTAssertEqual(loginViewModel.serverURL, "https://only.example.com")
+        XCTAssertEqual(loginViewModel.normalizedServerURL, "https://only.example.com")
+        XCTAssertFalse(loginViewModel.isServerURLExpanded)
+    }
+
     func testActivatingServerAllowsLoginFormToReflectSelectedServer() throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         let home = try registry.add(displayName: "Home Farm", baseURL: URL(string: "https://home.example.com")!)

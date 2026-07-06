@@ -150,11 +150,24 @@ struct LoginView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(switcherViewModel.switcherAccessibilityLabel)
+                .accessibilityValue(switcherViewModel.items.first(where: { $0.isActive })?.normalizedURLString ?? "")
             } else if let item = switcherViewModel.items.first {
-                serverPickerLabel(displayName: item.displayName, normalizedURLString: item.normalizedURLString)
+                if item.isActive {
+                    serverPickerLabel(displayName: item.displayName, normalizedURLString: item.normalizedURLString)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(item.accessibilityLabel)
+                        .accessibilityValue(item.normalizedURLString)
+                } else {
+                    Button {
+                        try? switcherViewModel.activate(item.id, registry: serverRegistry)
+                    } label: {
+                        serverPickerLabel(displayName: item.displayName, normalizedURLString: item.normalizedURLString)
+                    }
+                    .buttonStyle(.plain)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(item.accessibilityLabel)
                     .accessibilityValue(item.normalizedURLString)
+                }
             }
         }
     }
