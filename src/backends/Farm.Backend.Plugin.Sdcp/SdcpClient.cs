@@ -587,6 +587,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     private async Task<string?> ReceiveTextMessageAsync(ClientWebSocket ws, string operation, string correlationId, CancellationToken ct)
 #pragma warning restore S1172
     {
+        _ = operation;
+        _ = correlationId;
+
         byte[] rented = ArrayPool<byte>.Shared.Rent(8192);
         try
         {
@@ -749,6 +752,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         CancellationToken ct)
 #pragma warning restore S1172
     {
+        _ = operation;
+        _ = correlationId;
+
         List<Uri> candidates = GetWebSocketCandidateUris(baseUrl);
         Exception? lastException = null;
 

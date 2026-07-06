@@ -624,11 +624,17 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
 
     // Overload with credential for ISupportsMovement
     public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
+    {
+        _ = credential;
+        return await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
+    }
 
     // Overload with credential for ISupportsMovement
     public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
+    {
+        _ = credential;
+        return await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
+    }
 
     public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
     {

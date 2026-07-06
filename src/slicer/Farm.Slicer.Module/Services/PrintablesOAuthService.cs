@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -257,35 +257,36 @@ public sealed class PrintablesOAuthService(
         string accessToken = await GetValidAccessTokenAsync(userId, ct);
         int normalizedLimit = Math.Min(Math.Max(limit, 1), 100);
         string? normalizedCursor = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim();
+        const string likedModelsQuery = """
+            query AuthenticatedLikedModels($limit: Int, $cursor: String) {
+              viewer {
+                likedModels(limit: $limit, cursor: $cursor) {
+                  cursor
+                  items {
+                    id
+                    name
+                    slug
+                    summary
+                    likesCount
+                    downloadCount
+                    image {
+                      filePath
+                    }
+                    user {
+                      handle
+                    }
+                  }
+                }
+              }
+            }
+            """;
 
         try
         {
             return await QueryAuthenticatedModelsAsync(
                 accessToken,
                 operationName: "AuthenticatedLikedModels",
-                query: """
-                    query AuthenticatedLikedModels($limit: Int, $cursor: String) {
-                      viewer {
-                        likedModels(limit: $limit, cursor: $cursor) {
-                          cursor
-                          items {
-                            id
-                            name
-                            slug
-                            summary
-                            likesCount
-                            downloadCount
-                            image {
-                              filePath
-                            }
-                            user {
-                              handle
-                            }
-                          }
-                        }
-                      }
-                    }
-                    """,
+                query: likedModelsQuery,
                 variables: new { limit = normalizedLimit, cursor = normalizedCursor },
                 connectionPaths:
                 [
@@ -324,35 +325,36 @@ public sealed class PrintablesOAuthService(
         string accessToken = await GetValidAccessTokenAsync(userId, ct);
         int normalizedLimit = Math.Min(Math.Max(limit, 1), 100);
         string? normalizedCursor = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim();
+        const string downloadHistoryQuery = """
+            query AuthenticatedDownloadHistory($limit: Int, $cursor: String) {
+              viewer {
+                downloadHistory(limit: $limit, cursor: $cursor) {
+                  cursor
+                  items {
+                    id
+                    name
+                    slug
+                    summary
+                    likesCount
+                    downloadCount
+                    image {
+                      filePath
+                    }
+                    user {
+                      handle
+                    }
+                  }
+                }
+              }
+            }
+            """;
 
         try
         {
             return await QueryAuthenticatedModelsAsync(
                 accessToken,
                 operationName: "AuthenticatedDownloadHistory",
-                query: """
-                    query AuthenticatedDownloadHistory($limit: Int, $cursor: String) {
-                      viewer {
-                        downloadHistory(limit: $limit, cursor: $cursor) {
-                          cursor
-                          items {
-                            id
-                            name
-                            slug
-                            summary
-                            likesCount
-                            downloadCount
-                            image {
-                              filePath
-                            }
-                            user {
-                              handle
-                            }
-                          }
-                        }
-                      }
-                    }
-                    """,
+                query: downloadHistoryQuery,
                 variables: new { limit = normalizedLimit, cursor = normalizedCursor },
                 connectionPaths:
                 [
@@ -446,8 +448,7 @@ public sealed class PrintablesOAuthService(
                 ["client_secret"] = _options.ClientSecret,
                 ["redirect_uri"] = _options.RedirectUri,
                 ["code_verifier"] = codeVerifier,
-            }
-!)
+            })!
         };
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
@@ -537,8 +538,7 @@ public sealed class PrintablesOAuthService(
                 ["refresh_token"] = refreshToken,
                 ["client_id"] = _options.ClientId,
                 ["client_secret"] = _options.ClientSecret,
-            }
-!)
+            })!
         };
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);

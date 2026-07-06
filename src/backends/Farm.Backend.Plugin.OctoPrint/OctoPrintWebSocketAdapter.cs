@@ -278,6 +278,8 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<OctoPrintStatusData?> TryHttpPollingFallbackAsync(CancellationToken ct)
     {
+        _ = ct;
+
         // Only poll if enough time has passed since last poll
         if (DateTime.UtcNow - _lastHttpPoll < _pollingInterval)
         {

@@ -312,6 +312,9 @@ public class ProfilesController(
     [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
     {
+        _ = printerId;
+        _ = slicerType;
+
         try
         {
             IReadOnlyList<SlicerProfileDto> allProfiles = await _profilesService.GetProfilesAsync(CancellationToken.None);
@@ -357,6 +360,8 @@ public class ProfilesController(
         [FromServices] IOrcaBundleParsingService orcaParsingService,
         CancellationToken ct)
     {
+        _ = ct;
+
         if (request is null || string.IsNullOrWhiteSpace(request.BundleJson))
         {
             return BadRequest("BundleJson is required");
@@ -563,6 +568,7 @@ public class ProfilesController(
         try
         {
             request ??= new ExportOrcaBundleRequest();
+            _ = ct;
 
             string bundleJson = await exportService.ExportBundleAsync(request);
 

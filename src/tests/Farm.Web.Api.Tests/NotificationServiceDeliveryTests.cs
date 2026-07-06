@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Contracts.Auth;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
@@ -9,7 +10,6 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using System.Text.Json;
 using Xunit;
 
 namespace Farm.Web.Api.Tests;

@@ -27,6 +27,8 @@ internal class NullProfilesProvider : ISlicerProfilesProvider
 
     public Task<string?> GetUniversalFilamentsAsync(CancellationToken ct = default)
     {
+        _ = ct;
+
         // Filaments are loaded from the worker, not from bundled resources
         return Task.FromResult((string?)null);
     }

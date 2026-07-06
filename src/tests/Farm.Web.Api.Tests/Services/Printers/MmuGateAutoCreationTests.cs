@@ -76,6 +76,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             Backend = backend,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
+            MultiMaterial = multiMaterial,
             IsEnabled = true
         };
     }

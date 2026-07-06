@@ -1,4 +1,5 @@
-﻿using Farm.Api.Services.PrintQueue;
+﻿using System.Reflection;
+using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
@@ -18,7 +19,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using System.Reflection;
 
 namespace Farm.Web.Api.Tests.Services;
 

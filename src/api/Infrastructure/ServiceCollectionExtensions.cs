@@ -146,6 +146,8 @@ public static class ServiceCollectionExtensions
     /// <param name="environment">The host environment.</param>
     public static IServiceCollection AddPrintFarmerServices(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
+        _ = environment;
+
         // Check if background services should be disabled (for testing)
         bool disableBackgroundServices = ShouldDisableBackgroundServices();
 

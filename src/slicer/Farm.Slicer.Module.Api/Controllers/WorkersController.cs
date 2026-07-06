@@ -31,6 +31,8 @@ public class WorkersController(
     [HttpGet]
     public async Task<IActionResult> ListAsync([FromQuery] string? serviceId, CancellationToken ct)
     {
+        _ = ct;
+
         IReadOnlyList<Worker> workers;
         if (!string.IsNullOrEmpty(serviceId))
         {
@@ -76,6 +78,8 @@ public class WorkersController(
     [HttpGet("{id}")]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {
@@ -146,6 +150,8 @@ public class WorkersController(
     [HttpPost("{id}/disable")]
     public async Task<IActionResult> DisableAsync(Guid id, [FromBody] DisableWorkerRequest request, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {
@@ -166,6 +172,8 @@ public class WorkersController(
     [HttpPost("{id}/enable")]
     public async Task<IActionResult> EnableAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {
@@ -187,6 +195,8 @@ public class WorkersController(
     [HttpPatch("{id}/slots")]
     public async Task<IActionResult> UpdateSlotsAsync(Guid id, [FromBody] UpdateWorkerSlotsRequest request, CancellationToken ct)
     {
+        _ = ct;
+
         if (request.TotalSlots < 0)
         {
             return BadRequest(new { error = "TotalSlots must be non-negative." });
@@ -252,6 +262,8 @@ public class WorkersController(
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {

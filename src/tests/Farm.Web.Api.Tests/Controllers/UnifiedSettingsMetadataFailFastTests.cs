@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Background;
+﻿using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Workers;

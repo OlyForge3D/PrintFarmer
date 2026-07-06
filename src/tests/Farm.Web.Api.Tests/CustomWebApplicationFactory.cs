@@ -212,6 +212,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
+        _ = useInMemorySqlite;
+
         // Tests expect a factory instance configured for an isolated DB.
         return new CustomWebApplicationFactory();
     }
