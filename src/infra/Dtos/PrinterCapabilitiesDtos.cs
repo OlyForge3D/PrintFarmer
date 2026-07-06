@@ -12,6 +12,7 @@ public record PrinterCapabilitiesDto(
     Guid Id,
     Guid PrinterId,
     string PrinterName,
+    DateTime LastUpdated,
     double? NozzleDiameter = null,
     string[]? SupportedMaterials = null,
     double? MaxBuildVolumeX = null,
@@ -26,8 +27,7 @@ public record PrinterCapabilitiesDto(
     int? MaxPrintSpeed = null,
     [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,
     [property: ImportExport(ImportExportTargets.Import)] int? CurrentSpoolId = null,
-    [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true,
-    DateTime LastUpdated = default);
+    [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true);
 
 /// <summary>
 /// Creation payload for registering printer capabilities.
