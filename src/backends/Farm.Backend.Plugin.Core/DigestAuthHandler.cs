@@ -259,8 +259,9 @@ public class DigestAuthHandler : DelegatingHandler
         return sb.ToString();
     }
 
-    // MD5 is required by HTTP Digest Authentication (RFC 7616) - cannot use stronger algorithm
+    // MD5 is required by HTTP Digest Authentication (RFC 7616) and is not used for general-purpose hashing.
 #pragma warning disable CA5351 // Do not use broken cryptographic algorithms
+#pragma warning disable S4790 // HTTP Digest endpoints require MD5 per RFC 7616; stronger hashing would break protocol interoperability.
     private static string ComputeMd5Hash(string input)
     {
         byte[] inputBytes = Encoding.ASCII.GetBytes(input);
@@ -268,6 +269,7 @@ public class DigestAuthHandler : DelegatingHandler
         return Convert.ToHexStringLower(hashBytes);
     }
 #pragma warning restore CA5351
+#pragma warning restore S4790
 
     private static string GenerateCnonce()
     {

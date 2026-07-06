@@ -441,7 +441,7 @@ public sealed class PrusaLinkPollingService(
             }
 
             bool changed = false;
-            if (printer.NozzleDiameter != info.NozzleDiameter)
+            if (printer.NozzleDiameter is null || Math.Abs(printer.NozzleDiameter.Value - info.NozzleDiameter) > 0.0001)
             {
                 printer.NozzleDiameter = info.NozzleDiameter;
                 changed = true;

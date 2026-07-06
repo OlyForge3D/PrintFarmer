@@ -38,7 +38,7 @@ public class MonitoringController(
         var cookieOptions = new CookieOptions
         {
             HttpOnly = true,
-            Secure = isSecure,
+            Secure = true,
             SameSite = SameSiteMode.Lax,
             Path = "/",
             MaxAge = TimeSpan.FromMinutes(15),

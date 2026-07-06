@@ -1665,6 +1665,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     /// MD5 is required by the SDCP upload protocol for file integrity verification — not used for security.
     /// </summary>
 #pragma warning disable CA5351 // MD5 required by SDCP protocol, not used for security
+#pragma warning disable S4790 // SDCP firmware protocol requires MD5 for file integrity verification, not credential or security hashing.
     private static async Task<string> ComputeMd5Async(Stream stream, CancellationToken ct)
     {
         using MD5 md5 = MD5.Create();
@@ -1672,6 +1673,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return Convert.ToHexStringLower(hash);
     }
 #pragma warning restore CA5351
+#pragma warning restore S4790
 
     public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {

@@ -32,7 +32,7 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
         BackgroundServiceMonitor serviceMonitor = new();
         using HistorySeedingBackgroundService service = new(
             provider,
-            NullLogger<HistorySeedingSettings>.Instance,
+            NullLogger<HistorySeedingBackgroundService>.Instance,
             monitor,
             serviceMonitor);
 
@@ -83,7 +83,7 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
         BackgroundServiceMonitor serviceMonitor = new();
         using ActiveExternalJobSyncBackgroundService service = new(
             provider,
-            NullLogger<HistorySeedingSettings>.Instance,
+            NullLogger<ActiveExternalJobSyncBackgroundService>.Instance,
             monitor,
             serviceMonitor);
 

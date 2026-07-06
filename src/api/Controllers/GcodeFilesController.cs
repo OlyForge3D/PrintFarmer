@@ -296,7 +296,9 @@ public class GcodeFilesController(
     }
 
     [HttpPut("chunk/{uploadId}")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "Chunked G-code upload chunks are explicitly capped at 50 MB.")]
     [RequestSizeLimit(50_000_000)] // 50MB per request upper bound (clients should use recommended chunk size)
+    [RequestFormLimits(MultipartBodyLengthLimit = 50_000_000)]
     [ProducesResponseType(typeof(ChunkStatusResponse), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
@@ -758,7 +760,9 @@ public class GcodeFilesController(
     /// <param name="path">Optional virtual directory path (defaults to root '/').</param>
     /// <param name="file">Uploaded G-code file (multipart form field 'file').</param>
     [HttpPost("upload")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "G-code library uploads are explicitly capped at 200 MB.")]
     [RequestSizeLimit(200_000_000)] // 200 MB hard limit
+    [RequestFormLimits(MultipartBodyLengthLimit = 200_000_000)]
     [ProducesResponseType(typeof(GcodeFileEntryDto), 201)]
     [ProducesResponseType(400)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Path is rooted under validated library root; filename sanitized and revalidated with GetFullPath + StartsWith check.")]

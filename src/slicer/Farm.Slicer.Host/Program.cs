@@ -132,7 +132,27 @@ builder.Services.AddHealthChecks()
 // ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+    {
+        string allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+            ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
+            ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
+        bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
+
+        _ = policy.SetIsOriginAllowed(origin =>
+        {
+            if (allowLocalNetwork)
+            {
+                return true;
+            }
+
+            string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(o => o.Trim()).ToArray();
+            return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+        });
+        _ = policy.AllowCredentials();
+        _ = policy.AllowAnyMethod();
+        _ = policy.AllowAnyHeader();
+    }));
 
 // ── Bind port ─────────────────────────────────────────────────────────────────
 #pragma warning disable S1075

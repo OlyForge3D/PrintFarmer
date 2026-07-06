@@ -72,14 +72,14 @@ public class HistorySeedingSettings : IAppSetting
 /// </summary>
 public class HistorySeedingBackgroundService(
     IServiceProvider serviceProvider,
-    ILogger<HistorySeedingSettings> logger,
+    ILogger<HistorySeedingBackgroundService> logger,
     IOptionsMonitor<HistorySeedingSettings> settingsMonitor,
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "HistorySeedingService";
     private static readonly TimeSpan DisabledSettingsPollInterval = TimeSpan.FromSeconds(5);
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<HistorySeedingBackgroundService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 
@@ -176,14 +176,14 @@ public class HistorySeedingBackgroundService(
 /// </summary>
 public class ActiveExternalJobSyncBackgroundService(
     IServiceProvider serviceProvider,
-    ILogger<HistorySeedingSettings> logger,
+    ILogger<ActiveExternalJobSyncBackgroundService> logger,
     IOptionsMonitor<HistorySeedingSettings> settingsMonitor,
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "ActiveExternalJobSyncService";
     private static readonly TimeSpan DisabledSettingsPollInterval = TimeSpan.FromSeconds(5);
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<ActiveExternalJobSyncBackgroundService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 
