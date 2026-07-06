@@ -8,7 +8,7 @@ struct SpoolmanSpool: Codable, Identifiable, Sendable {
     let name: String
     let material: String
     let colorHex: String?
-    let inUse: Bool?
+    let inUse: Bool
     let filamentName: String?
     let vendor: String?
     let registeredAt: String?
@@ -43,7 +43,7 @@ struct SpoolmanSpool: Codable, Identifiable, Sendable {
         name: String,
         material: String,
         colorHex: String?,
-        inUse: Bool?,
+        inUse: Bool,
         filamentName: String?,
         vendor: String?,
         registeredAt: String?,

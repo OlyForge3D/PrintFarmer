@@ -120,6 +120,34 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertNil(spool.filamentId)
     }
 
+    func testImportSpoolMissingRequiredInUseThrowsKeyNotFoundWithServerVersionHint() async {
+        MockAPIClient.stubResponse(
+            json: """
+            {
+              "id": 503,
+              "name": "Generic ABS",
+              "material": "ABS"
+            }
+            """,
+            statusCode: 201
+        )
+
+        do {
+            _ = try await service.importSpool(barcode: "SP-503")
+            XCTFail("Expected NetworkError.decodingFailed")
+        } catch NetworkError.decodingFailed(let failure) {
+            let description = NetworkError.decodingFailed(failure).errorDescription ?? ""
+            XCTAssertEqual(failure.kind, "keyNotFound")
+            XCTAssertEqual(failure.codingPath, "inUse")
+            XCTAssertTrue(description.contains("keyNotFound"))
+            XCTAssertTrue(description.contains("inUse"))
+            XCTAssertTrue(description.contains("server version may be incompatible"))
+            XCTAssertTrue(description.contains("update the server"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testResolveFilamentDecodesFullBackendResponse() async throws {
         MockAPIClient.stubResponse(
             json: """
