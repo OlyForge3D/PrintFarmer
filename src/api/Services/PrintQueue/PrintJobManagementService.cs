@@ -1869,6 +1869,22 @@ public class PrintJobManagementService(
                 .ThenBy(c => c.Id)
                 .First();
 
+            // Guard against stranding a real printer-history identity. An external-print placeholder
+            // (IsExternalPrint, WasSeededFromHistory == false) carries a synthetic ExternalJobId plus a
+            // SourcePrinterId, so a later harvest cannot relink it (that path only matches rows with a
+            // null ExternalJobId and SourcePrinterId). Removing the seeded sibling here would delete the
+            // row that holds the real provider job id and leave the print permanently unreconcilable, so
+            // we skip the group and leave both rows for the harvest to resolve.
+            if (!survivor.WasSeededFromHistory && survivor.IsExternalPrint)
+            {
+                _logger.LogInformation(
+                    "History dedup: skipping group for printer {PrinterId} at {Start:o}; survivor {SurvivorId} is an external-print placeholder and removing seeded siblings would strand a real history id",
+                    group.Key.PrinterId,
+                    group.Key.Start,
+                    survivor.Id);
+                continue;
+            }
+
             List<Guid> removable = members
                 .Where(c => c.Id != survivor.Id && c.WasSeededFromHistory)
                 .Select(c => c.Id)
@@ -1906,12 +1922,34 @@ public class PrintJobManagementService(
         // Removing the retained row's duplicates is safe against re-seeding: the survivor keeps the
         // same whole-second start time, so the harvest-time start-time guard blocks re-insertion.
         List<PrintJob> jobsToRemove = await _repository.GetByIdsAsync(idsToRemove, cancellationToken);
+
+        // Report the count actually loaded for deletion; a concurrent process may have removed a
+        // candidate between the initial scan and this tracked load.
+        result.JobsRemoved = jobsToRemove.Count;
+
         foreach (PrintJob job in jobsToRemove)
         {
             _repository.Remove(job);
         }
 
-        await _repository.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _repository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            // A concurrent harvest may update a targeted row (RowVersion conflict) or a residual
+            // FK-restricted relationship may block the delete. Surface the affected ids so an
+            // operator can act, then rethrow so the caller reports the failure rather than a silent
+            // partial success.
+            _logger.LogError(
+                ex,
+                "History dedup cleanup failed while removing {Jobs} seeded duplicate job(s) across {Groups} group(s); affected ids: {JobIds}",
+                result.JobsRemoved,
+                result.DuplicateGroups,
+                string.Join(", ", idsToRemove));
+            throw;
+        }
 
         _logger.LogInformation(
             "History dedup cleanup: removed {Jobs} seeded duplicate job(s) across {Groups} group(s)",

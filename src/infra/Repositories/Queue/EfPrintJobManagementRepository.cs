@@ -539,6 +539,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
                 pj.AssignedPrinterId,
                 pj.ActualStartTime!.Value,
                 pj.WasSeededFromHistory,
+                pj.IsExternalPrint,
                 pj.ExternalJobId,
                 pj.CreatedAt))
             .ToListAsync(ct);

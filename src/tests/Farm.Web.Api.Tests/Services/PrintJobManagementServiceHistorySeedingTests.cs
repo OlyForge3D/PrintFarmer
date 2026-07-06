@@ -881,6 +881,40 @@ public class PrintJobManagementServiceHistorySeedingTests
     }
 
     [Fact]
+    public async Task DeduplicateSeededHistoryAsync_ExternalPrintPlaceholderSurvivor_SkipsGroupToPreserveHistoryId()
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"HistoryDedupPlaceholder_{Guid.NewGuid():N}")
+            .Options;
+
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = TruncateToSecond(DateTime.UtcNow.AddMinutes(-30));
+
+        // A native external-print placeholder (synthetic id, non-null SourcePrinterId) shares the
+        // start-second with a seeded row carrying the real provider job id. The placeholder cannot be
+        // relinked by a later harvest, so removing the seeded row would strand the real history id;
+        // the group must be skipped and both rows retained.
+        PrintJob placeholder = CreateExternalPrintPlaceholder(printerId, startUtc, createdAt: startUtc);
+        PrintJob seeded = CreateSeededHistoryJob(printerId, "real-history-id", startUtc, createdAt: startUtc.AddMinutes(1));
+
+        await using AppDbContext db = new(options);
+        db.Printers.Add(CreateEnabledPrinter(printerId, "Dedup Placeholder Printer"));
+        db.PrintJobs.AddRange(placeholder, seeded);
+        await db.SaveChangesAsync();
+
+        PrintJobManagementService service = CreateService(new EfPrintJobManagementRepository(db), new Mock<IPrintersService>());
+
+        DeduplicateHistoryResultDto result = await service.DeduplicateSeededHistoryAsync(dryRun: false);
+
+        Assert.Equal(0, result.DuplicateGroups);
+        Assert.Equal(0, result.JobsRemoved);
+        List<PrintJob> remaining = await db.PrintJobs.Where(j => j.AssignedPrinterId == printerId).ToListAsync();
+        Assert.Equal(2, remaining.Count);
+        Assert.Contains(remaining, j => j.Id == seeded.Id);
+        Assert.Contains(remaining, j => j.Id == placeholder.Id);
+    }
+
+    [Fact]
     public async Task SeedHistoryFromPrintersAsync_WhenKnownExternalJobIsNonTerminal_UpdatesExistingSeededJob()
     {
         Guid printerId = Guid.NewGuid();
@@ -1695,6 +1729,28 @@ public class PrintJobManagementServiceHistorySeedingTests
             UpdatedAt = createdAt,
             QueuedAt = createdAt,
             AssignedPrinterId = printerId,
+            WasSeededFromHistory = false
+        };
+    }
+
+    private static PrintJob CreateExternalPrintPlaceholder(Guid printerId, DateTime startUtc, DateTime createdAt)
+    {
+        // Mirrors PrintJobCompletionService's external-print placeholder: a native (non-seeded) row
+        // with a synthetic ExternalJobId and a SourcePrinterId, which a later harvest cannot relink.
+        return new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "External Print",
+            Status = PrintJobStatus.Completed,
+            ActualStartTime = startUtc,
+            ActualEndTime = startUtc.AddMinutes(10),
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt,
+            QueuedAt = createdAt,
+            AssignedPrinterId = printerId,
+            SourcePrinterId = printerId,
+            IsExternalPrint = true,
+            ExternalJobId = $"ext-{printerId:N}-{startUtc:yyyyMMddHHmmss}",
             WasSeededFromHistory = false
         };
     }

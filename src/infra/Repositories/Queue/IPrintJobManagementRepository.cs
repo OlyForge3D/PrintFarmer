@@ -294,5 +294,6 @@ public record HistoryDuplicateCandidate(
     Guid? AssignedPrinterId,
     DateTime ActualStartTime,
     bool WasSeededFromHistory,
+    bool IsExternalPrint,
     string? ExternalJobId,
     DateTime CreatedAt);
