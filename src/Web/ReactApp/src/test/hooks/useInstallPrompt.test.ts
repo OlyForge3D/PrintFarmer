@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useInstallPrompt } from '@/common/hooks/useInstallPrompt';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -32,7 +32,9 @@ describe('useInstallPrompt', () => {
     mockEvent.prompt = vi.fn().mockResolvedValue(undefined);
     mockEvent.userChoice = Promise.resolve({ outcome: 'accepted' as const });
 
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
@@ -51,7 +53,9 @@ describe('useInstallPrompt', () => {
     const mockEvent = new Event('beforeinstallprompt') as BeforeInstallPromptEvent;
     mockEvent.prompt = vi.fn().mockResolvedValue(undefined);
     mockEvent.userChoice = Promise.resolve({ outcome: 'accepted' as const });
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     // canInstall should still be false due to cooldown
     expect(result.current.canInstall).toBe(false);
@@ -69,7 +73,9 @@ describe('useInstallPrompt', () => {
     const mockEvent = new Event('beforeinstallprompt') as BeforeInstallPromptEvent;
     mockEvent.prompt = vi.fn().mockResolvedValue(undefined);
     mockEvent.userChoice = Promise.resolve({ outcome: 'accepted' as const });
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
@@ -84,13 +90,18 @@ describe('useInstallPrompt', () => {
 
     const { result } = renderHook(() => useInstallPrompt());
 
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
     });
 
-    const installResult = await result.current.promptInstall();
+    let installResult: boolean | undefined;
+    await act(async () => {
+      installResult = await result.current.promptInstall();
+    });
 
     expect(mockPrompt).toHaveBeenCalled();
     expect(installResult).toBe(true);
@@ -107,13 +118,18 @@ describe('useInstallPrompt', () => {
 
     const { result } = renderHook(() => useInstallPrompt());
 
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
     });
 
-    const installResult = await result.current.promptInstall();
+    let installResult: boolean | undefined;
+    await act(async () => {
+      installResult = await result.current.promptInstall();
+    });
 
     expect(mockPrompt).toHaveBeenCalled();
     expect(installResult).toBe(false);
@@ -129,14 +145,18 @@ describe('useInstallPrompt', () => {
 
     const { result } = renderHook(() => useInstallPrompt());
 
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
     });
 
     const beforeDismiss = new Date().getTime();
-    await result.current.promptInstall();
+    await act(async () => {
+      await result.current.promptInstall();
+    });
 
     // Check localStorage directly (state update may not trigger re-render in test)
     const dismissedTimestamp = localStorage.getItem('pwa-install-dismissed');
@@ -148,7 +168,10 @@ describe('useInstallPrompt', () => {
     const { result } = renderHook(() => useInstallPrompt());
 
     // No event dispatched, so no prompt available
-    const installResult = await result.current.promptInstall();
+    let installResult: boolean | undefined;
+    await act(async () => {
+      installResult = await result.current.promptInstall();
+    });
 
     expect(installResult).toBe(false);
   });
@@ -162,14 +185,18 @@ describe('useInstallPrompt', () => {
 
     const { result } = renderHook(() => useInstallPrompt());
 
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
     });
 
     const beforeDismiss = new Date().getTime();
-    result.current.dismiss();
+    act(() => {
+      result.current.dismiss();
+    });
 
     // Check localStorage directly
     const dismissedTimestamp = localStorage.getItem('pwa-install-dismissed');
@@ -219,13 +246,18 @@ describe('useInstallPrompt', () => {
 
     const { result } = renderHook(() => useInstallPrompt());
 
-    window.dispatchEvent(mockEvent);
+    act(() => {
+      window.dispatchEvent(mockEvent);
+    });
 
     await waitFor(() => {
       expect(result.current.canInstall).toBe(true);
     });
 
-    const installResult = await result.current.promptInstall();
+    let installResult: boolean | undefined;
+    await act(async () => {
+      installResult = await result.current.promptInstall();
+    });
 
     expect(installResult).toBe(true);
     expect(mockPrompt).toHaveBeenCalled();

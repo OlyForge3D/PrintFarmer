@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AlertsWidget } from '../AlertsWidget';
 
@@ -87,7 +87,7 @@ describe('AlertsWidget', () => {
     renderWidget();
     
     // Wait for async updates
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByText(/1 Printer Offline/i)).toBeInTheDocument();
     });
   });
@@ -107,7 +107,7 @@ describe('AlertsWidget', () => {
 
     renderWidget();
     
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByText(/1 Printer in Maintenance/i)).toBeInTheDocument();
     });
   });
@@ -128,7 +128,7 @@ describe('AlertsWidget', () => {
 
     renderWidget();
     
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByText(/3 active alerts/i)).toBeInTheDocument();
     });
   });
@@ -147,7 +147,7 @@ describe('AlertsWidget', () => {
 
     renderWidget();
     
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.queryByText(/Offline/i)).not.toBeInTheDocument();
     });
   });
@@ -167,7 +167,7 @@ describe('AlertsWidget', () => {
 
     renderWidget();
     
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByText(/2 Printers Offline/i)).toBeInTheDocument();
     });
   });

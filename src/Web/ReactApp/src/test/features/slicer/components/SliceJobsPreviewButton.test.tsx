@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -124,6 +125,7 @@ describe('SliceJobsPanel Preview button', () => {
   });
 
   it('opens preview modal when Preview button is clicked', async () => {
+    const user = userEvent.setup();
     mockGetMyJobs.mockResolvedValue([
       {
         id: 'job-completed-2',
@@ -140,7 +142,7 @@ describe('SliceJobsPanel Preview button', () => {
     renderPanel();
 
     const previewButton = await screen.findByRole('button', { name: /preview/i });
-    previewButton.click();
+    await user.click(previewButton);
 
     const modal = await screen.findByTestId('gcode-preview-modal');
     expect(modal.textContent).toContain('job-completed-2');

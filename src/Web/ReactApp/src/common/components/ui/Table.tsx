@@ -14,6 +14,7 @@ interface TableContextValue {
   rowCount: number;
   registerRow: () => number;
   unregisterRow: (index: number) => void;
+  keyboardNavigation: boolean;
 }
 
 const TableContext = createContext<TableContextValue | null>(null);
@@ -29,6 +30,8 @@ export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   onRowFocus?: (index: number) => void;
   /** Callback when Enter is pressed on a focused row */
   onRowSelect?: (index: number) => void;
+  /** Explicit navigable row count when rows provide their own rowIndex values */
+  rowCount?: number;
 }
 
 /**
@@ -88,26 +91,28 @@ export interface TableCellProps extends React.TdHTMLAttributes<HTMLTableCellElem
 function useTableKeyboardNavigation(
   enabled: boolean,
   onRowFocus?: (index: number) => void,
-  onRowSelect?: (index: number) => void
+  onRowSelect?: (index: number) => void,
+  explicitRowCount?: number
 ) {
   const [focusedRowIndex, setFocusedRowIndex] = useState(-1);
-  const [rowCount, setRowCount] = useState(0);
+  const [registeredRowCount, setRegisteredRowCount] = useState(0);
+  const rowCount = explicitRowCount ?? registeredRowCount;
   const rowIndexCounter = useRef(0);
 
   const registerRow = useCallback(() => {
     const index = rowIndexCounter.current++;
-    setRowCount(c => c + 1);
+    setRegisteredRowCount(c => c + 1);
     return index;
   }, []);
 
   const unregisterRow = useCallback(() => {
-    setRowCount(c => Math.max(0, c - 1));
+    setRegisteredRowCount(c => Math.max(0, c - 1));
   }, []);
 
   // Reset counter when rows change
   useEffect(() => {
     rowIndexCounter.current = 0;
-  }, [rowCount]);
+  }, [registeredRowCount]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!enabled || rowCount === 0) return;
@@ -183,6 +188,7 @@ export function Table({
   keyboardNavigation = false,
   onRowFocus,
   onRowSelect,
+  rowCount: explicitRowCount,
   ...props 
 }: TableProps) {
   const tableRef = useRef<HTMLTableElement>(null);
@@ -193,7 +199,7 @@ export function Table({
     registerRow,
     unregisterRow,
     handleKeyDown,
-  } = useTableKeyboardNavigation(keyboardNavigation, onRowFocus, onRowSelect);
+  } = useTableKeyboardNavigation(keyboardNavigation, onRowFocus, onRowSelect, explicitRowCount);
 
   return (
     <TableContext.Provider value={{ 
@@ -201,7 +207,8 @@ export function Table({
       setFocusedRowIndex, 
       rowCount, 
       registerRow, 
-      unregisterRow 
+      unregisterRow,
+      keyboardNavigation
     }}>
       <div className="overflow-x-auto rounded-lg border border-pf-border">
         <table
@@ -266,9 +273,10 @@ export function TableRow({
 
   // Register row for keyboard navigation (only if no explicit rowIndex provided)
   useEffect(() => {
-    if (context && rowIndex === undefined) {
+    if (context?.keyboardNavigation && rowIndex === undefined) {
       const idx = context.registerRow();
-      // Defer setState to satisfy React Compiler rules
+      // React Compiler disallows setState directly in an effect; defer row index assignment
+      // while preserving sibling registration order for keyboard navigation.
       queueMicrotask(() => setRegisteredIndex(idx));
       return () => context.unregisterRow(idx);
     }
@@ -277,7 +285,7 @@ export function TableRow({
   // Focus row when it becomes the focused row
   useEffect(() => {
     if (context && assignedIndex >= 0 && context.focusedRowIndex === assignedIndex) {
-      rowRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
     }
   }, [context, assignedIndex]);
 

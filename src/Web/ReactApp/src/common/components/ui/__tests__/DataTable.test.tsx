@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { DataTable, DataTableColumn } from '../DataTable';
 
@@ -131,13 +131,15 @@ describe('DataTable', () => {
       />
     );
 
-    // Test that the component renders with keyboard navigation enabled
     const table = screen.getByRole('table');
-    expect(table).toBeInTheDocument();
+    fireEvent.keyDown(table, { key: 'ArrowDown' });
+    fireEvent.keyDown(table, { key: 'Enter' });
+
+    expect(onRowSelect).toHaveBeenCalledWith(mockData[0], 0);
   });
 
   it('should enable keyboard navigation when specified', () => {
-    render(
+    const { container } = render(
       <DataTable
         data={mockData}
         columns={mockColumns}
@@ -146,9 +148,12 @@ describe('DataTable', () => {
       />
     );
 
+    const table = screen.getByRole('table');
     const rows = screen.getAllByRole('row');
-    // Should have tabIndex when keyboard navigation is enabled
+
+    expect(table).toHaveAttribute('tabIndex', '0');
     expect(rows.length).toBeGreaterThan(1);
+    expect(container.querySelectorAll('tbody tr[data-rowindex]')).toHaveLength(mockData.length);
   });
 
   it('should apply custom className', () => {

@@ -130,6 +130,7 @@ describe('LocationManagement', () => {
     render(<LocationManagement />);
 
     expect(screen.getByText('Printer Locations')).toBeInTheDocument();
+    expect(await screen.findByText('Add Location')).toBeInTheDocument();
   });
 
   it('renders its section heading as h2, not h1, so it nests under the page title', async () => {
@@ -140,6 +141,7 @@ describe('LocationManagement', () => {
 
     expect(screen.getByRole('heading', { level: 2, name: 'Printer Locations' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
+    expect(await screen.findByText('Add Location')).toBeInTheDocument();
   });
 
   it('renders Add Location button', async () => {
