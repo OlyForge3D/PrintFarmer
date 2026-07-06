@@ -48,6 +48,129 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertEqual(filament?.id, 123)
     }
 
+    func testImportSpoolDecodesFullCreatedBackendResponse() async throws {
+        MockAPIClient.stubResponse(
+            json: """
+            {
+              "id": 501,
+              "name": "Polymaker PolyLite PLA Black",
+              "material": "PLA",
+              "inUse": true,
+              "remainingWeightG": 876.5,
+              "colorHex": "#101010",
+              "filamentName": "PolyLite PLA Black",
+              "vendor": "Polymaker",
+              "registeredAt": "2026-07-06T17:00:00Z",
+              "firstUsedAt": "2026-07-06T17:05:00Z",
+              "lastUsedAt": "2026-07-06T18:05:00Z",
+              "initialWeightG": 1000,
+              "usedWeightG": 123.5,
+              "spoolWeightG": 220,
+              "remainingLengthMm": 287654.3,
+              "usedLengthMm": 40567.8,
+              "location": "Rack A",
+              "lotNumber": "LOT-42",
+              "archived": false,
+              "price": 24.99,
+              "comment": "Imported from barcode",
+              "filamentId": 77,
+              "usedPercent": 12.35,
+              "remainingPercent": 87.65
+            }
+            """,
+            statusCode: 201
+        )
+
+        let spool = try await service.importSpool(barcode: "SP-501")
+
+        XCTAssertEqual(spool.id, 501)
+        XCTAssertEqual(spool.name, "Polymaker PolyLite PLA Black")
+        XCTAssertEqual(spool.material, "PLA")
+        XCTAssertEqual(spool.inUse, true)
+        XCTAssertEqual(spool.remainingWeightG, 876.5)
+        XCTAssertEqual(spool.colorHex, "#101010")
+        XCTAssertEqual(spool.filamentName, "PolyLite PLA Black")
+        XCTAssertEqual(spool.vendor, "Polymaker")
+        XCTAssertEqual(spool.filamentId, 77)
+        XCTAssertEqual(spool.usedPercent, 12.35)
+        XCTAssertEqual(spool.remainingPercent, 87.65)
+    }
+
+    func testImportSpoolDecodesMinimalBackendResponseWithOmittedNulls() async throws {
+        MockAPIClient.stubResponse(
+            json: """
+            {
+              "id": 502,
+              "name": "Generic PETG",
+              "material": "PETG",
+              "inUse": false
+            }
+            """,
+            statusCode: 201
+        )
+
+        let spool = try await service.importSpool(barcode: "SP-502")
+
+        XCTAssertEqual(spool.id, 502)
+        XCTAssertEqual(spool.name, "Generic PETG")
+        XCTAssertEqual(spool.material, "PETG")
+        XCTAssertEqual(spool.inUse, false)
+        XCTAssertNil(spool.remainingWeightG)
+        XCTAssertNil(spool.colorHex)
+        XCTAssertNil(spool.filamentId)
+    }
+
+    func testResolveFilamentDecodesFullBackendResponse() async throws {
+        MockAPIClient.stubResponse(
+            json: """
+            {
+              "id": 701,
+              "name": "Galaxy Black",
+              "material": "PLA",
+              "colorHex": "#111111",
+              "vendor": "Prusament",
+              "density": 1.24,
+              "diameter": 1.75,
+              "weight": 1000,
+              "spoolWeight": 201,
+              "price": 29.99,
+              "settingsExtruderTemp": 215,
+              "settingsBedTemp": 60,
+              "articleNumber": "PLA-GB-1000",
+              "comment": "Resolved from barcode",
+              "multiColorHexes": "#111111,#222222",
+              "externalId": "ext-701"
+            }
+            """
+        )
+
+        let filament = try await service.resolveFilament(barcode: "FIL-701")
+
+        XCTAssertEqual(filament?.id, 701)
+        XCTAssertEqual(filament?.name, "Galaxy Black")
+        XCTAssertEqual(filament?.material, "PLA")
+        XCTAssertEqual(filament?.colorHex, "#111111")
+        XCTAssertEqual(filament?.vendor, "Prusament")
+        XCTAssertEqual(filament?.density, 1.24)
+        XCTAssertEqual(filament?.diameter, 1.75)
+        XCTAssertEqual(filament?.settingsExtruderTemp, 215)
+        XCTAssertEqual(filament?.settingsBedTemp, 60)
+        XCTAssertEqual(filament?.multiColorHexes, "#111111,#222222")
+        XCTAssertEqual(filament?.externalId, "ext-701")
+    }
+
+    func testResolveFilamentDecodesIdOnlyBackendResponseWithOmittedNulls() async throws {
+        MockAPIClient.stubResponse(json: #"{ "id": 702 }"#)
+
+        let filament = try await service.resolveFilament(barcode: "FIL-702")
+
+        XCTAssertEqual(filament?.id, 702)
+        XCTAssertNil(filament?.name)
+        XCTAssertNil(filament?.material)
+        XCTAssertNil(filament?.colorHex)
+        XCTAssertNil(filament?.vendor)
+    }
+
     func testResolveFilamentRethrowsNon404Errors() async {
         MockURLProtocol.requestHandler = { request in
             (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
