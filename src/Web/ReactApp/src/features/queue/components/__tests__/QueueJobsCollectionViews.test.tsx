@@ -77,5 +77,62 @@ describe("Queue view mode + collection renderers", () => {
 
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
+
+  it("card view falls back to the live printer thumbnail for an active external print", () => {
+    // External print: no local gcode thumbnail, but the printer reports one live.
+    const job = createMockJob({
+      job: {
+        id: "job-1",
+        name: "external-print",
+        gcodeFileId: "",
+        status: "Printing",
+        priority: 0,
+        queuePosition: 1,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+        queuedAtUtc: new Date().toISOString(),
+      },
+      gcodeFile: {
+        id: "file-1",
+        fileName: "external-print.gcode",
+        fileSizeBytes: 0,
+        createdAtUtc: new Date().toISOString(),
+      },
+    });
+
+    const { container } = render(
+      <QueueJobsCardView jobs={[job]} printThumbnailByPrinterId={{ "printer-1": "http://printer/live.png" }} />,
+    );
+
+    expect(container.querySelector('img[src="http://printer/live.png"]')).toBeInTheDocument();
+  });
+
+  it("list view does NOT show a live thumbnail on a Queued job pre-assigned to a busy printer", () => {
+    const job = createMockJob({
+      job: {
+        id: "job-1",
+        name: "waiting-print",
+        gcodeFileId: "",
+        status: "Queued",
+        priority: 0,
+        queuePosition: 1,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+        queuedAtUtc: new Date().toISOString(),
+      },
+      gcodeFile: {
+        id: "file-1",
+        fileName: "waiting-print.gcode",
+        fileSizeBytes: 0,
+        createdAtUtc: new Date().toISOString(),
+      },
+    });
+
+    const { container } = render(
+      <QueueJobsListView jobs={[job]} printThumbnailByPrinterId={{ "printer-1": "http://printer/other-job.png" }} />,
+    );
+
+    expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
+  });
 });
 

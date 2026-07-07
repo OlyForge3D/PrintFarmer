@@ -29,7 +29,7 @@ import { printerSignalRService } from "@/services/printer-signalr";
 import { usePageTour } from "@/common/hooks/usePageTour";
 import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
 import { HelpButton } from "@/common/components/HelpButton";
-import { mergePrinterProgress } from "@/features/queue/utils/printerProgress";
+import { mergePrinterProgress, mergePrinterThumbnail } from "@/features/queue/utils/printerProgress";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueueRecommendationDto,
@@ -174,6 +174,7 @@ export function PrintQueueDashboardPage() {
     Record<string, DispatchUploadProgressDto>
   >({});
   const [printProgressByPrinterId, setPrintProgressByPrinterId] = useState<Record<string, number>>({});
+  const [printThumbnailByPrinterId, setPrintThumbnailByPrinterId] = useState<Record<string, string>>({});
   const [scheduleModalJobId, setScheduleModalJobId] = useState<string | null>(null);
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
@@ -424,17 +425,29 @@ export function PrintQueueDashboardPage() {
   useEffect(() => {
     printerSignalRService.connect();
 
-    const applyStatus = (printerId: string, progress?: number) => {
+    const applyStatus = (
+      printerId: string,
+      progress?: number,
+      thumbnailUrl?: string,
+      state?: string,
+    ) => {
+      // Backend progress is "sticky" (a finished printer keeps reporting its last
+      // numeric progress), so activeness must be derived from the printer's
+      // normalized state, not from progress presence. Only a printer that is
+      // actively Printing/Paused should retain a cached live thumbnail; anything
+      // else clears it so a finished job's artwork can't bleed into the next job.
+      const isActive = state === "Printing" || state === "Paused";
       setPrintProgressByPrinterId((prev) => mergePrinterProgress(prev, printerId, progress));
+      setPrintThumbnailByPrinterId((prev) => mergePrinterThumbnail(prev, printerId, thumbnailUrl, isActive));
     };
 
     // Seed from any statuses already received before this effect mounted.
     printerSignalRService.getLastStatuses().forEach((status, printerId) => {
-      applyStatus(printerId, status.progress);
+      applyStatus(printerId, status.progress, status.thumbnailUrl, status.state);
     });
 
     const unsub = printerSignalRService.onPrinterStatusUpdate((status) => {
-      applyStatus(status.id, status.progress);
+      applyStatus(status.id, status.progress, status.thumbnailUrl, status.state);
     });
     return () => {
       unsub();
@@ -590,6 +603,7 @@ export function PrintQueueDashboardPage() {
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
                     printProgressByPrinterId={printProgressByPrinterId}
+                    printThumbnailByPrinterId={printThumbnailByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}
@@ -616,6 +630,7 @@ export function PrintQueueDashboardPage() {
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
                     printProgressByPrinterId={printProgressByPrinterId}
+                    printThumbnailByPrinterId={printThumbnailByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}
@@ -635,6 +650,7 @@ export function PrintQueueDashboardPage() {
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
                     printProgressByPrinterId={printProgressByPrinterId}
+                    printThumbnailByPrinterId={printThumbnailByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}

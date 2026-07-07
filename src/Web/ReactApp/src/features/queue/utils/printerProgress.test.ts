@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergePrinterProgress } from "./printerProgress";
+import { mergePrinterProgress, mergePrinterThumbnail } from "./printerProgress";
 
 describe("mergePrinterProgress", () => {
   it("sets a numeric progress value for a printer", () => {
@@ -39,6 +39,47 @@ describe("mergePrinterProgress", () => {
   it("is a no-op when clearing an absent printer", () => {
     const prev = { "printer-2": 30 };
     const next = mergePrinterProgress(prev, "printer-1", undefined);
+    expect(next).toBe(prev);
+  });
+});
+
+describe("mergePrinterThumbnail", () => {
+  it("caches a printer-side thumbnail while the printer is actively printing", () => {
+    const next = mergePrinterThumbnail({}, "printer-1", "http://printer/thumb.png", true);
+    expect(next).toEqual({ "printer-1": "http://printer/thumb.png" });
+  });
+
+  it("returns the same reference when the thumbnail is unchanged", () => {
+    const prev = { "printer-1": "http://printer/thumb.png" };
+    const next = mergePrinterThumbnail(prev, "printer-1", "http://printer/thumb.png", true);
+    expect(next).toBe(prev);
+  });
+
+  it("preserves the previous thumbnail when an active update omits it", () => {
+    const prev = { "printer-1": "http://printer/thumb.png" };
+    const next = mergePrinterThumbnail(prev, "printer-1", undefined, true);
+    expect(next).toBe(prev);
+    expect(next["printer-1"]).toBe("http://printer/thumb.png");
+  });
+
+  it("clears the cached thumbnail when the printer goes idle/finished", () => {
+    const prev = { "printer-1": "http://printer/thumb.png", "printer-2": "http://p2/t.png" };
+    const next = mergePrinterThumbnail(prev, "printer-1", undefined, false);
+    expect(next).toEqual({ "printer-2": "http://p2/t.png" });
+    expect("printer-1" in next).toBe(false);
+  });
+
+  it("does not let a stale thumbnail leak across consecutive jobs on the same printer", () => {
+    let state: Record<string, string> = { "printer-1": "http://printer/jobA.png" };
+    state = mergePrinterThumbnail(state, "printer-1", undefined, false); // idle between jobs
+    expect(state["printer-1"]).toBeUndefined();
+    state = mergePrinterThumbnail(state, "printer-1", "http://printer/jobB.png", true);
+    expect(state["printer-1"]).toBe("http://printer/jobB.png");
+  });
+
+  it("is a no-op when clearing an absent printer", () => {
+    const prev = { "printer-2": "http://p2/t.png" };
+    const next = mergePrinterThumbnail(prev, "printer-1", undefined, false);
     expect(next).toBe(prev);
   });
 });

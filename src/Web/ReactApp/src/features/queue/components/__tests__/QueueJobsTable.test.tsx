@@ -220,6 +220,145 @@ describe("QueueJobsTable Component", () => {
     });
   });
 
+  it("should fall back to the live printer-side thumbnail when the job has no gcode thumbnail", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    // Externally-started print: gcodeFile has no thumbnailUrl, but the printer
+    // reports one live over SignalR.
+    const externalJob = createMockJob({
+      id: "ext-1",
+      job: {
+        id: "ext-1",
+        name: "external-print",
+        gcodeFileId: "",
+        status: "Printing",
+        priority: 0,
+        queuePosition: 1,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+        queuedAtUtc: new Date().toISOString(),
+        wasSeededFromHistory: true,
+      },
+      gcodeFile: {
+        id: "file-ext",
+        fileName: "external-print.gcode",
+        fileSizeBytes: 0,
+        createdAtUtc: new Date().toISOString(),
+      },
+      assignedPrinter: {
+        id: "printer-live",
+        name: "U1",
+        modelName: "Snapmaker U1",
+        status: "online",
+        isOnline: true,
+      },
+    });
+
+    const { container } = render(
+      <QueueJobsTable
+        jobs={[externalJob]}
+        printThumbnailByPrinterId={{ "printer-live": "http://printer/thumb.png" }}
+        {...mockHandlers}
+      />,
+    );
+
+    const img = container.querySelector('img[src="http://printer/thumb.png"]');
+    expect(img).toBeInTheDocument();
+  });
+
+  it("should prefer the gcode thumbnail over the live printer thumbnail", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    const job = createMockJob({
+      id: "job-thumb",
+      gcodeFile: {
+        id: "file-thumb",
+        fileName: "has-thumb.gcode",
+        fileSizeBytes: 1024,
+        thumbnailUrl: "http://server/gcode-thumb.png",
+        createdAtUtc: new Date().toISOString(),
+      },
+      assignedPrinter: {
+        id: "printer-live",
+        name: "Printer 1",
+        modelName: "Prusa CORE One",
+        status: "online",
+        isOnline: true,
+      },
+    });
+
+    const { container } = render(
+      <QueueJobsTable
+        jobs={[job]}
+        printThumbnailByPrinterId={{ "printer-live": "http://printer/live-thumb.png" }}
+        {...mockHandlers}
+      />,
+    );
+
+    expect(container.querySelector('img[src="http://server/gcode-thumb.png"]')).toBeInTheDocument();
+    expect(container.querySelector('img[src="http://printer/live-thumb.png"]')).not.toBeInTheDocument();
+  });
+
+  it("should NOT show the live printer thumbnail on a Queued job pre-assigned to a busy printer", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    // A queued job can be pre-assigned to a printer that is currently printing a
+    // DIFFERENT job. The live thumbnail belongs to the printing job, not this
+    // queued one — it must not leak onto the queued row.
+    const queuedJob = createMockJob({
+      id: "queued-1",
+      job: {
+        id: "queued-1",
+        name: "waiting-print",
+        gcodeFileId: "",
+        status: "Queued",
+        priority: 0,
+        queuePosition: 1,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+        queuedAtUtc: new Date().toISOString(),
+      },
+      gcodeFile: {
+        id: "file-queued",
+        fileName: "waiting-print.gcode",
+        fileSizeBytes: 0,
+        createdAtUtc: new Date().toISOString(),
+      },
+      assignedPrinter: {
+        id: "printer-busy",
+        name: "Printer Busy",
+        modelName: "Prusa CORE One",
+        status: "online",
+        isOnline: true,
+      },
+    });
+
+    const { container } = render(
+      <QueueJobsTable
+        jobs={[queuedJob]}
+        printThumbnailByPrinterId={{ "printer-busy": "http://printer/other-job.png" }}
+        {...mockHandlers}
+      />,
+    );
+
+    expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
+  });
+
   it("should call onEdit when the detail row is clicked", () => {
     const onEdit = vi.fn();
     const mockHandlers = {

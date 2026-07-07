@@ -64,6 +64,8 @@ export interface QueueJobsTableProps {
   dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
   /** Live print progress (0-100) keyed by assigned printer id, from SignalR printer status. */
   printProgressByPrinterId?: Record<string, number>;
+  /** Live printer-side thumbnail URL keyed by assigned printer id, from SignalR printer status. */
+  printThumbnailByPrinterId?: Record<string, string>;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -82,6 +84,7 @@ export function QueueJobsTable({
   cancelingJobId = null,
   dispatchUploadProgressByJobId,
   printProgressByPrinterId,
+  printThumbnailByPrinterId,
   onPause,
   onResume,
   onCancel,
@@ -281,7 +284,11 @@ export function QueueJobsTable({
             : "";
 
         const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
-        const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
+        const liveThumbnailUrl =
+          (status === "Printing" || status === "Paused") && livePrinterId
+            ? printThumbnailByPrinterId?.[livePrinterId]
+            : undefined;
+        const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl || liveThumbnailUrl;
         const estimatedCost = job.estimatedCost;
         const deadlineAtUtc = job.deadlineAtUtc;
         const deadlineState = getDeadlineState(deadlineAtUtc, status);

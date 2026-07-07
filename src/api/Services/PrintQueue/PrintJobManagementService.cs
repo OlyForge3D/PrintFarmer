@@ -2412,7 +2412,7 @@ public class PrintJobManagementService(
         return new QueuedPrintJobWithFileMetaDto
         {
             Job = MapToQueuedPrintJobDto(job),
-            GcodeFile = job.GcodeFile != null ? MapToQueueGcodeFileMetaDto(job.GcodeFile) : new QueueGcodeFileMetaDto { FileName = "Unknown" },
+            GcodeFile = job.GcodeFile != null ? MapToQueueGcodeFileMetaDto(job.GcodeFile) : new QueueGcodeFileMetaDto { FileName = string.IsNullOrWhiteSpace(job.Name) ? "Unknown" : job.Name },
             AssignedPrinter = job.AssignedPrinter != null ? MapToQueuePrinterMetaDto(job.AssignedPrinter) : null,
             EstimatedStartTime = estimatedStart,
             EstimatedCompletionTime = estimatedCompletion

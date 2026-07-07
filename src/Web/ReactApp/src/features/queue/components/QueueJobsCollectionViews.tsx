@@ -13,6 +13,8 @@ interface QueueJobsCollectionViewProps {
   dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
   /** Live print progress (0-100) keyed by assigned printer id, from SignalR printer status. */
   printProgressByPrinterId?: Record<string, number>;
+  /** Live printer-side thumbnail URL keyed by assigned printer id, from SignalR printer status. */
+  printThumbnailByPrinterId?: Record<string, string>;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -202,6 +204,7 @@ function QueueJobCommon({
   cancelingJobId = null,
   dispatchUploadProgressByJobId,
   printProgressByPrinterId,
+  printThumbnailByPrinterId,
   onPause,
   onResume,
   onCancel,
@@ -227,9 +230,13 @@ function QueueJobCommon({
   const estimatedTimeDisplay = estimatedTimeSeconds ? formatDuration(estimatedTimeSeconds) : "—";
   const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
   const estimatedCost = job.estimatedCost;
-  const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
 
   const livePrinterId = jobWrapper.assignedPrinter?.id;
+  const liveThumbnailUrl =
+    (status === "Printing" || status === "Paused") && livePrinterId
+      ? printThumbnailByPrinterId?.[livePrinterId]
+      : undefined;
+  const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl || liveThumbnailUrl;
   const liveProgressRaw = livePrinterId ? printProgressByPrinterId?.[livePrinterId] : undefined;
   const showLiveProgress =
     (status === "Printing" || status === "Paused") && typeof liveProgressRaw === "number";
