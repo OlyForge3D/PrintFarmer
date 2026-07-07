@@ -525,7 +525,6 @@ public class PrintJobManagementService(
                     MaterialCostUsd = pj.MaterialCostUsd,
                     TotalCostUsd = pj.TotalCostUsd,
                     CostIsEstimated = pj.SpoolmanSpoolId == null
-                        && pj.SpoolmanFilamentId == null
                         && !pj.ToolheadUsages.Any(tu => tu.SpoolmanSpoolId != null),
                     ToolheadUsages = pj.ToolheadUsages
                         .OrderBy(tu => tu.ToolheadIndex)

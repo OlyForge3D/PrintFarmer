@@ -1706,6 +1706,41 @@ public class PrintJobManagementServiceHistorySeedingTests
         Assert.Equal(2.19m, nativeDto.MaterialCostUsd);
     }
 
+    [Fact]
+    public async Task GetQueueHistoryAsync_FilamentAssociationWithoutSpool_ReportsEstimatedCost()
+    {
+        // A filament id without a real spool still yields filament/default pricing → estimated.
+        PrintJob filamentOnly = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "filament-only.gcode",
+            Status = PrintJobStatus.Completed,
+            SpoolmanSpoolId = null,
+            SpoolmanFilamentId = 7,
+            MaterialCostUsd = 1.50m
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetHistoryAsync(
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(([filamentOnly], 1, 1, 0, 0, 600L));
+
+        PrintJobManagementService service = CreateService(repository, new Mock<IPrintersService>());
+
+        QueueHistoryPageDto page = await service.GetQueueHistoryAsync();
+
+        QueueHistoryEntryDto dto = page.Entries.Single();
+        Assert.True(dto.CostIsEstimated);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         Mock<IPrintersService> printersService)

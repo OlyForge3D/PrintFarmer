@@ -579,10 +579,11 @@ public class QueueHistoryEntryDto
     public decimal? TotalCostUsd { get; set; }
 
     /// <summary>
-    /// True when the cost figures are an estimate derived from default/material
-    /// pricing rather than a real associated Spoolman spool. History-seeded jobs
-    /// (filament weight only, no spool) are always estimated; jobs queued through
-    /// PrintFarmer with an associated spool report actual cost.
+    /// True when the cost figures are an estimate rather than backed by a real
+    /// associated Spoolman spool. Cost is treated as actual only when the job (or
+    /// one of its toolhead usages) has an associated spool; otherwise it is derived
+    /// from filament-level or default/material pricing and is therefore an estimate.
+    /// History-seeded jobs (filament weight only, no spool) are always estimated.
     /// </summary>
     public bool CostIsEstimated { get; set; }
 
