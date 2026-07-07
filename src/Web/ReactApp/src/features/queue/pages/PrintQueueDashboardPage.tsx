@@ -17,7 +17,6 @@ import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
 import QueueTimelineTab from "../components/QueueTimelineTab";
-import { QueueRecommendationsPanel } from "../components/QueueRecommendationsPanel";
 import QueueDateRangeBar, { defaultDateRange } from "../components/QueueDateRangeBar";
 import type { DateRange } from "../components/QueueDateRangeBar";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
@@ -32,7 +31,6 @@ import { HelpButton } from "@/common/components/HelpButton";
 import { mergePrinterProgress, mergePrinterThumbnail } from "@/features/queue/utils/printerProgress";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
-  QueueRecommendationDto,
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
 } from "@/types/api";
@@ -44,7 +42,6 @@ const VALID_TABS = ['print-queue', 'timeline', 'history', 'dispatch-log'] as con
 const VALID_QUEUE_VIEW_MODES: QueueViewMode[] = ["table", "list", "cards"];
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
-const RECOMMENDATIONS_POLL_INTERVAL_MS = 60_000;
 
 interface DispatchSettingsResponse {
   autoDispatchEnabled: boolean;
@@ -201,26 +198,10 @@ export function PrintQueueDashboardPage() {
     refetchInterval: 10_000,
   });
 
-  const {
-    data: recommendations = [],
-    isLoading: recommendationsLoading,
-  } = useQuery({
-    queryKey: ['queue-recommendations'],
-    queryFn: () => apiClient.getAnalyticsQueueRecommendations(5) as Promise<QueueRecommendationDto[]>,
-    staleTime: 30_000,
-    refetchInterval: () => (
-      typeof document !== 'undefined' && document.visibilityState === 'visible'
-        ? RECOMMENDATIONS_POLL_INTERVAL_MS
-        : false
-    ),
-    refetchIntervalInBackground: false,
-  });
-
   const invalidateQueue = useCallback(() => {
     setError(null);
     queryClient.invalidateQueries({ queryKey: ['queue-jobs'] });
     queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
-    queryClient.invalidateQueries({ queryKey: ['queue-recommendations'] });
   }, [queryClient]);
 
   const displayError = error || (jobsError ? (jobsError instanceof Error ? jobsError.message : "Failed to load jobs") : null);
@@ -565,14 +546,6 @@ export function PrintQueueDashboardPage() {
           {/* Tab 1: Queue */}
           <Tabs.Panel id="print-queue">
             <div className="flex flex-col h-full w-full min-h-0">
-              {/* To-Do Recommendations */}
-              <div className="px-4 pt-4">
-                <QueueRecommendationsPanel
-                  recommendations={recommendations}
-                  isLoading={recommendationsLoading}
-                />
-              </div>
-
               {/* Filters + Auto-dispatch global toggle */}
               <div data-tour="queue-filters" className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
