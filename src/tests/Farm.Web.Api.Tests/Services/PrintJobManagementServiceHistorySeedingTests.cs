@@ -1741,6 +1741,60 @@ public class PrintJobManagementServiceHistorySeedingTests
         Assert.True(dto.CostIsEstimated);
     }
 
+    [Fact]
+    public async Task GetQueueHistoryAsync_MixedToolheadSpoolCoverage_ReportsEstimatedCost()
+    {
+        // Multi-toolhead job: one toolhead spool-backed, one without a spool.
+        // Not every contributing usage is spool-backed → estimated.
+        PrintJob mixed = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "mixed-mmu.gcode",
+            Status = PrintJobStatus.Completed,
+            SpoolmanSpoolId = 42,
+            MaterialCostUsd = 3.00m,
+            ToolheadUsages =
+            [
+                new PrintJobToolheadUsage
+                {
+                    Id = Guid.NewGuid(),
+                    ToolheadIndex = 0,
+                    SpoolmanSpoolId = 42,
+                    FilamentUsageGrams = 50.0,
+                    MaterialCostUsd = 1.50m
+                },
+                new PrintJobToolheadUsage
+                {
+                    Id = Guid.NewGuid(),
+                    ToolheadIndex = 1,
+                    SpoolmanSpoolId = null,
+                    FilamentUsageGrams = 40.0,
+                    MaterialCostUsd = 1.50m
+                }
+            ]
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetHistoryAsync(
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(([mixed], 1, 1, 0, 0, 600L));
+
+        PrintJobManagementService service = CreateService(repository, new Mock<IPrintersService>());
+
+        QueueHistoryPageDto page = await service.GetQueueHistoryAsync();
+
+        QueueHistoryEntryDto dto = page.Entries.Single();
+        Assert.True(dto.CostIsEstimated);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         Mock<IPrintersService> printersService)

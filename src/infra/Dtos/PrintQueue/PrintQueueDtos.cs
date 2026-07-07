@@ -579,11 +579,14 @@ public class QueueHistoryEntryDto
     public decimal? TotalCostUsd { get; set; }
 
     /// <summary>
-    /// True when the cost figures are an estimate rather than backed by a real
-    /// associated Spoolman spool. Cost is treated as actual only when the job (or
-    /// one of its toolhead usages) has an associated spool; otherwise it is derived
-    /// from filament-level or default/material pricing and is therefore an estimate.
-    /// History-seeded jobs (filament weight only, no spool) are always estimated.
+    /// True when the cost figures are an estimate rather than backed by real
+    /// associated Spoolman spools. Cost is treated as actual only when every
+    /// contributing material usage has an associated spool: for jobs with
+    /// per-toolhead usages, all usages must be spool-backed; otherwise the job
+    /// itself must have an associated spool. Any missing spool means at least
+    /// part of the cost was derived from filament-level or default/material
+    /// pricing, so the figure is flagged as an estimate. History-seeded jobs
+    /// (filament weight only, no spool) are always estimated.
     /// </summary>
     public bool CostIsEstimated { get; set; }
 
