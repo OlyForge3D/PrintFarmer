@@ -539,6 +539,8 @@ public class PrintJobManagementService(
                     FilamentName = pj.FilamentName,
                     FilamentColor = pj.FilamentColor,
                     ActualFilamentUsageGrams = pj.ActualFilamentUsage,
+                    EstimatedFilamentUsageGrams = pj.EstimatedFilamentUsage ?? (pj.GcodeFile != null ? pj.GcodeFile.EstimatedFilamentWeightG : null),
+                    MaterialType = pj.RequiredMaterialType ?? (pj.GcodeFile != null ? pj.GcodeFile.RequiredMaterial : null),
                     ActualCost = pj.ActualCost,
                     MaterialCostUsd = pj.MaterialCostUsd,
                     TotalCostUsd = pj.TotalCostUsd,

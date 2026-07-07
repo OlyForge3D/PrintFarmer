@@ -5,15 +5,6 @@ import type { DispatchUploadProgressDto } from "@/types/api";
 import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 
-/**
- * Shared grid column template for the header and every job row. Using a single
- * definition with fixed track widths (only the File column is flexible) keeps the
- * header labels aligned with the row cells — `auto` tracks would size to content
- * and resolve differently between the header grid and each row grid.
- */
-const GRID_COLS =
-  "grid grid-cols-[40px_56px_minmax(0,1fr)_80px_128px_64px_112px_176px_200px] items-center gap-x-2";
-
 const DUE_SOON_HOURS = 24;
 
 function formatDuration(seconds: number): string {
@@ -105,29 +96,30 @@ export function QueueJobsTable({
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const dragCounter = useRef(0);
 
-  const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, index: number) => {
+  const handleDragStart = useCallback((e: React.DragEvent<HTMLTableSectionElement>, index: number) => {
     setDragIndex(index);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(index));
+    const node = e.currentTarget as HTMLElement;
     requestAnimationFrame(() => {
-      (e.target as HTMLElement).style.opacity = "0.4";
+      node.style.opacity = "0.4";
     });
   }, []);
 
-  const handleDragEnd = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    (e.target as HTMLElement).style.opacity = "1";
+  const handleDragEnd = useCallback((e: React.DragEvent<HTMLTableSectionElement>) => {
+    (e.currentTarget as HTMLElement).style.opacity = "1";
     setDragIndex(null);
     setDropIndex(null);
     dragCounter.current = 0;
   }, []);
 
-  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>, index: number) => {
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLTableSectionElement>, index: number) => {
     e.preventDefault();
     dragCounter.current++;
     setDropIndex(index);
   }, []);
 
-  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLTableSectionElement>) => {
     e.preventDefault();
     dragCounter.current--;
     if (dragCounter.current === 0) {
@@ -135,12 +127,12 @@ export function QueueJobsTable({
     }
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLTableSectionElement>) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
+  const handleDrop = useCallback((e: React.DragEvent<HTMLTableSectionElement>, targetIndex: number) => {
     e.preventDefault();
     dragCounter.current = 0;
     setDropIndex(null);
@@ -219,22 +211,35 @@ export function QueueJobsTable({
   }
 
   return (
-    <div className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden" role="list" aria-label="Print job queue">
-      {/* Header */}
-      <div className={clsx(GRID_COLS, "px-2 py-2.5 bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary")}>
-        <span className="sr-only">Reorder</span>
-        <span className="sr-only">Thumbnail</span>
-        <span className="px-2">File</span>
-        <span className="px-2 w-20 text-center">Status</span>
-        <span className="px-2 w-32">Printer</span>
-        <span className="px-2 w-16 text-center">Copies</span>
-        <span className="px-2 w-28">Priority</span>
-        <span className="px-2 w-44">Deadline</span>
-        <span className="px-2 min-w-[180px]">Actions</span>
-      </div>
-
-      {/* Job rows */}
-      {jobs.map((jobWrapper, index) => {
+    <div className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full table-fixed text-sm" aria-label="Print job queue">
+          <colgroup>
+            <col className="w-10" />
+            <col className="w-14" />
+            <col />
+            <col className="w-20" />
+            <col className="w-32" />
+            <col className="w-16" />
+            <col className="w-28" />
+            <col className="w-44" />
+            <col className="w-[200px]" />
+          </colgroup>
+          <thead>
+            <tr className="bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary text-left">
+              <th scope="col" className="px-2 py-2.5 font-medium"><span className="sr-only">Reorder</span></th>
+              <th scope="col" className="px-2 py-2.5 font-medium"><span className="sr-only">Thumbnail</span></th>
+              <th scope="col" className="px-2 py-2.5 font-medium">File</th>
+              <th scope="col" className="px-2 py-2.5 font-medium text-center">Status</th>
+              <th scope="col" className="px-2 py-2.5 font-medium">Printer</th>
+              <th scope="col" className="px-2 py-2.5 font-medium text-center">Copies</th>
+              <th scope="col" className="px-2 py-2.5 font-medium">Priority</th>
+              <th scope="col" className="px-2 py-2.5 font-medium">Deadline</th>
+              <th scope="col" className="px-2 py-2.5 font-medium">Actions</th>
+            </tr>
+          </thead>
+          {/* Job rows — one <tbody> per job groups the primary + detail rows */}
+          {jobs.map((jobWrapper, index) => {
         const job = jobWrapper.job;
         const jobId = job.id;
         const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
@@ -297,11 +302,19 @@ export function QueueJobsTable({
         const isLastJob = index === jobs.length - 1;
 
         return (
-          <div
+          <tbody
             key={jobId}
-            role="listitem"
-            aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
             draggable
+            aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
+            tabIndex={0}
+            onClick={() => onEdit?.(jobId)}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onEdit?.(jobId);
+              }
+            }}
             onDragStart={(e) => handleDragStart(e, index)}
             onDragEnd={handleDragEnd}
             onDragEnter={(e) => handleDragEnter(e, index)}
@@ -310,92 +323,92 @@ export function QueueJobsTable({
             onDrop={(e) => handleDrop(e, index)}
             className={clsx(
               "transition-colors cursor-pointer hover:bg-pf-bg-2/50",
-              !isLastJob && "border-b border-pf-border",
-              isDragTarget && "border-t-2 border-t-pf-accent",
               deadlineState === "due-soon" && "bg-pf-warning/5",
               deadlineState === "overdue" && "bg-pf-error/10",
             )}
-            onClick={() => onEdit?.(jobId)}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onEdit?.(jobId);
-              }
-            }}
           >
             {/* Row 1 — Primary: drag, thumbnail, file name, status, printer, copies, priority, actions */}
-            <div className={clsx(GRID_COLS, "px-2 pt-2.5 pb-1 text-sm")}>
+            <tr
+              className={clsx("align-middle", isDragTarget && "border-t-2 border-t-pf-accent")}
+            >
               {/* Drag handle */}
-              <div
-                className="flex items-center justify-center cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
-                onClick={(e) => e.stopPropagation()}
-                aria-label="Drag to reorder"
-              >
-                <GripVertical className="h-4 w-4" aria-hidden="true" />
-              </div>
+              <td className="px-2 pt-2.5 pb-1 align-middle">
+                <div
+                  className="flex items-center justify-center cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Drag to reorder"
+                >
+                  <GripVertical className="h-4 w-4" aria-hidden="true" />
+                </div>
+              </td>
 
               {/* Thumbnail */}
-              <div className="flex items-center justify-center">
-                {thumbnailUrl ? (
-                  <img
-                    src={thumbnailUrl}
-                    alt=""
-                    className="w-10 h-10 min-w-10 rounded object-cover bg-pf-bg-2"
-                  />
-                ) : (
-                  <div className="w-10 h-10 min-w-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
-                    —
-                  </div>
-                )}
-              </div>
+              <td className="px-2 pt-2.5 pb-1 align-middle">
+                <div className="flex items-center justify-center">
+                  {thumbnailUrl ? (
+                    <img
+                      src={thumbnailUrl}
+                      alt=""
+                      className="w-10 h-10 min-w-10 rounded object-cover bg-pf-bg-2"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 min-w-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
+                      —
+                    </div>
+                  )}
+                </div>
+              </td>
 
               {/* File name */}
-              <div className="px-2 min-w-0">
+              <td className="px-2 py-1 align-middle">
                 <div className="font-medium text-pf-text-primary truncate" title={fileName}>
                   {fileName}
                 </div>
-              </div>
+              </td>
 
               {/* Status + live progress */}
-              <div className="px-2 w-20 flex flex-col items-center gap-1">
-                <span
-                  className={clsx(
-                    "inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap",
-                    getStatusColor(status),
-                  )}
-                >
-                  {status}
-                </span>
-                {showLiveProgress && (
-                  <div className="w-full" title={`${liveProgressRounded}% complete`}>
-                    <div
-                      className="h-1 w-full rounded-full bg-pf-bg-2 overflow-hidden"
-                      role="progressbar"
-                      aria-valuenow={liveProgressRounded}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-label="Print progress"
-                    >
+              <td className="px-2 py-1 align-middle">
+                <div className="flex flex-col items-center gap-1">
+                  <span
+                    className={clsx(
+                      "inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap",
+                      getStatusColor(status),
+                    )}
+                  >
+                    {status}
+                  </span>
+                  {showLiveProgress && (
+                    <div className="w-full" title={`${liveProgressRounded}% complete`}>
                       <div
-                        className="h-full rounded-full bg-pf-success transition-[width] duration-300"
-                        style={{ width: `${liveProgressPct}%` }}
-                      />
+                        className="h-1 w-full rounded-full bg-pf-bg-2 overflow-hidden"
+                        role="progressbar"
+                        aria-valuenow={liveProgressRounded}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label="Print progress"
+                      >
+                        <div
+                          className="h-full rounded-full bg-pf-success transition-[width] duration-300"
+                          style={{ width: `${liveProgressPct}%` }}
+                        />
+                      </div>
+                      <span className="mt-0.5 block text-center text-[10px] tabular-nums text-pf-text-tertiary">
+                        {liveProgressRounded}%
+                      </span>
                     </div>
-                    <span className="mt-0.5 block text-center text-[10px] tabular-nums text-pf-text-tertiary">
-                      {liveProgressRounded}%
-                    </span>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              </td>
 
               {/* Printer */}
-              <div className="px-2 w-32 text-pf-text-secondary truncate" title={printerName}>
-                {printerName}
-              </div>
+              <td className="px-2 py-1 align-middle text-pf-text-secondary">
+                <div className="truncate" title={printerName}>
+                  {printerName}
+                </div>
+              </td>
 
               {/* Copies */}
-              <div className="px-2 w-16 text-center whitespace-nowrap">
+              <td className="px-2 py-1 align-middle text-center whitespace-nowrap">
                 {(job.copies ?? 1) > 1 ? (
                   <span className="text-pf-text-primary font-medium text-xs">
                     {job.completedCopies ?? 0}/{job.copies}
@@ -403,10 +416,10 @@ export function QueueJobsTable({
                 ) : (
                   <span className="text-pf-text-tertiary text-xs">1</span>
                 )}
-              </div>
+              </td>
 
               {/* Priority */}
-              <div className="px-2 w-28" onClick={(e) => e.stopPropagation()}>
+              <td className="px-2 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
                 <Select
                   value={priority}
                   onChange={(e) => onPriority?.(jobId, parseInt(e.target.value))}
@@ -418,10 +431,10 @@ export function QueueJobsTable({
                   <option value="2">Urgent</option>
                   <option value="-1">Low</option>
                 </Select>
-              </div>
+              </td>
 
               {/* Deadline */}
-              <div className="px-2 w-44">
+              <td className="px-2 py-1 align-middle">
                 {deadlineDisplay === "-" ? (
                   <span className="text-pf-text-tertiary text-xs">No deadline</span>
                 ) : (
@@ -457,10 +470,10 @@ export function QueueJobsTable({
                     )}
                   </div>
                 )}
-              </div>
+              </td>
 
               {/* Actions */}
-              <div className="px-2 min-w-[180px]" onClick={(e) => e.stopPropagation()}>
+              <td className="px-2 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
                 <div className="flex gap-1.5 flex-wrap">
                   {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
                     <Button
@@ -547,62 +560,70 @@ export function QueueJobsTable({
                     </Button>
                   )}
                 </div>
-              </div>
-            </div>
+              </td>
+            </tr>
 
             {/* Row 2 — Secondary: detail chips with supplementary info */}
-            <div className="flex items-center gap-x-4 gap-y-1 flex-wrap pl-[104px] pr-4 pb-2.5 pt-0.5">
-              {projectName && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-pf-accent/10 text-pf-accent border border-pf-accent/20">
-                  <FolderOpen className="h-3 w-3" aria-hidden="true" />
-                  {projectName}
-                </span>
-              )}
-              {model && (
-                <DetailChip icon={<Box className="h-3 w-3" />} label="Model">
-                  {model}
-                </DetailChip>
-              )}
-              {material && (
-                <DetailChip icon={<Layers className="h-3 w-3" />} label="Material">
-                  {material}
-                </DetailChip>
-              )}
-              {filamentDisplay && (
-                <DetailChip icon={<Palette className="h-3 w-3" />} label="Filament">
-                  {filamentDisplay}
-                </DetailChip>
-              )}
-              {estimatedTimeDisplay && (
-                <DetailChip icon={<Timer className="h-3 w-3" />} label="Est">
-                  {estimatedTimeDisplay}
-                </DetailChip>
-              )}
-              {estimatedCost != null && (
-                <DetailChip icon={<DollarSign className="h-3 w-3" />} label="Cost">
-                  ${estimatedCost.toFixed(2)}
-                </DetailChip>
-              )}
-              {timeDisplay !== "-" && (
-                <DetailChip icon={<Clock className="h-3 w-3" />} label="Queued">
-                  {timeDisplay}
-                </DetailChip>
-              )}
-              {job.wasSeededFromHistory ? (
-                <span
-                  role="img"
-                  aria-label="Imported"
-                  title="Imported from history"
-                  className="inline-flex items-center gap-1 text-xs text-pf-text-tertiary"
-                >
-                  <Download className="h-3 w-3" aria-hidden="true" />
-                  <span>Imported</span>
-                </span>
-              ) : null}
-            </div>
-          </div>
+            <tr className={clsx(!isLastJob && "border-b border-pf-border")}>
+              <td aria-hidden="true" />
+              <td aria-hidden="true" />
+              <td colSpan={7} className="px-2 pr-4 pb-2.5 pt-0.5">
+                <div className="flex items-center gap-x-4 gap-y-1 flex-wrap">
+                  {projectName && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-pf-accent/10 text-pf-accent border border-pf-accent/20">
+                      <FolderOpen className="h-3 w-3" aria-hidden="true" />
+                      {projectName}
+                    </span>
+                  )}
+                  {model && (
+                    <DetailChip icon={<Box className="h-3 w-3" />} label="Model">
+                      {model}
+                    </DetailChip>
+                  )}
+                  {material && (
+                    <DetailChip icon={<Layers className="h-3 w-3" />} label="Material">
+                      {material}
+                    </DetailChip>
+                  )}
+                  {filamentDisplay && (
+                    <DetailChip icon={<Palette className="h-3 w-3" />} label="Filament">
+                      {filamentDisplay}
+                    </DetailChip>
+                  )}
+                  {estimatedTimeDisplay && (
+                    <DetailChip icon={<Timer className="h-3 w-3" />} label="Est">
+                      {estimatedTimeDisplay}
+                    </DetailChip>
+                  )}
+                  {estimatedCost != null && (
+                    <DetailChip icon={<DollarSign className="h-3 w-3" />} label="Cost">
+                      ${estimatedCost.toFixed(2)}
+                    </DetailChip>
+                  )}
+                  {timeDisplay !== "-" && (
+                    <DetailChip icon={<Clock className="h-3 w-3" />} label="Queued">
+                      {timeDisplay}
+                    </DetailChip>
+                  )}
+                  {job.wasSeededFromHistory ? (
+                    <span
+                      role="img"
+                      aria-label="Imported"
+                      title="Imported from history"
+                      className="inline-flex items-center gap-1 text-xs text-pf-text-tertiary"
+                    >
+                      <Download className="h-3 w-3" aria-hidden="true" />
+                      <span>Imported</span>
+                    </span>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+          </tbody>
         );
       })}
+        </table>
+      </div>
     </div>
   );
 }

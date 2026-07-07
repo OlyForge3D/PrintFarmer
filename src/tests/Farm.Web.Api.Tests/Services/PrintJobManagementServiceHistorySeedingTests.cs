@@ -1742,6 +1742,68 @@ public class PrintJobManagementServiceHistorySeedingTests
     }
 
     [Fact]
+    public async Task GetQueueHistoryAsync_SurfacesMaterialTypeAndEstimatedFilamentFallback()
+    {
+        // A seeded job with no actual usage but a material type and slicer estimate:
+        // the history entry must surface both so an estimated cost has a visible basis.
+        PrintJob seeded = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "seeded.gcode",
+            Status = PrintJobStatus.Completed,
+            RequiredMaterialType = "PETG",
+            ActualFilamentUsage = null,
+            EstimatedFilamentUsage = 42.5,
+            MaterialCostUsd = 1.06m
+        };
+
+        // A job whose direct fields are null must fall back to its GcodeFile metadata.
+        PrintJob viaGcodeFile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "gcode-fallback.gcode",
+            Status = PrintJobStatus.Completed,
+            RequiredMaterialType = null,
+            ActualFilamentUsage = null,
+            EstimatedFilamentUsage = null,
+            MaterialCostUsd = 2.00m,
+            GcodeFile = new GcodeFile
+            {
+                Id = Guid.NewGuid(),
+                RequiredMaterial = "PLA",
+                EstimatedFilamentWeightG = 30.0
+            }
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetHistoryAsync(
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(([seeded, viaGcodeFile], 2, 1, 0, 0, 600L));
+
+        PrintJobManagementService service = CreateService(repository, new Mock<IPrintersService>());
+
+        QueueHistoryPageDto page = await service.GetQueueHistoryAsync();
+
+        QueueHistoryEntryDto directDto = page.Entries.Single(e => e.Id == seeded.Id.ToString());
+        Assert.Equal("PETG", directDto.MaterialType);
+        Assert.Null(directDto.ActualFilamentUsageGrams);
+        Assert.Equal(42.5, directDto.EstimatedFilamentUsageGrams);
+
+        QueueHistoryEntryDto fallbackDto = page.Entries.Single(e => e.Id == viaGcodeFile.Id.ToString());
+        Assert.Equal("PLA", fallbackDto.MaterialType);
+        Assert.Null(fallbackDto.ActualFilamentUsageGrams);
+        Assert.Equal(30.0, fallbackDto.EstimatedFilamentUsageGrams);
+    }
+
+    [Fact]
     public async Task GetQueueHistoryAsync_MixedToolheadSpoolCoverage_ReportsEstimatedCost()
     {
         // Multi-toolhead job: one toolhead spool-backed, one without a spool.

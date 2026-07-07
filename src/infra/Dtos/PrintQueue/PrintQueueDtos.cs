@@ -562,6 +562,18 @@ public class QueueHistoryEntryDto
     public double? ActualFilamentUsageGrams { get; set; }
 
     /// <summary>
+    /// Estimated filament weight in grams (from slicer metadata). Display fallback
+    /// so the filament basis for an estimated cost is always visible, even when no
+    /// actual usage was reported (e.g. history-seeded jobs).
+    /// </summary>
+    public double? EstimatedFilamentUsageGrams { get; set; }
+
+    /// <summary>
+    /// Material type for the job (e.g. "PLA", "PETG"), for the history Material column.
+    /// </summary>
+    public string? MaterialType { get; set; }
+
+    /// <summary>
     /// Actual cost of the print job (calculated on completion).
     /// </summary>
     public decimal? ActualCost { get; set; }

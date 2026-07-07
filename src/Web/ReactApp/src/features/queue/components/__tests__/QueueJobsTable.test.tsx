@@ -213,10 +213,91 @@ describe("QueueJobsTable Component", () => {
 
     const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const rows = container.querySelectorAll('[role="listitem"]');
+    const rows = container.querySelectorAll('tbody[draggable="true"]');
     expect(rows.length).toBe(mockJobs.length);
     rows.forEach((row) => {
       expect(row).toHaveAttribute("draggable", "true");
     });
+  });
+
+  it("should call onEdit when the detail row is clicked", () => {
+    const onEdit = vi.fn();
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+      onEdit,
+    };
+
+    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+
+    // The secondary (detail) row lives in the same <tbody> as the primary row;
+    // clicking a detail chip must still open edit (handlers live on the <tbody>).
+    const firstBody = container.querySelector('tbody[draggable="true"]');
+    const detailRow = firstBody?.querySelectorAll("tr")[1];
+    expect(detailRow).toBeTruthy();
+    fireEvent.click(detailRow as Element);
+
+    expect(onEdit).toHaveBeenCalledWith("job-1");
+  });
+
+  it("should call onEdit on Enter only when the row itself is focused", () => {
+    const onEdit = vi.fn();
+    const onCancel = vi.fn();
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel,
+      onPriority: vi.fn(),
+      onEdit,
+    };
+
+    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+    const firstBody = container.querySelector('tbody[draggable="true"]') as Element;
+
+    // Enter on the row itself opens edit.
+    fireEvent.keyDown(firstBody, { key: "Enter" });
+    expect(onEdit).toHaveBeenCalledWith("job-1");
+    onEdit.mockClear();
+
+    // Enter on a child action control must NOT be hijacked into edit (WCAG 2.1.1).
+    const cancelButton = screen.getAllByText("Cancel")[0];
+    fireEvent.keyDown(cancelButton, { key: "Enter" });
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it("should not throw on drag start and applies drag opacity via rAF", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+    const firstBody = container.querySelector('tbody[draggable="true"]') as HTMLElement;
+
+    // Capture the rAF callback and run it AFTER dispatch, mirroring the real frame
+    // timing where React has already nulled a non-captured currentTarget.
+    let rafCallback: FrameRequestCallback | null = null;
+    const rafSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        rafCallback = cb;
+        return 0;
+      });
+
+    expect(() =>
+      fireEvent.dragStart(firstBody, {
+        dataTransfer: { setData: vi.fn(), effectAllowed: "" },
+      }),
+    ).not.toThrow();
+
+    expect(rafCallback).not.toBeNull();
+    expect(() => rafCallback?.(0)).not.toThrow();
+    expect(firstBody.style.opacity).toBe("0.4");
+
+    rafSpy.mockRestore();
   });
 });

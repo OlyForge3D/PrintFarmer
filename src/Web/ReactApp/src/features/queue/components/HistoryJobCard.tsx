@@ -219,31 +219,39 @@ export default function HistoryJobCard({
       {/* Aggregate Filament Usage / Cost fallback (no per-toolhead usage records) */}
       {(!job.toolheadUsages || job.toolheadUsages.length === 0) &&
         ((job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0) ||
+          (job.estimatedFilamentUsageGrams != null && job.estimatedFilamentUsageGrams > 0) ||
           (job.materialCostUsd != null && job.materialCostUsd > 0)) && (
           <div className="mb-4">
             <div className="text-xs text-pf-text-secondary mb-2">Filament Usage</div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-pf-text-primary flex-1 min-w-0 truncate">
-                Actual usage
+                {job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0
+                  ? "Actual usage"
+                  : "Estimated usage"}
               </span>
               <div className="flex items-center gap-2 text-pf-text-secondary shrink-0">
-                {job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0 && (
+                {job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0 ? (
                   <span className="font-medium tabular-nums">
                     {job.actualFilamentUsageGrams.toFixed(1)}g
                   </span>
-                )}
+                ) : job.estimatedFilamentUsageGrams != null && job.estimatedFilamentUsageGrams > 0 ? (
+                  <span className="font-medium tabular-nums inline-flex items-baseline gap-1" title="Slicer estimate (no actual usage reported)">
+                    {job.estimatedFilamentUsageGrams.toFixed(1)}g
+                    <span className="text-[10px] uppercase tracking-wide text-pf-text-muted">est</span>
+                  </span>
+                ) : null}
                 {job.materialCostUsd != null && job.materialCostUsd > 0 && (
                   <span
-                    className={`tabular-nums ${job.costIsEstimated ? 'text-pf-text-secondary italic' : 'text-pf-text-tertiary'}`}
+                    className="tabular-nums text-pf-text-tertiary"
                     title={
-                      job.costIsEstimated
-                        ? `Estimated from filament used (no spool associated).${job.totalCostUsd != null ? ` Total job cost: $${job.totalCostUsd.toFixed(2)}` : ''}`
-                        : job.totalCostUsd != null
-                        ? `Material cost. Total job cost: $${job.totalCostUsd.toFixed(2)}`
+                      job.totalCostUsd != null && Math.abs(job.totalCostUsd - job.materialCostUsd) > 0.005
+                        ? `${job.costIsEstimated ? 'Estimated material cost' : 'Material cost'}. Total incl. energy/labor: $${job.totalCostUsd.toFixed(2)}`
+                        : job.costIsEstimated
+                        ? 'Estimated material cost'
                         : 'Material cost'
                     }
                   >
-                    {job.costIsEstimated ? '~' : ''}${job.materialCostUsd.toFixed(2)}
+                    ${job.materialCostUsd.toFixed(2)}
                     {job.costIsEstimated ? ' (est.)' : ''}
                   </span>
                 )}

@@ -42,7 +42,7 @@ describe('history filament/cost fallback (seeded jobs without toolhead usages)',
     expect(screen.getByText('$3.14')).toBeInTheDocument();
   });
 
-  it('marks seeded-history cost as estimated (~ prefix) in the table', () => {
+  it('marks seeded-history cost as estimated (est badge, no misleading minus) in the table', () => {
     render(
       <HistoryJobTable
         jobs={[baseJob({ actualFilamentUsageGrams: 156.8, materialCostUsd: 3.14, totalCostUsd: 4.5, costIsEstimated: true })]}
@@ -50,8 +50,11 @@ describe('history filament/cost fallback (seeded jobs without toolhead usages)',
       />,
     );
 
-    expect(screen.getByText('~$3.14')).toBeInTheDocument();
-    expect(screen.queryByText('$3.14')).not.toBeInTheDocument();
+    // Cost is shown as a plain positive value plus an "est" marker — never with a
+    // leading "~" that users mistake for a negative sign.
+    expect(screen.getByText('$3.14')).toBeInTheDocument();
+    expect(screen.queryByText('~$3.14')).not.toBeInTheDocument();
+    expect(screen.getByText('est')).toBeInTheDocument();
   });
 
   it('prefers per-toolhead usage over the aggregate fallback in the table', () => {
@@ -89,6 +92,31 @@ describe('history filament/cost fallback (seeded jobs without toolhead usages)',
     );
 
     expect(screen.getByText('181.6g')).toBeInTheDocument();
-    expect(screen.getByText('~$3.63 (est.)')).toBeInTheDocument();
+    expect(screen.getByText('$3.63 (est.)')).toBeInTheDocument();
+  });
+
+  it('shows estimated filament as a fallback so an estimated cost always has a visible basis', () => {
+    render(
+      <HistoryJobTable
+        jobs={[baseJob({ estimatedFilamentUsageGrams: 42.5, materialCostUsd: 1.06, costIsEstimated: true })]}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    // No actual usage, but the slicer estimate is shown (marked "est") next to the cost.
+    expect(screen.getByText('42.5g')).toBeInTheDocument();
+    expect(screen.getByText('$1.06')).toBeInTheDocument();
+  });
+
+  it('renders the material type column', () => {
+    render(
+      <HistoryJobTable
+        jobs={[baseJob({ materialType: 'PETG;PETG;PETG', actualFilamentUsageGrams: 100 })]}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    // Duplicate material tokens collapse to a single compact label.
+    expect(screen.getByText('PETG')).toBeInTheDocument();
   });
 });

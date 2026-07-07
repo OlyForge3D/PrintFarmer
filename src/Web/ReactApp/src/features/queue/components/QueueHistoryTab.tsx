@@ -100,6 +100,8 @@ export default function QueueHistoryTab({
         failureReason?: string;
         toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
         actualFilamentUsageGrams?: number | null;
+        estimatedFilamentUsageGrams?: number | null;
+        materialType?: string | null;
         materialCostUsd?: number | null;
         totalCostUsd?: number | null;
         costIsEstimated?: boolean;
@@ -119,6 +121,8 @@ export default function QueueHistoryTab({
         failureReason: job.failureReason,
         toolheadUsages: job.toolheadUsages,
         actualFilamentUsageGrams: job.actualFilamentUsageGrams,
+        estimatedFilamentUsageGrams: job.estimatedFilamentUsageGrams,
+        materialType: job.materialType,
         materialCostUsd: job.materialCostUsd,
         totalCostUsd: job.totalCostUsd,
         costIsEstimated: job.costIsEstimated,
