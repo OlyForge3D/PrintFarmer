@@ -227,6 +227,13 @@ public interface IPrintJobManagementRepository
     Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Get lightweight candidate rows for detecting existing duplicate history jobs.
+    /// Returns every job that has a valid (post-epoch) <see cref="PrintJob.ActualStartTime"/>,
+    /// projecting only the fields needed to group duplicates by printer and whole-second start.
+    /// </summary>
+    Task<List<HistoryDuplicateCandidate>> GetHistoryDuplicateCandidatesAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Get a job by external job ID and source printer ID (for history seeding updates).
     /// </summary>
     Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default);
@@ -277,3 +284,18 @@ public record PrinterModelQueueStats(
     int TotalQueued,
     int CurrentlyPrinting,
     DateTime? OldestQueuedAtUtc);
+
+/// <summary>
+/// Lightweight projection of a print job used to detect existing duplicate history rows.
+/// The effective printer for grouping is <see cref="SourcePrinterId"/> when set, otherwise
+/// <see cref="AssignedPrinterId"/>.
+/// </summary>
+public record HistoryDuplicateCandidate(
+    Guid Id,
+    Guid? SourcePrinterId,
+    Guid? AssignedPrinterId,
+    DateTime ActualStartTime,
+    bool WasSeededFromHistory,
+    bool IsExternalPrint,
+    string? ExternalJobId,
+    DateTime CreatedAt);

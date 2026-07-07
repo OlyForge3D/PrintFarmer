@@ -67,13 +67,19 @@ export default function HistoryJobCard({
   };
 
   const getStatusLabel = () => {
+    const showProgress =
+      (job.status === "failed" || job.status === "cancelled") &&
+      typeof job.completionPercentage === "number" &&
+      job.completionPercentage > 0 &&
+      job.completionPercentage < 100;
+    const progressSuffix = showProgress ? ` @ ${Math.round(job.completionPercentage!)}%` : "";
     switch (job.status) {
       case "completed":
         return "✓ Completed";
       case "failed":
-        return "✗ Failed";
+        return `✗ Failed${progressSuffix}`;
       case "cancelled":
-        return "◯ Cancelled";
+        return `◯ Cancelled${progressSuffix}`;
       default:
         return job.status;
     }
@@ -143,28 +149,6 @@ export default function HistoryJobCard({
         </div>
       )}
 
-      {/* Progress Bar */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-pf-text-secondary">Progress</span>
-          <span className="text-xs font-medium text-pf-text-primary">
-            {job.completionPercentage}%
-          </span>
-        </div>
-        <div className="w-full bg-pf-bg-1 rounded-full h-2">
-          <div
-            className={`h-2 rounded-full transition-all ${
-              job.status === "completed"
-                ? "bg-pf-success"
-                : job.status === "failed"
-                ? "bg-pf-error"
-                : "bg-pf-warning"
-            }`}
-            style={{ width: `${Math.min(100, job.completionPercentage)}%` }}
-          />
-        </div>
-      </div>
-
       {/* Failure Reason (if failed) */}
       {job.status === "failed" && job.failureReason && (
         <div className="mb-4 p-3 bg-pf-error-bg border border-pf-error rounded-sm text-sm text-pf-text-primary">
@@ -231,6 +215,50 @@ export default function HistoryJobCard({
           </div>
         </div>
       )}
+
+      {/* Aggregate Filament Usage / Cost fallback (no per-toolhead usage records) */}
+      {(!job.toolheadUsages || job.toolheadUsages.length === 0) &&
+        ((job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0) ||
+          (job.estimatedFilamentUsageGrams != null && job.estimatedFilamentUsageGrams > 0) ||
+          (job.materialCostUsd != null && job.materialCostUsd > 0)) && (
+          <div className="mb-4">
+            <div className="text-xs text-pf-text-secondary mb-2">Filament Usage</div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-pf-text-primary flex-1 min-w-0 truncate">
+                {job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0
+                  ? "Actual usage"
+                  : "Estimated usage"}
+              </span>
+              <div className="flex items-center gap-2 text-pf-text-secondary shrink-0">
+                {job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0 ? (
+                  <span className="font-medium tabular-nums">
+                    {job.actualFilamentUsageGrams.toFixed(1)}g
+                  </span>
+                ) : job.estimatedFilamentUsageGrams != null && job.estimatedFilamentUsageGrams > 0 ? (
+                  <span className="font-medium tabular-nums inline-flex items-baseline gap-1" title="Slicer estimate (no actual usage reported)">
+                    {job.estimatedFilamentUsageGrams.toFixed(1)}g
+                    <span className="text-[10px] uppercase tracking-wide text-pf-text-muted">est</span>
+                  </span>
+                ) : null}
+                {job.materialCostUsd != null && job.materialCostUsd > 0 && (
+                  <span
+                    className="tabular-nums text-pf-text-tertiary"
+                    title={
+                      job.totalCostUsd != null && Math.abs(job.totalCostUsd - job.materialCostUsd) > 0.005
+                        ? `${job.costIsEstimated ? 'Estimated material cost' : 'Material cost'}. Total incl. energy/labor: $${job.totalCostUsd.toFixed(2)}`
+                        : job.costIsEstimated
+                        ? 'Estimated material cost'
+                        : 'Material cost'
+                    }
+                  >
+                    ${job.materialCostUsd.toFixed(2)}
+                    {job.costIsEstimated ? ' (est.)' : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Actions */}
       <div className="flex gap-2 pt-3 border-t border-pf-border">

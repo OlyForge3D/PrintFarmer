@@ -137,7 +137,7 @@ describe("TableFiltersBar Component", () => {
     expect(refreshButton).toBeDisabled();
   });
 
-  it("should display all status options in dropdown", () => {
+  it("should display active status options and exclude terminal states", () => {
     const mockHandlers = {
       onStatusChange: vi.fn(),
       onModelChange: vi.fn(),
@@ -157,6 +157,11 @@ describe("TableFiltersBar Component", () => {
     expect(statusValues).toContain("Starting");
     expect(statusValues).toContain("Printing");
     expect(statusValues).toContain("Paused");
+
+    // Terminal states live on the History tab and must not be selectable here.
+    expect(statusValues).not.toContain("Completed");
+    expect(statusValues).not.toContain("Failed");
+    expect(statusValues).not.toContain("Cancelled");
   });
 
   it("should display all material options in dropdown", () => {

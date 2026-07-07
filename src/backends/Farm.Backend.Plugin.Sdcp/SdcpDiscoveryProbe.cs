@@ -9,7 +9,9 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Backend.Plugin.Sdcp;
 
 /// <summary>
-/// Discovery probe for SDCP (Snapmaker Discovery Protocol) printers using UDP broadcast.
+/// Discovery probe for SDCP (Smart Device Control Protocol) printers using UDP broadcast.
+/// SDCP is CHITUBOX/CBD-Tech's LAN protocol used by compatible printers (e.g. newer ELEGOO
+/// models); it is unrelated to Snapmaker, whose printers use other backends (e.g. Moonraker).
 /// Sends 'M99999' discovery message to port 3000, receives JSON response with printer details.
 /// </summary>
 public class SdcpDiscoveryProbe : INetworkDiscoveryProbe

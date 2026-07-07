@@ -307,6 +307,61 @@ public class SeedQueueHistoryRequest
 // ============= RESPONSE DTOs =============
 
 /// <summary>
+/// Result of a seeded-history duplicate cleanup run. Duplicates are jobs that share
+/// the same printer and the same whole-second <c>ActualStartTime</c> (mirroring the
+/// harvest-time dedup guard). Only history-seeded rows are removed; native jobs are kept.
+/// </summary>
+public class DeduplicateHistoryResultDto
+{
+    /// <summary>
+    /// When true, no rows were deleted; the result reports what would have been removed.
+    /// </summary>
+    public bool DryRun { get; set; }
+
+    /// <summary>
+    /// Number of duplicate groups (printer + whole-second start) that had at least one
+    /// removable seeded duplicate.
+    /// </summary>
+    public int DuplicateGroups { get; set; }
+
+    /// <summary>
+    /// Number of seeded duplicate jobs removed (or that would be removed in a dry run).
+    /// </summary>
+    public int JobsRemoved { get; set; }
+
+    /// <summary>
+    /// Per-group detail of the retained job and the removed duplicates.
+    /// </summary>
+    public List<DeduplicateHistoryGroupDto> Groups { get; set; } = new();
+}
+
+/// <summary>
+/// Detail of a single duplicate group processed by the seeded-history cleanup.
+/// </summary>
+public class DeduplicateHistoryGroupDto
+{
+    /// <summary>
+    /// Effective printer the duplicate jobs belong to (source printer, else assigned printer).
+    /// </summary>
+    public Guid PrinterId { get; set; }
+
+    /// <summary>
+    /// Whole-second UTC start time shared by the jobs in this group.
+    /// </summary>
+    public DateTime StartTimeUtc { get; set; }
+
+    /// <summary>
+    /// The job retained as the canonical record for this group.
+    /// </summary>
+    public Guid RetainedJobId { get; set; }
+
+    /// <summary>
+    /// The seeded duplicate jobs removed (or that would be removed in a dry run).
+    /// </summary>
+    public List<Guid> RemovedJobIds { get; set; } = new();
+}
+
+/// <summary>
 /// Result of bulk queue operations
 /// </summary>
 public class QueueBulkOperationResultDto
@@ -507,9 +562,45 @@ public class QueueHistoryEntryDto
     public double? ActualFilamentUsageGrams { get; set; }
 
     /// <summary>
+    /// Estimated filament weight in grams (from slicer metadata). Display fallback
+    /// so the filament basis for an estimated cost is always visible, even when no
+    /// actual usage was reported (e.g. history-seeded jobs).
+    /// </summary>
+    public double? EstimatedFilamentUsageGrams { get; set; }
+
+    /// <summary>
+    /// Material type for the job (e.g. "PLA", "PETG"), for the history Material column.
+    /// </summary>
+    public string? MaterialType { get; set; }
+
+    /// <summary>
     /// Actual cost of the print job (calculated on completion).
     /// </summary>
     public decimal? ActualCost { get; set; }
+
+    /// <summary>
+    /// Material cost in USD (filament usage × price per gram). Used as a display
+    /// fallback for jobs that have no per-toolhead usage records (e.g. history-seeded jobs).
+    /// </summary>
+    public decimal? MaterialCostUsd { get; set; }
+
+    /// <summary>
+    /// Total cost in USD (material + energy + machine time + labor). Provided for
+    /// display context on jobs without per-toolhead usage records.
+    /// </summary>
+    public decimal? TotalCostUsd { get; set; }
+
+    /// <summary>
+    /// True when the cost figures are an estimate rather than backed by real
+    /// associated Spoolman spools. Cost is treated as actual only when every
+    /// contributing material usage has an associated spool: for jobs with
+    /// per-toolhead usages, all usages must be spool-backed; otherwise the job
+    /// itself must have an associated spool. Any missing spool means at least
+    /// part of the cost was derived from filament-level or default/material
+    /// pricing, so the figure is flagged as an estimate. History-seeded jobs
+    /// (filament weight only, no spool) are always estimated.
+    /// </summary>
+    public bool CostIsEstimated { get; set; }
 
     /// <summary>
     /// Tags associated with the print job (auto-generated and manual).

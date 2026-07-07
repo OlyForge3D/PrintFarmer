@@ -34,8 +34,8 @@ public class JobQueueAnalyticsController(
     /// <param name="filterMaterial">Filter by material type</param>
     /// <param name="deadlineStart">Filter jobs with deadline at or after this UTC timestamp</param>
     /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
-    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp</param>
-    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp</param>
+    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
+    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
     /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
@@ -722,6 +722,44 @@ public class JobQueueAnalyticsController(
         {
             _logger.LogError(ex, "Error seeding queue history");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to seed history" });
+        }
+    }
+
+    /// <summary>
+    /// Remove existing duplicate history jobs created before the harvest-time dedup guard.
+    /// Duplicates are seeded history jobs that share the same printer and the same whole-second
+    /// actual start time. Native (non-seeded) jobs are always retained. Defaults to a dry run
+    /// that only reports what would be removed; pass <c>dryRun=false</c> to actually delete.
+    /// </summary>
+    /// <param name="dryRun">When true (default), reports duplicates without deleting them.</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
+    [HttpPost("history/deduplicate")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(DeduplicateHistoryResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> DeduplicateHistoryAsync(
+        [FromQuery] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            DeduplicateHistoryResultDto result =
+                await _printJobManagementService.DeduplicateSeededHistoryAsync(dryRun, cancellationToken);
+
+            _logger.LogInformation(
+                "History deduplication {Mode} completed: {Groups} group(s), {Jobs} job(s)",
+                dryRun ? "dry-run" : "cleanup",
+                result.DuplicateGroups,
+                result.JobsRemoved);
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deduplicating queue history");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to deduplicate history" });
         }
     }
 

@@ -22,8 +22,8 @@ public interface IPrintJobManagementService
     /// <param name="sortBy">Sort mode for queued jobs (for example: priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
-    /// <param name="queuedFrom">Optional inclusive lower bound for when the job was queued (UTC).</param>
-    /// <param name="queuedTo">Optional inclusive upper bound for when the job was queued (UTC).</param>
+    /// <param name="queuedFrom">Optional inclusive lower bound for when the job was queued (UTC). Only honored for terminal (History-style) views; ignored for the active queue.</param>
+    /// <param name="queuedTo">Optional inclusive upper bound for when the job was queued (UTC). Only honored for terminal (History-style) views; ignored for the active queue.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<List<QueuedPrintJobWithFileMetaDto>> GetAllQueuedJobsAsync(
         string? filterStatus = null,
@@ -328,6 +328,20 @@ public interface IPrintJobManagementService
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task SeedHistoryFromPrintersAsync(
         List<string>? printerIds = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Remove existing duplicate history jobs that were created before the harvest-time
+    /// dedup guard existed. Duplicates are jobs sharing the same printer
+    /// (<c>SourcePrinterId</c> or <c>AssignedPrinterId</c>) and the
+    /// same whole-second <c>ActualStartTime</c> (post-epoch only). Only
+    /// history-seeded rows are removed; a native (non-seeded) job in a group is always retained.
+    /// </summary>
+    /// <param name="dryRun">When true, no rows are deleted; the result reports what would be removed.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    /// <returns>A summary of the duplicate groups found and jobs removed.</returns>
+    Task<DeduplicateHistoryResultDto> DeduplicateSeededHistoryAsync(
+        bool dryRun = true,
         CancellationToken cancellationToken = default);
 
     /// <summary>

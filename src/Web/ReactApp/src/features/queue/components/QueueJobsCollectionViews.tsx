@@ -11,6 +11,10 @@ interface QueueJobsCollectionViewProps {
   dispatchingJobId?: string | null;
   cancelingJobId?: string | null;
   dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
+  /** Live print progress (0-100) keyed by assigned printer id, from SignalR printer status. */
+  printProgressByPrinterId?: Record<string, number>;
+  /** Live printer-side thumbnail URL keyed by assigned printer id, from SignalR printer status. */
+  printThumbnailByPrinterId?: Record<string, string>;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -199,6 +203,8 @@ function QueueJobCommon({
   dispatchingJobId = null,
   cancelingJobId = null,
   dispatchUploadProgressByJobId,
+  printProgressByPrinterId,
+  printThumbnailByPrinterId,
   onPause,
   onResume,
   onCancel,
@@ -224,7 +230,18 @@ function QueueJobCommon({
   const estimatedTimeDisplay = estimatedTimeSeconds ? formatDuration(estimatedTimeSeconds) : "—";
   const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
   const estimatedCost = job.estimatedCost;
-  const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
+
+  const livePrinterId = jobWrapper.assignedPrinter?.id;
+  const liveThumbnailUrl =
+    (status === "Printing" || status === "Paused") && livePrinterId
+      ? printThumbnailByPrinterId?.[livePrinterId]
+      : undefined;
+  const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl || liveThumbnailUrl;
+  const liveProgressRaw = livePrinterId ? printProgressByPrinterId?.[livePrinterId] : undefined;
+  const showLiveProgress =
+    (status === "Printing" || status === "Paused") && typeof liveProgressRaw === "number";
+  const liveProgressPct = showLiveProgress ? Math.min(Math.max(liveProgressRaw!, 0), 100) : 0;
+  const liveProgressRounded = Math.round(liveProgressPct);
 
   return (
     <article
@@ -263,6 +280,25 @@ function QueueJobCommon({
               {status}
             </span>
           </div>
+
+          {showLiveProgress && (
+            <div className="flex items-center gap-2" title={`${liveProgressRounded}% complete`}>
+              <div
+                className="h-1.5 flex-1 rounded-full bg-pf-bg-2 overflow-hidden"
+                role="progressbar"
+                aria-valuenow={liveProgressRounded}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Print progress"
+              >
+                <div
+                  className="h-full rounded-full bg-pf-success transition-[width] duration-300"
+                  style={{ width: `${liveProgressPct}%` }}
+                />
+              </div>
+              <span className="text-xs tabular-nums text-pf-text-secondary shrink-0">{liveProgressRounded}%</span>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-pf-text-secondary">
             <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden="true" />{deadlineDisplay === "-" ? "No deadline" : deadlineDisplay}</span>

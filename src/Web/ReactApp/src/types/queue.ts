@@ -40,6 +40,29 @@ export interface HistoryJob {
   durationSeconds: number;
   failureReason?: string;
   toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
+  /**
+   * Aggregate actual filament used (grams). Display fallback for jobs without
+   * per-toolhead usage records (e.g. history-seeded jobs).
+   */
+  actualFilamentUsageGrams?: number | null;
+  /**
+   * Estimated filament weight (grams) from slicer metadata. Shown (flagged as an
+   * estimate) when no actual usage is available, so an estimated cost always has
+   * a visible filament basis.
+   */
+  estimatedFilamentUsageGrams?: number | null;
+  /** Material type (e.g. "PLA", "PETG") for the Material column. */
+  materialType?: string | null;
+  /** Job-level material cost (USD). Fallback when there are no per-toolhead usages. */
+  materialCostUsd?: number | null;
+  /** Job-level total cost (USD). Provided for display context. */
+  totalCostUsd?: number | null;
+  /**
+   * True when cost is an estimate from default/material pricing (no associated
+   * Spoolman spool) — e.g. history-seeded jobs. False when cost is actual
+   * (real spool associated at queue/completion time).
+   */
+  costIsEstimated?: boolean;
   tags?: JobTag[];
 }
 

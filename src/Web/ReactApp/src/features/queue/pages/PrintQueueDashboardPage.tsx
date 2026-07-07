@@ -17,7 +17,6 @@ import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
 import QueueTimelineTab from "../components/QueueTimelineTab";
-import { QueueRecommendationsPanel } from "../components/QueueRecommendationsPanel";
 import QueueDateRangeBar, { defaultDateRange } from "../components/QueueDateRangeBar";
 import type { DateRange } from "../components/QueueDateRangeBar";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
@@ -29,9 +28,9 @@ import { printerSignalRService } from "@/services/printer-signalr";
 import { usePageTour } from "@/common/hooks/usePageTour";
 import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
 import { HelpButton } from "@/common/components/HelpButton";
+import { mergePrinterProgress, mergePrinterThumbnail } from "@/features/queue/utils/printerProgress";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
-  QueueRecommendationDto,
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
 } from "@/types/api";
@@ -43,7 +42,6 @@ const VALID_TABS = ['print-queue', 'timeline', 'history', 'dispatch-log'] as con
 const VALID_QUEUE_VIEW_MODES: QueueViewMode[] = ["table", "list", "cards"];
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
-const RECOMMENDATIONS_POLL_INTERVAL_MS = 60_000;
 
 interface DispatchSettingsResponse {
   autoDispatchEnabled: boolean;
@@ -172,11 +170,17 @@ export function PrintQueueDashboardPage() {
   const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
     Record<string, DispatchUploadProgressDto>
   >({});
+  const [printProgressByPrinterId, setPrintProgressByPrinterId] = useState<Record<string, number>>({});
+  const [printThumbnailByPrinterId, setPrintThumbnailByPrinterId] = useState<Record<string, string>>({});
   const [scheduleModalJobId, setScheduleModalJobId] = useState<string | null>(null);
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
-    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    // The active Print Queue reflects current state, so it is intentionally NOT
+    // constrained by the page date range (which applies to Timeline/History/Dispatch Log).
+    // Date-filtering active jobs previously hid still-queued/assigned jobs older than the
+    // window while the stats chiclet still counted them, causing a count/list mismatch.
+    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy],
     queryFn: () => apiClient.getAnalyticsQueueJobs(
       statusFilter || undefined,
       modelFilter || undefined,
@@ -184,8 +188,8 @@ export function PrintQueueDashboardPage() {
       sortBy,
       100,
       0,
-      dateRange.from ?? undefined,
-      dateRange.to ?? undefined,
+      undefined,
+      undefined,
     ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
     staleTime: 10_000,
     refetchInterval: 10_000,
@@ -198,26 +202,10 @@ export function PrintQueueDashboardPage() {
     refetchInterval: 10_000,
   });
 
-  const {
-    data: recommendations = [],
-    isLoading: recommendationsLoading,
-  } = useQuery({
-    queryKey: ['queue-recommendations'],
-    queryFn: () => apiClient.getAnalyticsQueueRecommendations(5) as Promise<QueueRecommendationDto[]>,
-    staleTime: 30_000,
-    refetchInterval: () => (
-      typeof document !== 'undefined' && document.visibilityState === 'visible'
-        ? RECOMMENDATIONS_POLL_INTERVAL_MS
-        : false
-    ),
-    refetchIntervalInBackground: false,
-  });
-
   const invalidateQueue = useCallback(() => {
     setError(null);
     queryClient.invalidateQueries({ queryKey: ['queue-jobs'] });
     queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
-    queryClient.invalidateQueries({ queryKey: ['queue-recommendations'] });
   }, [queryClient]);
 
   const displayError = error || (jobsError ? (jobsError instanceof Error ? jobsError.message : "Failed to load jobs") : null);
@@ -418,6 +406,39 @@ export function PrintQueueDashboardPage() {
     };
   }, []);
 
+  // Live print progress subscription (SignalR printer status) — keyed by printer id.
+  useEffect(() => {
+    printerSignalRService.connect();
+
+    const applyStatus = (
+      printerId: string,
+      progress?: number,
+      thumbnailUrl?: string,
+      state?: string,
+    ) => {
+      // Backend progress is "sticky" (a finished printer keeps reporting its last
+      // numeric progress), so activeness must be derived from the printer's
+      // normalized state, not from progress presence. Only a printer that is
+      // actively Printing/Paused should retain a cached live thumbnail; anything
+      // else clears it so a finished job's artwork can't bleed into the next job.
+      const isActive = state === "Printing" || state === "Paused";
+      setPrintProgressByPrinterId((prev) => mergePrinterProgress(prev, printerId, progress));
+      setPrintThumbnailByPrinterId((prev) => mergePrinterThumbnail(prev, printerId, thumbnailUrl, isActive));
+    };
+
+    // Seed from any statuses already received before this effect mounted.
+    printerSignalRService.getLastStatuses().forEach((status, printerId) => {
+      applyStatus(printerId, status.progress, status.thumbnailUrl, status.state);
+    });
+
+    const unsub = printerSignalRService.onPrinterStatusUpdate((status) => {
+      applyStatus(status.id, status.progress, status.thumbnailUrl, status.state);
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
+
   const handleRerunJob = async (jobId: string) => {
     try {
       await apiClient.rerunPrintQueueJob(jobId);
@@ -508,11 +529,15 @@ export function PrintQueueDashboardPage() {
         </div>
       )}
 
-      <QueueDateRangeBar
-        dateFrom={dateRange.from}
-        dateTo={dateRange.to}
-        onChange={setDateRange}
-      />
+      {/* Date range applies to Timeline/History/Dispatch Log only. The Print Queue tab
+          shows current active state and is not date-filtered, so hide the bar there. */}
+      {activeTab !== "print-queue" && (
+        <QueueDateRangeBar
+          dateFrom={dateRange.from}
+          dateTo={dateRange.to}
+          onChange={setDateRange}
+        />
+      )}
 
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
@@ -529,14 +554,6 @@ export function PrintQueueDashboardPage() {
           {/* Tab 1: Queue */}
           <Tabs.Panel id="print-queue">
             <div className="flex flex-col h-full w-full min-h-0">
-              {/* To-Do Recommendations */}
-              <div className="px-4 pt-4">
-                <QueueRecommendationsPanel
-                  recommendations={recommendations}
-                  isLoading={recommendationsLoading}
-                />
-              </div>
-
               {/* Filters + Auto-dispatch global toggle */}
               <div data-tour="queue-filters" className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -566,6 +583,8 @@ export function PrintQueueDashboardPage() {
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    printProgressByPrinterId={printProgressByPrinterId}
+                    printThumbnailByPrinterId={printThumbnailByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}
@@ -591,6 +610,8 @@ export function PrintQueueDashboardPage() {
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    printProgressByPrinterId={printProgressByPrinterId}
+                    printThumbnailByPrinterId={printThumbnailByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}
@@ -609,6 +630,8 @@ export function PrintQueueDashboardPage() {
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    printProgressByPrinterId={printProgressByPrinterId}
+                    printThumbnailByPrinterId={printThumbnailByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}

@@ -11,15 +11,15 @@ export interface TableFiltersBarProps {
   isLoading?: boolean;
 }
 
+// Terminal states (Completed/Failed/Cancelled) are intentionally excluded here: the Print
+// Queue tab shows active work only. Finished jobs live on the History tab, so exposing those
+// filters here duplicated History and let the queue show terminal jobs.
 const STATUS_OPTIONS = [
   { value: "Queued", label: "Queued" },
   { value: "Assigned", label: "Assigned" },
   { value: "Starting", label: "Starting" },
   { value: "Printing", label: "Printing" },
   { value: "Paused", label: "Paused" },
-  { value: "Completed", label: "Completed" },
-  { value: "Failed", label: "Failed" },
-  { value: "Cancelled", label: "Cancelled" },
 ];
 
 const MATERIAL_OPTIONS = [

@@ -26,6 +26,7 @@ export interface JobDetailsSectionProps {
     copies?: number;
     completedCopies?: number;
     deadlineAtUtc?: string;
+    toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
   };
   isEditing: boolean;
   onFieldChange: (field: keyof JobDetailsSectionProps['jobDetails'], value: string | number | undefined) => void;
@@ -314,48 +315,12 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
     );
   }
 
-  // Get material and nozzle from either new or legacy field names
-  const materialType = jobDetails.requiredMaterialType || jobDetails.materialType;
-  const nozzleDiameter = jobDetails.requiredNozzleDiameter || jobDetails.nozzleDiameter;
-
   // Check if we have multi-toolhead usage data
   const hasToolheadUsages = jobDetails.toolheadUsages && jobDetails.toolheadUsages.length > 0;
 
   return (
     <div className="space-y-1">
       <dl className="grid grid-cols-1 gap-3">
-        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Name</dt>
-          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.name}</dd>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Status</dt>
-          <dd className="text-sm mt-1 sm:mt-0">
-            <span 
-              className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
-                jobDetails.status.toLowerCase() === 'completed' ? 'bg-pf-success/20 text-pf-success' :
-                jobDetails.status.toLowerCase() === 'printing' ? 'bg-pf-accent/20 text-pf-accent' :
-                jobDetails.status.toLowerCase() === 'queued' ? 'bg-pf-warning/20 text-pf-warning' :
-                jobDetails.status.toLowerCase() === 'failed' ? 'bg-pf-error/20 text-pf-error' :
-                'bg-pf-bg-2 text-pf-text-secondary'
-              }`}
-            >
-              {jobDetails.status.toUpperCase()}
-            </span>
-          </dd>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Printer</dt>
-          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.printerName || <span className="text-pf-text-muted italic">Not assigned</span>}</dd>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Printer Model</dt>
-          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.printerModel || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Material Type</dt>
-          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{materialType || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
-        </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Filament</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">
@@ -376,10 +341,6 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
           </dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Nozzle Diameter</dt>
-          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="text-pf-text-muted italic">Not specified</span>}</dd>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center py-2">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Deadline</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">
             {jobDetails.deadlineAtUtc ? new Date(jobDetails.deadlineAtUtc).toLocaleString() : <span className="text-pf-text-muted italic">Not set</span>}
