@@ -1637,6 +1637,75 @@ public class PrintJobManagementServiceHistorySeedingTests
         return Assert.IsType<int>(value);
     }
 
+    [Fact]
+    public async Task GetQueueHistoryAsync_SeededJobWithoutSpool_ReportsEstimatedCostAndAggregateFilament()
+    {
+        // Seeded-from-history job: aggregate actual filament only, no spool association → estimated cost.
+        PrintJob seeded = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "seeded.gcode",
+            Status = PrintJobStatus.Completed,
+            WasSeededFromHistory = true,
+            ActualFilamentUsage = 156.8,
+            MaterialCostUsd = 3.14m,
+            TotalCostUsd = 4.50m,
+            SpoolmanSpoolId = null,
+            SpoolmanFilamentId = null
+        };
+
+        // Native job with an associated Spoolman spool and per-toolhead usage → actual cost.
+        PrintJob nativeWithSpool = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "native.gcode",
+            Status = PrintJobStatus.Completed,
+            WasSeededFromHistory = false,
+            SpoolmanSpoolId = 42,
+            MaterialCostUsd = 2.19m,
+            TotalCostUsd = 2.50m,
+            ToolheadUsages =
+            [
+                new PrintJobToolheadUsage
+                {
+                    Id = Guid.NewGuid(),
+                    ToolheadIndex = 0,
+                    SpoolmanSpoolId = 42,
+                    FilamentUsageGrams = 87.5,
+                    MaterialCostUsd = 2.19m
+                }
+            ]
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetHistoryAsync(
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(([seeded, nativeWithSpool], 2, 2, 0, 0, 1200L));
+
+        PrintJobManagementService service = CreateService(repository, new Mock<IPrintersService>());
+
+        QueueHistoryPageDto page = await service.GetQueueHistoryAsync();
+
+        QueueHistoryEntryDto seededDto = page.Entries.Single(e => e.Id == seeded.Id.ToString());
+        Assert.True(seededDto.CostIsEstimated);
+        Assert.Equal(156.8, seededDto.ActualFilamentUsageGrams);
+        Assert.Equal(3.14m, seededDto.MaterialCostUsd);
+        Assert.Equal(4.50m, seededDto.TotalCostUsd);
+        Assert.Empty(seededDto.ToolheadUsages);
+
+        QueueHistoryEntryDto nativeDto = page.Entries.Single(e => e.Id == nativeWithSpool.Id.ToString());
+        Assert.False(nativeDto.CostIsEstimated);
+        Assert.Equal(2.19m, nativeDto.MaterialCostUsd);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         Mock<IPrintersService> printersService)

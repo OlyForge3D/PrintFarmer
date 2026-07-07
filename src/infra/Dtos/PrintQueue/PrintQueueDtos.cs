@@ -567,6 +567,26 @@ public class QueueHistoryEntryDto
     public decimal? ActualCost { get; set; }
 
     /// <summary>
+    /// Material cost in USD (filament usage × price per gram). Used as a display
+    /// fallback for jobs that have no per-toolhead usage records (e.g. history-seeded jobs).
+    /// </summary>
+    public decimal? MaterialCostUsd { get; set; }
+
+    /// <summary>
+    /// Total cost in USD (material + energy + machine time + labor). Provided for
+    /// display context on jobs without per-toolhead usage records.
+    /// </summary>
+    public decimal? TotalCostUsd { get; set; }
+
+    /// <summary>
+    /// True when the cost figures are an estimate derived from default/material
+    /// pricing rather than a real associated Spoolman spool. History-seeded jobs
+    /// (filament weight only, no spool) are always estimated; jobs queued through
+    /// PrintFarmer with an associated spool report actual cost.
+    /// </summary>
+    public bool CostIsEstimated { get; set; }
+
+    /// <summary>
     /// Tags associated with the print job (auto-generated and manual).
     /// </summary>
     public List<TagDto> Tags { get; set; } = [];

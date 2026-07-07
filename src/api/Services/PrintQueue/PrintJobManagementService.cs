@@ -522,6 +522,11 @@ public class PrintJobManagementService(
                     FilamentColor = pj.FilamentColor,
                     ActualFilamentUsageGrams = pj.ActualFilamentUsage,
                     ActualCost = pj.ActualCost,
+                    MaterialCostUsd = pj.MaterialCostUsd,
+                    TotalCostUsd = pj.TotalCostUsd,
+                    CostIsEstimated = pj.SpoolmanSpoolId == null
+                        && pj.SpoolmanFilamentId == null
+                        && !pj.ToolheadUsages.Any(tu => tu.SpoolmanSpoolId != null),
                     ToolheadUsages = pj.ToolheadUsages
                         .OrderBy(tu => tu.ToolheadIndex)
                         .Select(tu => new PrintJobToolheadUsageDto(

@@ -144,6 +144,10 @@ export default function HistoryJobTable({
                         </span>
                       );
                     })()
+                  ) : job.actualFilamentUsageGrams != null && job.actualFilamentUsageGrams > 0 ? (
+                    <span title="Actual filament reported by the printer">
+                      {job.actualFilamentUsageGrams.toFixed(1)}g
+                    </span>
                   ) : (
                     <span className="text-pf-text-muted">—</span>
                   )}
@@ -151,23 +155,34 @@ export default function HistoryJobTable({
 
                 {/* Cost */}
                 <td className="px-4 py-3 text-right text-pf-text-primary tabular-nums">
-                  {job.toolheadUsages && job.toolheadUsages.length > 0 ? (
-                    (() => {
-                      const totalCost = job.toolheadUsages.reduce(
-                        (sum, u) => sum + (u.materialCostUsd ?? 0),
-                        0
-                      );
-                      return totalCost > 0 ? (
-                        <span title={job.toolheadUsages.map(u => `T${u.toolheadIndex}: $${u.materialCostUsd?.toFixed(2) ?? '—'} (${u.filamentName || 'Unknown'})`).join('\n')}>
-                          ${totalCost.toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="text-pf-text-muted">—</span>
-                      );
-                    })()
-                  ) : (
-                    <span className="text-pf-text-muted">—</span>
-                  )}
+                  {(() => {
+                    const hasUsages = !!(job.toolheadUsages && job.toolheadUsages.length > 0);
+                    const cost = hasUsages
+                      ? job.toolheadUsages!.reduce((sum, u) => sum + (u.materialCostUsd ?? 0), 0)
+                      : job.materialCostUsd ?? 0;
+
+                    if (!(cost > 0)) {
+                      return <span className="text-pf-text-muted">—</span>;
+                    }
+
+                    const estimated = job.costIsEstimated === true;
+                    const baseTooltip = hasUsages
+                      ? job.toolheadUsages!
+                          .map(u => `T${u.toolheadIndex}: $${u.materialCostUsd?.toFixed(2) ?? '—'} (${u.filamentName || 'Unknown'})`)
+                          .join('\n')
+                      : job.totalCostUsd != null
+                      ? `Total job cost: $${job.totalCostUsd.toFixed(2)}`
+                      : 'Material cost';
+                    const tooltip = estimated
+                      ? `Estimated from filament used (no spool associated).\n${baseTooltip}`
+                      : baseTooltip;
+
+                    return (
+                      <span className={estimated ? 'text-pf-text-secondary italic' : undefined} title={tooltip}>
+                        {estimated ? '~' : ''}${cost.toFixed(2)}
+                      </span>
+                    );
+                  })()}
                 </td>
                 
                 {/* Duration */}
