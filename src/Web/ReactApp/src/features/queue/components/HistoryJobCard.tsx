@@ -67,13 +67,19 @@ export default function HistoryJobCard({
   };
 
   const getStatusLabel = () => {
+    const showProgress =
+      (job.status === "failed" || job.status === "cancelled") &&
+      typeof job.completionPercentage === "number" &&
+      job.completionPercentage > 0 &&
+      job.completionPercentage < 100;
+    const progressSuffix = showProgress ? ` @ ${Math.round(job.completionPercentage!)}%` : "";
     switch (job.status) {
       case "completed":
         return "✓ Completed";
       case "failed":
-        return "✗ Failed";
+        return `✗ Failed${progressSuffix}`;
       case "cancelled":
-        return "◯ Cancelled";
+        return `◯ Cancelled${progressSuffix}`;
       default:
         return job.status;
     }

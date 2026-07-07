@@ -172,6 +172,7 @@ export function PrintQueueDashboardPage() {
   const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
     Record<string, DispatchUploadProgressDto>
   >({});
+  const [printProgressByPrinterId, setPrintProgressByPrinterId] = useState<Record<string, number>>({});
   const [scheduleModalJobId, setScheduleModalJobId] = useState<string | null>(null);
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
@@ -418,6 +419,30 @@ export function PrintQueueDashboardPage() {
     };
   }, []);
 
+  // Live print progress subscription (SignalR printer status) — keyed by printer id.
+  useEffect(() => {
+    printerSignalRService.connect();
+
+    const applyStatus = (printerId: string, progress?: number) => {
+      if (typeof progress !== "number") return;
+      setPrintProgressByPrinterId((prev) =>
+        prev[printerId] === progress ? prev : { ...prev, [printerId]: progress },
+      );
+    };
+
+    // Seed from any statuses already received before this effect mounted.
+    printerSignalRService.getLastStatuses().forEach((status, printerId) => {
+      applyStatus(printerId, status.progress);
+    });
+
+    const unsub = printerSignalRService.onPrinterStatusUpdate((status) => {
+      applyStatus(status.id, status.progress);
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
+
   const handleRerunJob = async (jobId: string) => {
     try {
       await apiClient.rerunPrintQueueJob(jobId);
@@ -566,6 +591,7 @@ export function PrintQueueDashboardPage() {
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    printProgressByPrinterId={printProgressByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}
@@ -591,6 +617,7 @@ export function PrintQueueDashboardPage() {
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    printProgressByPrinterId={printProgressByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}
@@ -609,6 +636,7 @@ export function PrintQueueDashboardPage() {
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
+                    printProgressByPrinterId={printProgressByPrinterId}
                     onPause={handlePauseJob}
                     onResume={handleResumeJob}
                     onCancel={handleCancelJob}

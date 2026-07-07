@@ -5,6 +5,15 @@ import type { DispatchUploadProgressDto } from "@/types/api";
 import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 
+/**
+ * Shared grid column template for the header and every job row. Using a single
+ * definition with fixed track widths (only the File column is flexible) keeps the
+ * header labels aligned with the row cells — `auto` tracks would size to content
+ * and resolve differently between the header grid and each row grid.
+ */
+const GRID_COLS =
+  "grid grid-cols-[40px_56px_minmax(0,1fr)_80px_128px_64px_112px_176px_200px] items-center gap-x-2";
+
 const DUE_SOON_HOURS = 24;
 
 function formatDuration(seconds: number): string {
@@ -62,6 +71,8 @@ export interface QueueJobsTableProps {
   dispatchingJobId?: string | null;
   cancelingJobId?: string | null;
   dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
+  /** Live print progress (0-100) keyed by assigned printer id, from SignalR printer status. */
+  printProgressByPrinterId?: Record<string, number>;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -79,6 +90,7 @@ export function QueueJobsTable({
   dispatchingJobId = null,
   cancelingJobId = null,
   dispatchUploadProgressByJobId,
+  printProgressByPrinterId,
   onPause,
   onResume,
   onCancel,
@@ -209,7 +221,7 @@ export function QueueJobsTable({
   return (
     <div className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden" role="list" aria-label="Print job queue">
       {/* Header */}
-      <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 py-2.5 bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary">
+      <div className={clsx(GRID_COLS, "px-2 py-2.5 bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary")}>
         <span className="sr-only">Reorder</span>
         <span className="sr-only">Thumbnail</span>
         <span className="px-2">File</span>
@@ -232,6 +244,13 @@ export function QueueJobsTable({
         const status = job.status || "Unknown";
         const priority = job.priority || 0;
         const projectName = job.projectName;
+
+        const livePrinterId = jobWrapper.assignedPrinter?.id;
+        const liveProgressRaw = livePrinterId ? printProgressByPrinterId?.[livePrinterId] : undefined;
+        const showLiveProgress =
+          (status === "Printing" || status === "Paused") && typeof liveProgressRaw === "number";
+        const liveProgressPct = showLiveProgress ? Math.min(Math.max(liveProgressRaw!, 0), 100) : 0;
+        const liveProgressRounded = Math.round(liveProgressPct);
 
         const estimatedTimeSeconds = job.estimatedPrintTimeSeconds || jobWrapper.gcodeFile?.estimatedPrintTimeSeconds;
         const estimatedTimeDisplay = estimatedTimeSeconds
@@ -306,7 +325,7 @@ export function QueueJobsTable({
             }}
           >
             {/* Row 1 — Primary: drag, thumbnail, file name, status, printer, copies, priority, actions */}
-            <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 pt-2.5 pb-1 text-sm">
+            <div className={clsx(GRID_COLS, "px-2 pt-2.5 pb-1 text-sm")}>
               {/* Drag handle */}
               <div
                 className="flex items-center justify-center cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
@@ -338,8 +357,8 @@ export function QueueJobsTable({
                 </div>
               </div>
 
-              {/* Status badge */}
-              <div className="px-2 w-20 flex justify-center">
+              {/* Status + live progress */}
+              <div className="px-2 w-20 flex flex-col items-center gap-1">
                 <span
                   className={clsx(
                     "inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap",
@@ -348,6 +367,26 @@ export function QueueJobsTable({
                 >
                   {status}
                 </span>
+                {showLiveProgress && (
+                  <div className="w-full" title={`${liveProgressRounded}% complete`}>
+                    <div
+                      className="h-1 w-full rounded-full bg-pf-bg-2 overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={liveProgressRounded}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Print progress"
+                    >
+                      <div
+                        className="h-full rounded-full bg-pf-success transition-[width] duration-300"
+                        style={{ width: `${liveProgressPct}%` }}
+                      />
+                    </div>
+                    <span className="mt-0.5 block text-center text-[10px] tabular-nums text-pf-text-tertiary">
+                      {liveProgressRounded}%
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Printer */}

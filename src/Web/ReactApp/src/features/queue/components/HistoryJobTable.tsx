@@ -48,15 +48,21 @@ export default function HistoryJobTable({
     return "Just now";
   }, []);
 
-  const getStatusBadge = useCallback((status: string) => {
+  const getStatusBadge = useCallback((status: string, completionPercentage?: number) => {
     const baseClasses = "px-2 py-0.5 rounded-sm text-xs font-medium whitespace-nowrap";
+    const showProgress =
+      (status === "failed" || status === "cancelled") &&
+      typeof completionPercentage === "number" &&
+      completionPercentage > 0 &&
+      completionPercentage < 100;
+    const progressSuffix = showProgress ? ` @ ${Math.round(completionPercentage!)}%` : "";
     switch (status) {
       case "completed":
         return <span className={`${baseClasses} bg-pf-success-bg text-pf-success border border-pf-success`}>✓ Completed</span>;
       case "failed":
-        return <span className={`${baseClasses} bg-pf-error-bg text-pf-error border border-pf-error`}>✗ Failed</span>;
+        return <span className={`${baseClasses} bg-pf-error-bg text-pf-error border border-pf-error`}>✗ Failed{progressSuffix}</span>;
       case "cancelled":
-        return <span className={`${baseClasses} bg-pf-warning-bg text-pf-warning border border-pf-warning`}>◯ Cancelled</span>;
+        return <span className={`${baseClasses} bg-pf-warning-bg text-pf-warning border border-pf-warning`}>◯ Cancelled{progressSuffix}</span>;
       default:
         return <span className={`${baseClasses} bg-pf-bg-0 text-pf-text-secondary border border-pf-border`}>{status}</span>;
     }
@@ -105,7 +111,7 @@ export default function HistoryJobTable({
                 
                 {/* Status */}
                 <td className="px-4 py-3">
-                  {getStatusBadge(job.status)}
+                  {getStatusBadge(job.status, job.completionPercentage)}
                 </td>
                 
                 {/* Filament Usage */}
