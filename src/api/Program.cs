@@ -570,19 +570,7 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }))
 // Build version endpoint (uses /api/system/version to avoid conflict with OctoPrint-compat /api/version)
 app.MapGet("/api/system/version", () =>
 {
-    var asm = System.Reflection.Assembly.GetEntryAssembly();
-    string? infoVersion = (asm is not null
-        ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
-            as System.Reflection.AssemblyInformationalVersionAttribute
-        : null)?.InformationalVersion;
-    string version = "0.0.0";
-    string? commit = null;
-    if (infoVersion != null)
-    {
-        string[] parts = infoVersion.Split('+', 2);
-        version = parts[0];
-        commit = parts.Length > 1 ? parts[1] : null;
-    }
+    (string version, string? commit) = Farm.Web.Api.Health.BuildVersion.FromAssembly();
 
     return Results.Ok(new
     {

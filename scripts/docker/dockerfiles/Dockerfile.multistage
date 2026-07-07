@@ -8,6 +8,8 @@
 # Global build arguments
 ARG ORCASLICER_VERSION=2.4.1
 ARG BUILD_VERBOSITY=quiet
+# Short git SHA of the source commit; embedded into each service's version endpoint
+ARG GIT_SHA=unknown
 
 # Multi-architecture support
 # BUILDPLATFORM = arch of the build host (for compile stages — faster, no emulation)
@@ -30,6 +32,10 @@ ARG UBUNTU_TAG=24.04
 ############################################################
 FROM --platform=${BUILDPLATFORM:-linux/amd64} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
 WORKDIR /
+
+# Re-declare git SHA in this stage (ARGs are scoped per-stage after FROM).
+# Passed to `dotnet publish` as GitCommitSha so InformationalVersion carries the commit.
+ARG GIT_SHA=unknown
 
 # Copy root-level files and the entire src directory
 # The context root is the repository root (/home/pi/pfarm)
@@ -69,13 +75,13 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj && \
     echo "Publishing API..." && \
-    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing OrcaSlicer Worker..." && \
-    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Printer Discovery..." && \
-    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Slicer Host..." && \
-    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Building backend plugins..." && \
     dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
@@ -492,15 +498,21 @@ COPY src/Web/ReactApp/ ./
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+# Short git SHA baked into the frontend bundle (vite.config reads process.env.VITE_GIT_SHA
+# as a fallback when .git is not present in the build context).
+ARG GIT_SHA=unknown
+ARG VITE_GIT_SHA=${GIT_SHA}
 RUN set -eux; \
     echo "[frontend-build] Starting React build with Vite..."; \
     echo "[frontend-build] VITE_API_BASE_URL=${VITE_API_BASE_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}"; \
+    echo "[frontend-build] VITE_GIT_SHA=${VITE_GIT_SHA}"; \
     \
     export VITE_API_BASE_URL="${VITE_API_BASE_URL}"; \
     export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
     export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
+    export VITE_GIT_SHA="${VITE_GIT_SHA}"; \
     \
     set +e; \
     npm run build > /tmp/frontend-build.log 2>&1; \

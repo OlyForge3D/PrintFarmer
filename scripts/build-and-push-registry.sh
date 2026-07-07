@@ -8,6 +8,10 @@ REGISTRY_HOST=${REGISTRY_HOST:-localhost:5000}
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
+# Short git SHA of the source commit, injected into the worker build so
+# /api/system/version reports the deployed commit (.git is not in the build context).
+GIT_SHA=$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
 DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}
 
@@ -66,6 +70,7 @@ WORKER_CMD+=( -f Dockerfile.multistage --target orcaslicer-worker \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION" \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
+    --build-arg GIT_SHA=$GIT_SHA \
     .)
 
 "${WORKER_CMD[@]}"

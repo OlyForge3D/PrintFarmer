@@ -364,6 +364,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Compute short SHA
+        id: gitsha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU for multi-arch builds
         uses: docker/setup-qemu-action@v4
         with:
@@ -421,6 +425,8 @@ jobs:
             NODE_TAG=24-alpine
             NGINX_TAG=alpine
             UBUNTU_TAG=24.04
+            GIT_SHA=${{ steps.gitsha.outputs.short }}
+            VITE_GIT_SHA=${{ steps.gitsha.outputs.short }}
 
   # ====================
   # JOB 6: ARM64 Smoke Test
