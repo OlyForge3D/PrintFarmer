@@ -31,7 +31,9 @@ internal sealed class DefaultSlicerTempPathProvider : ISlicerTempPathProvider
         }
         catch
         {
+#pragma warning disable S5443 // Last-resort fallback for local slicer scratch storage when configured temp root cannot be created.
             _tempRoot = Path.GetTempPath();
+#pragma warning restore S5443
         }
     }
 

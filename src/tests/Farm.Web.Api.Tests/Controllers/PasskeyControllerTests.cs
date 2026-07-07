@@ -61,7 +61,7 @@ public class PasskeyControllerTests
     {
         _passkeySvc
             .Setup(s => s.BeginRegistrationAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("fido2 error"));
+            .ThrowsAsync(new InvalidOperationException("fido2 error"));
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterBeginAsync(CancellationToken.None);
@@ -107,7 +107,7 @@ public class PasskeyControllerTests
     {
         _passkeySvc
             .Setup(s => s.CompleteRegistrationAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAttestationRawResponse>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Invalid attestation signature"));
+            .ThrowsAsync(new InvalidOperationException("Invalid attestation signature"));
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterCompleteAsync(
@@ -187,7 +187,7 @@ public class PasskeyControllerTests
     {
         _passkeySvc
             .Setup(s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Signature verification failed"));
+            .ThrowsAsync(new InvalidOperationException("Signature verification failed"));
 
         Farm.Web.Api.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginCompleteAsync(

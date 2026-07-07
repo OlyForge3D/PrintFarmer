@@ -764,7 +764,7 @@ public class JobQueueServiceTests
 
         Mock<ISettingsService> settingsService = new();
         settingsService.Setup(x => x.Get<QueuePlanningSettings>())
-            .Returns((QueuePlanningSettings?)null);
+            .Returns((QueuePlanningSettings)null!);
 
         var sut = new JobQueueService(
             _mockRepo.Object,

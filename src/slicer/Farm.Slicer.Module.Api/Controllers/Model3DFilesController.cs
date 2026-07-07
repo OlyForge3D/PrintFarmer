@@ -30,7 +30,9 @@ public class Model3DFilesController(
     [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "3D model uploads are explicitly capped at 500 MB for slicer workflows.")]
     [RequestSizeLimit(500_000_000)] // 500 MB
+    [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
     public async Task<IActionResult> UploadModelAsync(IFormFile modelFile)
     {
         if (modelFile is null || modelFile.Length == 0)
@@ -352,7 +354,9 @@ public class Model3DFilesController(
     [HttpPost("upload-geometry")]
     [ProducesResponseType(typeof(GeometryUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "Cut-model geometry uploads are explicitly capped at 200 MB for slicer workflows.")]
     [RequestSizeLimit(200_000_000)] // 200 MB
+    [RequestFormLimits(MultipartBodyLengthLimit = 200_000_000)]
     public async Task<IActionResult> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct)
     {
         if (geometryFile is null || geometryFile.Length == 0)

@@ -159,7 +159,7 @@ public class ThreeMfMetadataService(ILogger<ThreeMfMetadataService> logger) : IT
             {
                 try
                 {
-                    using Stream sliceStream = sliceInfoEntry.Open();
+                    await using Stream sliceStream = await sliceInfoEntry.OpenAsync(ct);
                     using JsonDocument jsonDoc = await JsonDocument.ParseAsync(sliceStream, cancellationToken: ct);
                     if (jsonDoc.RootElement.TryGetProperty("plates", out JsonElement platesProp) && platesProp.ValueKind == JsonValueKind.Array)
                     {

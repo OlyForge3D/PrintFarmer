@@ -161,7 +161,7 @@ public class PrintJobManagementServiceQueuePlanningTests
 
         Mock<ISettingsService> settingsService = new();
         settingsService.Setup(s => s.Get<QueuePlanningSettings>())
-            .Returns((QueuePlanningSettings?)null);
+            .Returns((QueuePlanningSettings)null!);
 
         PrintJobManagementService service = CreateService(repository, settingsService);
 

@@ -25,7 +25,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _progressReporter = progressReporter ?? throw new ArgumentNullException(nameof(progressReporter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(configuration);
+#pragma warning disable S5443 // Worker default is a container-local scratch directory; deployments can override Worker:WorkingDirectory.
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
+#pragma warning restore S5443
         _storageEndpoint = configuration["SlicerApi:BaseUrl"]
                           ?? configuration["Worker:StorageEndpoint"]
                           ?? "http://api:5245";
@@ -634,7 +636,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "mkfifo",
+                    FileName = "/usr/bin/mkfifo",
                     Arguments = $"\"{pipePath}\"",
                     UseShellExecute = false,
                     RedirectStandardError = true,

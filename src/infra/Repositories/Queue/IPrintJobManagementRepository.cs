@@ -75,6 +75,8 @@ public interface IPrintJobManagementRepository
     /// <param name="sortBy">Sort mode for queued jobs (for example: priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum results to return.</param>
     /// <param name="offset">Number of results to skip.</param>
+    /// <param name="queuedFrom">Optional inclusive minimum queued timestamp (UTC).</param>
+    /// <param name="queuedTo">Optional inclusive maximum queued timestamp (UTC).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<List<PrintJob>> GetFilteredJobsAsync(
         PrintJobStatus? filterStatus = null,

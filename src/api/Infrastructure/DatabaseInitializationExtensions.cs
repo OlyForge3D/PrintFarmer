@@ -1,4 +1,5 @@
 ﻿using System.Data.Common;
+using System.Globalization;
 using System.Linq;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Interfaces;
@@ -304,8 +305,10 @@ public static class DatabaseInitializationExtensions
                     await EnsureMigrationHistoryTableExistsAsync(db, logger, cancellationToken);
 
                     // Insert the baseline migration record
-                    string insertSql = $"INSERT INTO \"{historyTable}\" (\"MigrationId\", \"ProductVersion\") VALUES ('{initialMigration}', '{productVersion}')";
-                    await db.Database.ExecuteSqlRawAsync(insertSql, cancellationToken);
+                    string insertSql = string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"INSERT INTO \"{historyTable}\" (\"MigrationId\", \"ProductVersion\") VALUES (@p0, @p1)");
+                    await db.Database.ExecuteSqlRawAsync(insertSql, [initialMigration, productVersion], cancellationToken);
 
                     logger.LogInformation("[Startup]   ✓ Baselined migration: {Migration}", initialMigration);
 

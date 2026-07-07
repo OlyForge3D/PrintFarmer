@@ -52,7 +52,9 @@ public class OctoPrintCompatController : ControllerBase
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
     [HttpPost("files/local")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "OctoPrint compatibility uploads are explicitly capped at 50 MB.")]
     [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
+    [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
     public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId)
     {
         // OctoPrint API sends 'print' and 'select' as form fields, not query params

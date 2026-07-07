@@ -12,6 +12,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// File upload is handled via the standard model upload endpoint; call <c>POST /api/3d-models/printables/attribution</c>
 /// afterward to attach Printables attribution fields to the uploaded record.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S6960", Justification = "Printables import endpoints share a single workflow and dependencies; splitting would add routing and state coordination without reducing risk.")]
 [ApiController]
 [Route("api/3d-models/printables")]
 [Tags("3D Models")]

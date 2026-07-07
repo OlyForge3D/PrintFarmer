@@ -284,7 +284,8 @@ public sealed class CameraHealthMonitorService(
                 else
                 {
                     // Extract the RTSP status code from response
-                    string statusLine = responseLine.Split(['\r', '\n'])[0];
+                    int lineBreakIndex = responseLine.IndexOfAny(['\r', '\n']);
+                    string statusLine = lineBreakIndex >= 0 ? responseLine[..lineBreakIndex] : responseLine;
                     HandleFailure(camera, checkTime, previousStatus, $"RTSP error: {statusLine}");
                 }
             }

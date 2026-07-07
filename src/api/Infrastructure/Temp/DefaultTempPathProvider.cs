@@ -27,8 +27,10 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
         }
         catch
         {
+#pragma warning disable S5443 // Last-resort fallback for configured local development storage when app-owned temp root cannot be created.
             // Fallback to process temp if creation fails (last resort)
             string fallback = Path.GetTempPath();
+#pragma warning restore S5443
             try
             {
                 _ = Directory.CreateDirectory(fallback);

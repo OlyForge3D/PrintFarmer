@@ -132,7 +132,13 @@ builder.Services.AddHealthChecks()
 // ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+    {
+#pragma warning disable S5122 // slicer-host is internal and reached same-origin via nginx; all internal LAN origins are intentional, and restriction breaks direct LAN access.
+        _ = policy.AllowAnyOrigin();
+#pragma warning restore S5122
+        _ = policy.AllowAnyMethod();
+        _ = policy.AllowAnyHeader();
+    }));
 
 // ── Bind port ─────────────────────────────────────────────────────────────────
 #pragma warning disable S1075
