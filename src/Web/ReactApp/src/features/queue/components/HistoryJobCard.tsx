@@ -143,28 +143,6 @@ export default function HistoryJobCard({
         </div>
       )}
 
-      {/* Progress Bar */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-pf-text-secondary">Progress</span>
-          <span className="text-xs font-medium text-pf-text-primary">
-            {job.completionPercentage}%
-          </span>
-        </div>
-        <div className="w-full bg-pf-bg-1 rounded-full h-2">
-          <div
-            className={`h-2 rounded-full transition-all ${
-              job.status === "completed"
-                ? "bg-pf-success"
-                : job.status === "failed"
-                ? "bg-pf-error"
-                : "bg-pf-warning"
-            }`}
-            style={{ width: `${Math.min(100, job.completionPercentage)}%` }}
-          />
-        </div>
-      </div>
-
       {/* Failure Reason (if failed) */}
       {job.status === "failed" && job.failureReason && (
         <div className="mb-4 p-3 bg-pf-error-bg border border-pf-error rounded-sm text-sm text-pf-text-primary">

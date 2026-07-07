@@ -12,7 +12,7 @@ interface HistoryJobTableProps {
  * HistoryJobTable Component
  * 
  * Displays job history in a compact table format with sortable columns.
- * Shows: Job Name, Printer, Status, Progress, Duration, Completed, Actions
+ * Shows: Job Name, Printer, Status, Duration, Completed, Actions
  */
 export default function HistoryJobTable({
   jobs,
@@ -71,7 +71,6 @@ export default function HistoryJobTable({
               <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Job Name</th>
               <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Printer</th>
               <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Status</th>
-              <th className="text-center px-4 py-3 font-medium text-pf-text-secondary">Progress</th>
               <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Filament</th>
               <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Cost</th>
               <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Duration</th>
@@ -107,27 +106,6 @@ export default function HistoryJobTable({
                 {/* Status */}
                 <td className="px-4 py-3">
                   {getStatusBadge(job.status)}
-                </td>
-                
-                {/* Progress */}
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2 justify-center">
-                    <div className="w-16 bg-pf-bg-2 rounded-full h-1.5">
-                      <div
-                        className={`h-1.5 rounded-full ${
-                          job.status === "completed"
-                            ? "bg-pf-success"
-                            : job.status === "failed"
-                            ? "bg-pf-error"
-                            : "bg-pf-warning"
-                        }`}
-                        style={{ width: `${Math.min(100, job.completionPercentage)}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-pf-text-secondary w-8 text-right">
-                      {job.completionPercentage}%
-                    </span>
-                  </div>
                 </td>
                 
                 {/* Filament Usage */}
