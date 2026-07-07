@@ -1464,7 +1464,7 @@ public class PrintJobManagementServiceHistorySeedingTests
     }
 
     [Fact]
-    public async Task SeedHistoryFromPrintersAsync_WithUnknownExternalStatus_MapsToQueued()
+    public async Task SeedHistoryFromPrintersAsync_WithUnknownStatusAndNoEndTime_SkipsWithoutSeeding()
     {
         Guid printerId = Guid.NewGuid();
         DateTime startUtc = DateTime.UtcNow.AddMinutes(-12);
@@ -1539,8 +1539,10 @@ public class PrintJobManagementServiceHistorySeedingTests
 
         await service.SeedHistoryFromPrintersAsync();
 
-        Assert.NotNull(addedJob);
-        Assert.Equal(PrintJobStatus.Queued, addedJob!.Status);
+        // Unknown status with no end time cannot be classified, so it must be skipped rather than
+        // seeded as a phantom queued job (previously mapped to Queued).
+        Assert.Null(addedJob);
+        repository.Verify(r => r.Add(It.IsAny<PrintJob>()), Times.Never);
     }
 
     [Fact]
@@ -1924,6 +1926,140 @@ public class PrintJobManagementServiceHistorySeedingTests
 
         QueueHistoryEntryDto dto = page.Entries.Single();
         Assert.Equal(0, dto.CompletionPercentage);
+    }
+
+    [Theory]
+    // Terminal, unsuccessful states must classify as Failed — never fall through and be dropped.
+    // OctoPrint emits "Failed" and only sets an end time when completionTime is present, so a
+    // failed record can legitimately arrive with no end time.
+    [InlineData("failed", false, PrintJobStatus.Failed)]
+    [InlineData("failed", true, PrintJobStatus.Failed)]
+    [InlineData("error", false, PrintJobStatus.Failed)]
+    // Klipper-lifecycle interruptions are terminal, unsuccessful attempts (not queued work).
+    [InlineData("klippy_shutdown", true, PrintJobStatus.Failed)]
+    [InlineData("klippy_disconnect", true, PrintJobStatus.Failed)]
+    [InlineData("server_exit", true, PrintJobStatus.Failed)]
+    [InlineData("interrupted", true, PrintJobStatus.Failed)]
+    // Terminal, successful synonyms. PrusaLink emits "FINISHED" (raw, uppercased) for a
+    // successful print — it must classify as Completed, not fall through to Failed.
+    [InlineData("success", true, PrintJobStatus.Completed)]
+    [InlineData("finished", true, PrintJobStatus.Completed)]
+    // Terminal, user-cancelled. PrusaLink emits "STOPPED" for a user-aborted print.
+    [InlineData("cancelled", true, PrintJobStatus.Cancelled)]
+    [InlineData("stopped", true, PrintJobStatus.Cancelled)]
+    // A non-terminal state that nonetheless carries an end time is a stale/aborted attempt.
+    [InlineData("printing", true, PrintJobStatus.Failed)]
+    [InlineData("standby", true, PrintJobStatus.Failed)]
+    // Unknown status WITH an end time is a terminal (failed) attempt, not a phantom queued job.
+    [InlineData("weird_unrecognized_status", true, PrintJobStatus.Failed)]
+    // Active (non-terminal) states with NO end time keep their live status — never forced terminal.
+    [InlineData("printing", false, PrintJobStatus.Printing)]
+    [InlineData("in_progress", false, PrintJobStatus.Printing)]
+    [InlineData("paused", false, PrintJobStatus.Paused)]
+    [InlineData("standby", false, PrintJobStatus.Queued)]
+    [InlineData("ready", false, PrintJobStatus.Queued)]
+    public async Task SeedHistoryFromPrintersAsync_MapsHistoryStatusToExpectedStatus(
+        string historyStatus, bool withEndTime, PrintJobStatus expected)
+    {
+        PrintJob? addedJob = await SeedSingleHistoryJobAsync(historyStatus, withEndTime);
+
+        Assert.NotNull(addedJob);
+        Assert.Equal(expected, addedJob!.Status);
+        Assert.True(addedJob.WasSeededFromHistory);
+    }
+
+    [Theory]
+    // Only genuinely unclassifiable records (unknown status, no end time) are skipped rather than
+    // seeded as phantom queued jobs.
+    [InlineData("weird_unrecognized_status")]
+    [InlineData(null)]
+    public async Task SeedHistoryFromPrintersAsync_UnknownStatusWithoutEndTime_SkipsWithoutSeeding(string? historyStatus)
+    {
+        PrintJob? addedJob = await SeedSingleHistoryJobAsync(historyStatus, withEndTime: false);
+
+        Assert.Null(addedJob);
+    }
+
+    /// <summary>
+    /// Seeds a single history job with the given status (and optional end time) through the real
+    /// seeding pipeline, returning the job that was added to the repository (or <c>null</c> if the
+    /// record was skipped). Keeps the per-case setup DRY for status-mapping assertions.
+    /// </summary>
+    private static async Task<PrintJob?> SeedSingleHistoryJobAsync(string? historyStatus, bool withEndTime)
+    {
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = DateTime.UtcNow.AddDays(-90);
+        long startUnix = new DateTimeOffset(startUtc).ToUnixTimeSeconds();
+        double? endUnix = withEndTime ? new DateTimeOffset(startUtc.AddSeconds(41)).ToUnixTimeSeconds() : null;
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "micron1",
+            Backend = (int)PrinterBackend.Moonraker,
+            IsEnabled = true,
+            ServiceState = null
+        };
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 1,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "ext-status-map-1",
+                    Filename = "y-belt-holder.gcode",
+                    Status = historyStatus!,
+                    StartTime = startUnix,
+                    EndTime = endUnix,
+                    FilamentUsed = 0,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
+        repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
+                printerId,
+                "y-belt-holder.gcode",
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+        repository.Setup(r => r.FindGcodeFileByFilenameAsync("y-belt-holder.gcode", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GcodeFile?)null);
+
+        PrintJob? addedJob = null;
+        repository.Setup(r => r.Add(It.IsAny<PrintJob>()))
+            .Callback<PrintJob>(job => addedJob = job);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repository.Setup(r => r.UpdatePrinterLastHistorySeedAsync(printerId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IPrintersService> printersService = new();
+        printersService.Setup(p => p.GetHistoryListAsync(
+                printerId,
+                10000,
+                0,
+                null,
+                null,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyResponse);
+
+        PrintJobManagementService service = CreateService(repository, printersService);
+
+        await service.SeedHistoryFromPrintersAsync();
+
+        return addedJob;
     }
 
     private static PrintJobManagementService CreateService(

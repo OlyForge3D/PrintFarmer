@@ -1,4 +1,4 @@
-using Farm.Api.Services.PrintQueue;
+﻿using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
@@ -103,6 +103,83 @@ public class PrintJobManagementServiceQueueMappingTests
 
         Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
         Assert.Equal("Unknown", dto.GcodeFile.FileName);
+    }
+
+    [Fact]
+    public async Task GetAllQueuedJobsAsync_ActiveView_DoesNotApplyQueuedDateWindow()
+    {
+        // The active queue reflects current state; a job still waiting must appear regardless of
+        // when it was queued. So the queue-date window must be dropped for the default/active view,
+        // otherwise old active jobs are hidden while the stats count still includes them.
+        DateTime from = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        DateTime to = new(2026, 1, 8, 0, 0, 0, DateTimeKind.Utc);
+
+        DateTime? capturedFrom = to;
+        DateTime? capturedTo = from;
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                It.IsAny<PrintJobStatus?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback((PrintJobStatus? _, string? _, string? _, DateTime? _, DateTime? _, string _, int _, int _, DateTime? qFrom, DateTime? qTo, CancellationToken _) =>
+            {
+                capturedFrom = qFrom;
+                capturedTo = qTo;
+            })
+            .ReturnsAsync([]);
+
+        PrintJobManagementService service = CreateService(repository);
+
+        await service.GetAllQueuedJobsAsync(queuedFrom: from, queuedTo: to);
+
+        Assert.Null(capturedFrom);
+        Assert.Null(capturedTo);
+    }
+
+    [Fact]
+    public async Task GetAllQueuedJobsAsync_TerminalView_AppliesQueuedDateWindow()
+    {
+        // Terminal (History-style) views may legitimately be time-windowed, so the date range
+        // must still flow through when a terminal status is explicitly requested.
+        DateTime from = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        DateTime to = new(2026, 1, 8, 0, 0, 0, DateTimeKind.Utc);
+
+        DateTime? capturedFrom = null;
+        DateTime? capturedTo = null;
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                It.IsAny<PrintJobStatus?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback((PrintJobStatus? _, string? _, string? _, DateTime? _, DateTime? _, string _, int _, int _, DateTime? qFrom, DateTime? qTo, CancellationToken _) =>
+            {
+                capturedFrom = qFrom;
+                capturedTo = qTo;
+            })
+            .ReturnsAsync([]);
+
+        PrintJobManagementService service = CreateService(repository);
+
+        await service.GetAllQueuedJobsAsync(filterStatus: "Completed", queuedFrom: from, queuedTo: to);
+
+        Assert.Equal(from, capturedFrom);
+        Assert.Equal(to, capturedTo);
     }
 
     private static PrintJobManagementService CreateService(Mock<IPrintJobManagementRepository> repository)

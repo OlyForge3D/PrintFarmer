@@ -205,8 +205,16 @@ public class PrintJobManagementService(
                 status = parsedStatus;
             }
 
+            // The active queue reflects current state, so it must not be constrained by the
+            // queue-date window (that window belongs to terminal/History views). Applying it here
+            // hid still-active jobs older than the window while the stats count still included them,
+            // causing a count/list mismatch. Only honor queuedFrom/queuedTo for terminal views.
+            bool isTerminalView = status.HasValue && IsTerminalStatus(status.Value);
+            DateTime? effectiveQueuedFrom = isTerminalView ? queuedFrom : null;
+            DateTime? effectiveQueuedTo = isTerminalView ? queuedTo : null;
+
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
-                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
+                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, effectiveQueuedFrom, effectiveQueuedTo, cancellationToken);
 
             return jobs.Select(pj => MapToQueuedPrintJobWithFileMeta(pj)).ToList();
         }
@@ -1616,9 +1624,17 @@ public class PrintJobManagementService(
                     ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
                     : null;
 
-                PrintJobStatus mappedStatus = MapHistoryStatusToPrintJobStatus(historyJob.Status);
+                PrintJobStatus? mappedStatus = MapHistoryStatusToPrintJobStatus(historyJob.Status, historyJob.EndTime.HasValue);
 
-                if (options.ActiveOnly && IsTerminalStatus(mappedStatus))
+                // Unclassifiable record (unknown status with no end time): skip rather than
+                // fabricate a phantom queued job.
+                if (mappedStatus is null)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                if (options.ActiveOnly && IsTerminalStatus(mappedStatus.Value))
                 {
                     skipped++;
                     continue;
@@ -2012,7 +2028,7 @@ public class PrintJobManagementService(
         {
             Id = Guid.NewGuid(),
             Name = Path.GetFileNameWithoutExtension(historyJob.Filename) ?? "Unknown",
-            Status = MapHistoryStatusToPrintJobStatus(historyJob.Status),
+            Status = MapHistoryStatusToPrintJobStatus(historyJob.Status, historyJob.EndTime.HasValue) ?? PrintJobStatus.Failed,
             Priority = 0,
             QueuePosition = 0,
             ActualStartTime = startTime,
@@ -2053,7 +2069,7 @@ public class PrintJobManagementService(
             : null;
 
         // Update mutable fields
-        existingJob.Status = MapHistoryStatusToPrintJobStatus(historyJob.Status);
+        existingJob.Status = MapHistoryStatusToPrintJobStatus(historyJob.Status, historyJob.EndTime.HasValue) ?? PrintJobStatus.Failed;
         existingJob.ActualStartTime = startTime;
         existingJob.ActualEndTime = endTime;
         existingJob.ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null;
@@ -2084,20 +2100,61 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
-    /// Maps Moonraker history status strings to PrintJobStatus enum.
+    /// Maps a printer history status string to a <see cref="PrintJobStatus"/>.
+    /// Returns <c>null</c> when the record cannot be classified (unknown status with no end time),
+    /// signalling the caller to skip seeding it rather than fabricating a phantom queued job.
     /// </summary>
-    private static PrintJobStatus MapHistoryStatusToPrintJobStatus(string historyStatus)
+    /// <param name="historyStatus">The raw status string reported by the printer/backend.</param>
+    /// <param name="hasEndTime">Whether the history record has an end time (i.e. the print ended).</param>
+    private static PrintJobStatus? MapHistoryStatusToPrintJobStatus(string historyStatus, bool hasEndTime)
     {
-        return historyStatus?.ToLowerInvariant() switch
+        switch (historyStatus?.ToLowerInvariant())
         {
-            "completed" => PrintJobStatus.Completed,
-            "cancelled" => PrintJobStatus.Cancelled,
-            "error" => PrintJobStatus.Failed,
-            "in_progress" or "printing" => PrintJobStatus.Printing,
-            "paused" => PrintJobStatus.Paused,
-            "standby" or "ready" => PrintJobStatus.Queued,
-            _ => PrintJobStatus.Queued // Unknown external states must remain non-terminal
-        };
+            // Terminal, successful. OctoPrint emits "Completed"; PrusaLink emits "FINISHED";
+            // some backends use "success".
+            case "completed":
+            case "finished":
+            case "success":
+                return PrintJobStatus.Completed;
+
+            // Terminal, user-cancelled. PrusaLink emits "STOPPED" for a user-aborted print.
+            case "cancelled":
+            case "stopped":
+                return PrintJobStatus.Cancelled;
+
+            // Terminal, unsuccessful. Moonraker uses "error"; OctoPrint emits "Failed". Both are
+            // known terminal states and must classify — never fall through to the default branch,
+            // otherwise a real failed record with no end time would be silently skipped.
+            case "error":
+            case "failed":
+                return PrintJobStatus.Failed;
+
+            // Klipper-lifecycle interruptions: the print ended without completing
+            // (e.g. firmware restart mid/near print). These are terminal, unsuccessful attempts,
+            // not queued work. Mapping them to Queued created phantom active-queue entries.
+            case "klippy_shutdown":
+            case "klippy_disconnect":
+            case "server_exit":
+            case "interrupted":
+                return PrintJobStatus.Failed;
+
+            // Non-terminal states. A history record for one of these normally has no end time.
+            // If it *does* have an end time the print has clearly ended, so the live state is stale
+            // and the attempt was aborted — classify as Failed rather than seed a phantom active job.
+            case "in_progress":
+            case "printing":
+                return hasEndTime ? PrintJobStatus.Failed : PrintJobStatus.Printing;
+            case "paused":
+                return hasEndTime ? PrintJobStatus.Failed : PrintJobStatus.Paused;
+            case "standby":
+            case "ready":
+                return hasEndTime ? PrintJobStatus.Failed : PrintJobStatus.Queued;
+
+            default:
+                // Unknown status: if the record has ended it is a terminal (failed) attempt;
+                // otherwise it cannot be classified, so skip it rather than seed a phantom job.
+                return hasEndTime ? PrintJobStatus.Failed : null;
+        }
     }
 
     private static PrinterSyncLockState AcquirePrinterHistorySyncLock(Guid printerId)

@@ -34,8 +34,8 @@ public class JobQueueAnalyticsController(
     /// <param name="filterMaterial">Filter by material type</param>
     /// <param name="deadlineStart">Filter jobs with deadline at or after this UTC timestamp</param>
     /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
-    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp</param>
-    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp</param>
+    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
+    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
     /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>

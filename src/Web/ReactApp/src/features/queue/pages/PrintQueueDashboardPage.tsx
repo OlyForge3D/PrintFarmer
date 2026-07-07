@@ -176,7 +176,11 @@ export function PrintQueueDashboardPage() {
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
-    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    // The active Print Queue reflects current state, so it is intentionally NOT
+    // constrained by the page date range (which applies to Timeline/History/Dispatch Log).
+    // Date-filtering active jobs previously hid still-queued/assigned jobs older than the
+    // window while the stats chiclet still counted them, causing a count/list mismatch.
+    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy],
     queryFn: () => apiClient.getAnalyticsQueueJobs(
       statusFilter || undefined,
       modelFilter || undefined,
@@ -184,8 +188,8 @@ export function PrintQueueDashboardPage() {
       sortBy,
       100,
       0,
-      dateRange.from ?? undefined,
-      dateRange.to ?? undefined,
+      undefined,
+      undefined,
     ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
     staleTime: 10_000,
     refetchInterval: 10_000,
@@ -525,11 +529,15 @@ export function PrintQueueDashboardPage() {
         </div>
       )}
 
-      <QueueDateRangeBar
-        dateFrom={dateRange.from}
-        dateTo={dateRange.to}
-        onChange={setDateRange}
-      />
+      {/* Date range applies to Timeline/History/Dispatch Log only. The Print Queue tab
+          shows current active state and is not date-filtered, so hide the bar there. */}
+      {activeTab !== "print-queue" && (
+        <QueueDateRangeBar
+          dateFrom={dateRange.from}
+          dateTo={dateRange.to}
+          onChange={setDateRange}
+        />
+      )}
 
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
