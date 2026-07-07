@@ -5,6 +5,16 @@
     <RepoVersion>$([System.Text.RegularExpressions.Regex]::Replace('$(RepoVersionRaw)', '^v', ''))</RepoVersion>
     <Version>$(RepoVersion)</Version>
     <InformationalVersion>$(RepoVersion)</InformationalVersion>
+    <!--
+      Explicit git short SHA injection for container builds where .git is absent.
+      When GitCommitSha is passed (e.g. `dotnet publish -p:GitCommitSha=abc1234`),
+      embed it in InformationalVersion as `<version>+<sha>` so /api/system/version can
+      report the deployed commit. Disable the SDK's SourceRevisionId auto-append in
+      that case to avoid a doubled `+sha`. Locally (no GitCommitSha) the SDK still
+      auto-appends the full SourceRevisionId, preserving existing behavior.
+    -->
+    <InformationalVersion Condition="'$(GitCommitSha)' != ''">$(RepoVersion)+$(GitCommitSha)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion Condition="'$(GitCommitSha)' != ''">false</IncludeSourceRevisionInInformationalVersion>
     <!-- Disable Central Package Management - using per-project version management -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AnalysisMode>All</AnalysisMode>
