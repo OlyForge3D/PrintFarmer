@@ -29,6 +29,7 @@ import { printerSignalRService } from "@/services/printer-signalr";
 import { usePageTour } from "@/common/hooks/usePageTour";
 import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
 import { HelpButton } from "@/common/components/HelpButton";
+import { mergePrinterProgress } from "@/features/queue/utils/printerProgress";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueueRecommendationDto,
@@ -424,10 +425,7 @@ export function PrintQueueDashboardPage() {
     printerSignalRService.connect();
 
     const applyStatus = (printerId: string, progress?: number) => {
-      if (typeof progress !== "number") return;
-      setPrintProgressByPrinterId((prev) =>
-        prev[printerId] === progress ? prev : { ...prev, [printerId]: progress },
-      );
+      setPrintProgressByPrinterId((prev) => mergePrinterProgress(prev, printerId, progress));
     };
 
     // Seed from any statuses already received before this effect mounted.

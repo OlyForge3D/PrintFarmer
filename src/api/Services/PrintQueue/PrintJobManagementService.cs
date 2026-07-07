@@ -478,6 +478,22 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
+    /// Derives an approximate completion percentage for a non-completed (failed/cancelled)
+    /// history job from how far it progressed through its estimated print time. Returns 0
+    /// when timing data is unavailable, and never returns 100 (reserved for completed jobs).
+    /// </summary>
+    private static int ComputePartialCompletionPercentage(TimeSpan? actualPrintTime, TimeSpan? estimatedPrintTime)
+    {
+        if (actualPrintTime is null || estimatedPrintTime is null || estimatedPrintTime.Value.TotalSeconds <= 0)
+        {
+            return 0;
+        }
+
+        double pct = actualPrintTime.Value.TotalSeconds / estimatedPrintTime.Value.TotalSeconds * 100.0;
+        return (int)Math.Round(Math.Clamp(pct, 0, 99));
+    }
+
+    /// <summary>
     /// Get print job history (Phase 2)
     /// </summary>
     /// <param name="limit">Maximum number of history entries to return.</param>
@@ -512,7 +528,9 @@ public class PrintJobManagementService(
                     JobName = pj.GcodeFile?.Name ?? pj.Name,
                     PrinterName = pj.AssignedPrinter?.Name ?? "Unassigned",
                     Status = pj.Status.ToString(),
-                    CompletionPercentage = pj.Status == PrintJobStatus.Completed ? 100 : 0,
+                    CompletionPercentage = pj.Status == PrintJobStatus.Completed
+                        ? 100
+                        : ComputePartialCompletionPercentage(pj.ActualPrintTime, pj.EstimatedPrintTime),
                     StartedAtUtc = pj.ActualStartTime ?? pj.CreatedAt,
                     CompletedAtUtc = pj.ActualEndTime,
                     DeadlineAtUtc = pj.DeadlineAtUtc,

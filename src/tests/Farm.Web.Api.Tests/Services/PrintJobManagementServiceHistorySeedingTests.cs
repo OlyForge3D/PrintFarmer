@@ -1795,6 +1795,75 @@ public class PrintJobManagementServiceHistorySeedingTests
         Assert.True(dto.CostIsEstimated);
     }
 
+    [Fact]
+    public async Task GetQueueHistoryAsync_FailedJob_DerivesPartialCompletionFromPrintTime()
+    {
+        // A failed job that ran ~64% through its estimated print time should report
+        // a partial completion percentage (never 100) so the UI can show "FAILED @ 64%".
+        PrintJob failed = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "aborted.gcode",
+            Status = PrintJobStatus.Failed,
+            EstimatedPrintTime = TimeSpan.FromMinutes(100),
+            ActualPrintTime = TimeSpan.FromMinutes(64)
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetHistoryAsync(
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(([failed], 1, 0, 1, 0, 600L));
+
+        PrintJobManagementService service = CreateService(repository, new Mock<IPrintersService>());
+
+        QueueHistoryPageDto page = await service.GetQueueHistoryAsync();
+
+        QueueHistoryEntryDto dto = page.Entries.Single();
+        Assert.Equal(64, dto.CompletionPercentage);
+    }
+
+    [Fact]
+    public async Task GetQueueHistoryAsync_FailedJobWithoutTiming_ReportsZeroCompletion()
+    {
+        // No timing data → cannot derive a partial percentage → 0 (badge shows no %).
+        PrintJob failed = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "aborted-no-timing.gcode",
+            Status = PrintJobStatus.Cancelled,
+            EstimatedPrintTime = null,
+            ActualPrintTime = null
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetHistoryAsync(
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(([failed], 1, 0, 0, 1, 0L));
+
+        PrintJobManagementService service = CreateService(repository, new Mock<IPrintersService>());
+
+        QueueHistoryPageDto page = await service.GetQueueHistoryAsync();
+
+        QueueHistoryEntryDto dto = page.Entries.Single();
+        Assert.Equal(0, dto.CompletionPercentage);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         Mock<IPrintersService> printersService)
