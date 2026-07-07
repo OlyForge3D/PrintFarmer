@@ -36,7 +36,10 @@ actor SpoolService: SpoolServiceProtocol {
     }
 
     func listFilaments() async throws -> [SpoolmanFilament] {
-        try await apiClient.get("/api/spoolman/filaments")
+        // GET /api/spoolman/filaments returns a paged wrapper (SpoolmanPagedResult),
+        // not a bare array. Decode the wrapper and return its items.
+        let page: SpoolmanPagedResult<SpoolmanFilament> = try await apiClient.get("/api/spoolman/filaments")
+        return page.items
     }
 
     func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
