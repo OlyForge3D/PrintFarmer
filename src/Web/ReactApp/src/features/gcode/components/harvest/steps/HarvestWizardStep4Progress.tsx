@@ -3,6 +3,7 @@ import { CloseIcon, CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/commo
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 
 interface HarvestDiscoveredFile {
   id: string;
@@ -279,16 +280,12 @@ export function HarvestWizardStep4Progress({
                 {/* Progress bar */}
                 {(file.status === 'importing' || file.status === 'completed') && (
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 h-2 bg-pf-border rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${
-                          file.status === 'completed'
-                            ? 'bg-pf-success-bg'
-                            : 'bg-pf-accent'
-                        }`}
-                        style={{ width: `${Math.max(0, Math.min(100, file.progress))}%` } as React.CSSProperties}
-                      />
-                    </div>
+                    <ProgressBar
+                      value={file.progress}
+                      ariaLabel={`${file.fileName} import progress`}
+                      showPercent={false}
+                      className="flex-1"
+                    />
                     <div className="text-xs text-pf-text-secondary w-8 text-right">
                       {Math.round(file.progress)}%
                     </div>

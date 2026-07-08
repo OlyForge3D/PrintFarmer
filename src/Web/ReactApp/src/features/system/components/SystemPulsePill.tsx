@@ -155,7 +155,7 @@ function getMeterFillClassName(value: number): string {
     return 'bg-pf-warning';
   }
 
-  return 'bg-pf-accent';
+  return 'bg-pf-progress-fill';
 }
 
 function UsageMeter({ label, value, details, icon }: UsageMeterProps) {
@@ -184,7 +184,7 @@ function UsageMeter({ label, value, details, icon }: UsageMeterProps) {
         aria-valuemax={100}
         aria-valuenow={Number(normalizedValue.toFixed(1))}
         aria-valuetext={`${formatPercent(normalizedValue)} used`}
-        className="h-2 overflow-hidden rounded-full border border-pf-border/70 bg-pf-bg-2"
+        className="h-2 overflow-hidden rounded-full border border-pf-border/70 bg-pf-progress-track"
       >
         <div
           aria-hidden="true"

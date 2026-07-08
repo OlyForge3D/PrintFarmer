@@ -1,4 +1,4 @@
-import { Button, Select, Spinner } from "@/common/components/ui";
+import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
 import { useState, useRef, useCallback } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import type { DispatchUploadProgressDto } from "@/types/api";
@@ -386,19 +386,12 @@ export function QueueJobsTable({
                   </span>
                   {showLiveProgress && (
                     <div className="w-full" title={`${liveProgressRounded}% complete`}>
-                      <div
-                        className="h-1 w-full rounded-full bg-pf-bg-2 overflow-hidden"
-                        role="progressbar"
-                        aria-valuenow={liveProgressRounded}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label="Print progress"
-                      >
-                        <div
-                          className="h-full rounded-full bg-pf-success transition-[width] duration-300"
-                          style={{ width: `${liveProgressPct}%` }}
-                        />
-                      </div>
+                      <ProgressBar
+                        value={liveProgressPct}
+                        ariaLabel="Print progress"
+                        showPercent={false}
+                        size="xs"
+                      />
                       <span className="mt-0.5 block text-center text-[10px] tabular-nums text-pf-text-tertiary">
                         {liveProgressRounded}%
                       </span>

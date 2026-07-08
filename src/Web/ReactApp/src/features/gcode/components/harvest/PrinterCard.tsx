@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Printer, GcodeHarvestOperation, HarvestOptions, GcodeHarvestStatus } from '@/types/api';
 import { getHarvestErrorInfo } from '@/common/utils/harvestErrorHelper';
+import { ProgressBar } from '@/common/components/ui';
 import { ErrorIcon } from './ErrorIcon';
 
 export interface PrinterCardProps {
@@ -150,20 +151,12 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
             <span>Harvest: {operation.filesProcessed}/{operation.filesFound}</span>
             <span>{progress}%</span>
           </div>
-          {(() => {
-            // Snap progress to nearest 10% for className
-            const progressValue = Math.min(Math.round(progress / 10) * 10, 100);
-            const progressClass = `pf-progress-bar-${progressValue}`;
-            return (
-              <div
-                className={`w-full bg-pf-bg-2 rounded-full ${compact ? 'pf-progress-bar-compact' : 'pf-progress-bar'} ${progressClass}`}
-              >
-                <div
-                  className={`bg-pf-accent rounded-full transition-all duration-300 ${compact ? 'pf-progress-inner-compact' : 'pf-progress-inner'}`}
-                />
-              </div>
-            );
-          })()}
+          <ProgressBar
+            value={progress}
+            ariaLabel="Harvest progress"
+            showPercent={false}
+            size={compact ? 'xs' : 'sm'}
+          />
         </div>
       )}
 

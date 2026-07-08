@@ -1,4 +1,4 @@
-import { Button, Select, Spinner } from "@/common/components/ui";
+import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
 import clsx from "clsx";
 import { AlertTriangle, Clock, DollarSign, FolderOpen, Layers, Palette, Timer } from "lucide-react";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
@@ -283,19 +283,13 @@ function QueueJobCommon({
 
           {showLiveProgress && (
             <div className="flex items-center gap-2" title={`${liveProgressRounded}% complete`}>
-              <div
-                className="h-1.5 flex-1 rounded-full bg-pf-bg-2 overflow-hidden"
-                role="progressbar"
-                aria-valuenow={liveProgressRounded}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label="Print progress"
-              >
-                <div
-                  className="h-full rounded-full bg-pf-success transition-[width] duration-300"
-                  style={{ width: `${liveProgressPct}%` }}
-                />
-              </div>
+              <ProgressBar
+                value={liveProgressPct}
+                ariaLabel="Print progress"
+                showPercent={false}
+                size="xs"
+                className="flex-1"
+              />
               <span className="text-xs tabular-nums text-pf-text-secondary shrink-0">{liveProgressRounded}%</span>
             </div>
           )}

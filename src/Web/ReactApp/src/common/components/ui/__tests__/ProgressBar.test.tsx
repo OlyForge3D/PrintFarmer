@@ -10,6 +10,39 @@ describe('ProgressBar', () => {
     expect(progressbar).toHaveAttribute('aria-valuenow', '50');
   });
 
+  it('should use the shared theme track and fill tokens', () => {
+    render(<ProgressBar value={50} />);
+
+    const track = screen.getByRole('progressbar');
+    const fill = track.querySelector('[data-pf-progress-fill]');
+
+    expect(track).toHaveClass('bg-pf-progress-track');
+    expect(fill).toHaveClass('bg-pf-progress-fill');
+    expect(fill).toHaveStyle({ width: '50%' });
+  });
+
+  it('should keep legacy color props on the shared theme tokens', () => {
+    render(<ProgressBar value={50} color="green" />);
+
+    const track = screen.getByRole('progressbar');
+    const fill = track.querySelector('[data-pf-progress-fill]');
+
+    expect(track).toHaveClass('bg-pf-progress-track');
+    expect(fill).toHaveClass('bg-pf-progress-fill');
+    expect(fill).not.toHaveClass('bg-pf-success-bg');
+  });
+
+  it('should map non-100 max values to a percent width while preserving aria value', () => {
+    render(<ProgressBar value={25} max={50} showPercent={false} />);
+
+    const track = screen.getByRole('progressbar');
+    const fill = track.querySelector('[data-pf-progress-fill]');
+
+    expect(track).toHaveAttribute('aria-valuenow', '25');
+    expect(track).toHaveAttribute('aria-valuemax', '50');
+    expect(fill).toHaveStyle({ width: '50%' });
+  });
+
   it('should render with label', () => {
     render(<ProgressBar value={25} label="Upload Progress" />);
     

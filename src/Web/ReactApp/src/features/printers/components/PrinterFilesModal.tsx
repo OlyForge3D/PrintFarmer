@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Select } from '@/common/components/ui';
+import { Button, ProgressBar, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
@@ -451,12 +451,11 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                               <span className="text-xs text-pf-text-secondary font-medium">{isHarvesting.message}</span>
                               <span className="text-xs font-semibold text-pf-accent">{isHarvesting.percentComplete}%</span>
                             </div>
-                            <div className="w-full h-2 bg-pf-bg-2 rounded-full overflow-hidden border border-pf-border">
-                              <div
-                                className="h-full bg-linear-to-r from-pf-accent to-pf-accent transition-all duration-300 ease-out rounded-full"
-                                style={{ width: `${isHarvesting.percentComplete}%` }}
-                              />
-                            </div>
+                            <ProgressBar
+                              value={isHarvesting.percentComplete}
+                              ariaLabel="File harvest progress"
+                              showPercent={false}
+                            />
                           </div>
                         )}
                       </div>

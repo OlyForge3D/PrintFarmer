@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import { PrinterBedVisualization, PrinterStatus } from './PrinterBedVisualization';
 import { PrinterModelDto } from '@/types/api';
-import { Button, Checkbox } from '@/common/components/ui';
+import { Button, Checkbox, ProgressBar as SharedProgressBar } from '@/common/components/ui';
 
 export interface PrinterBedCardProps {
   printerModel: PrinterModelDto;
@@ -112,7 +112,7 @@ const StatusBadge: React.FC<{
  * Progress Bar Component
  * Shows print job progress
  */
-const ProgressBar: React.FC<{
+const PrintJobProgress: React.FC<{
   progress?: number;
   jobName?: string;
 }> = ({ progress, jobName }) => {
@@ -128,12 +128,7 @@ const ProgressBar: React.FC<{
         <span className="text-pf-text-tertiary">Job Progress</span>
         <span className="text-white font-mono">{Math.round(percentage)}%</span>
       </div>
-      <div className="h-2 bg-pf-bg-1 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-linear-to-r from-pf-accent to-pf-error transition-all duration-300"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
+      <SharedProgressBar value={percentage} ariaLabel="Print progress" showPercent={false} />
       {jobName && <p className="text-xs text-pf-text-tertiary truncate">{jobName}</p>}
     </div>
   );
@@ -257,7 +252,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
           {/* Progress */}
           {status.progress !== undefined && (
             <div className="pt-2 border-t border-pf-border">
-              <ProgressBar progress={status.progress} jobName={status.jobName} />
+              <PrintJobProgress progress={status.progress} jobName={status.jobName} />
             </div>
           )}
 

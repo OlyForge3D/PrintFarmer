@@ -8,6 +8,7 @@ import { Badge } from '@/common/components/ui/Badge';
 import { Card } from '@/common/components/ui/Card';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { Select } from '@/common/components/ui/Select';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import {
   GridIcon,
   TableIcon,
@@ -622,15 +623,13 @@ function ProgressCell({ job }: { job: SliceJobStatusResponse }) {
     return (
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <div
-            className="flex-1 h-1.5 bg-pf-bg-2 rounded-full overflow-hidden"
-            role="progressbar"
-            aria-label={`Slice progress: ${job.progressPercent}%`}
-          >
-            <div
-              className={`h-full bg-pf-accent rounded-full transition-all duration-300 w-[${Math.min(job.progressPercent, 100)}%]`}
-            />
-          </div>
+          <ProgressBar
+            value={job.progressPercent}
+            ariaLabel={`Slice progress: ${job.progressPercent}%`}
+            showPercent={false}
+            size="xs"
+            className="flex-1"
+          />
           <span className="text-xs text-pf-text-secondary font-mono whitespace-nowrap">
             {job.progressPercent}%
           </span>

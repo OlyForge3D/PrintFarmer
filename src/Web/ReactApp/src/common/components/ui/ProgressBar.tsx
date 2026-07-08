@@ -2,13 +2,19 @@ import React from 'react';
 import clsx from 'clsx';
 
 export interface ProgressBarProps {
-  value: number; // 0-100
+  value: number;
+  max?: number;
   label?: string;
+  ariaLabel?: string;
+  ariaValueText?: string;
   size?: 'xs' | 'sm' | 'md';
   color?: 'blue' | 'green' | 'purple' | 'red' | 'gray';
   showPercent?: boolean;
   animated?: boolean;
   className?: string;
+  trackClassName?: string;
+  fillClassName?: string;
+  fillRef?: React.Ref<HTMLDivElement>;
 }
 
 const heightMap = {
@@ -17,24 +23,26 @@ const heightMap = {
   md: 'h-3'
 };
 
-const colorMap: Record<string, string> = {
-  blue: 'bg-pf-accent',
-  green: 'bg-pf-success-bg',
-  purple: 'bg-linear-to-r from-pf-gradient-secondary-start to-pf-gradient-secondary-end',
-  red: 'bg-pf-error',
-  gray: 'bg-pf-text-muted'
-};
+const trackClass = 'bg-pf-progress-track';
+const fillClass = 'bg-pf-progress-fill';
 
 export const ProgressBar: React.FC<ProgressBarProps> = ({
   value,
+  max = 100,
   label,
+  ariaLabel,
+  ariaValueText,
   size = 'sm',
-  color = 'blue',
   showPercent = true,
   animated = true,
-  className
+  className,
+  trackClassName,
+  fillClassName,
+  fillRef,
 }) => {
-  const pct = Math.min(100, Math.max(0, Math.round(value)));
+  const safeMax = Math.max(1, max);
+  const clampedValue = Math.min(safeMax, Math.max(0, value));
+  const pct = Math.min(100, Math.max(0, Math.round((clampedValue / safeMax) * 100)));
   return (
     <div className={clsx('w-full', className)}>
       {(label || showPercent) && (
@@ -44,18 +52,23 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         </div>
       )}
       <div
-        className={clsx('w-full bg-pf-bg-1 rounded-full overflow-hidden', heightMap[size])}
+        data-pf-progress-track
+        className={clsx('w-full rounded-full overflow-hidden', trackClass, heightMap[size], trackClassName)}
         role="progressbar"
-        aria-valuenow={pct}
+        aria-valuenow={Math.round(clampedValue)}
         aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={label || 'Progress'}
+        aria-valuemax={safeMax}
+        aria-valuetext={ariaValueText}
+        aria-label={ariaLabel || label || 'Progress'}
       >
         <div
+          ref={fillRef}
+          data-pf-progress-fill
           className={clsx(
-            colorMap[color], 
+            fillClass,
             'h-full rounded-full',
-            animated && 'transition-[width] duration-200 ease-out'
+            animated && 'transition-[width] duration-200 ease-out',
+            fillClassName
           )}
           style={{ width: `${pct}%` }}
         />

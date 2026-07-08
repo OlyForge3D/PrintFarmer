@@ -1,14 +1,6 @@
 import { apiClient } from '@/services/api';
-import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { FileUpload } from '@/common/components/ui/FileUpload';
-
-const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.style.width = `${Math.min(percent, 100)}%`;
-  }, [percent]);
-  return <div ref={ref} className="bg-pf-accent-bg h-2 rounded-sm transition-all duration-300" />;
-};
+import React, { useCallback, useState } from 'react';
+import { FileUpload, ProgressBar } from '@/common/components/ui';
 
 export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) => void }) {
   const [dragOver, setDragOver] = useState(false);
@@ -71,9 +63,7 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         {progress !== null && (
           <div className="mt-4">
             <div className="text-sm">Uploading: {progress}%</div>
-            <div className="w-full bg-pf-bg-2 h-2 rounded-sm mt-1">
-              <ProgressBar percent={progress} />
-            </div>
+            <ProgressBar value={progress} ariaLabel="Upload progress" showPercent={false} className="mt-1" />
           </div>
         )}
         {error && <div className="mt-3 text-pf-error">Error: {error}</div>}

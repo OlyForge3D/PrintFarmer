@@ -38,7 +38,7 @@ import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select, ColorPicker } from '@/common/components/ui';
+import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
@@ -2820,16 +2820,11 @@ function SliceJobProgressPanel({
       {/* Progress bar */}
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <progress
-            value={Math.min(isCompleted ? 100 : percent, 100)}
-            max={100}
-            className={`flex-1 h-2 rounded-full overflow-hidden [&::-webkit-progress-bar]:bg-pf-bg-2 [&::-webkit-progress-value]:rounded-full [&::-moz-progress-bar]:rounded-full ${
-              isFailed
-                ? '[&::-webkit-progress-value]:bg-pf-error [&::-moz-progress-bar]:bg-pf-error'
-                : isCompleted
-                  ? '[&::-webkit-progress-value]:bg-pf-success [&::-moz-progress-bar]:bg-pf-success'
-                  : '[&::-webkit-progress-value]:bg-pf-accent [&::-moz-progress-bar]:bg-pf-accent'
-            }`}
+          <ProgressBar
+            value={isCompleted ? 100 : percent}
+            ariaLabel="Slice progress"
+            showPercent={false}
+            className="flex-1"
           />
           <span className="text-xs font-mono text-pf-text-secondary whitespace-nowrap">
             {isCompleted ? '100' : percent}%

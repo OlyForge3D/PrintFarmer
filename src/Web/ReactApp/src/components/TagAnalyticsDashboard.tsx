@@ -4,6 +4,7 @@ import { tagService } from '@/services/tagService';
 import { Card } from '@/common/components/ui/Card';
 import { Alert } from '@/common/components/ui/Alert';
 import { Badge } from '@/common/components/ui/Badge';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 
 /**
  * TagAnalyticsDashboard Component
@@ -57,11 +58,6 @@ const TagAnalyticsDashboard: React.FC = () => {
       maxUsage,
     };
   }, [data]);
-
-  // Calculate percentage for bar width
-  const getBarPercentage = (count: number): number => {
-    return stats.maxUsage > 0 ? (count / stats.maxUsage) * 100 : 0;
-  };
 
   if (isLoading) {
     return (
@@ -197,17 +193,15 @@ const TagAnalyticsDashboard: React.FC = () => {
 
                 {/* Bar */}
                 <div className="grow">
-                  <div className="h-8 bg-pf-bg-1 rounded-md overflow-hidden">
-                    <div
-                      className="h-full bg-linear-to-r from-pf-accent to-pf-accent/80 transition-all duration-300"
-                      style={{ width: `${getBarPercentage(tag.modelCount)}%` }}
-                      role="progressbar"
-                      aria-valuenow={tag.modelCount}
-                      aria-valuemin={0}
-                      aria-valuemax={stats.maxUsage}
-                      aria-label={`${tag.name} usage: ${tag.modelCount}`}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={tag.modelCount}
+                    max={stats.maxUsage}
+                    ariaLabel={`${tag.name} usage: ${tag.modelCount}`}
+                    showPercent={false}
+                    size="md"
+                    trackClassName="rounded-md"
+                    fillClassName="rounded-md"
+                  />
                 </div>
 
                 {/* Count */}

@@ -5,6 +5,7 @@ import Tabs from '@/common/components/ui/Tabs';
 import { FileUpload } from '@/common/components/ui/FileUpload';
 import Button from '@/common/components/ui/Button';
 import Select from '@/common/components/ui/Select';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { toast } from 'sonner';
 import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
@@ -269,9 +270,11 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
                 {exportProgress !== null && (
                   <div className="w-full max-w-xs">
-                    <div className="w-full bg-pf-bg-2 rounded-full h-2">
-                      <div className="bg-pf-accent h-2 rounded-full transition-all duration-300" style={{ width: `${Math.max(0, Math.min(100, exportProgress ?? 0))}%` }} />
-                    </div>
+                    <ProgressBar
+                      value={exportProgress ?? 0}
+                      ariaLabel="Export progress"
+                      showPercent={false}
+                    />
                     <div className="text-xs text-pf-text-tertiary mt-1 text-center">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
                   </div>
                 )}

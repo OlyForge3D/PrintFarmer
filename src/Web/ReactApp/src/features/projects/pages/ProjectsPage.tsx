@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectService } from '@/services/projectService';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Select, EmptyState } from '@/common/components/ui';
+import { Button, Select, EmptyState, ProgressBar } from '@/common/components/ui';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';
 import { 
@@ -341,11 +341,10 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  <span>{project.completedPrints} / {project.totalPrints} prints</span>
  <span>{project.progressPercent}%</span>
  </div>
- <progress
+ <ProgressBar
  value={project.progressPercent}
- max={100}
- aria-label={`${project.progressPercent}% complete`}
- className="h-2 w-full overflow-hidden rounded-full bg-pf-bg-2 [&::-webkit-progress-bar]:bg-pf-bg-2 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-pf-accent [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-pf-accent"
+ ariaLabel={`${project.name} progress`}
+ showPercent={false}
  />
  </div>
 

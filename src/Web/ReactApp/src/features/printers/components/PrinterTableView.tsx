@@ -1,7 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import { PanelRightOpen } from 'lucide-react';
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import styles from './PrinterTableView.module.css';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { AutoDispatchStatus, Printer } from '@/types/api';
@@ -12,7 +11,7 @@ import { CloseIcon, DeleteIcon, EditIcon, HelpCircleIcon } from '@/common/compon
 import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, ToolsIcon } from '@/common/components/icons/MdiIcons';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button } from '@/common/components/ui';
+import { Button, ProgressBar } from '@/common/components/ui';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 
 interface PrinterTableViewProps {
@@ -353,11 +352,12 @@ export function PrinterTableView({
                   <td className="px-4 py-4">
                     {displayPrinter.progress !== undefined && displayPrinter.progress > 0 ? (
                       <div className="flex items-center space-x-2">
-                        <div className="w-12 bg-pf-border-dark rounded-full h-2">
-                          <div
-                            className={`bg-pf-success-bg ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(displayPrinter.progress / 5) * 5))}`]}`}
-                          />
-                        </div>
+                        <ProgressBar
+                          value={displayPrinter.progress}
+                          ariaLabel="Print progress"
+                          showPercent={false}
+                          className="w-12"
+                        />
                         <span className="text-sm text-pf-text-primary">
                           {Math.round(displayPrinter.progress)}%
                         </span>
