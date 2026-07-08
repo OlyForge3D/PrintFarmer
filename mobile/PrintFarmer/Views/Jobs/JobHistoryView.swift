@@ -135,7 +135,7 @@ struct JobHistoryView: View {
             if let failureReason = item.failureReason, item.status.lowercased() == "failed" {
                 Text(failureReason)
                     .font(.caption)
-                    .foregroundStyle(.pfError)
+                    .foregroundStyle(Color.pfError)
                     .lineLimit(2)
             }
 
