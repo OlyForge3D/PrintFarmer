@@ -13,7 +13,7 @@ concurrency:
 
 env:
   # Prefer a stable, explicit simulator over the newest available runtime/model.
-  IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16
+  IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
   IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.4,iOS 26.5
 
 jobs:

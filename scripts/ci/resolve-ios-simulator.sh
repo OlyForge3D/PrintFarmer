@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/../common-utils.sh"
 
 : "${GITHUB_ENV:?GITHUB_ENV must be set by GitHub Actions}"
 
-readonly DEVICE_PREFERENCE="${IOS_SIMULATOR_DEVICE_PREFERENCE:-iPhone 15,iPhone 16}"
+readonly DEVICE_PREFERENCE="${IOS_SIMULATOR_DEVICE_PREFERENCE:-iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e}"
 readonly RUNTIME_PREFERENCE="${IOS_SIMULATOR_RUNTIME_PREFERENCE:-iOS 26.4,iOS 26.5}"
 
 SIMCTL_DEVICES_JSON="$(xcrun simctl list devices available -j)"
@@ -51,33 +51,55 @@ for runtime_identifier, devices in data.get('devices', {}).items():
         continue
     for device in devices:
         name = device.get('name', '')
-        if device.get('isAvailable') is False or name not in device_preference:
+        if device.get('isAvailable') is False or not name.startswith('iPhone '):
             continue
         candidates.append({
             'runtime': runtime,
             'runtimeVersion': version_key(runtime),
             'name': name,
-            'deviceRank': device_preference.index(name),
+            'model': version_key(name),
+            'deviceRank': device_preference.index(name) if name in device_preference else None,
             'runtimeRank': runtime_preference.index(runtime) if runtime in runtime_preference else None,
             'udid': device['udid'],
         })
 
-preferred = [candidate for candidate in candidates if candidate['runtimeRank'] is not None]
-if preferred:
-    selected = min(preferred, key=lambda candidate: (candidate['runtimeRank'], candidate['deviceRank']))
-elif candidates:
-    candidates.sort(key=lambda candidate: (candidate['runtimeVersion'], -candidate['deviceRank']))
-    selected = candidates[-1]
-    print(
-        '::warning::Preferred iOS simulator runtime not found; '
-        f"falling back to {selected['name']} on {selected['runtime']}.",
-        file=sys.stderr,
-    )
-else:
-    print('No available preferred iPhone simulator found.', file=sys.stderr)
+if not candidates:
+    print('No available iPhone simulator found.', file=sys.stderr)
     print(f'Device preference: {device_preference}', file=sys.stderr)
     print(f'Runtime preference: {runtime_preference}', file=sys.stderr)
     sys.exit(1)
+
+preferred_runtime_and_device = [
+    candidate for candidate in candidates
+    if candidate['deviceRank'] is not None and candidate['runtimeRank'] is not None
+]
+preferred_device = [candidate for candidate in candidates if candidate['deviceRank'] is not None]
+
+if preferred_runtime_and_device:
+    selected = min(
+        preferred_runtime_and_device,
+        key=lambda candidate: (candidate['runtimeRank'], candidate['deviceRank']),
+    )
+elif preferred_device:
+    selected = max(
+        preferred_device,
+        key=lambda candidate: (candidate['runtimeVersion'], -candidate['deviceRank'], candidate['name'], candidate['udid']),
+    )
+    print(
+        '::warning::Preferred iOS simulator runtime not found; '
+        f"using preferred device {selected['name']} on newest installed runtime {selected['runtime']}.",
+        file=sys.stderr,
+    )
+else:
+    selected = max(
+        candidates,
+        key=lambda candidate: (candidate['runtimeVersion'], candidate['model'], candidate['name'], candidate['udid']),
+    )
+    print(
+        '::warning::Preferred iPhone simulator device/runtime not found; '
+        f"falling back to {selected['name']} on newest installed runtime {selected['runtime']}.",
+        file=sys.stderr,
+    )
 
 print(f"{selected['udid']}\t{selected['name']}\t{selected['runtime']}")
 PY
