@@ -56,6 +56,7 @@ struct NotificationsView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(notificationService: services.notificationService)
             await viewModel.loadNotifications()
         }

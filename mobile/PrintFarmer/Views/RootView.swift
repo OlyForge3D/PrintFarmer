@@ -11,6 +11,7 @@ struct RootView: View {
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
     @State private var pendingReadyMonitor = PendingReadyMonitor()
+    @State private var connectionMonitor = ConnectionMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
@@ -21,6 +22,10 @@ struct RootView: View {
         VStack(spacing: 0) {
             if DemoMode.shared.isActive && authViewModel.isAuthenticated {
                 DemoModeBanner()
+            }
+
+            if authViewModel.isAuthenticated && !DemoMode.shared.isActive {
+                ConnectionStatusBar(monitor: connectionMonitor)
             }
 
             Group {
@@ -50,6 +55,11 @@ struct RootView: View {
                             } catch {
                                 // SignalR will auto-reconnect; log silently
                             }
+                            connectionMonitor.configure(
+                                apiClient: services.apiClient,
+                                signalRService: services.signalRService
+                            )
+                            connectionMonitor.start()
                         }
                         .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
                             router.pendingReadyCount = newValue
@@ -66,6 +76,7 @@ struct RootView: View {
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
+                connectionMonitor.stop()
                 router.pendingReadyCount = 0
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
@@ -83,6 +94,7 @@ struct RootView: View {
             signOutIfServerRegistryUnavailable()
         }
         .onDisappear {
+            connectionMonitor.stop()
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
         }

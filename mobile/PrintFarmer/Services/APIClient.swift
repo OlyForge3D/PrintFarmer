@@ -548,6 +548,29 @@ actor APIClient {
         return data
     }
 
+    // MARK: - Reachability
+
+    /// Lightweight, unauthenticated reachability probe for the connection indicator.
+    /// Sends a short GET to `path` (default `/healthz`) using the configured
+    /// private-network session so self-signed certs are still trusted. Returns
+    /// `true` when the server answers with an HTTP status below 500 (server is up),
+    /// `false` on transport failure or a 5xx response. Never throws.
+    func isReachable(path: String = "/healthz", timeout: TimeInterval = 6) async -> Bool {
+        guard let url = URL(string: path, relativeTo: baseURL) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return http.statusCode < 500
+        } catch {
+            return false
+        }
+    }
+
     func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
         let request = try buildRequest(path: path, method: "POST")
         return try await execute(request)

@@ -37,6 +37,7 @@ struct DispatchDashboardView: View {
             await viewModel.loadHistory()
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(dispatchService: services.dispatchService)
             await viewModel.loadQueueStatus()
             await viewModel.loadHistory()

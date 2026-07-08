@@ -64,6 +64,7 @@ struct JobListView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(jobService: services.jobService)
             await viewModel.loadJobs()
         }

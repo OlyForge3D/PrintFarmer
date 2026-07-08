@@ -58,6 +58,7 @@ struct JobHistoryView: View {
             await viewModel.loadHistory()
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
             await viewModel.loadHistory()
         }
