@@ -11,6 +11,11 @@ concurrency:
   group: ios-pr-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+env:
+  # Prefer a stable, explicit simulator over the newest available runtime/model.
+  IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+  IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.4,iOS 26.5
+
 jobs:
   build:
     name: Build (iOS)
@@ -39,37 +44,8 @@ jobs:
             -resolvePackageDependencies \
             -clonedSourcePackagesDirPath build/SourcePackages
 
-      - name: Resolve iPhone simulator destination
-        run: |
-          set -euo pipefail
-          SIMCTL_DEVICES_JSON="$(xcrun simctl list devices available -j)"
-          SIMULATOR_UDID="$(
-            SIMCTL_DEVICES_JSON="$SIMCTL_DEVICES_JSON" python3 <<'PY'
-          import json
-          import os
-          import re
-          import sys
-
-          data = json.loads(os.environ["SIMCTL_DEVICES_JSON"])
-          candidates = []
-          for runtime, devices in data.get("devices", {}).items():
-              version = tuple(int(part) for part in re.findall(r"\d+", runtime))
-              for device in devices:
-                  name = device.get("name", "")
-                  if device.get("isAvailable") is False or not name.startswith("iPhone "):
-                      continue
-                  model = tuple(int(part) for part in re.findall(r"\d+", name))
-                  candidates.append((version, model, name, device["udid"]))
-
-          if not candidates:
-              sys.exit("No available iPhone simulator found")
-
-          candidates.sort()
-          print(candidates[-1][3])
-          PY
-          )"
-          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
-          echo "Using iPhone simulator UDID: $SIMULATOR_UDID"
+      - name: Resolve pinned iOS simulator destination
+        run: ../scripts/ci/resolve-ios-simulator.sh
 
       - name: Build (Debug)
         timeout-minutes: 20
@@ -90,6 +66,8 @@ jobs:
     name: Unit Tests (iOS) — Informational
     runs-on: macos-latest
     needs: build
+    # Keep informational until the macOS runner proves simulator launch stability;
+    # promote by removing continue-on-error after repeated green CI runs.
     continue-on-error: true
     defaults:
       run:
@@ -105,38 +83,29 @@ jobs:
             XCODE_PATH="/Applications/Xcode.app"
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
 
-      - name: Resolve iPhone simulator destination
+      - name: Resolve pinned iOS simulator destination
+        run: ../scripts/ci/resolve-ios-simulator.sh
+
+      - name: Boot iOS simulator
+        run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
+
+      - name: Build unit tests for testing
+        timeout-minutes: 20
         run: |
-          set -euo pipefail
-          SIMCTL_DEVICES_JSON="$(xcrun simctl list devices available -j)"
-          SIMULATOR_UDID="$(
-            SIMCTL_DEVICES_JSON="$SIMCTL_DEVICES_JSON" python3 <<'PY'
-          import json
-          import os
-          import re
-          import sys
-
-          data = json.loads(os.environ["SIMCTL_DEVICES_JSON"])
-          candidates = []
-          for runtime, devices in data.get("devices", {}).items():
-              version = tuple(int(part) for part in re.findall(r"\d+", runtime))
-              for device in devices:
-                  name = device.get("name", "")
-                  if device.get("isAvailable") is False or not name.startswith("iPhone "):
-                      continue
-                  model = tuple(int(part) for part in re.findall(r"\d+", name))
-                  candidates.append((version, model, name, device["udid"]))
-
-          if not candidates:
-              sys.exit("No available iPhone simulator found")
-
-          candidates.sort()
-          print(candidates[-1][3])
-          PY
-          )"
-          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
-          echo "Using iPhone simulator UDID: $SIMULATOR_UDID"
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            build-for-testing
 
       - name: Run unit tests
         timeout-minutes: 15
@@ -146,12 +115,15 @@ jobs:
             -scheme PrintFarmer \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            test \
+            test-without-building \
             -only-testing:PrintFarmerTests \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
             -resultBundlePath build/TestResults.xcresult
 
       - name: Upload test results
