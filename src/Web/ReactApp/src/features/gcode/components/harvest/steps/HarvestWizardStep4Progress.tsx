@@ -285,6 +285,7 @@ export function HarvestWizardStep4Progress({
                       ariaLabel={`${file.fileName} import progress`}
                       showPercent={false}
                       className="flex-1"
+                      fillClassName={file.status === 'completed' ? 'bg-pf-success' : undefined}
                     />
                     <div className="text-xs text-pf-text-secondary w-8 text-right">
                       {Math.round(file.progress)}%

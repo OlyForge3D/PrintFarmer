@@ -8,7 +8,6 @@ export interface ProgressBarProps {
   ariaLabel?: string;
   ariaValueText?: string;
   size?: 'xs' | 'sm' | 'md';
-  color?: 'blue' | 'green' | 'purple' | 'red' | 'gray';
   showPercent?: boolean;
   animated?: boolean;
   className?: string;
@@ -65,8 +64,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
           ref={fillRef}
           data-pf-progress-fill
           className={clsx(
-            fillClass,
             'h-full rounded-full',
+            !fillClassName && fillClass,
             animated && 'transition-[width] duration-200 ease-out',
             fillClassName
           )}

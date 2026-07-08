@@ -48,7 +48,7 @@ function getWeightColor(pct: number | null): string {
 }
 
 function getWeightBarColor(pct: number | null): string {
-  if (pct === null || pct > 50) return 'bg-pf-progress-fill';
+  if (pct === null || pct > 50) return 'bg-pf-success';
   if (pct > 20) return 'bg-amber-500';
   return 'bg-red-500';
 }

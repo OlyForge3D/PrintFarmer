@@ -2805,6 +2805,11 @@ function SliceJobProgressPanel({
   const isCancelled = progress.status === 'Cancelled';
   const isTerminal = isCompleted || isFailed || isCancelled;
   const percent = progress.progressPercent;
+  const progressFillClassName = isFailed
+    ? 'bg-pf-error'
+    : isCompleted
+      ? 'bg-pf-success'
+      : undefined;
 
   return (
     <div className="rounded-lg border border-pf-border bg-pf-bg-1/50 p-4 space-y-3">
@@ -2825,6 +2830,7 @@ function SliceJobProgressPanel({
             ariaLabel="Slice progress"
             showPercent={false}
             className="flex-1"
+            fillClassName={progressFillClassName}
           />
           <span className="text-xs font-mono text-pf-text-secondary whitespace-nowrap">
             {isCompleted ? '100' : percent}%
