@@ -282,7 +282,15 @@ struct JobHistoryView: View {
         let summaries = usages.map { usage in
             let label = "T\(usage.toolheadIndex ?? 0)"
             let filament = usage.filamentName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let grams = usage.filamentUsageGrams.map { String(format: "%.1fg", $0) } ?? "—"
+            let grams: String
+            if let actualGrams = usage.filamentUsageGrams, actualGrams > 0 {
+                grams = String(format: "%.1fg", actualGrams)
+            } else if let estimateGrams = usage.slicerEstimateGrams, estimateGrams > 0 {
+                grams = String(format: "%.1fg est.", estimateGrams)
+            } else {
+                grams = "—"
+            }
+
             if let filament, !filament.isEmpty {
                 return "\(label): \(filament) \(grams)"
             }

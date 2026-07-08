@@ -628,8 +628,8 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(entry.estimatedFilamentUsageGrams ?? 0, 160.0, accuracy: 0.001)
         XCTAssertEqual(entry.actualCost, Decimal(string: "3.14"))
         XCTAssertEqual(entry.failureReason, "Layer shift")
-        XCTAssertNotNil(entry.startedAtUtc)
-        XCTAssertNotNil(entry.deadlineAtUtc)
+        XCTAssertNotNil(entry.startedAt)
+        XCTAssertNotNil(entry.deadlineAt)
         XCTAssertEqual(entry.toolheadUsages?.count, 2)
         XCTAssertEqual(entry.toolheadUsages?.first?.toolheadIndex, 0)
         XCTAssertEqual(entry.toolheadUsages?.first?.materialCostUsd, Decimal(string: "2.01"))
@@ -665,6 +665,60 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 42.5, accuracy: 0.001)
         XCTAssertTrue(entry.displayFilamentUsageIsEstimated)
         XCTAssertEqual(entry.displayMaterialCostUsd, Decimal(string: "1.06"))
+    }
+
+    func testQueueHistoryEntryFallsBackToJobLevelCostAndUsageWhenToolheadsHaveNoMeasurements() throws {
+        let json = """
+        {
+            "id": "job-fallback",
+            "jobName": "fallback.gcode",
+            "printerName": "Prusa XL",
+            "status": "failed",
+            "completionPercentage": 12,
+            "completedAtUtc": "2026-03-25T00:30:00Z",
+            "actualPrintTimeSeconds": 1800,
+            "materialCostUsd": 2.22,
+            "totalCostUsd": 5.00,
+            "costIsEstimated": false,
+            "actualFilamentUsageGrams": 12.3,
+            "estimatedFilamentUsageGrams": 20.0,
+            "toolheadUsages": [
+                { "toolheadIndex": 0, "filamentName": "PLA" },
+                { "toolheadIndex": 1, "filamentName": "PETG" }
+            ]
+        }
+        """
+
+        let entry = try decoder.decode(QueueHistoryEntry.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(entry.displayMaterialCostUsd, Decimal(string: "2.22"))
+        XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 12.3, accuracy: 0.001)
+        XCTAssertFalse(entry.displayFilamentUsageIsEstimated)
+    }
+
+    func testQueueHistoryEntrySumsToolheadSlicerEstimatesAndMarksUsageEstimated() throws {
+        let json = """
+        {
+            "id": "job-toolhead-estimates",
+            "jobName": "estimate-only.gcode",
+            "printerName": "Prusa XL",
+            "status": "cancelled",
+            "completionPercentage": 37,
+            "completedAtUtc": "2026-03-25T00:30:00Z",
+            "actualPrintTimeSeconds": 1800,
+            "materialCostUsd": 1.23,
+            "costIsEstimated": true,
+            "toolheadUsages": [
+                { "toolheadIndex": 0, "slicerEstimateGrams": 10.5, "filamentName": "PLA" },
+                { "toolheadIndex": 1, "slicerEstimateGrams": 20.0, "filamentName": "PETG" }
+            ]
+        }
+        """
+
+        let entry = try decoder.decode(QueueHistoryEntry.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 30.5, accuracy: 0.001)
+        XCTAssertTrue(entry.displayFilamentUsageIsEstimated)
     }
 
     func testQueueHistoryEntryCompletionBadgeLogicMatchesWeb() {

@@ -112,8 +112,8 @@ struct QueueHistoryEntry: Codable, Sendable, Identifiable {
     let failureReason: String?
     let toolheadUsages: [QueueHistoryToolheadUsage]?
     let tags: [QueueHistoryTag]?
-    let startedAtUtc: Date?
-    let deadlineAtUtc: Date?
+    let startedAt: Date?
+    let deadlineAt: Date?
 
     init(
         id: String,
@@ -135,8 +135,8 @@ struct QueueHistoryEntry: Codable, Sendable, Identifiable {
         failureReason: String? = nil,
         toolheadUsages: [QueueHistoryToolheadUsage]? = nil,
         tags: [QueueHistoryTag]? = nil,
-        startedAtUtc: Date? = nil,
-        deadlineAtUtc: Date? = nil
+        startedAt: Date? = nil,
+        deadlineAt: Date? = nil
     ) {
         self.id = id
         self.jobName = jobName
@@ -157,8 +157,8 @@ struct QueueHistoryEntry: Codable, Sendable, Identifiable {
         self.failureReason = failureReason
         self.toolheadUsages = toolheadUsages
         self.tags = tags
-        self.startedAtUtc = startedAtUtc
-        self.deadlineAtUtc = deadlineAtUtc
+        self.startedAt = startedAt
+        self.deadlineAt = deadlineAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -167,7 +167,8 @@ struct QueueHistoryEntry: Codable, Sendable, Identifiable {
         case materialType, filamentName, filamentColor
         case actualFilamentUsageGrams, estimatedFilamentUsageGrams
         case actualCost, failureReason, toolheadUsages, tags
-        case startedAtUtc, deadlineAtUtc
+        case startedAt = "startedAtUtc"
+        case deadlineAt = "deadlineAtUtc"
         case completedAt = "completedAtUtc"
         case durationSeconds = "actualPrintTimeSeconds"
     }
@@ -207,17 +208,23 @@ extension QueueHistoryEntry {
     var displayMaterialCostUsd: Decimal? {
         if let toolheadUsages, !toolheadUsages.isEmpty {
             let total = toolheadUsages.compactMap(\.materialCostUsd).reduce(Decimal(0), +)
-            return total > 0 ? total : nil
+            if total > 0 { return total }
         }
 
-        guard let materialCostUsd, materialCostUsd > 0 else { return nil }
-        return materialCostUsd
+        if let materialCostUsd, materialCostUsd > 0 { return materialCostUsd }
+        if let totalCostUsd, totalCostUsd > 0 { return totalCostUsd }
+        return nil
     }
 
     var displayFilamentUsageGrams: Double? {
         if let toolheadUsages, !toolheadUsages.isEmpty {
-            let total = toolheadUsages.reduce(0) { $0 + ($1.filamentUsageGrams ?? 0) }
-            return total > 0 ? total : nil
+            let total = toolheadUsages.reduce(0) { sum, usage in
+                if let actualGrams = usage.filamentUsageGrams, actualGrams > 0 {
+                    return sum + actualGrams
+                }
+                return sum + (usage.slicerEstimateGrams ?? 0)
+            }
+            if total > 0 { return total }
         }
 
         if let actualFilamentUsageGrams, actualFilamentUsageGrams > 0 {
@@ -232,7 +239,22 @@ extension QueueHistoryEntry {
     }
 
     var displayFilamentUsageIsEstimated: Bool {
-        guard toolheadUsages?.isEmpty ?? true else { return false }
+        if let toolheadUsages, !toolheadUsages.isEmpty {
+            let actualTotal = toolheadUsages.reduce(0) { sum, usage in
+                guard let actualGrams = usage.filamentUsageGrams, actualGrams > 0 else { return sum }
+                return sum + actualGrams
+            }
+            let displayedTotal = toolheadUsages.reduce(0) { sum, usage in
+                if let actualGrams = usage.filamentUsageGrams, actualGrams > 0 {
+                    return sum + actualGrams
+                }
+                return sum + (usage.slicerEstimateGrams ?? 0)
+            }
+            if displayedTotal > 0 {
+                return actualTotal <= 0
+            }
+        }
+
         return (actualFilamentUsageGrams ?? 0) <= 0 && (estimatedFilamentUsageGrams ?? 0) > 0
     }
 }
