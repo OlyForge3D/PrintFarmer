@@ -50,8 +50,8 @@ import {
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
-  QueueRecommendationDto,
   QueueOverviewDto,
+  QueueStatsDto,
   RegisterRequest,
   SystemInfo,
   ResolveHostnameRequest,
@@ -3801,17 +3801,6 @@ export class ApiClient {
     const response = await this.client.get(`/job-queue-analytics/stats`);
     return response.data as QueueStatsDto;
   }
-
-  /**
-   * Get prioritized queue to-do recommendations (analytics)
-   */
-  async getAnalyticsQueueRecommendations(limit: number = 5): Promise<QueueRecommendationDto[]> {
-    const response = await this.client.get(`/job-queue-analytics/recommendations`, {
-      params: { limit },
-    });
-    return response.data as QueueRecommendationDto[];
-  }
-
   /**
    * Get queue statistics by model (analytics)
    */

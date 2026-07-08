@@ -12,7 +12,6 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
@@ -2087,7 +2086,6 @@ public class PrintJobManagementServiceHistorySeedingTests
             jobCostCalculationService: Mock.Of<IJobCostCalculationService>(),
             cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
-            dispatchScorer: Mock.Of<IDispatchScorer>(),
             settingsService: Mock.Of<ISettingsService>());
     }
 
