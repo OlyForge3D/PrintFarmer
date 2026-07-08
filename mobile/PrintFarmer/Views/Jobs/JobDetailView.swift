@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct JobDetailView: View {
@@ -191,9 +192,24 @@ struct JobDetailView: View {
                     infoRow(label: "Priority", value: priorityLabel(priority), icon: "flag")
                 }
 
+                if let material = job.requiredMaterialType {
+                    Divider()
+                    infoRow(label: "Material", value: material, icon: "cube.box")
+                }
+
                 if let filament = job.filamentName {
                     Divider()
                     infoRow(label: "Filament", value: filament, icon: "circle.fill")
+                }
+
+                if let filamentUsage = filamentUsageSummary(job) {
+                    Divider()
+                    infoRow(label: "Filament Usage", value: filamentUsage, icon: "scalemass")
+                }
+
+                if let cost = costSummary(job) {
+                    Divider()
+                    infoRow(label: "Cost", value: cost, icon: "dollarsign.circle")
                 }
 
                 if let eta = job.estimatedPrintTime {
@@ -378,6 +394,30 @@ struct JobDetailView: View {
                 .lineLimit(1)
         }
         .padding(.vertical, 6)
+    }
+
+    private func filamentUsageSummary(_ job: PrintJob) -> String? {
+        if let actual = job.actualFilamentUsage, actual > 0 {
+            return String(format: "%.1fg", actual)
+        }
+        if let estimated = job.estimatedFilamentUsage, estimated > 0 {
+            return String(format: "%.1fg est.", estimated)
+        }
+        return nil
+    }
+
+    private func costSummary(_ job: PrintJob) -> String? {
+        if let actual = job.actualCost, actual > 0 {
+            return currencyString(actual)
+        }
+        if let estimated = job.estimatedCost, estimated > 0 {
+            return "\(currencyString(estimated)) est."
+        }
+        return nil
+    }
+
+    private func currencyString(_ amount: Decimal) -> String {
+        String(format: "$%.2f", NSDecimalNumber(decimal: amount).doubleValue)
     }
 
     private func progressColor(for job: PrintJob) -> Color {

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct JobHistoryView: View {
@@ -103,7 +104,7 @@ struct JobHistoryView: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                 Spacer()
-                Text(item.status.capitalized)
+                Text(item.statusBadgeText)
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -130,8 +131,59 @@ struct JobHistoryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            if let failureReason = item.failureReason, item.status.lowercased() == "failed" {
+                Text(failureReason)
+                    .font(.caption)
+                    .foregroundStyle(.pfError)
+                    .lineLimit(2)
+            }
+
+            historyDetails(item)
         }
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func historyDetails(_ item: QueueHistoryEntry) -> some View {
+        let material = materialSummary(item)
+        let filamentUsage = filamentUsageSummary(item)
+        let cost = costSummary(item)
+        let toolheads = toolheadUsageSummary(item)
+
+        if material != nil || filamentUsage != nil || cost != nil || toolheads != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 12) {
+                    if let material {
+                        Label(material, systemImage: "cube.box")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if let filamentUsage {
+                        Label(filamentUsage, systemImage: "scalemass")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if let cost {
+                        Label(cost, systemImage: "dollarsign.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                if let toolheads {
+                    Text(toolheads)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+            }
+        }
     }
 
     // MARK: - Date Filter Sheet
@@ -189,6 +241,59 @@ struct JobHistoryView: View {
     }
 
     // MARK: - Helpers
+
+    private func materialSummary(_ item: QueueHistoryEntry) -> String? {
+        var parts: [String] = []
+        if let materialType = item.materialType?.trimmingCharacters(in: .whitespacesAndNewlines), !materialType.isEmpty {
+            parts.append(materialType)
+        }
+        if let filamentName = item.filamentName?.trimmingCharacters(in: .whitespacesAndNewlines), !filamentName.isEmpty {
+            parts.append(filamentName)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func filamentUsageSummary(_ item: QueueHistoryEntry) -> String? {
+        guard let grams = item.displayFilamentUsageGrams else { return nil }
+        let suffix = item.displayFilamentUsageIsEstimated ? " est." : ""
+        return String(format: "%.1fg%@", grams, suffix)
+    }
+
+    private func costSummary(_ item: QueueHistoryEntry) -> String? {
+        guard let cost = item.displayMaterialCostUsd else { return nil }
+        let suffix = item.costIsEstimated == true ? " est." : ""
+        let materialCostText = "\(currencyString(cost))\(suffix)"
+
+        if let totalCost = item.totalCostUsd, costDiffers(totalCost, from: cost) {
+            return "\(materialCostText) · \(currencyString(totalCost)) total"
+        }
+
+        return materialCostText
+    }
+
+    private func costDiffers(_ lhs: Decimal, from rhs: Decimal) -> Bool {
+        let left = NSDecimalNumber(decimal: lhs).doubleValue
+        let right = NSDecimalNumber(decimal: rhs).doubleValue
+        return abs(left - right) > 0.005
+    }
+
+    private func toolheadUsageSummary(_ item: QueueHistoryEntry) -> String? {
+        guard let usages = item.toolheadUsages, !usages.isEmpty else { return nil }
+        let summaries = usages.map { usage in
+            let label = "T\(usage.toolheadIndex ?? 0)"
+            let filament = usage.filamentName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let grams = usage.filamentUsageGrams.map { String(format: "%.1fg", $0) } ?? "—"
+            if let filament, !filament.isEmpty {
+                return "\(label): \(filament) \(grams)"
+            }
+            return "\(label): \(grams)"
+        }
+        return summaries.joined(separator: " · ")
+    }
+
+    private func currencyString(_ amount: Decimal) -> String {
+        String(format: "$%.2f", NSDecimalNumber(decimal: amount).doubleValue)
+    }
 
     private func statusColor(_ status: String) -> Color {
         switch status.lowercased() {
