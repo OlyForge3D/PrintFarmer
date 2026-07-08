@@ -200,7 +200,7 @@ const TagAnalyticsDashboard: React.FC = () => {
                     showPercent={false}
                     size="md"
                     trackClassName="rounded-md"
-                    fillClassName="rounded-md"
+                    fillClassName="bg-pf-progress-fill rounded-md"
                   />
                 </div>
 
