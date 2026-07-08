@@ -75,6 +75,9 @@
 		4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6208E685EEDD0498124C143A /* SignalRModels.swift */; };
 		4F679582C671B972DF8C69C5 /* NotificationsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */; };
 		0D7D6FE112414AE495990773 /* PendingReadyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61A5AAA3D1E4BAD9CA3FE7D /* PendingReadyMonitor.swift */; };
+		CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0002 /* ConnectionMonitor.swift */; };
+		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
+		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
 		4FFB267499981D7206071A85 /* AddSpoolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013F7A319FAE93072F4272D2 /* AddSpoolView.swift */; };
 		50223C7434476DC0B6673E8B /* SignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45FDB4137FE34914C387AE17 /* SignalRService.swift */; };
 		57E23E107ED77369284AF9D4 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E45A19848758E2DB8543C2A /* StatusBadge.swift */; };
@@ -445,6 +448,9 @@
 		647C4A6609FCEA4362C65F32 /* DemoSignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSignalRService.swift; sourceTree = "<group>"; };
 		5F1813AB98B7AEA3A598863F /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMode.swift; sourceTree = "<group>"; };
 		94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeBanner.swift; sourceTree = "<group>"; };
+		CF11AA0000000000000C0002 /* ConnectionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitor.swift; sourceTree = "<group>"; };
+		CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBar.swift; sourceTree = "<group>"; };
+		CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitorTests.swift; sourceTree = "<group>"; };
 		A2B6286100000000000000A1 /* JogSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroup.swift; sourceTree = "<group>"; };
 		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
 		A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisabledControlStyle.swift; sourceTree = "<group>"; };
@@ -558,6 +564,7 @@
 				C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */,
 				967769D7BBE893354EE7158A /* ServiceContainer.swift */,
 				45FDB4137FE34914C387AE17 /* SignalRService.swift */,
+				CF11AA0000000000000C0002 /* ConnectionMonitor.swift */,
 				BF23D467957EDEE89DB0A90A /* SpoolService.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */,
 				D4E5F6A7B8C9D0E1F2A3B4C5 /* QRSpoolScannerService.swift */,
@@ -856,6 +863,7 @@
 			isa = PBXGroup;
 			children = (
 				94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */,
+				CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */,
 				534568DC689B743CE69E44A4 /* EmptyStateView.swift */,
 				46DEBCDF7D99C0F2AEFB6AEC /* ActionButtonStyle.swift */,
 				93B8E20F526E7CE3E92BE781 /* JobCardView.swift */,
@@ -882,6 +890,7 @@
 				D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */,
 				A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */,
 				1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */,
+				CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1124,6 +1133,7 @@
 				BC10000000000000000000FA /* SpoolServiceTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
+				CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */,
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
 				DFD4294EC690BF7D5A4E695F /* DashboardViewModelTests.swift in Sources */,
 				814473DF28A49641B79766BA /* LoginViewModelTests.swift in Sources */,
@@ -1164,6 +1174,8 @@
 				BC1000000000000000000006 /* BarcodeIntakeViewModel.swift in Sources */,
 				BC1000000000000000000007 /* BarcodeIntakeView.swift in Sources */,
 				82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */,
+				CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */,
+				CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */,
 				20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */,
 				9E95C65470445D11D1AC62E4 /* AuthServiceProtocol.swift in Sources */,
 				F7A48E9C1C18B76092C052AE /* LocationServiceProtocol.swift in Sources */,

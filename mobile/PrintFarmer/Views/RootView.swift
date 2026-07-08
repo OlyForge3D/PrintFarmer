@@ -11,6 +11,7 @@ struct RootView: View {
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
     @State private var pendingReadyMonitor = PendingReadyMonitor()
+    @State private var connectionMonitor = ConnectionMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
@@ -21,6 +22,10 @@ struct RootView: View {
         VStack(spacing: 0) {
             if DemoMode.shared.isActive && authViewModel.isAuthenticated {
                 DemoModeBanner()
+            }
+
+            if authViewModel.isAuthenticated && !DemoMode.shared.isActive && isShowingMainContent {
+                ConnectionStatusBar(monitor: connectionMonitor)
             }
 
             Group {
@@ -50,6 +55,11 @@ struct RootView: View {
                             } catch {
                                 // SignalR will auto-reconnect; log silently
                             }
+                            connectionMonitor.configure(
+                                apiClient: services.apiClient,
+                                signalRService: services.signalRService
+                            )
+                            connectionMonitor.start()
                         }
                         .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
                             router.pendingReadyCount = newValue
@@ -66,12 +76,14 @@ struct RootView: View {
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
+                connectionMonitor.stop()
                 router.pendingReadyCount = 0
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
         }
         .onChange(of: services.activeServerGeneration) {
             pendingReadyMonitor.stopMonitoring()
+            connectionMonitor.stop()
             router.pendingReadyCount = 0
         }
         .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
@@ -83,9 +95,22 @@ struct RootView: View {
             signOutIfServerRegistryUnavailable()
         }
         .onDisappear {
+            connectionMonitor.stop()
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
         }
+    }
+
+    /// True only when the authenticated `ContentView` shell is actually on
+    /// screen — i.e. auth checked, splash elapsed, and a server is selected.
+    /// The connection bar is gated on this so it never renders over the splash
+    /// screen or `AddFirstServerView` (where the monitor hasn't started).
+    private var isShowingMainContent: Bool {
+        authViewModel.hasCheckedAuth
+            && minimumSplashElapsed
+            && !serverRegistry.servers.isEmpty
+            && serverRegistry.activeServerID != nil
+            && authViewModel.isAuthenticated
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.

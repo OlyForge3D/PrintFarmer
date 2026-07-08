@@ -19,6 +19,7 @@ struct PredictiveInsightsView: View {
         .navigationBarTitleDisplayMode(.large)
         #endif
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(predictiveService: services.predictiveService)
             await viewModel.predictFailure(
                 printerId: printerId,

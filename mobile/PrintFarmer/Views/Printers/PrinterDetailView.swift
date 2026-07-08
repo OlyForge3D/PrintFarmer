@@ -61,6 +61,7 @@ struct PrinterDetailView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(printerService: services.printerService)
             #if canImport(UIKit)
             if let nfc = services.nfcService {
