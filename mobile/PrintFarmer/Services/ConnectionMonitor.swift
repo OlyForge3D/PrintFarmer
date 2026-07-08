@@ -55,11 +55,17 @@ final class ConnectionMonitor {
     /// Starts (or restarts) the periodic connectivity poll loop.
     func start() {
         pollTask?.cancel()
+        // Reset to a neutral state so a restart (e.g. a server switch) never
+        // surfaces the previous server's status while the first probe is in flight.
+        status = .connecting
+        signalRState = .disconnected
+        isServerReachable = false
         pollTask = Task { [weak self] in
-            guard let self else { return }
             while !Task.isCancelled {
+                guard let self else { break }
                 await self.refresh()
-                try? await Task.sleep(for: self.pollInterval)
+                let interval = self.pollInterval
+                try? await Task.sleep(for: interval)
             }
         }
     }

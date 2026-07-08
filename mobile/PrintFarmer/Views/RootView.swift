@@ -24,7 +24,7 @@ struct RootView: View {
                 DemoModeBanner()
             }
 
-            if authViewModel.isAuthenticated && !DemoMode.shared.isActive {
+            if authViewModel.isAuthenticated && !DemoMode.shared.isActive && isShowingMainContent {
                 ConnectionStatusBar(monitor: connectionMonitor)
             }
 
@@ -83,6 +83,7 @@ struct RootView: View {
         }
         .onChange(of: services.activeServerGeneration) {
             pendingReadyMonitor.stopMonitoring()
+            connectionMonitor.stop()
             router.pendingReadyCount = 0
         }
         .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
@@ -98,6 +99,18 @@ struct RootView: View {
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
         }
+    }
+
+    /// True only when the authenticated `ContentView` shell is actually on
+    /// screen — i.e. auth checked, splash elapsed, and a server is selected.
+    /// The connection bar is gated on this so it never renders over the splash
+    /// screen or `AddFirstServerView` (where the monitor hasn't started).
+    private var isShowingMainContent: Bool {
+        authViewModel.hasCheckedAuth
+            && minimumSplashElapsed
+            && !serverRegistry.servers.isEmpty
+            && serverRegistry.activeServerID != nil
+            && authViewModel.isAuthenticated
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.
