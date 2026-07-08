@@ -442,37 +442,6 @@ public class QueuePlanningAssumptionsDto
     public int MinimumLeadHours { get; set; }
 }
 
-/// <summary>
-/// Recommendation item for high-impact queue operator actions.
-/// </summary>
-public class QueueRecommendationDto
-{
-    /// <summary>
-    /// Machine-readable category key.
-    /// </summary>
-    public string Category { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Short recommendation title.
-    /// </summary>
-    public string Title { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Operator action text shown in the dashboard.
-    /// </summary>
-    public string ActionText { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Number of queued jobs expected to unlock after taking this action.
-    /// </summary>
-    public int EstimatedUnlockedJobCount { get; set; }
-
-    /// <summary>
-    /// Deterministic ranking score for ordering recommendations.
-    /// </summary>
-    public int PriorityScore { get; set; }
-}
-
 // ============= HISTORY DTOs (Phase 2) =============
 
 /// <summary>
