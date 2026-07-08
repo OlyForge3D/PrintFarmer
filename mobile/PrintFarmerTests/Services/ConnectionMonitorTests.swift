@@ -110,4 +110,26 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.isServerReachable)
         XCTAssertEqual(monitor.status, .offline)
     }
+
+    // MARK: - stop() resets displayed state
+
+    func testStopClearsPreviousStatusImmediately() async {
+        MockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor()
+        monitor.configure(apiClient: MockAPIClient.makeAPIClient(), signalRService: signalR)
+
+        await monitor.refresh()
+        XCTAssertEqual(monitor.status, .connected)
+
+        // Stopping (e.g. on a server switch) must clear the previous server's
+        // status right away rather than leaving it on screen.
+        monitor.stop()
+
+        XCTAssertEqual(monitor.status, .connecting)
+        XCTAssertEqual(monitor.signalRState, .disconnected)
+        XCTAssertFalse(monitor.isServerReachable)
+    }
 }

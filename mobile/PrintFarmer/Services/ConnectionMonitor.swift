@@ -57,9 +57,7 @@ final class ConnectionMonitor {
         pollTask?.cancel()
         // Reset to a neutral state so a restart (e.g. a server switch) never
         // surfaces the previous server's status while the first probe is in flight.
-        status = .connecting
-        signalRState = .disconnected
-        isServerReachable = false
+        resetState()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { break }
@@ -74,6 +72,17 @@ final class ConnectionMonitor {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        // Clear the displayed state immediately so a stopped monitor (e.g. during
+        // a server switch) never keeps showing the previous server's status while
+        // the next connect attempt is still in flight.
+        resetState()
+    }
+
+    /// Resets the published state to a neutral "connecting" baseline.
+    private func resetState() {
+        status = .connecting
+        signalRState = .disconnected
+        isServerReachable = false
     }
 
     /// Performs a single connectivity sample and updates ``status``.
