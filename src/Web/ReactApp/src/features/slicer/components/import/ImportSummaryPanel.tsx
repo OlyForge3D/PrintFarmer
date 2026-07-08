@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Button, Card, Badge, Spinner } from '@/common/components/ui';
+import { Button, Card, Badge, Spinner, ProgressBar } from '@/common/components/ui';
 import { CheckCircleIcon, AlertTriangleIcon } from '@/common/components/icons/MdiIcons';
 
 export interface ImportSummaryPanelProps {
@@ -187,12 +187,11 @@ export function ImportSummaryPanel({
                   {importProgress}%
                 </span>
               </div>
-              <div className="h-2 bg-pf-bg-1 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-pf-accent transition-all duration-300"
-                  style={{ width: `${importProgress}%` }}
-                />
-              </div>
+              <ProgressBar
+                value={importProgress}
+                ariaLabel="Profile import progress"
+                showPercent={false}
+              />
             </div>
           )}
 

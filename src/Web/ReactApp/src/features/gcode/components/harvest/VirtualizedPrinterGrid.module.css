@@ -47,26 +47,6 @@
 .printerGridCellCompact {
   min-width: 140px;
 }
-.pf-progress-bar-0  { --progress-width: 0%; }
-.pf-progress-bar-1  { --progress-width: 1%; }
-.pf-progress-bar-2  { --progress-width: 2%; }
-.pf-progress-bar-3  { --progress-width: 3%; }
-.pf-progress-bar-4  { --progress-width: 4%; }
-.pf-progress-bar-5  { --progress-width: 5%; }
-.pf-progress-bar-6  { --progress-width: 6%; }
-.pf-progress-bar-7  { --progress-width: 7%; }
-.pf-progress-bar-8  { --progress-width: 8%; }
-.pf-progress-bar-9  { --progress-width: 9%; }
-.pf-progress-bar-10 { --progress-width: 10%; }
-.pf-progress-bar-20 { --progress-width: 20%; }
-.pf-progress-bar-30 { --progress-width: 30%; }
-.pf-progress-bar-40 { --progress-width: 40%; }
-.pf-progress-bar-50 { --progress-width: 50%; }
-.pf-progress-bar-60 { --progress-width: 60%; }
-.pf-progress-bar-70 { --progress-width: 70%; }
-.pf-progress-bar-80 { --progress-width: 80%; }
-.pf-progress-bar-90 { --progress-width: 90%; }
-.pf-progress-bar-100 { --progress-width: 100%; }
 .printerGridCell {
   /* Use flex to center content, and allow for custom sizing */
   display: flex;
@@ -75,19 +55,4 @@
   width: 100%;
   height: 100%;
 
-}
-
-.pf-progress-bar {
-  height: 8px;
-}
-.pf-progress-bar-compact {
-  height: 4px;
-}
-.pf-progress-inner {
-  height: 8px;
-  width: var(--progress-width, 0%);
-}
-.pf-progress-inner-compact {
-  height: 4px;
-  width: var(--progress-width, 0%);
 }

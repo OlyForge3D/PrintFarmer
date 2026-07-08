@@ -1,5 +1,6 @@
 import React from 'react';
 import Button from '@/common/components/ui/Button';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { PrinterImportProgress } from '@/services/printerHubService';
 
 type ImportProgressItem = PrinterImportProgress;
@@ -79,12 +80,11 @@ const ImportProgressTable: React.FC<ImportProgressTableProps> = ({ items, fileNa
 
       {/* Progress bar */}
       {totalCount > 0 && (
-        <div className="w-full bg-pf-bg-2 rounded-full h-2">
-          <div
-            className="bg-pf-accent h-2 rounded-full transition-all duration-300"
-            style={{ width: `${((totalCount - pendingCount) / totalCount) * 100}%` }}
-          />
-        </div>
+        <ProgressBar
+          value={((totalCount - pendingCount) / totalCount) * 100}
+          ariaLabel="Import progress"
+          showPercent={false}
+        />
       )}
 
       {/* Results table */}

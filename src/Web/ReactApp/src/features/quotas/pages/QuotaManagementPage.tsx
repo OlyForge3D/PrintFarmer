@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Card, Badge, Spinner, Input, Select, FormField } from '@/common/components/ui';
+import { Button, Card, Badge, Spinner, Input, Select, FormField, ProgressBar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
@@ -119,12 +119,12 @@ export function QuotaManagementPage() {
                   {q.notes && <div className="text-xs text-pf-text-secondary mt-1">{q.notes}</div>}
                 </div>
                 <div className="flex-shrink-0">
-                  <div className="w-32 bg-pf-bg-1 rounded-full h-2 mb-2">
-                    <div
-                      className="bg-pf-accent rounded-full h-2 transition-all"
-                      style={{ width: `${Math.min((q.usedAmount / q.limitAmount) * 100, 100)}%` }}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={Math.min((q.usedAmount / q.limitAmount) * 100, 100)}
+                    ariaLabel={`${quotaTypeLabel(q.quotaType)} quota usage`}
+                    showPercent={false}
+                    className="w-32 mb-2"
+                  />
                   <div className="text-xs text-right text-pf-text-secondary">
                     {((q.usedAmount / q.limitAmount) * 100).toFixed(0)}% used
                   </div>

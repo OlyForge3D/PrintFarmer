@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CubeIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { Button, FileUpload } from '@/common/components/ui';
+import { Button, FileUpload, ProgressBar } from '@/common/components/ui';
 import { Modal } from './Modal';
 import { slicerService } from '@/services/slicerService';
 import { toast } from 'sonner';
@@ -244,12 +244,12 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
 
                 {/* Progress Bar */}
                 {(item.status === 'uploading' || item.status === 'done') && (
-                  <div className="h-1.5 bg-pf-bg-0 rounded-full border border-pf-border overflow-hidden">
-                    <div
-                      className="h-full transition-all bg-pf-accent"
-                      style={{ width: `${Math.min(100, item.progress)}%` }}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={item.progress}
+                    ariaLabel={`${item.file.name} upload progress`}
+                    showPercent={false}
+                    size="xs"
+                  />
                 )}
 
                 {/* Error Message */}

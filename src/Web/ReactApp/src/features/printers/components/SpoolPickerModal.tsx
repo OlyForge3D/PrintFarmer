@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Select } from '@/common/components/ui/Select';
 import { RefreshIcon, SearchIcon, CheckIcon, CloseIcon, ChevronLeftIcon, ChevronUpIcon, ChevronDownIcon, EjectIcon } from '@/common/components/icons/MdiIcons';
 import { SpoolIcon } from '@/common/components/icons/SpoolIcon';
@@ -47,8 +48,7 @@ function getWeightColor(pct: number | null): string {
 }
 
 function getWeightBarColor(pct: number | null): string {
-  if (pct === null) return 'bg-pf-text-tertiary/20';
-  if (pct > 50) return 'bg-emerald-500';
+  if (pct === null || pct > 50) return 'bg-pf-success';
   if (pct > 20) return 'bg-amber-500';
   return 'bg-red-500';
 }
@@ -523,12 +523,14 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: S
                   </span>
                   <div className="flex justify-end">
                     {weight.percentage !== null && (
-                      <div className="w-14 h-1 rounded-full bg-pf-bg-2 overflow-hidden self-center">
-                        <div
-                          className={clsx('h-full rounded-full transition-all', getWeightBarColor(weight.percentage))}
-                          style={{ width: `${Math.max(2, weight.percentage)}%` }}
-                        />
-                      </div>
+                      <ProgressBar
+                        value={Math.max(2, weight.percentage)}
+                        ariaLabel={`${displayName} remaining weight`}
+                        showPercent={false}
+                        size="xs"
+                        className="w-14 self-center"
+                        fillClassName={getWeightBarColor(weight.percentage)}
+                      />
                   )}
                 </div>
               </div>

@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 // No MdiIcons used in this component
 import { CheckCircleIcon, AlertCircleIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Modal } from '@/common/components/modals/Modal';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
 
@@ -459,17 +460,11 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 </span>
                 <span className="text-sm text-pf-accent">{Math.round(slicingProgress.progress)}%</span>
               </div>
-              <div className="w-full bg-pf-accent-bg/15 rounded-full h-2 overflow-hidden">
-                {(() => {
-                  const pct = Math.max(0, Math.min(100, Math.round(slicingProgress.progress)));
-                  const step = Math.round(pct / 5) * 5;
-                  const widthClass = `w-[${step}%]` as const;
-                  return <>
-                    <span className="sr-only">Slicing progress {pct}%</span>
-                    <div className={`h-2 bg-pf-accent-bg transition-all duration-300 ${widthClass}`} aria-hidden="true" />
-                  </>;
-                })()}
-              </div>
+              <ProgressBar
+                value={slicingProgress.progress}
+                ariaLabel="Slicing progress"
+                showPercent={false}
+              />
               {slicingProgress.message && (
                 <div className="mt-2 text-sm text-pf-accent">{slicingProgress.message}</div>
               )}

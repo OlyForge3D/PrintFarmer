@@ -39,6 +39,10 @@
   --pf-accent-fg:    var(--pf-on-accent);
   --pf-accent-2:     #fbbf24;
 
+  /* --- Progress ------------------------------------------------------------- */
+  --pf-progress-track: #0d150d;
+  --pf-progress-fill:  #00ff41;
+
   /* --- Semantic: Success ---------------------------------------------------- */
   --pf-success:        #00ff41;
   --pf-success-bg:     #003d10;

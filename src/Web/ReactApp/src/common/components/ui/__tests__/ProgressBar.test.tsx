@@ -10,6 +10,39 @@ describe('ProgressBar', () => {
     expect(progressbar).toHaveAttribute('aria-valuenow', '50');
   });
 
+  it('should use the shared theme track and fill tokens', () => {
+    render(<ProgressBar value={50} />);
+
+    const track = screen.getByRole('progressbar');
+    const fill = track.querySelector('[data-pf-progress-fill]');
+
+    expect(track).toHaveClass('bg-pf-progress-track');
+    expect(fill).toHaveClass('bg-pf-progress-fill');
+    expect(fill).toHaveStyle({ width: '50%' });
+  });
+
+  it('should omit the default fill token when a custom fill class is provided', () => {
+    render(<ProgressBar value={50} fillClassName="bg-pf-error" />);
+
+    const track = screen.getByRole('progressbar');
+    const fill = track.querySelector('[data-pf-progress-fill]');
+
+    expect(track).toHaveClass('bg-pf-progress-track');
+    expect(fill).toHaveClass('bg-pf-error');
+    expect(fill).not.toHaveClass('bg-pf-progress-fill');
+  });
+
+  it('should map non-100 max values to a percent width while preserving aria value', () => {
+    render(<ProgressBar value={25} max={50} showPercent={false} />);
+
+    const track = screen.getByRole('progressbar');
+    const fill = track.querySelector('[data-pf-progress-fill]');
+
+    expect(track).toHaveAttribute('aria-valuenow', '25');
+    expect(track).toHaveAttribute('aria-valuemax', '50');
+    expect(fill).toHaveStyle({ width: '50%' });
+  });
+
   it('should render with label', () => {
     render(<ProgressBar value={25} label="Upload Progress" />);
     
@@ -66,23 +99,6 @@ describe('ProgressBar', () => {
   it('should render with md size', () => {
     render(<ProgressBar value={50} size="md" />);
     
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
-  });
-
-  it('should render with different colors', () => {
-    const { rerender } = render(<ProgressBar value={50} color="blue" />);
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    
-    rerender(<ProgressBar value={50} color="green" />);
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    
-    rerender(<ProgressBar value={50} color="red" />);
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    
-    rerender(<ProgressBar value={50} color="purple" />);
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    
-    rerender(<ProgressBar value={50} color="gray" />);
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 

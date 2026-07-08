@@ -43,6 +43,8 @@
   --color-pf-success-bg: var(--pf-success-bg);
   --color-pf-success-hover: var(--pf-success-hover);
   --color-pf-link: var(--pf-link);
+  --color-pf-progress-track: var(--pf-progress-track);
+  --color-pf-progress-fill: var(--pf-progress-fill);
 
   /* Status colors */
   --color-pf-status-online-bg: var(--pf-status-online-bg);

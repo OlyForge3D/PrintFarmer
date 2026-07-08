@@ -2,7 +2,6 @@ if (!window.PrintFarmerDebug) {
   window.PrintFarmerDebug = {};
 }
 import React, { useState, useEffect } from 'react';
-import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCancelDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/common/hooks/useApi';
 import { useDiscoveryStream, useSignalRConnection } from '@/common/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';

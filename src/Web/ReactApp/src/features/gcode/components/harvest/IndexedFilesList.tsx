@@ -7,6 +7,7 @@ import { signalRService as harvestSignalRService } from '@/services/harvest-sign
 import { Button } from '@/common/components/ui/Button';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Select } from '@/common/components/ui/Select';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Modal } from '@/common/components/modals/Modal';
 import { ArrowLeftIcon, ArrowRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from '@/common/components/icons/MdiIcons';
 
@@ -470,12 +471,11 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                     <td className="p-2 border-b border-pf-border">
                       {file.progress && (
                         <div className="flex flex-col gap-1">
-                          <div className="w-full bg-pf-bg-2 rounded-full h-2 overflow-hidden">
-                            <div
-                              className="bg-pf-accent h-full transition-all duration-300"
-                              style={{ width: `${file.progress.percent}%` }}
-                            />
-                          </div>
+                          <ProgressBar
+                            value={file.progress.percent}
+                            ariaLabel={`${file.fileName} import progress`}
+                            showPercent={false}
+                          />
                           <span className="text-xs text-pf-muted">
                             {file.progress.percent}% ({(file.progress.bytesCopied / 1024 / 1024).toFixed(1)}MB / {(file.progress.totalBytes / 1024 / 1024).toFixed(1)}MB)
                           </span>

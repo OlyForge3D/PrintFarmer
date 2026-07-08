@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Breadcrumbs } from '@/common/components/Breadcrumbs';
-import { Button } from '@/common/components/ui';
+import { Button, ProgressBar } from '@/common/components/ui';
 // Sparkles icon - using ActivityIcon as close substitute
 import { ActivityIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -255,14 +255,12 @@ export const HarvestPage: React.FC = () => {
                       <span>Added: {op.filesAdded}</span>
                       <span>Skipped: {op.filesSkipped}</span>
                     </div>
-                    <div className="mt-2 w-full bg-pf-background rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-pf-success h-2 rounded-full transition-all"
-                        style={{
-                          '--progress': `${op.filesFound > 0 ? (op.filesProcessed / op.filesFound) * 100 : 0}%`,
-                        } as React.CSSProperties & { '--progress': string }}
-                      />
-                    </div>
+                    <ProgressBar
+                      value={op.filesFound > 0 ? (op.filesProcessed / op.filesFound) * 100 : 0}
+                      ariaLabel={`${op.printerName} harvest progress`}
+                      showPercent={false}
+                      className="mt-2"
+                    />
                   </div>
                   <div className="flex gap-2 shrink-0 ml-4">
                     <Button

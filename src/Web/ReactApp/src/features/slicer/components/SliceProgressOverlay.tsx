@@ -62,12 +62,11 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (percent / 100) * circumference;
-
-  const ringColor = isFailed
+  const ringFillClassName = isFailed
     ? 'stroke-pf-error'
     : isCompleted
       ? 'stroke-pf-success'
-      : 'stroke-pf-accent';
+      : 'stroke-pf-progress-fill';
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-lg">
@@ -83,7 +82,7 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
               r={radius}
               fill="none"
               strokeWidth={strokeWidth}
-              className="stroke-white/10"
+              className="stroke-pf-progress-track"
             />
             {/* Progress arc */}
             <circle
@@ -95,7 +94,7 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
               strokeLinecap="round"
               strokeDasharray={circumference}
               strokeDashoffset={offset}
-              className={`${ringColor} transition-[stroke-dashoffset] duration-500 ease-out`}
+              className={`${ringFillClassName} transition-[stroke-dashoffset] duration-500 ease-out`}
             />
           </svg>
           {/* Center label */}

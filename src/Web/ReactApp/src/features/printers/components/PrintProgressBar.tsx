@@ -1,5 +1,6 @@
 import React from 'react';
 import { NozzleIcon, BedIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
+import { ProgressBar } from '@/common/components/ui';
 
 interface PrintProgressBarProps {
   progress: number | undefined;
@@ -56,22 +57,14 @@ export function PrintProgressBar({
         )}
         {isActive && <span className="font-semibold ml-2">{Math.round(progress)}%</span>}
       </div>
-      <div
-        className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden"
-        role="progressbar"
-        aria-label="Print progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={isActive ? Math.round(clampedProgress) : 0}
-      >
-        <div
-          ref={progressRef}
-          className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
-          style={{ width: `${isActive ? clampedProgress : 0}%` }}
-        >
-          <span className="sr-only">Print progress: {isActive ? Math.round(clampedProgress) : 0}%</span>
-        </div>
-      </div>
+      <ProgressBar
+        value={isActive ? clampedProgress : 0}
+        ariaLabel="Print progress"
+        ariaValueText={`Print progress: ${isActive ? Math.round(clampedProgress) : 0}%`}
+        showPercent={false}
+        fillRef={progressRef}
+        animated
+      />
       {/* Temperature readouts */}
       {showTemperatures && isOnline && (
         <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-pf-text-secondary">

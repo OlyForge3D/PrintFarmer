@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button } from '@/common/components/ui';
+import { Button, ProgressBar } from '@/common/components/ui';
 import { Badge } from '@/common/components/ui/Badge';
 import { 
   CheckIcon, 
@@ -246,12 +246,12 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               {project.completedPrints} / {project.totalPrints} prints ({project.progressPercent}%)
             </span>
           </div>
-          <div className="h-3 bg-pf-bg-1 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-pf-accent rounded-full transition-all duration-300"
-              style={{ width: `${project.progressPercent}%` }}
-            />
-          </div>
+          <ProgressBar
+            value={project.progressPercent}
+            ariaLabel="Overall project progress"
+            showPercent={false}
+            size="md"
+          />
           {(project.estimatedTotalCost != null && project.estimatedTotalCost > 0) && (
             <div className="flex items-center justify-between mt-2 text-sm">
               <span className="text-pf-text-tertiary">Estimated Cost</span>
