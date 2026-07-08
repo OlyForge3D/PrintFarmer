@@ -99,12 +99,189 @@ struct QueueHistoryEntry: Codable, Sendable, Identifiable {
     let status: String
     let completedAt: Date?
     let durationSeconds: Int?
+    let completionPercentage: Double?
+    let materialCostUsd: Decimal?
+    let totalCostUsd: Decimal?
+    let costIsEstimated: Bool?
+    let materialType: String?
+    let filamentName: String?
+    let filamentColor: String?
+    let actualFilamentUsageGrams: Double?
+    let estimatedFilamentUsageGrams: Double?
+    let actualCost: Decimal?
+    let failureReason: String?
+    let toolheadUsages: [QueueHistoryToolheadUsage]?
+    let tags: [QueueHistoryTag]?
+    let startedAt: Date?
+    let deadlineAt: Date?
+
+    init(
+        id: String,
+        jobName: String,
+        printerName: String?,
+        status: String,
+        completedAt: Date?,
+        durationSeconds: Int?,
+        completionPercentage: Double? = nil,
+        materialCostUsd: Decimal? = nil,
+        totalCostUsd: Decimal? = nil,
+        costIsEstimated: Bool? = nil,
+        materialType: String? = nil,
+        filamentName: String? = nil,
+        filamentColor: String? = nil,
+        actualFilamentUsageGrams: Double? = nil,
+        estimatedFilamentUsageGrams: Double? = nil,
+        actualCost: Decimal? = nil,
+        failureReason: String? = nil,
+        toolheadUsages: [QueueHistoryToolheadUsage]? = nil,
+        tags: [QueueHistoryTag]? = nil,
+        startedAt: Date? = nil,
+        deadlineAt: Date? = nil
+    ) {
+        self.id = id
+        self.jobName = jobName
+        self.printerName = printerName
+        self.status = status
+        self.completedAt = completedAt
+        self.durationSeconds = durationSeconds
+        self.completionPercentage = completionPercentage
+        self.materialCostUsd = materialCostUsd
+        self.totalCostUsd = totalCostUsd
+        self.costIsEstimated = costIsEstimated
+        self.materialType = materialType
+        self.filamentName = filamentName
+        self.filamentColor = filamentColor
+        self.actualFilamentUsageGrams = actualFilamentUsageGrams
+        self.estimatedFilamentUsageGrams = estimatedFilamentUsageGrams
+        self.actualCost = actualCost
+        self.failureReason = failureReason
+        self.toolheadUsages = toolheadUsages
+        self.tags = tags
+        self.startedAt = startedAt
+        self.deadlineAt = deadlineAt
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, jobName, printerName, status
+        case id, jobName, printerName, status, completionPercentage
+        case materialCostUsd, totalCostUsd, costIsEstimated
+        case materialType, filamentName, filamentColor
+        case actualFilamentUsageGrams, estimatedFilamentUsageGrams
+        case actualCost, failureReason, toolheadUsages, tags
+        case startedAt = "startedAtUtc"
+        case deadlineAt = "deadlineAtUtc"
         case completedAt = "completedAtUtc"
         case durationSeconds = "actualPrintTimeSeconds"
     }
+}
+
+extension QueueHistoryEntry {
+    var shouldShowPartialCompletionBadge: Bool {
+        let normalizedStatus = status.lowercased()
+        guard normalizedStatus == "failed" || normalizedStatus == "cancelled",
+              let completionPercentage,
+              completionPercentage > 0,
+              completionPercentage < 100 else {
+            return false
+        }
+        return true
+    }
+
+    var statusBadgeText: String {
+        let baseText: String
+        switch status.lowercased() {
+        case "completed":
+            baseText = "Completed"
+        case "failed":
+            baseText = "Failed"
+        case "cancelled":
+            baseText = "Cancelled"
+        default:
+            baseText = status.capitalized
+        }
+
+        guard shouldShowPartialCompletionBadge, let completionPercentage else {
+            return baseText
+        }
+        return "\(baseText) @ \(Int(completionPercentage.rounded()))%"
+    }
+
+    var displayMaterialCostUsd: Decimal? {
+        if let toolheadUsages, !toolheadUsages.isEmpty {
+            let total = toolheadUsages.compactMap(\.materialCostUsd).reduce(Decimal(0), +)
+            if total > 0 { return total }
+        }
+
+        if let materialCostUsd, materialCostUsd > 0 { return materialCostUsd }
+        if let totalCostUsd, totalCostUsd > 0 { return totalCostUsd }
+        return nil
+    }
+
+    var displayFilamentUsageGrams: Double? {
+        if let toolheadUsages, !toolheadUsages.isEmpty {
+            let total = toolheadUsages.reduce(0) { sum, usage in
+                if let actualGrams = usage.filamentUsageGrams, actualGrams > 0 {
+                    return sum + actualGrams
+                }
+                return sum + (usage.slicerEstimateGrams ?? 0)
+            }
+            if total > 0 { return total }
+        }
+
+        if let actualFilamentUsageGrams, actualFilamentUsageGrams > 0 {
+            return actualFilamentUsageGrams
+        }
+
+        if let estimatedFilamentUsageGrams, estimatedFilamentUsageGrams > 0 {
+            return estimatedFilamentUsageGrams
+        }
+
+        return nil
+    }
+
+    var displayFilamentUsageIsEstimated: Bool {
+        if let toolheadUsages, !toolheadUsages.isEmpty {
+            let actualTotal = toolheadUsages.reduce(0) { sum, usage in
+                guard let actualGrams = usage.filamentUsageGrams, actualGrams > 0 else { return sum }
+                return sum + actualGrams
+            }
+            let displayedTotal = toolheadUsages.reduce(0) { sum, usage in
+                if let actualGrams = usage.filamentUsageGrams, actualGrams > 0 {
+                    return sum + actualGrams
+                }
+                return sum + (usage.slicerEstimateGrams ?? 0)
+            }
+            if displayedTotal > 0 {
+                return actualTotal <= 0
+            }
+        }
+
+        return (actualFilamentUsageGrams ?? 0) <= 0 && (estimatedFilamentUsageGrams ?? 0) > 0
+    }
+}
+
+// MARK: - Queue History Toolhead Usage
+
+struct QueueHistoryToolheadUsage: Codable, Sendable {
+    let id: String?
+    let printJobId: String?
+    let toolheadIndex: Int?
+    let spoolmanSpoolId: Int?
+    let filamentUsageGrams: Double?
+    let slicerEstimateGrams: Double?
+    let filamentName: String?
+    let filamentColor: String?
+    let materialCostUsd: Decimal?
+}
+
+// MARK: - Queue History Tag
+
+struct QueueHistoryTag: Codable, Sendable {
+    let id: String?
+    let name: String?
+    let category: String?
+    let isAutoGenerated: Bool?
+    let color: String?
+    let description: String?
 }
 
 // MARK: - Queue History Stats
