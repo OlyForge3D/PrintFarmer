@@ -232,7 +232,7 @@ public class DiscoveryProbeValidationTests
     }
 
     [Fact]
-    public async Task MoonrakerProbe_NonU1SystemInfo_DoesNotAssignSnapmakerModel()
+    public async Task MoonrakerProbe_NonU1SystemInfo_ReturnsNoResult()
     {
         const string ipAddress = "192.0.2.44";
         var handler = new RoutingHttpMessageHandler(request =>
@@ -263,12 +263,43 @@ public class DiscoveryProbeValidationTests
 
         ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs: 1000, cancellationToken: default);
 
-        result.Should().NotBeNull();
-        result!.Printer.BackendPort.Should().Be(80);
-        result.Printer.FrontendPort.Should().Be(80);
-        result.Printer.Manufacturer.Should().BeNull();
-        result.Printer.Model.Should().BeNull();
-        result.Reason.Should().Contain("Moonraker system_info detected");
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_Port80SnapmakerNonU1_ReturnsNoResult()
+    {
+        const string ipAddress = "192.0.2.46";
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "manufacturer": "Snapmaker",
+                            "model": "J1",
+                            "serial_number": "U1-SERIAL-DOES-NOT-MATTER"
+                          },
+                          "network": {}
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        var probe = new HttpClientMoonrakerProbe(handler);
+
+        ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs: 1000, cancellationToken: default);
+
+        result.Should().BeNull();
     }
 
     [Fact]
@@ -337,6 +368,84 @@ public class DiscoveryProbeValidationTests
         metadata!.Manufacturer.Should().Be("Snapmaker");
         metadata.Model.Should().Be("Snapmaker U1");
         metadata.DeviceName.Should().Be("U1");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ExplicitUrlPort_DoesNotFallbackToPort80()
+    {
+        var requestedPaths = new List<string>();
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            requestedPaths.Add($"{request.RequestUri?.Port}{request.RequestUri?.AbsolutePath}");
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "machine_type": "Snapmaker U1"
+                          }
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.47:8123"),
+            preferredBackendPort: null,
+            cancellationToken: default);
+
+        resolution.Should().BeNull();
+        requestedPaths.Should().Equal("8123/printer/info");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_PreferredCustomPort_HonorsCustomPortWithoutFallback()
+    {
+        var requestedPaths = new List<string>();
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            requestedPaths.Add($"{request.RequestUri?.Port}{request.RequestUri?.AbsolutePath}");
+            if (request.RequestUri?.Port == 9234 && request.RequestUri.AbsolutePath == "/printer/info")
+            {
+                return JsonResponse("""{ "result": { "state_message": "ready", "hostname": "preferred-port" } }""");
+            }
+
+            return JsonResponse("""
+                {
+                  "result": {
+                    "system_info": {
+                      "product_info": {
+                        "machine_type": "Snapmaker U1"
+                      }
+                    }
+                  }
+                }
+                """);
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.48"),
+            preferredBackendPort: 9234,
+            cancellationToken: default);
+
+        resolution.Should().NotBeNull();
+        resolution!.BackendPort.Should().Be(9234);
+        resolution.EndpointPath.Should().Be("/printer/info");
+        resolution.IsSnapmakerU1.Should().BeFalse();
+        requestedPaths.Should().Equal("9234/printer/info");
     }
 
     [Fact]

@@ -27,7 +27,12 @@ public static class MoonrakerOnboardingResolver
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(serverUrl);
 
-        foreach (MoonrakerEndpointCandidate candidate in GetEndpointCandidates(preferredBackendPort))
+        bool hasExplicitUrlPort = !serverUrl.IsDefaultPort;
+        int? portToProbe = preferredBackendPort ?? (hasExplicitUrlPort ? serverUrl.Port : null);
+        bool isAuthoritativePort = hasExplicitUrlPort ||
+                                   (preferredBackendPort.HasValue && preferredBackendPort.Value != DefaultMoonrakerPort);
+
+        foreach (MoonrakerEndpointCandidate candidate in GetEndpointCandidates(portToProbe, isAuthoritativePort))
         {
             Uri endpoint = BuildEndpointUri(serverUrl, candidate.BackendPort, candidate.EndpointPath);
             try
@@ -141,19 +146,12 @@ public static class MoonrakerOnboardingResolver
                 return Task.FromResult((false, 0, "Missing system_info"));
             }
 
-            SnapmakerU1Metadata? u1Metadata = ExtractSnapmakerU1Metadata(systemInfo);
-            if (u1Metadata is not null)
+            if (ExtractSnapmakerU1Metadata(systemInfo) is not null)
             {
                 return Task.FromResult((true, 100, "Snapmaker U1 Moonraker detected"));
             }
 
-            bool hasProductInfo = systemInfo.TryGetProperty("product_info", out JsonElement productInfo) &&
-                                  productInfo.ValueKind == JsonValueKind.Object;
-            bool hasNetwork = systemInfo.TryGetProperty("network", out JsonElement network) &&
-                              network.ValueKind == JsonValueKind.Object;
-
-            int confidence = hasProductInfo && hasNetwork ? 90 : hasProductInfo || hasNetwork ? 75 : 70;
-            return Task.FromResult((true, confidence, "Moonraker system_info detected"));
+            return Task.FromResult((false, 0, "Moonraker system_info did not identify a Snapmaker U1"));
         }
         catch
         {
@@ -204,6 +202,15 @@ public static class MoonrakerOnboardingResolver
     /// </summary>
     public static IEnumerable<MoonrakerEndpointCandidate> GetEndpointCandidates(int? preferredBackendPort)
     {
+        bool isAuthoritativePort = preferredBackendPort.HasValue && preferredBackendPort.Value != DefaultMoonrakerPort;
+
+        return GetEndpointCandidates(preferredBackendPort, isAuthoritativePort);
+    }
+
+    private static IEnumerable<MoonrakerEndpointCandidate> GetEndpointCandidates(
+        int? preferredBackendPort,
+        bool isAuthoritativePort)
+    {
         HashSet<string> yielded = [];
 
         if (preferredBackendPort.HasValue)
@@ -215,6 +222,11 @@ public static class MoonrakerOnboardingResolver
             {
                 yield return new MoonrakerEndpointCandidate(SnapmakerU1MoonrakerPort, MachineSystemInfoPath);
                 yielded.Add($"{SnapmakerU1MoonrakerPort}:{MachineSystemInfoPath}");
+            }
+
+            if (isAuthoritativePort)
+            {
+                yield break;
             }
         }
 
@@ -242,39 +254,65 @@ public static class MoonrakerOnboardingResolver
         }
 
         string? deviceName = TryGetString(productInfo, "device_name");
+        string? manufacturer = FirstNonWhiteSpace(
+            TryGetString(productInfo, "manufacturer"),
+            TryGetString(productInfo, "vendor"),
+            TryGetString(productInfo, "brand"));
+        string? machineType = TryGetString(productInfo, "machine_type");
         string? productName = TryGetString(productInfo, "product_name");
         string? model = TryGetString(productInfo, "model");
+        string? productModel = TryGetString(productInfo, "product_model");
 
         // SnapCon/U1Hub prove port-80 /machine/system_info use, but exact stock-U1
-        // product_info keys are inferred rather than real-hardware verified. Scan all
-        // string metadata values so manufacturer/model split across fields still matches.
-        string combined = string.Join(' ', EnumerateStringValues(productInfo));
+        // product_info field names are inferred rather than real-hardware verified.
+        // Only model/product identity fields participate so serial/firmware text cannot
+        // accidentally turn a non-U1 Snapmaker into a U1 catalog match.
+        string?[] identityFields = [machineType, productName, model, productModel];
+        bool hasSnapmaker = ContainsIgnoreCase(manufacturer, SnapmakerManufacturerName) ||
+                            identityFields.Any(static value => ContainsIgnoreCase(value, SnapmakerManufacturerName));
+        bool hasU1Model = identityFields.Any(ContainsU1Token);
 
-        if (!combined.Contains("snapmaker", StringComparison.OrdinalIgnoreCase) ||
-            !combined.Contains("u1", StringComparison.OrdinalIgnoreCase))
+        if (!hasSnapmaker || !hasU1Model)
         {
             return null;
         }
 
         return new SnapmakerU1Metadata(
-            FirstNonWhiteSpace(deviceName, productName, model) ?? SnapmakerU1ModelName,
+            FirstNonWhiteSpace(deviceName, productName, model, productModel) ?? SnapmakerU1ModelName,
             SnapmakerManufacturerName,
             SnapmakerU1ModelName);
     }
 
-    private static IEnumerable<string> EnumerateStringValues(JsonElement element)
+    private static bool ContainsIgnoreCase(string? value, string expected)
     {
-        foreach (JsonProperty property in element.EnumerateObject())
+        return value?.Contains(expected, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool ContainsU1Token(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
         {
-            if (property.Value.ValueKind == JsonValueKind.String)
+            return false;
+        }
+
+        ReadOnlySpan<char> span = value.AsSpan();
+        for (int i = 0; i < span.Length - 1; i++)
+        {
+            if (char.ToUpperInvariant(span[i]) == 'U' &&
+                span[i + 1] == '1' &&
+                IsTokenBoundary(span, i - 1) &&
+                IsTokenBoundary(span, i + 2))
             {
-                string? value = property.Value.GetString();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    yield return value;
-                }
+                return true;
             }
         }
+
+        return false;
+    }
+
+    private static bool IsTokenBoundary(ReadOnlySpan<char> value, int index)
+    {
+        return index < 0 || index >= value.Length || !char.IsLetterOrDigit(value[index]);
     }
 
     private static string? FirstNonWhiteSpace(params string?[] values)
