@@ -213,6 +213,35 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)/status") ?? false)
     }
 
+    // MARK: - Camera URLs
+
+    func testListCameraUrlsCallsCorrectEndpoint() async throws {
+        MockAPIClient.stubResponse(json: TestJSON.printerCameraUrls)
+
+        let cameras = try await printerService.listCameraUrls()
+
+        XCTAssertEqual(cameras.count, 2)
+        XCTAssertEqual(cameras[1].cameraAccessMode, .snapshotOnly)
+        XCTAssertEqual(cameras[1].cameraSnapshotStrategy, .snapmakerU1MonitorJpeg)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "GET")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/api/printers/camera-urls") ?? false)
+    }
+
+    func testGetCameraUrlCallsCorrectEndpoint() async throws {
+        MockAPIClient.stubResponse(json: TestJSON.printerCameraUrl)
+
+        let camera = try await printerService.getCameraUrl(id: TestData.testUUID)
+
+        XCTAssertEqual(camera.accessMode, .snapshotOnly)
+        XCTAssertEqual(camera.snapshotStrategy, .snapmakerU1MonitorJpeg)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "GET")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/api/printers/\(TestData.testUUID)/camera-url") ?? false)
+    }
+
     // MARK: - Command Error Handling
 
     func testCommandThrowsOnServerError() async {

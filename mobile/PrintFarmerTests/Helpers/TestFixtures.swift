@@ -31,6 +31,10 @@ enum TestJSON {
         "jobName": "benchy.gcode",
         "thumbnailUrl": "http://192.168.1.100/thumb/benchy.png",
         "cameraStreamUrl": "http://192.168.1.100:8080/?action=stream",
+        "cameraSnapshotUrl": "http://192.168.1.100/snapshot.jpg",
+        "cameraAccessMode": "StreamAndSnapshot",
+        "cameraStreamFormat": "Mjpeg",
+        "cameraSnapshotStrategy": "DirectUrl",
         "x": 120.0,
         "y": 85.5,
         "z": 12.3,
@@ -73,6 +77,39 @@ enum TestJSON {
     """
 
     static let printerArray = "[\(printer), \(printerMinimal)]"
+
+    static let printerCameraUrls = """
+    [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Prusa MK4",
+            "cameraStreamUrl": "http://192.168.1.100:8080/?action=stream",
+            "cameraSnapshotUrl": "http://192.168.1.100/snapshot.jpg",
+            "cameraAccessMode": "StreamAndSnapshot",
+            "cameraStreamFormat": "Mjpeg",
+            "cameraSnapshotStrategy": "DirectUrl"
+        },
+        {
+            "id": "660e8400-e29b-41d4-a716-446655440001",
+            "name": "Snapmaker U1",
+            "cameraStreamUrl": null,
+            "cameraSnapshotUrl": null,
+            "cameraAccessMode": "SnapshotOnly",
+            "cameraStreamFormat": "Unknown",
+            "cameraSnapshotStrategy": "SnapmakerU1MonitorJpeg"
+        }
+    ]
+    """
+
+    static let printerCameraUrl = """
+    {
+        "streamUrl": null,
+        "snapshotUrl": null,
+        "accessMode": "SnapshotOnly",
+        "streamFormat": "Unknown",
+        "snapshotStrategy": "SnapmakerU1MonitorJpeg"
+    }
+    """
 
     // MARK: PrintJob (JobQueuePrintJobDto)
 

@@ -18,6 +18,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     override func tearDown() {
+        viewModel?.stopSnapshotPolling()
         mockService = nil
         viewModel = nil
         super.tearDown()
@@ -67,6 +68,75 @@ final class PrinterDetailViewModelTests: XCTestCase {
 
         XCTAssertFalse(viewModel.isPrinting)
         XCTAssertFalse(viewModel.isOnline)
+    }
+
+    // MARK: - Camera Branching
+
+    func testSnapshotOnlyCameraStartsPollingSnapshots() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil,
+            snapshotUrl: nil,
+            accessMode: .snapshotOnly,
+            streamFormat: .unknown,
+            snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+        mockService.snapshotDataToReturn = Data([0xff, 0xd8, 0xff, 0xd9])
+        viewModel = PrinterDetailViewModel(
+            printerId: TestData.testUUID,
+            snapshotPollInterval: .milliseconds(10),
+            snapshotErrorBackoffBaseSeconds: 1,
+            snapshotErrorBackoffMaxSeconds: 1
+        )
+        viewModel.configure(printerService: mockService)
+
+        await viewModel.loadPrinter()
+        try? await Task.sleep(for: .milliseconds(25))
+        viewModel.stopSnapshotPolling()
+
+        XCTAssertEqual(viewModel.cameraPreviewMode, .snapshotPolling)
+        XCTAssertEqual(viewModel.printer?.cameraSnapshotStrategy, .snapmakerU1MonitorJpeg)
+        XCTAssertGreaterThan(mockService.getSnapshotCallCount, 0)
+        XCTAssertNotNil(viewModel.snapshotData)
+    }
+
+    func testMjpegStreamCameraDoesNotStartSnapshotPolling() async throws {
+        let printer = try TestData.decodePrinter()
+        mockService.printerToReturn = printer
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: "http://192.168.1.100:8080/?action=stream",
+            snapshotUrl: "http://192.168.1.100/snapshot.jpg",
+            accessMode: .streamAndSnapshot,
+            streamFormat: .mjpeg,
+            snapshotStrategy: .directUrl
+        )
+
+        await viewModel.loadPrinter()
+        viewModel.startSnapshotPollingIfNeeded()
+        try? await Task.sleep(for: .milliseconds(25))
+
+        XCTAssertEqual(viewModel.cameraPreviewMode, .mjpegStream)
+        XCTAssertFalse(viewModel.isSnapshotPollingActive)
+        XCTAssertEqual(mockService.getSnapshotCallCount, 0)
+    }
+
+    func testUnsupportedStreamCameraUsesUnsupportedPreviewMode() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: "rtsp://printer.local/live",
+            snapshotUrl: nil,
+            accessMode: .unsupportedStream,
+            streamFormat: .rtsp,
+            snapshotStrategy: .none
+        )
+
+        await viewModel.loadPrinter()
+
+        XCTAssertEqual(viewModel.cameraPreviewMode, .unsupported)
+        XCTAssertFalse(viewModel.isSnapshotPollingActive)
+        XCTAssertEqual(mockService.getSnapshotCallCount, 0)
     }
 
     // MARK: - Pause/Resume Commands

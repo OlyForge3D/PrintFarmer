@@ -480,6 +480,8 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func list(includeDisabled: Bool) async throws -> [Printer] { [] }
     func get(id: UUID) async throws -> Printer { throw NetworkError.notFound }
     func getStatus(id: UUID) async throws -> PrinterStatusDetail { throw NetworkError.notFound }
+    func listCameraUrls() async throws -> [PrinterCameraUrls] { [] }
+    func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { throw NetworkError.notFound }
     func getSnapshot(id: UUID) async throws -> Data { Data() }
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? { nil }
     func pause(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
