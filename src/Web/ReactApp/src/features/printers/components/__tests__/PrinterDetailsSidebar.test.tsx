@@ -1,14 +1,18 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { PrinterBackend, type Printer } from '@/types/api';
+import { PrinterBackend, type CommandResult, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectListDto } from '@/types/api';
 import { PrinterDetailsSidebar } from '../PrinterDetailsSidebar';
 import type { PrinterStatistics } from '@/types/maintenance';
 
 const mockInvalidateQueries = vi.fn();
+const mockSetQueryData = vi.fn();
 const mockRefetch = vi.fn();
+const mockPrintJobObjectsRefetch = vi.fn();
+const mockExcludePrintJobObject = vi.fn();
 let capturedStatisticsQueryOptions: UseQueryOptions<PrinterStatistics> | undefined;
 let mockStatisticsData: PrinterStatistics | undefined;
+let mockPrintJobObjectsData: PrintJobObjectListDto | undefined;
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: UseQueryOptions<PrinterStatistics>) => {
@@ -29,16 +33,44 @@ vi.mock('@tanstack/react-query', () => ({
   },
   useQueryClient: () => ({
     invalidateQueries: mockInvalidateQueries,
+    setQueryData: mockSetQueryData,
+  }),
+  useMutation: (options: {
+    mutationFn: (name: string) => Promise<CommandResult>;
+    onSuccess?: (result: CommandResult, name: string) => void | Promise<void>;
+    onError?: (error: Error) => void;
+  }) => ({
+    isPending: false,
+    mutate: (name: string) => {
+      void options.mutationFn(name)
+        .then((result) => options.onSuccess?.(result, name))
+        .catch((error: Error) => options.onError?.(error));
+    },
   }),
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({
+  queryKeys: {
+    printJobObjects: (printerId: string) => ['printers', printerId, 'printjob', 'objects'],
+  },
   usePrinter: () => ({
     data: undefined,
     isLoading: false,
     refetch: mockRefetch,
   }),
   usePrinterDetails: () => ({ data: undefined }),
+  usePrintJobObjects: () => ({
+    data: mockPrintJobObjectsData,
+    isLoading: false,
+    isFetching: false,
+    refetch: mockPrintJobObjectsRefetch,
+  }),
+}));
+
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    excludePrintJobObject: (printerId: string, name: string) => mockExcludePrintJobObject(printerId, name),
+  },
 }));
 
 vi.mock('@/common/hooks/usePrinterDisplay', () => ({
@@ -83,12 +115,39 @@ const printer: Printer = {
   z: 0,
 };
 
+function capabilities(overrides: Partial<PrinterBackendCapabilitiesDto> = {}): PrinterBackendCapabilitiesDto {
+  return {
+    printerId: printer.id,
+    printerName: printer.name,
+    backend: printer.backend,
+    supportsCamera: true,
+    supportsFileDownload: true,
+    supportsFileList: true,
+    supportsFileUpload: true,
+    supportsStartPrint: true,
+    supportsControlOperations: true,
+    supportsFileMetadata: true,
+    supportsMovement: true,
+    supportsTemperatureControl: true,
+    supportsPrinterInformation: true,
+    supportsHistory: true,
+    supportsFilamentControl: false,
+    supportsObjectExclusion: false,
+    ...overrides,
+  };
+}
+
 describe('PrinterDetailsSidebar', () => {
   beforeEach(() => {
     capturedStatisticsQueryOptions = undefined;
     mockStatisticsData = undefined;
+    mockPrintJobObjectsData = undefined;
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
+    mockPrintJobObjectsRefetch.mockClear();
+    mockSetQueryData.mockClear();
+    mockExcludePrintJobObject.mockReset();
+    mockExcludePrintJobObject.mockResolvedValue({ success: true, message: 'Object skipped' });
   });
 
   it('bounds content layout on desktop and lets the inner region scroll', () => {
@@ -172,5 +231,61 @@ describe('PrinterDetailsSidebar', () => {
 
     expect(lastSyncRow).not.toBeNull();
     expect(within(lastSyncRow!).getByText('—')).toBeInTheDocument();
+  });
+
+  it('hides object skip controls when backend capability is false', () => {
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, state: 'Printing' }}
+        backendCapabilities={capabilities({ supportsObjectExclusion: false })}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    expect(screen.queryByText('Objects')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Skip object cube')).not.toBeInTheDocument();
+  });
+
+  it('calls the skip object mutation after confirmation', async () => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: 'plate.gcode',
+      objects: [
+        { name: 'cube', isExcluded: false, isCurrent: true },
+      ],
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, backend: PrinterBackend.Moonraker, state: 'Printing' }}
+        backendCapabilities={capabilities({
+          backend: PrinterBackend.Moonraker,
+          supportsObjectExclusion: true,
+        })}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Skip object cube'));
+    fireEvent.click(screen.getByRole('button', { name: 'Skip object' }));
+
+    await waitFor(() => {
+      expect(mockExcludePrintJobObject).toHaveBeenCalledWith(printer.id, 'cube');
+    });
+
+    expect(mockSetQueryData).toHaveBeenCalledWith(
+      ['printers', printer.id, 'printjob', 'objects'],
+      expect.any(Function)
+    );
+    const updateCache = mockSetQueryData.mock.calls[0][1] as (old: PrintJobObjectListDto) => PrintJobObjectListDto;
+    expect(updateCache(mockPrintJobObjectsData!).objects[0]).toMatchObject({
+      name: 'cube',
+      isExcluded: true,
+      isCurrent: false,
+    });
   });
 });

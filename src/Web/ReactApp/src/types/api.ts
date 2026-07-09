@@ -405,6 +405,7 @@ export interface PrinterBackendCapabilitiesDto {
   supportsPrinterInformation: boolean;
   supportsHistory: boolean;
   supportsFilamentControl: boolean;
+  supportsObjectExclusion: boolean;
 }
 
 /**
@@ -2061,6 +2062,22 @@ export interface CommandResult {
   success: boolean;
   error?: string;
   message?: string;
+}
+
+export interface PrintJobObjectDto {
+  name: string;
+  isExcluded: boolean;
+  isCurrent: boolean;
+}
+
+export interface PrintJobObjectListDto {
+  printerId: string;
+  jobName?: string | null;
+  objects: PrintJobObjectDto[];
+}
+
+export interface ExcludePrintJobObjectRequest {
+  name: string;
 }
 
 /** Request payload for saving a calibrated Z-offset. */

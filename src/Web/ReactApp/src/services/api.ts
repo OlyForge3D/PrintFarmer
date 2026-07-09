@@ -42,6 +42,7 @@ import {
   PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
+  PrintJobObjectListDto,
   PrinterFileDto,
   PrinterGroup,
   PrinterGroupAccessRule,
@@ -669,6 +670,13 @@ export class ApiClient {
     return response.data;
   }
 
+  async getPrintJobObjects(printerId: string): Promise<PrintJobObjectListDto> {
+    const response = await this.client.get<PrintJobObjectListDto>(
+      `/printers/${printerId}/printjob/objects`
+    );
+    return response.data;
+  }
+
   async getPrinterDetails(id: string): Promise<PrinterDetails> {
     const response = await this.client.get<PrinterDetails>(
       `/printers/${id}/details`
@@ -1066,6 +1074,14 @@ export class ApiClient {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/gcode`,
       { command }
+    );
+    return response.data;
+  }
+
+  async excludePrintJobObject(printerId: string, name: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/printjob/objects/exclude`,
+      { name }
     );
     return response.data;
   }

@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
@@ -35,12 +36,16 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsCompositeStatus,
     ISupportsControlRestart,
     ISupportsGcodeExecution,
+    ISupportsObjectExclusion,
     ISupportsFilamentUsageQuery,
     ISupportsPerExtruderFilamentUsage
 {
+    private const int MaxExcludeObjectNameLength = 256;
+
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
+    private static readonly Regex SafeUnquotedObjectNamePattern = new(@"^[A-Za-z0-9_.:+/@-]+$", RegexOptions.Compiled);
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
     {
@@ -809,6 +814,189 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return SendGcodeAsync(baseUrl.ToString(), gcode, ct);
+    }
+
+    public async Task<PrintJobObjectListDto?> GetCurrentJobObjectsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "printer/objects/query?print_stats&exclude_object");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            if (!doc.RootElement.TryGetProperty("result", out JsonElement result) ||
+                !result.TryGetProperty("status", out JsonElement status))
+            {
+                return null;
+            }
+
+            string? jobName = TryGetJobName(status);
+            HashSet<string> excludedObjects = GetStringSet(status, "exclude_object", "excluded_objects");
+            string? currentObject = TryGetNestedString(status, "exclude_object", "current_object");
+
+            List<PrintJobObjectDto> objects = GetLiveExcludeObjects(status, excludedObjects, currentObject);
+            if (objects.Count == 0 && !string.IsNullOrWhiteSpace(jobName))
+            {
+                GCodeMetadata? metadata = await GetFileMetadataAsync(baseUrl, jobName, cts.Token);
+                objects = GetMetadataObjects(metadata, excludedObjects, currentObject);
+            }
+
+            return new PrintJobObjectListDto(Guid.Empty, jobName, objects);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<bool> ExcludeObjectAsync(string baseUrl, string objectName, CancellationToken ct = default)
+    {
+        string command = BuildExcludeObjectCommand(objectName);
+        return await SendGcodePrivateAsync(baseUrl, command, ct);
+    }
+
+    public static string BuildExcludeObjectCommand(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            throw new ArgumentException("Object name is required.", nameof(objectName));
+        }
+
+        string trimmedName = objectName.Trim();
+        if (trimmedName.Length > MaxExcludeObjectNameLength)
+        {
+            throw new ArgumentException("Object name is too long.", nameof(objectName));
+        }
+
+        if (trimmedName.Any(char.IsControl) || trimmedName.Contains(';', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Object name contains invalid characters.", nameof(objectName));
+        }
+
+        if (SafeUnquotedObjectNamePattern.IsMatch(trimmedName))
+        {
+            return $"EXCLUDE_OBJECT NAME={trimmedName}";
+        }
+
+        string escapedName = trimmedName
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+        return $"EXCLUDE_OBJECT NAME=\"{escapedName}\"";
+    }
+
+    private static string? TryGetJobName(JsonElement status)
+    {
+        if (status.TryGetProperty("print_stats", out JsonElement printStats) &&
+            printStats.ValueKind == JsonValueKind.Object &&
+            printStats.TryGetProperty("filename", out JsonElement filename) &&
+            filename.ValueKind == JsonValueKind.String)
+        {
+            return filename.GetString();
+        }
+
+        return null;
+    }
+
+    private static string? TryGetNestedString(JsonElement parent, string objectName, string propertyName)
+    {
+        if (parent.TryGetProperty(objectName, out JsonElement nested) &&
+            nested.ValueKind == JsonValueKind.Object &&
+            nested.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+
+        return null;
+    }
+
+    private static HashSet<string> GetStringSet(JsonElement parent, string objectName, string propertyName)
+    {
+        HashSet<string> values = new(StringComparer.Ordinal);
+        if (!parent.TryGetProperty(objectName, out JsonElement nested) ||
+            nested.ValueKind != JsonValueKind.Object ||
+            !nested.TryGetProperty(propertyName, out JsonElement array) ||
+            array.ValueKind != JsonValueKind.Array)
+        {
+            return values;
+        }
+
+        foreach (JsonElement item in array.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                values.Add(item.GetString()!);
+            }
+        }
+
+        return values;
+    }
+
+    private static List<PrintJobObjectDto> GetLiveExcludeObjects(JsonElement status, HashSet<string> excludedObjects, string? currentObject)
+    {
+        if (!status.TryGetProperty("exclude_object", out JsonElement excludeObject) ||
+            excludeObject.ValueKind != JsonValueKind.Object ||
+            !excludeObject.TryGetProperty("objects", out JsonElement objectsElement) ||
+            objectsElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        List<PrintJobObjectDto> objects = [];
+        foreach (JsonElement objectElement in objectsElement.EnumerateArray())
+        {
+            if (objectElement.ValueKind != JsonValueKind.Object ||
+                !objectElement.TryGetProperty("name", out JsonElement nameElement) ||
+                nameElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            string? name = nameElement.GetString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            objects.Add(new PrintJobObjectDto(
+                name,
+                excludedObjects.Contains(name),
+                string.Equals(name, currentObject, StringComparison.Ordinal)));
+        }
+
+        return objects;
+    }
+
+    private static List<PrintJobObjectDto> GetMetadataObjects(GCodeMetadata? metadata, HashSet<string> excludedObjects, string? currentObject)
+    {
+        if (metadata?.ObjectInfo is not { Length: > 0 })
+        {
+            return [];
+        }
+
+        return metadata.ObjectInfo
+            .Select(o => o.Name?.Trim())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .Select(name => new PrintJobObjectDto(
+                name!,
+                excludedObjects.Contains(name!),
+                string.Equals(name, currentObject, StringComparison.Ordinal)))
+            .ToList();
     }
 
     // ISupportsFilamentControl implementation

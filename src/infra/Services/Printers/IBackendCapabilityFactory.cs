@@ -198,6 +198,13 @@ public interface IBackendCapabilityFactory
     /// <param name="backend">The printer backend type to get a client for.</param>
     /// <param name="client">When this method returns, contains the typed filament control client if the capability is supported; otherwise, null.</param>
     bool TryGetFilamentControlClientTyped(PrinterBackend backend, out ISupportsFilamentControl? client);
+
+    /// <summary>
+    /// Tries to get a backend client typed as ISupportsObjectExclusion for runtime object skipping.
+    /// </summary>
+    /// <param name="backend">The printer backend type to get a client for.</param>
+    /// <param name="client">When this method returns, contains the typed object-exclusion client if the capability is supported; otherwise, null.</param>
+    bool TryGetObjectExclusionClientTyped(PrinterBackend backend, out ISupportsObjectExclusion? client);
 }
 
 /// <summary>
@@ -222,6 +229,7 @@ public enum BackendCapabilities
     FileDelete = 1 << 11,
     FilamentControl = 1 << 12,
     UploadAndPrint = 1 << 13,
+    ObjectExclusion = 1 << 14,
 
     /// <summary>All file operations (download, list, upload, delete)</summary>
     FileOperations = FileDownload | FileList | FileUpload | FileDelete,
@@ -233,5 +241,5 @@ public enum BackendCapabilities
     AllControlOps = ControlOperations | Movement | TemperatureControl,
 
     /// <summary>All capabilities combined</summary>
-    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete | FilamentControl | UploadAndPrint
+    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete | FilamentControl | UploadAndPrint | ObjectExclusion
 }

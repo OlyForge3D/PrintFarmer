@@ -779,6 +779,49 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Lists object-exclusion metadata for the current print job.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The current job's objects and exclusion state.</returns>
+    [HttpGet("{id:guid}/printjob/objects")]
+    [ProducesResponseType(typeof(PrintJobObjectListDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<PrintJobObjectListDto>> GetPrintJobObjectsAsync(Guid id, CancellationToken ct)
+    {
+        PrintJobObjectListDto? objects = await _printersService.GetPrintJobObjectsAsync(id, ct);
+        if (objects is null)
+        {
+            return NotFound(new { message = $"Printer {id} not found" });
+        }
+
+        return Ok(objects);
+    }
+
+    /// <summary>
+    /// Excludes a single object from the current print job.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">Object exclusion request.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Command execution result.</returns>
+    [HttpPost("{id:guid}/printjob/objects/exclude")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> ExcludePrintJobObjectAsync(Guid id, [FromBody] ExcludePrintJobObjectRequest request, CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new CommandResult(false, "Object name is required."));
+        }
+
+        CommandResult result = await _printersService.ExcludePrintJobObjectAsync(id, request.Name, ct);
+        _telemetryService.RecordPrinterOperation("exclude_object", id.ToString(), result.Success);
+        return MapCommandResult(result);
+    }
+
+    /// <summary>
     /// Gets the current status of a specific printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>

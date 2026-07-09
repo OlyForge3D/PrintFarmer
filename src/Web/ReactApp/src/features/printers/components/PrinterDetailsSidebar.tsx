@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
-import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
+import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import {
@@ -14,6 +14,7 @@ import {
   canCooldown,
   canDisableMotors,
   canEmergencyStop,
+  canExcludeObject,
   canFilamentChange,
   canFilamentControl,
   canMove,
@@ -71,6 +72,8 @@ import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldH
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
+import { Modal } from '@/common/components/modals/Modal';
+import { toast } from 'sonner';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -240,6 +243,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [step, setStep] = useState(10);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
+  const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
 
   // Track last known values for display fallback - use state not refs for render access
   const [lastKnownValues, setLastKnownValues] = useState({
@@ -304,6 +308,45 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     setBedTemp(printerBedTarget > 0 ? printerBedTarget : '');
   }, [printerHotendTarget, printerBedTarget]);
 
+  const support = getPrinterSupport(backendCapabilities);
+  const preRenderRawState = printer?.state ?? '';
+  const isPrintingForObjectQuery = preRenderRawState.toLowerCase().includes('printing');
+  const printJobObjectsQuery = usePrintJobObjects(printerId, {
+    enabled: !!printerId && support.supportsObjectExclusion && isPrintingForObjectQuery,
+  });
+  const excludeObjectMutation = useMutation({
+    mutationFn: (name: string) => apiClient.excludePrintJobObject(printerId!, name),
+    onSuccess: async (result, name) => {
+      if (result.success) {
+        toast.success(`Skipped object "${name}"`);
+        if (printerId) {
+          queryClient.setQueryData<PrintJobObjectListDto>(queryKeys.printJobObjects(printerId), (old) =>
+            old
+              ? {
+                  ...old,
+                  objects: old.objects.map((object) =>
+                    object.name === name
+                      ? { ...object, isExcluded: true, isCurrent: false }
+                      : object
+                  ),
+                }
+              : old
+          );
+        }
+        setObjectToSkip(null);
+      } else {
+        toast.error(`Failed to skip object: ${result.message ?? result.error ?? 'Unknown error'}`);
+      }
+
+      if (printerId) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.printJobObjects(printerId) });
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to skip object: ${error.message}`);
+    },
+  });
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
@@ -340,8 +383,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 
-  const support = getPrinterSupport(backendCapabilities);
-
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
@@ -353,6 +394,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
+  const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, support });
+  const printJobObjects = printJobObjectsQuery.data?.objects ?? [];
 
   const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
@@ -836,6 +879,69 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           </div>
         </CollapsibleSection>
 
+        {support.supportsObjectExclusion && (
+          <CollapsibleSection
+            title="Objects"
+            expanded={true}
+            headerActions={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void printJobObjectsQuery.refetch()}
+                disabled={!isPrinting || printJobObjectsQuery.isFetching}
+                className="p-1! h-auto!"
+                title="Refresh print objects"
+                aria-label="Refresh print objects"
+                iconCenter={<RefreshIcon className="h-4 w-4" />}
+              ></Button>
+            }
+          >
+            {printJobObjectsQuery.isLoading ? (
+              <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
+            ) : !isPrinting ? (
+              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
+            ) : printJobObjects.length === 0 ? (
+              <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
+            ) : (
+              <ul className="space-y-2" aria-label="Current print objects">
+                {printJobObjects.map((object) => (
+                  <li
+                    key={object.name}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-pf-text-primary">{object.name}</div>
+                      <div className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide">
+                        {object.isCurrent && (
+                          <span className="rounded-full border border-pf-accent/50 bg-pf-accent-bg px-2 py-0.5 text-pf-accent">
+                            Printing
+                          </span>
+                        )}
+                        {object.isExcluded && (
+                          <span className="rounded-full border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-pf-text-secondary">
+                            Skipped
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      disabled={!canExcludeObjectNow || object.isExcluded || excludeObjectMutation.isPending}
+                      onClick={() => setObjectToSkip(object)}
+                      aria-label={`Skip object ${object.name}`}
+                    >
+                      Skip
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CollapsibleSection>
+        )}
+
         {/* Move Section */}
         <CollapsibleSection
           title="Move"
@@ -1305,6 +1411,49 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onClose={() => setShowFiles(false)}
         printer={printer}
       />
+
+      <Modal
+        isOpen={objectToSkip !== null}
+        onClose={() => {
+          if (!excludeObjectMutation.isPending) {
+            setObjectToSkip(null);
+          }
+        }}
+        title="Skip print object?"
+        size="sm"
+        isDisabled={excludeObjectMutation.isPending}
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setObjectToSkip(null)}
+              disabled={excludeObjectMutation.isPending}
+            >
+              Keep printing
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              loading={excludeObjectMutation.isPending}
+              onClick={() => {
+                if (objectToSkip) {
+                  excludeObjectMutation.mutate(objectToSkip.name);
+                }
+              }}
+            >
+              Skip object
+            </Button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-pf-text-primary">
+          Skip <span className="font-semibold">{objectToSkip?.name}</span> for the active print on {printer.name}?
+        </p>
+        <p className="mt-2 text-xs text-pf-text-secondary">
+          The printer will continue printing the remaining objects. This action cannot be undone from PrintFarmer.
+        </p>
+      </Modal>
 
       {/* Spool Picker Modal */}
       <SpoolPickerModal

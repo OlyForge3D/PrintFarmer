@@ -2495,6 +2495,75 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
+    public async Task<PrintJobObjectListDto?> GetPrintJobObjectsAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer == null)
+        {
+            return null;
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        IBackendClient client = GetBackendClient(backend);
+        if (client is not ISupportsObjectExclusion objectExclusionClient)
+        {
+            return new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>());
+        }
+
+        string url = backend == PrinterBackend.Moonraker
+            ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+            : printer.BackendUrl;
+
+        PrintJobObjectListDto? objects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+        return objects is null
+            ? new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>())
+            : objects with { PrinterId = id };
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> ExcludePrintJobObjectAsync(Guid id, string objectName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            return new CommandResult(false, "Object name is required.");
+        }
+
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)printer.Backend;
+            IBackendClient client = GetBackendClient(backend);
+            if (client is not ISupportsObjectExclusion objectExclusionClient)
+            {
+                return new CommandResult(false, $"Backend '{backend}' does not support object exclusion");
+            }
+
+            string url = backend == PrinterBackend.Moonraker
+                ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+                : printer.BackendUrl;
+
+            bool result = await objectExclusionClient.ExcludeObjectAsync(url, objectName, ct).ConfigureAwait(false);
+            return result
+                ? new CommandResult(true, $"Object '{objectName.Trim()}' skipped")
+                : new CommandResult(false, "Printer rejected the object exclusion command");
+        }
+        catch (ArgumentException ex)
+        {
+            return new CommandResult(false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to exclude object on printer {PName} ({Id})", printer.Name, id);
+            return new CommandResult(false, $"Failed to exclude object: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<CommandResult> LoadFilamentAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);

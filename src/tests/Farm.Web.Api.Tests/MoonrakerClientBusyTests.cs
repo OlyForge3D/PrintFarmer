@@ -155,4 +155,53 @@ public class MoonrakerClientBusyTests
         bool result = await client.SendGcodeAsync("http://moonraker:7125", "M84");
         result.Should().BeTrue();
     }
+
+    [Fact]
+    public void BuildExcludeObjectCommand_WhenNameIsValid_ReturnsUnquotedCommand()
+    {
+        string command = MoonrakerClient.BuildExcludeObjectCommand("object_1");
+
+        command.Should().Be("EXCLUDE_OBJECT NAME=object_1");
+    }
+
+    [Fact]
+    public void BuildExcludeObjectCommand_WhenNameContainsSpace_ReturnsQuotedCommand()
+    {
+        string command = MoonrakerClient.BuildExcludeObjectCommand("left cube");
+
+        command.Should().Be("EXCLUDE_OBJECT NAME=\"left cube\"");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("bad\nname")]
+    [InlineData("bad;M112")]
+    public void BuildExcludeObjectCommand_WhenNameIsInvalid_ThrowsArgumentException(string objectName)
+    {
+        Action act = () => MoonrakerClient.BuildExcludeObjectCommand(objectName);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task ExcludeObjectAsync_WhenNameIsValid_SendsExcludeObjectGcode()
+    {
+        string? postedJson = null;
+        (MoonrakerClient client, _) = CreateClient(req =>
+        {
+            postedJson = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            };
+        });
+
+        bool result = await client.ExcludeObjectAsync("http://moonraker:7125", "object_1");
+
+        result.Should().BeTrue();
+        postedJson.Should().NotBeNull();
+        using JsonDocument doc = JsonDocument.Parse(postedJson!);
+        doc.RootElement.GetProperty("script").GetString().Should().Be("EXCLUDE_OBJECT NAME=object_1");
+    }
 }
