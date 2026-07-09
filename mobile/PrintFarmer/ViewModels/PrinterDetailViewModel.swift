@@ -60,14 +60,36 @@ final class PrinterDetailViewModel {
     private var signalRService: (any SignalRServiceProtocol)?
     private var predictiveService: (any PredictiveServiceProtocol)?
     private var failureDetectionService: (any FailureDetectionServiceProtocol)?
+    private var snapshotPollingTask: Task<Void, Never>?
+    private var snapshotPollingGeneration = 0
+    private var isSnapshotPollingAllowed = true
+    private let snapshotPollInterval: Duration
+    private let snapshotErrorBackoffBaseSeconds: Int
+    private let snapshotErrorBackoffMaxSeconds: Int
 
     let printerId: UUID
     private var printerService: (any PrinterServiceProtocol)?
-    
+
     var cameraRotation: Int = 0
 
-    init(printerId: UUID) {
+    enum CameraPreviewMode: Equatable {
+        case none
+        case directSnapshot
+        case snapshotPolling
+        case mjpegStream
+        case unsupported
+    }
+
+    init(
+        printerId: UUID,
+        snapshotPollInterval: Duration = .seconds(5),
+        snapshotErrorBackoffBaseSeconds: Int = 5,
+        snapshotErrorBackoffMaxSeconds: Int = 30
+    ) {
         self.printerId = printerId
+        self.snapshotPollInterval = snapshotPollInterval
+        self.snapshotErrorBackoffBaseSeconds = snapshotErrorBackoffBaseSeconds
+        self.snapshotErrorBackoffMaxSeconds = snapshotErrorBackoffMaxSeconds
         self.cameraRotation = UserDefaults.standard.integer(forKey: "cameraRotation-\(printerId.uuidString)")
     }
 
@@ -132,6 +154,7 @@ final class PrinterDetailViewModel {
                     showLivestream = false
                 }
             }
+            startSnapshotPollingIfNeeded()
         }
 
         statusDetail = PrinterStatusDetail(
@@ -319,7 +342,7 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         isLoading = true
         errorMessage = nil
-        
+
         cameraRotation = UserDefaults.standard.integer(forKey: "cameraRotation-\(printerId.uuidString)")
 
         guard let printerService else {
@@ -346,22 +369,27 @@ final class PrinterDetailViewModel {
         }
 
         do {
+            let cameraUrl = try await printerService.getCameraUrl(id: printerId)
+            applyCameraUrl(cameraUrl)
+        } catch {
+            logger.warning("Failed to load camera URL metadata: \(error.localizedDescription)")
+        }
+
+        do {
             currentJob = try await printerService.getCurrentJob(id: printerId)
         } catch {
             logger.warning("Failed to load current job: \(error.localizedDescription)")
         }
 
-        do {
-            snapshotData = try await printerService.getSnapshot(id: printerId)
-        } catch {
-            logger.warning("Failed to load snapshot: \(error.localizedDescription)")
+        if shouldLoadInitialSnapshot {
+            _ = await refreshSnapshot()
         }
 
         // Auto-enable livestream when printer is actively printing
-        if let state = printer?.state?.lowercased(),
-           ["printing", "starting", "paused"].contains(state),
-           printer?.cameraStreamUrl != nil {
+        if canShowLivestream {
             showLivestream = true
+        } else if cameraPreviewMode != .mjpegStream {
+            showLivestream = false
         }
 
         // Load failure detection status when printing with Obico enabled
@@ -373,6 +401,7 @@ final class PrinterDetailViewModel {
         }
 
         isLoading = false
+        startSnapshotPollingIfNeeded()
     }
 
     /// Keep the UI-facing printer state aligned with the dedicated status endpoint.
@@ -395,6 +424,16 @@ final class PrinterDetailViewModel {
         current.bedTarget = detail.bedTarget
         if let homed = detail.homedAxes { current.homedAxes = homed }
         current.spoolInfo = detail.spoolInfo
+        printer = current
+    }
+
+    private func applyCameraUrl(_ cameraUrl: PrinterCameraUrl) {
+        guard var current = printer else { return }
+        current.cameraStreamUrl = cameraUrl.streamUrl
+        current.cameraSnapshotUrl = cameraUrl.snapshotUrl
+        current.cameraAccessMode = cameraUrl.accessMode
+        current.cameraStreamFormat = cameraUrl.streamFormat
+        current.cameraSnapshotStrategy = cameraUrl.snapshotStrategy
         printer = current
     }
 
@@ -479,19 +518,76 @@ final class PrinterDetailViewModel {
         }
     }
 
-    func refreshSnapshot() async {
-        guard isViewActive else { return }
-        guard let printerService else { return }
+    @discardableResult
+    func refreshSnapshot() async -> Bool {
+        guard isViewActive else { return false }
+        guard let printerService else { return false }
         isLoadingSnapshot = true
         do {
             snapshotData = try await printerService.getSnapshot(id: printerId)
+            guard isViewActive else { return false }
+            isLoadingSnapshot = false
+            return true
         } catch {
             logger.warning("Failed to refresh snapshot: \(error.localizedDescription)")
+            guard isViewActive else { return false }
+            isLoadingSnapshot = false
+            return false
         }
-        guard isViewActive else { return }
+    }
+
+    func startSnapshotPollingIfNeeded() {
+        guard isViewActive, isSnapshotPollingAllowed, shouldPollSnapshot else {
+            stopSnapshotPolling()
+            return
+        }
+        guard snapshotPollingTask == nil else { return }
+        snapshotPollingGeneration += 1
+        let generation = snapshotPollingGeneration
+        snapshotPollingTask = Task { [weak self] in
+            await self?.runSnapshotPollingLoop(generation: generation)
+        }
+    }
+
+    func stopSnapshotPolling() {
+        snapshotPollingGeneration += 1
+        snapshotPollingTask?.cancel()
+        snapshotPollingTask = nil
         isLoadingSnapshot = false
     }
-    
+
+    func setSnapshotPollingAllowed(_ allowed: Bool) {
+        isSnapshotPollingAllowed = allowed
+        if allowed {
+            startSnapshotPollingIfNeeded()
+        } else {
+            stopSnapshotPolling()
+        }
+    }
+
+    private func runSnapshotPollingLoop(generation: Int) async {
+        var consecutiveFailures = 0
+        while isViewActive && shouldPollSnapshot && !Task.isCancelled {
+            let succeeded = await refreshSnapshot()
+            consecutiveFailures = succeeded ? 0 : min(consecutiveFailures + 1, 6)
+            let delay = succeeded ? snapshotPollInterval : snapshotBackoffDuration(afterFailures: consecutiveFailures)
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                break
+            }
+        }
+        if snapshotPollingGeneration == generation {
+            snapshotPollingTask = nil
+        }
+    }
+
+    private func snapshotBackoffDuration(afterFailures failures: Int) -> Duration {
+        let exponent = max(0, min(failures - 1, 4))
+        let seconds = min(snapshotErrorBackoffMaxSeconds, snapshotErrorBackoffBaseSeconds * (1 << exponent))
+        return .seconds(seconds)
+    }
+
     func rotateCameraView() {
         cameraRotation = (cameraRotation + 90) % 360
         UserDefaults.standard.set(cameraRotation, forKey: "cameraRotation-\(printerId.uuidString)")
@@ -521,7 +617,72 @@ final class PrinterDetailViewModel {
     }
 
     var canShowLivestream: Bool {
-        isActivelyPrinting && printer?.cameraStreamUrl != nil
+        isActivelyPrinting && cameraPreviewMode == .mjpegStream
+    }
+
+    var cameraPreviewMode: CameraPreviewMode {
+        guard let printer else { return .none }
+
+        switch printer.cameraAccessMode {
+        case .snapshotOnly:
+            if printer.cameraSnapshotStrategy == .snapmakerU1MonitorJpeg {
+                return .snapshotPolling
+            }
+            if hasDirectSnapshot(printer) {
+                return .directSnapshot
+            }
+            return .snapshotPolling
+        case .streamOnly:
+            if hasUsableMjpegStream(printer) { return .mjpegStream }
+            return snapshotFallbackMode(for: printer) ?? .unsupported
+        case .streamAndSnapshot:
+            if hasUsableMjpegStream(printer) { return .mjpegStream }
+            return snapshotFallbackMode(for: printer) ?? .unsupported
+        case .unsupportedStream:
+            return snapshotFallbackMode(for: printer) ?? .unsupported
+        case .unknown:
+            if hasUsableMjpegStream(printer) { return .mjpegStream }
+            return snapshotFallbackMode(for: printer) ?? .none
+        }
+    }
+
+    var shouldPollSnapshot: Bool {
+        cameraPreviewMode == .snapshotPolling
+    }
+
+    var isSnapshotPollingActive: Bool {
+        snapshotPollingTask != nil
+    }
+
+    private var shouldLoadInitialSnapshot: Bool {
+        switch cameraPreviewMode {
+        case .snapshotPolling:
+            return true
+        case .directSnapshot:
+            return snapshotData == nil
+        case .mjpegStream, .none, .unsupported:
+            return false
+        }
+    }
+
+    private func hasUsableMjpegStream(_ printer: Printer) -> Bool {
+        guard printer.cameraStreamUrl != nil else { return false }
+        return printer.cameraStreamFormat == .mjpeg || printer.cameraStreamFormat == .unknown
+    }
+
+    private func snapshotFallbackMode(for printer: Printer) -> CameraPreviewMode? {
+        if printer.cameraSnapshotStrategy == .snapmakerU1MonitorJpeg {
+            return .snapshotPolling
+        }
+        if hasDirectSnapshot(printer) {
+            return .directSnapshot
+        }
+        return nil
+    }
+
+    private func hasDirectSnapshot(_ printer: Printer) -> Bool {
+        guard let snapshotUrl = printer.cameraSnapshotUrl else { return false }
+        return !snapshotUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var isIdle: Bool {

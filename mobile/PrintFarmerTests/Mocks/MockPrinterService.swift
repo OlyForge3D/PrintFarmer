@@ -5,6 +5,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var printersToReturn: [Printer] = []
     var printerToReturn: Printer?
     var statusToReturn: PrinterStatusDetail?
+    var cameraUrlsToReturn: [PrinterCameraUrls] = []
+    var cameraUrlToReturn: PrinterCameraUrl?
     var currentJobToReturn: PrintJobStatusInfo?
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
@@ -17,7 +19,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var listIncludeDisabledArg: Bool?
     var getPrinterCalledWith: UUID?
     var getStatusCalledWith: UUID?
+    var listCameraUrlsCalled = false
+    var getCameraUrlCalledWith: UUID?
     var getSnapshotCalledWith: UUID?
+    var getSnapshotCallCount = 0
     var getCurrentJobCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
@@ -58,8 +63,22 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return status
     }
 
+    func listCameraUrls() async throws -> [PrinterCameraUrls] {
+        listCameraUrlsCalled = true
+        if let error = errorToThrow { throw error }
+        return cameraUrlsToReturn
+    }
+
+    func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl {
+        getCameraUrlCalledWith = id
+        if let error = errorToThrow { throw error }
+        guard let cameraUrl = cameraUrlToReturn else { throw NetworkError.notFound }
+        return cameraUrl
+    }
+
     func getSnapshot(id: UUID) async throws -> Data {
         getSnapshotCalledWith = id
+        getSnapshotCallCount += 1
         if let error = errorToThrow { throw error }
         return snapshotDataToReturn
     }
@@ -184,6 +203,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         printersToReturn = []
         printerToReturn = nil
         statusToReturn = nil
+        cameraUrlsToReturn = []
+        cameraUrlToReturn = nil
         currentJobToReturn = nil
         commandResultToReturn = CommandResult(success: true, message: nil)
         errorToThrow = nil
@@ -191,7 +212,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         listIncludeDisabledArg = nil
         getPrinterCalledWith = nil
         getStatusCalledWith = nil
+        listCameraUrlsCalled = false
+        getCameraUrlCalledWith = nil
         getSnapshotCalledWith = nil
+        getSnapshotCallCount = 0
         getCurrentJobCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil

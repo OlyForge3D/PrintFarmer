@@ -96,6 +96,83 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(printer.frontendUrl, "http://192.168.1.100")
         XCTAssertNotNil(printer.thumbnailUrl)
         XCTAssertNotNil(printer.cameraStreamUrl)
+        XCTAssertEqual(printer.cameraSnapshotUrl, "http://192.168.1.100/snapshot.jpg")
+        XCTAssertEqual(printer.cameraAccessMode, .streamAndSnapshot)
+        XCTAssertEqual(printer.cameraStreamFormat, .mjpeg)
+        XCTAssertEqual(printer.cameraSnapshotStrategy, .directUrl)
+    }
+
+    func testCameraAccessModeDecodesKnownAndUnknownValues() throws {
+        let cases: [(String, CameraAccessMode)] = [
+            ("Unknown", .unknown),
+            ("StreamAndSnapshot", .streamAndSnapshot),
+            ("SnapshotOnly", .snapshotOnly),
+            ("StreamOnly", .streamOnly),
+            ("UnsupportedStream", .unsupportedStream),
+            ("FutureMode", .unknown)
+        ]
+
+        for (raw, expected) in cases {
+            let decoded = try decoder.decode(CameraAccessMode.self, from: Data("\"\(raw)\"".utf8))
+            XCTAssertEqual(decoded, expected)
+        }
+    }
+
+    func testCameraStreamFormatDecodesKnownAndUnknownValues() throws {
+        let cases: [(String, CameraStreamFormat)] = [
+            ("Unknown", .unknown),
+            ("Mjpeg", .mjpeg),
+            ("WebRtc", .webRtc),
+            ("Rtsp", .rtsp),
+            ("Unsupported", .unsupported),
+            ("FutureFormat", .unknown)
+        ]
+
+        for (raw, expected) in cases {
+            let decoded = try decoder.decode(CameraStreamFormat.self, from: Data("\"\(raw)\"".utf8))
+            XCTAssertEqual(decoded, expected)
+        }
+    }
+
+    func testCameraSnapshotStrategyDecodesKnownAndUnknownValues() throws {
+        let cases: [(String, CameraSnapshotStrategy)] = [
+            ("None", .none),
+            ("DirectUrl", .directUrl),
+            ("SnapmakerU1MonitorJpeg", .snapmakerU1MonitorJpeg),
+            ("FutureStrategy", .none)
+        ]
+
+        for (raw, expected) in cases {
+            let decoded = try decoder.decode(CameraSnapshotStrategy.self, from: Data("\"\(raw)\"".utf8))
+            XCTAssertEqual(decoded, expected)
+        }
+    }
+
+    func testPrinterCameraUrlsContractDecodes() throws {
+        let cameras = try decoder.decode(
+            [PrinterCameraUrls].self,
+            from: TestJSON.printerCameraUrls.data(using: .utf8)!
+        )
+
+        XCTAssertEqual(cameras.count, 2)
+        XCTAssertEqual(cameras[0].cameraAccessMode, .streamAndSnapshot)
+        XCTAssertEqual(cameras[0].cameraStreamFormat, .mjpeg)
+        XCTAssertEqual(cameras[0].cameraSnapshotStrategy, .directUrl)
+        XCTAssertEqual(cameras[1].cameraAccessMode, .snapshotOnly)
+        XCTAssertEqual(cameras[1].cameraSnapshotStrategy, .snapmakerU1MonitorJpeg)
+    }
+
+    func testPrinterCameraUrlContractDecodes() throws {
+        let camera = try decoder.decode(
+            PrinterCameraUrl.self,
+            from: TestJSON.printerCameraUrl.data(using: .utf8)!
+        )
+
+        XCTAssertNil(camera.streamUrl)
+        XCTAssertNil(camera.snapshotUrl)
+        XCTAssertEqual(camera.accessMode, .snapshotOnly)
+        XCTAssertEqual(camera.streamFormat, .unknown)
+        XCTAssertEqual(camera.snapshotStrategy, .snapmakerU1MonitorJpeg)
     }
 
     // MARK: - PrinterStatusDetail homedAxes (#276)

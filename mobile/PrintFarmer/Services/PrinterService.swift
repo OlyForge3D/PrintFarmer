@@ -59,6 +59,14 @@ actor PrinterService: PrinterServiceProtocol {
         try await apiClient.get("/api/printers/\(id)/status")
     }
 
+    func listCameraUrls() async throws -> [PrinterCameraUrls] {
+        try await apiClient.get("/api/printers/camera-urls")
+    }
+
+    func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl {
+        try await apiClient.get("/api/printers/\(id)/camera/url")
+    }
+
     func getSnapshot(id: UUID) async throws -> Data {
         try await apiClient.getData("/api/printers/\(id)/snapshot")
     }
