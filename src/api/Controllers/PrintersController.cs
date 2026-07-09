@@ -27,6 +27,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
+using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
+using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -270,7 +272,7 @@ public class PrintersController(
 
         return backend switch
         {
-            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
+            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort, ct),
             PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, username, password, ct),
             PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, effectiveApiKey, ct),
             PrinterBackend.SDCP => await TestSdcpConnectionAsync(serverUrl, backendPort, ct),
@@ -345,43 +347,27 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Tests Moonraker connection by hitting /printer/info endpoint.
+    /// Tests Moonraker connection by probing stock /printer/info and Snapmaker U1 /machine/system_info endpoints.
     /// </summary>
     private static async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
-        HttpClient httpClient, Uri serverUrl, int backendPort, CancellationToken ct)
+        HttpClient httpClient, Uri serverUrl, int? backendPort, CancellationToken ct)
     {
-        // Build URL with backend port (default 7125 for Moonraker API)
-        var builder = new UriBuilder(serverUrl)
-        {
-            Port = backendPort,
-            Path = "/printer/info"
-        };
-
-        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
-
         try
         {
-            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+            MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(httpClient, serverUrl, backendPort, ct);
 
-            if (response.IsSuccessStatusCode)
-            {
-                string content = await response.Content.ReadAsStringAsync(ct);
-
-                // Moonraker responses are wrapped in "result"
-                if (content.Contains("\"result\"") || content.Contains("hostname"))
+            return resolution is not null
+                ? new TestConnectionResponse
                 {
-                    return new TestConnectionResponse
-                    {
-                        Success = true,
-                        Message = "Successfully connected to Moonraker printer"
-                    };
+                    Success = true,
+                    Message = resolution.IsSnapmakerU1
+                        ? $"Successfully connected to Snapmaker U1 Moonraker printer on port {resolution.BackendPort}"
+                        : $"Successfully connected to Moonraker printer on port {resolution.BackendPort}"
                 }
-            }
-
-            return new TestConnectionResponse
+                : new TestConnectionResponse
             {
                 Success = false,
-                Message = $"Moonraker returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+                Message = "Moonraker did not respond on the standard 7125 endpoint or Snapmaker U1 port 80 endpoint"
             };
         }
         catch (TaskCanceledException)

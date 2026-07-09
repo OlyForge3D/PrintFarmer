@@ -5,12 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
 /// <summary>
 /// Advanced discovery probe for Moonraker-based 3D printers (Klipper firmware).
-/// Probes backend port 7125, discovers frontend ports (80, 8080, 8808), and extracts actual camera URLs.
+/// Probes backend port 7125 plus Snapmaker U1-style port 80, discovers frontend ports (80, 8080, 8808), and extracts actual camera URLs.
 /// Features:
 /// - Validates Klipper-specific response fields with confidence scoring
 /// - Discovers frontend port for web interface
@@ -18,7 +19,7 @@ namespace Farm.Backend.Plugin.Moonraker;
 /// </summary>
 public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
 {
-    // Moonraker backend always on 7125; frontend ports to probe: 80, 8080, 8808
+    // Stock Moonraker commonly uses backend 7125; Snapmaker U1 exposes Moonraker-compatible endpoints on port 80.
     private static readonly int[] FrontendPorts = new[] { 80, 8080, 8808 };
 
     public string DisplayName => "Moonraker";
@@ -37,49 +38,15 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
-        if (!response.IsSuccessStatusCode)
-        {
-            return Task.FromResult((false, 0, "HTTP error"));
-        }
-
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return Task.FromResult((false, 0, "Empty response"));
-        }
-
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(content);
-            JsonElement root = doc.RootElement;
-
-            // Moonraker wraps response in a "result" property
-            if (!root.TryGetProperty("result", out JsonElement resultElem))
-            {
-                return Task.FromResult((false, 0, "Missing 'result' wrapper"));
-            }
-
-            // Check for Klipper-specific fields in the result
-            bool hasStateMessage = resultElem.TryGetProperty("state_message", out _);
-            bool hasKlipperPath = resultElem.TryGetProperty("klipper_path", out _);
-            bool hasHostname = resultElem.TryGetProperty("hostname", out _);
-
-            int fieldCount = (hasStateMessage ? 1 : 0) + (hasKlipperPath ? 1 : 0) + (hasHostname ? 1 : 0);
-
-            if (fieldCount == 0)
-            {
-                return Task.FromResult((false, 0, "No Klipper fields found"));
-            }
-
-            // Score based on how many Klipper fields are present
-            int confidence = fieldCount == 3 ? 100 : fieldCount == 2 ? 90 : 75;
-            return Task.FromResult((true, confidence, $"Moonraker detected ({fieldCount}/3 fields)"));
-        }
-        catch
-        {
-            // Not valid JSON or parsing error - not Moonraker
-            return Task.FromResult((false, 0, "Invalid JSON"));
-        }
+        return MoonrakerOnboardingResolver.ValidatePrinterInfoResponseAsync(response, content);
     }
+
+    protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateMachineSystemInfoResponseAsync(
+        HttpResponseMessage response, string content) =>
+        MoonrakerOnboardingResolver.ValidateMachineSystemInfoResponseAsync(response, content);
+
+    protected virtual HttpClient CreateHttpClient(int timeoutMs) => new()
+    { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
 
     /// <summary>
     /// Advanced probe that:
@@ -93,68 +60,79 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
-        using HttpClient client = new()
-        { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+        using HttpClient client = CreateHttpClient(timeoutMs);
 
-        // First, confirm Moonraker backend is running on port 7125
-        string backendUrl = $"http://{ipAddress}:7125/printer/info";
-        try
+        foreach (MoonrakerEndpointCandidate endpoint in MoonrakerOnboardingResolver.GetEndpointCandidates(preferredBackendPort: null))
         {
-            HttpResponseMessage response = await client.GetAsync(backendUrl, cancellationToken);
-            string content = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            (bool isValid, int confidence, string? reason) = await ValidateResponseAsync(response, content);
-            if (!isValid)
+            string backendUrl = $"http://{ipAddress}:{endpoint.BackendPort}{endpoint.EndpointPath}";
+            try
             {
-                return null;
-            }
+                HttpResponseMessage response = await client.GetAsync(backendUrl, cancellationToken);
+                string content = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            // Backend found on 7125; now discover frontend port
-            int? frontendPort = await DiscoverFrontendPortAsync(ipAddress, client, timeoutMs, cancellationToken);
-
-            // Extract hostname from response or via reverse DNS
-            string? hostName = ExtractHostnameFromResponse(content);
-            if (string.IsNullOrEmpty(hostName))
-            {
-                try
+                (bool isValid, int confidence, string? reason) = endpoint.EndpointPath == MoonrakerOnboardingResolver.MachineSystemInfoPath
+                    ? await ValidateMachineSystemInfoResponseAsync(response, content)
+                    : await ValidateResponseAsync(response, content);
+                if (!isValid)
                 {
-                    IPHostEntry entry = await Dns.GetHostEntryAsync(ipAddress, cancellationToken);
-                    hostName = entry.HostName;
+                    continue;
                 }
-                catch
+
+                int? frontendPort = endpoint.BackendPort == MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort
+                    ? MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort
+                    : await DiscoverFrontendPortAsync(ipAddress, client, timeoutMs, cancellationToken);
+
+                SnapmakerU1Metadata? u1Metadata = MoonrakerOnboardingResolver.ExtractSnapmakerU1Metadata(content);
+                string? hostName = u1Metadata?.DeviceName ?? ExtractHostnameFromResponse(content);
+                if (string.IsNullOrEmpty(hostName))
                 {
+                    hostName = await TryResolveHostNameAsync(ipAddress, cancellationToken);
                 }
+
+                // Attempt to get camera URLs (basic implementation; can be extended with IMoonrakerClient in API layer)
+                string? cameraStreamUrl = null;
+                string? cameraSnapshotUrl = null;
+                if (frontendPort.HasValue)
+                {
+                    (cameraStreamUrl, cameraSnapshotUrl) =
+                        await DiscoverCameraUrlsAsync(ipAddress, endpoint.BackendPort, frontendPort.Value, client, timeoutMs, cancellationToken);
+                }
+
+                DiscoveredPrinterDto dto = new DiscoveredPrinterDto
+                {
+                    IpAddress = ipAddress,
+                    BackendPort = endpoint.BackendPort,
+                    FrontendPort = frontendPort,
+                    Backend = Backend,
+                    ServerUrl = $"http://{ipAddress}",
+                    Name = hostName ?? "Moonraker Printer",
+                    Manufacturer = u1Metadata?.Manufacturer,
+                    Model = u1Metadata?.Model,
+                    CameraStreamUrl = cameraStreamUrl,
+                    CameraSnapshotUrl = cameraSnapshotUrl
+                };
+
+                return new ProbeResult(dto, confidence, u1Metadata is not null ? "Snapmaker U1 Moonraker detected via /machine/system_info" : reason);
             }
-
-            // Attempt to get camera URLs (basic implementation; can be extended with IMoonrakerClient in API layer)
-            string? cameraStreamUrl = null;
-            string? cameraSnapshotUrl = null;
-            if (frontendPort.HasValue)
+            catch
             {
-                // Try common camera endpoint paths
-                (cameraStreamUrl, cameraSnapshotUrl) =
-                    await DiscoverCameraUrlsAsync(ipAddress, frontendPort.Value, client, timeoutMs, cancellationToken);
             }
-
-            DiscoveredPrinterDto dto = new DiscoveredPrinterDto
-            {
-                IpAddress = ipAddress,
-                BackendPort = 7125,
-                FrontendPort = frontendPort,
-                Backend = Backend,
-                ServerUrl = $"http://{ipAddress}",
-                Name = hostName ?? "Moonraker Printer",
-                CameraStreamUrl = cameraStreamUrl,
-                CameraSnapshotUrl = cameraSnapshotUrl
-            };
-
-            return new ProbeResult(dto, confidence, reason);
-        }
-        catch
-        {
         }
 
         return null;
+    }
+
+    protected virtual async Task<string?> TryResolveHostNameAsync(string ipAddress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            IPHostEntry entry = await Dns.GetHostEntryAsync(ipAddress, cancellationToken);
+            return entry.HostName;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -219,17 +197,18 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     /// Uses basic HTTP calls to query the API endpoint.
     /// </summary>
     /// <param name="ipAddress">The IP address of the Moonraker instance.</param>
+    /// <param name="backendPort">The backend API port to use for camera discovery.</param>
     /// <param name="frontendPort">The frontend port to use for camera URLs.</param>
     /// <param name="client">The HTTP client to use for requests.</param>
     /// <param name="timeoutMs">Timeout in milliseconds for the request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     private static async Task<(string? StreamUrl, string? SnapshotUrl)> DiscoverCameraUrlsAsync(
-        string ipAddress, int frontendPort, HttpClient client, int timeoutMs, CancellationToken cancellationToken)
+        string ipAddress, int backendPort, int frontendPort, HttpClient client, int timeoutMs, CancellationToken cancellationToken)
     {
         try
         {
             // Query Moonraker's /server/webcams/list API for configured cameras
-            string webcamsApiUrl = $"http://{ipAddress}:7125/server/webcams/list";
+            string webcamsApiUrl = $"http://{ipAddress}:{backendPort}/server/webcams/list";
             using CancellationTokenSource cameraTimeoutCts =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cameraTimeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Min(timeoutMs / 3, 3000)));
