@@ -10,16 +10,17 @@ import type { NotificationEventChannelPreferenceDto, UpdateNotificationPreferenc
 import { toast } from 'sonner';
 
 const DEFAULT_EVENT_CHANNEL_PREFERENCES: NotificationEventChannelPreferenceDto[] = [
-  { eventType: NotificationPreferenceEventType.JobStarted, inApp: false, email: false, push: false },
-  { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true },
-  { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true },
-  { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true },
+  { eventType: NotificationPreferenceEventType.JobStarted, inApp: false, email: false, push: false, telegram: false },
+  { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true, telegram: false },
+  { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true, telegram: false },
+  { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true, telegram: false },
 ];
 
 const DEFAULT_PREFERENCES: UpdateNotificationPreferencesRequest = {
   enableEmailNotifications: true,
   enablePushNotifications: true,
   enableInAppNotifications: true,
+  enableTelegramNotifications: false,
   notifyOnCompletion: true,
   notifyOnFailure: true,
   notifyOnStart: false,
@@ -62,10 +63,11 @@ function withDerivedLegacyFlags(request: UpdateNotificationPreferencesRequest): 
     enableEmailNotifications: matrix.some(x => x.email),
     enablePushNotifications: matrix.some(x => x.push),
     enableInAppNotifications: matrix.some(x => x.inApp),
-    notifyOnStart: !!started && (started.inApp || started.email || started.push),
-    notifyOnCompletion: !!completed && (completed.inApp || completed.email || completed.push),
+    enableTelegramNotifications: matrix.some(x => x.telegram),
+    notifyOnStart: !!started && (started.inApp || started.email || started.push || started.telegram),
+    notifyOnCompletion: !!completed && (completed.inApp || completed.email || completed.push || completed.telegram),
     notifyOnFailure: true,
-    notifyOnPause: !!paused && (paused.inApp || paused.email || paused.push),
+    notifyOnPause: !!paused && (paused.inApp || paused.email || paused.push || paused.telegram),
     eventChannelPreferences: matrix.map(item => (
       item.eventType === NotificationPreferenceEventType.JobFailed
         ? { ...item, inApp: true }
@@ -104,6 +106,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       enableEmailNotifications: preferences.enableEmailNotifications,
       enablePushNotifications: preferences.enablePushNotifications,
       enableInAppNotifications: preferences.enableInAppNotifications,
+      enableTelegramNotifications: preferences.enableTelegramNotifications,
       notifyOnCompletion: preferences.notifyOnCompletion,
       notifyOnFailure: preferences.notifyOnFailure,
       notifyOnStart: preferences.notifyOnStart,
@@ -124,7 +127,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     [formState.eventChannelPreferences],
   );
 
-  const updateMatrixField = (eventType: NotificationPreferenceEventType, key: 'inApp' | 'email' | 'push', value: boolean) => {
+  const updateMatrixField = (eventType: NotificationPreferenceEventType, key: 'inApp' | 'email' | 'push' | 'telegram', value: boolean) => {
     const current = formState.eventChannelPreferences ?? DEFAULT_EVENT_CHANNEL_PREFERENCES;
     const nextMatrix = current.map(item => {
       if (item.eventType !== eventType) return item;
@@ -183,7 +186,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   }
 
   if (error) {
-    const errorContent = <Alert variant="error">Failed to load notification preferences</Alert>;
+    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
     if (embedded) return errorContent;
     return (
       <PageTemplate title="Notification Preferences" icon={BellIcon}>
@@ -210,17 +213,18 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
           <p className="text-sm text-pf-text-secondary mt-1">Choose which channels each print event should use</p>
         </div>
         <div className="p-4">
-          <div className="grid grid-cols-[2fr,1fr,1fr,1fr] gap-3 items-center text-xs uppercase tracking-wide text-pf-text-secondary mb-2">
+          <div className="grid grid-cols-[2fr,1fr,1fr,1fr,1fr] gap-3 items-center text-xs uppercase tracking-wide text-pf-text-secondary mb-2">
             <div>Event</div>
             <div>In-App</div>
             <div>Email</div>
             <div>Browser Push</div>
+            <div>Telegram</div>
           </div>
           <div className="space-y-3">
             {EVENT_ROWS.map(row => {
               const pref = getEventPreference(row.eventType);
               return (
-                <div key={row.eventType} className="grid grid-cols-[2fr,1fr,1fr,1fr] gap-3 items-center py-2 border-b border-pf-border last:border-b-0">
+                <div key={row.eventType} className="grid grid-cols-[2fr,1fr,1fr,1fr,1fr] gap-3 items-center py-2 border-b border-pf-border last:border-b-0">
                   <div>
                     <p className="text-sm font-medium text-pf-text-primary">{row.label}</p>
                     <p className="text-xs text-pf-text-secondary">{row.description}</p>
@@ -250,6 +254,13 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
                       aria-label={`${row.label} push`}
                     />
                   </div>
+                  <div>
+                    <Toggle
+                      checked={!!pref?.telegram}
+                      onChange={(e) => updateMatrixField(row.eventType, 'telegram', e.target.checked)}
+                      aria-label={`${row.label} Telegram`}
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -277,7 +288,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       )}
 
       {pushSubscription.error && (
-        <Alert variant="warning">{pushSubscription.error}</Alert>
+        <Alert type="warning">{pushSubscription.error}</Alert>
       )}
 
       <Card>

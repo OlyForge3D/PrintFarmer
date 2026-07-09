@@ -32,15 +32,16 @@ function createPreferences(): NotificationPreferencesDto {
     enableEmailNotifications: true,
     enablePushNotifications: true,
     enableInAppNotifications: true,
+    enableTelegramNotifications: false,
     notifyOnCompletion: true,
     notifyOnFailure: true,
     notifyOnStart: false,
     notifyOnPause: true,
     eventChannelPreferences: [
-      { eventType: NotificationPreferenceEventType.JobStarted, inApp: false, email: false, push: false },
-      { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true },
-      { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true },
-      { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true },
+      { eventType: NotificationPreferenceEventType.JobStarted, inApp: false, email: false, push: false, telegram: false },
+      { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true, telegram: false },
+      { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true, telegram: false },
+      { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true, telegram: false },
     ],
     frequency: NotificationFrequency.RealTime,
     retentionDays: 30,
@@ -84,7 +85,9 @@ describe('NotificationPreferencesPage', () => {
     expect(screen.getByText('In-App')).toBeInTheDocument();
     expect(screen.getByText('Email')).toBeInTheDocument();
     expect(screen.getByText('Browser Push')).toBeInTheDocument();
+    expect(screen.getByText('Telegram')).toBeInTheDocument();
     expect(screen.getByLabelText('Print Complete email')).toBeInTheDocument();
+    expect(screen.getByLabelText('Print Complete Telegram')).toBeInTheDocument();
   });
 
   it('keeps print-failed in-app always on and disabled', () => {
@@ -110,5 +113,21 @@ describe('NotificationPreferencesPage', () => {
     const started = payload.eventChannelPreferences?.find(x => x.eventType === NotificationPreferenceEventType.JobStarted);
     expect(started?.email).toBe(true);
     expect(payload.enableEmailNotifications).toBe(true);
+  });
+
+  it('saves Telegram opt-in when a Telegram toggle changes', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByLabelText('Print Complete Telegram'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+    const completed = payload.eventChannelPreferences?.find(x => x.eventType === NotificationPreferenceEventType.JobCompleted);
+    expect(completed?.telegram).toBe(true);
+    expect(payload.enableTelegramNotifications).toBe(true);
   });
 });

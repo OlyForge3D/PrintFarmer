@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
@@ -159,7 +160,8 @@ public class NotificationService(
     IWebhookService? webhookService = null,
     IEmailService? emailService = null,
     IWebPushNotificationSender? webPushNotificationSender = null,
-    Func<string, CancellationToken, Task<bool>>? pushEndpointValidatorOverride = null) : INotificationService
+    Func<string, CancellationToken, Task<bool>>? pushEndpointValidatorOverride = null,
+    IEnumerable<INotificationChannel>? notificationChannels = null) : INotificationService
 {
     private static readonly string[] KnownPushServiceHosts =
     {
@@ -173,6 +175,7 @@ public class NotificationService(
     private const int ChannelFanOutConcurrency = 8;
     private const int PushFanOutConcurrency = 8;
     private readonly Func<string, CancellationToken, Task<bool>> pushEndpointValidator = pushEndpointValidatorOverride ?? IsValidPushEndpointAsync;
+    private readonly IReadOnlyList<INotificationChannel> notificationChannels = notificationChannels?.ToList() ?? [];
 
     public async Task SendJobStartedAsync(
         string jobId,
@@ -290,6 +293,7 @@ public class NotificationService(
             IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
             var pendingEmailTargets = new List<EmailDispatchTarget>();
             var pendingPushTargets = new List<PushDispatchTarget>();
+            bool shouldDispatchTelegram = false;
 
             foreach (UserDto user in activeUsers)
             {
@@ -322,7 +326,11 @@ public class NotificationService(
                             subscription.Auth));
                     }
                 }
+
+                shouldDispatchTelegram |= ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Telegram);
             }
+
+            Guid? printerId = await ResolvePrinterIdForJobAsync(parsedJobId, cancellationToken);
 
             Task pushDispatchTask = Task.CompletedTask;
             if (pendingPushTargets.Count > 0)
@@ -344,7 +352,17 @@ public class NotificationService(
                 emailDispatchTask = DispatchEmailTargetsAsync(pendingEmailTargets, type, subject, body, cancellationToken);
             }
 
-            await Task.WhenAll(pushDispatchTask, emailDispatchTask);
+            Task telegramDispatchTask = Task.CompletedTask;
+            if (shouldDispatchTelegram)
+            {
+                var message = new NotificationChannelMessage(type, subject, body, parsedJobId, printerId);
+                telegramDispatchTask = DispatchNotificationChannelAsync(
+                    NotificationDeliveryChannel.Telegram,
+                    message,
+                    cancellationToken);
+            }
+
+            await Task.WhenAll(pushDispatchTask, emailDispatchTask, telegramDispatchTask);
 
             logger.LogInformation(
                 "Job notification broadcast ({Type}) for job {JobId}: {Subject}",
@@ -451,6 +469,7 @@ public class NotificationService(
             existing.EnableEmailNotifications = preferences.EnableEmailNotifications;
             existing.EnablePushNotifications = preferences.EnablePushNotifications;
             existing.EnableInAppNotifications = preferences.EnableInAppNotifications;
+            existing.EnableTelegramNotifications = preferences.EnableTelegramNotifications;
             existing.NotifyOnCompletion = preferences.NotifyOnCompletion;
             existing.NotifyOnFailure = preferences.NotifyOnFailure;
             existing.NotifyOnStart = preferences.NotifyOnStart;
@@ -467,6 +486,10 @@ public class NotificationService(
             existing.PushOnJobCompleted = preferences.PushOnJobCompleted;
             existing.PushOnJobFailed = preferences.PushOnJobFailed;
             existing.PushOnJobPaused = preferences.PushOnJobPaused;
+            existing.TelegramOnJobStarted = preferences.TelegramOnJobStarted;
+            existing.TelegramOnJobCompleted = preferences.TelegramOnJobCompleted;
+            existing.TelegramOnJobFailed = preferences.TelegramOnJobFailed;
+            existing.TelegramOnJobPaused = preferences.TelegramOnJobPaused;
             existing.Frequency = preferences.Frequency;
             existing.RetentionDays = preferences.RetentionDays;
             existing.UpdatedAt = DateTime.UtcNow;
@@ -503,6 +526,7 @@ public class NotificationService(
             EnableEmailNotifications = true,
             EnablePushNotifications = true,
             EnableInAppNotifications = true,
+            EnableTelegramNotifications = false,
             NotifyOnCompletion = true,
             NotifyOnFailure = true,
             NotifyOnStart = false,
@@ -519,6 +543,10 @@ public class NotificationService(
             PushOnJobCompleted = true,
             PushOnJobFailed = true,
             PushOnJobPaused = true,
+            TelegramOnJobStarted = false,
+            TelegramOnJobCompleted = false,
+            TelegramOnJobFailed = false,
+            TelegramOnJobPaused = false,
             Frequency = NotificationFrequency.RealTime,
             RetentionDays = 30
         };
@@ -536,6 +564,7 @@ public class NotificationService(
             NotificationDeliveryChannel.InApp => preferences.EnableInAppNotifications,
             NotificationDeliveryChannel.Email => preferences.EnableEmailNotifications,
             NotificationDeliveryChannel.Push => preferences.EnablePushNotifications,
+            NotificationDeliveryChannel.Telegram => preferences.EnableTelegramNotifications,
             _ => false
         };
 
@@ -728,6 +757,54 @@ public class NotificationService(
                         target.User.Email);
                 }
             });
+    }
+
+    private async Task DispatchNotificationChannelAsync(
+        NotificationDeliveryChannel channel,
+        NotificationChannelMessage message,
+        CancellationToken cancellationToken)
+    {
+        foreach (INotificationChannel notificationChannel in notificationChannels.Where(c => c.Channel == channel))
+        {
+            try
+            {
+                NotificationChannelDispatchResult result = await notificationChannel.SendAsync(message, cancellationToken);
+                if (!result.Success)
+                {
+                    logger.LogWarning(
+                        "Notification channel {Channel} delivery failed for {Type}: {Error}",
+                        channel,
+                        message.Type,
+                        result.Error);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    ex,
+                    "Error dispatching notification channel {Channel} for {Type}",
+                    channel,
+                    message.Type);
+            }
+        }
+    }
+
+    private async Task<Guid?> ResolvePrinterIdForJobAsync(Guid? jobId, CancellationToken cancellationToken)
+    {
+        if (!jobId.HasValue)
+        {
+            return null;
+        }
+
+        return await dbContext.PrintJobs
+            .AsNoTracking()
+            .Where(job => job.Id == jobId.Value)
+            .Select(job => job.AssignedPrinterId ?? job.SourcePrinterId)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task SavePushSubscriptionAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken cancellationToken = default)

@@ -121,7 +121,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     description: 'Webhooks, automation endpoints, and external connections.',
     keywords: ['integration', 'api', 'key', 'external', 'webhook', 'automation', 'endpoint'],
     subPages: [
-      { id: 'connections', label: 'External Services', description: 'Configure Spoolman, Home Assistant, and slicer auth.', keywords: ['spoolman', 'home assistant', 'slicer', 'octoprint'] },
+      { id: 'connections', label: 'External Services', description: 'Configure Spoolman, Home Assistant, Telegram, and slicer auth.', keywords: ['spoolman', 'home assistant', 'telegram', 'slicer', 'octoprint'] },
       { id: 'webhooks', label: 'Webhooks', description: 'Manage outgoing webhook endpoints.', keywords: ['webhook', 'api', 'endpoints'] },
     ],
   },

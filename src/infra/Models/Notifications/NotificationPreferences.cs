@@ -30,6 +30,11 @@ public class NotificationPreferences
     public bool EnableInAppNotifications { get; set; } = true;
 
     /// <summary>
+    /// Enable Telegram notifications
+    /// </summary>
+    public bool EnableTelegramNotifications { get; set; } = false;
+
+    /// <summary>
     /// Notify when job completes
     /// </summary>
     public bool NotifyOnCompletion { get; set; } = true;
@@ -111,6 +116,26 @@ public class NotificationPreferences
     public bool PushOnJobPaused { get; set; } = true;
 
     /// <summary>
+    /// Enable Telegram delivery for job start events.
+    /// </summary>
+    public bool TelegramOnJobStarted { get; set; } = false;
+
+    /// <summary>
+    /// Enable Telegram delivery for job completion events.
+    /// </summary>
+    public bool TelegramOnJobCompleted { get; set; } = false;
+
+    /// <summary>
+    /// Enable Telegram delivery for job failure events.
+    /// </summary>
+    public bool TelegramOnJobFailed { get; set; } = false;
+
+    /// <summary>
+    /// Enable Telegram delivery for job pause/resume events.
+    /// </summary>
+    public bool TelegramOnJobPaused { get; set; } = false;
+
+    /// <summary>
     /// Notification frequency (real-time, hourly digest, daily digest)
     /// </summary>
     public NotificationFrequency Frequency { get; set; } = NotificationFrequency.RealTime;
@@ -153,6 +178,10 @@ public class NotificationPreferences
             (NotificationType.JobCompleted, NotificationDeliveryChannel.Push) => PushOnJobCompleted,
             (NotificationType.JobFailed, NotificationDeliveryChannel.Push) => PushOnJobFailed,
             (NotificationType.JobPaused, NotificationDeliveryChannel.Push) => PushOnJobPaused,
+            (NotificationType.JobStarted, NotificationDeliveryChannel.Telegram) => TelegramOnJobStarted,
+            (NotificationType.JobCompleted, NotificationDeliveryChannel.Telegram) => TelegramOnJobCompleted,
+            (NotificationType.JobFailed, NotificationDeliveryChannel.Telegram) => TelegramOnJobFailed,
+            (NotificationType.JobPaused, NotificationDeliveryChannel.Telegram) => TelegramOnJobPaused,
             _ => false
         };
     }
@@ -162,7 +191,8 @@ public enum NotificationDeliveryChannel
 {
     InApp,
     Email,
-    Push
+    Push,
+    Telegram
 }
 
 public enum NotificationFrequency

@@ -16,6 +16,7 @@ import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar'
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
 import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
+import { TelegramSettingsCard } from '@/features/settings/components/TelegramSettingsCard';
 import {
   buildSettingsCommandItems,
   resolveSettingsNavigationTarget,
@@ -153,6 +154,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       <SettingsPage
         allowedGroups={['Integrations']}
         introText="Configure third-party services, Smart Plugs, and slicer API connections."
+        afterContent={<TelegramSettingsCard />}
       />
     </SettingsSection>
   ),
