@@ -61,6 +61,7 @@ public static class CameraContractClassifier
             CameraStreamFormat.Mjpeg => CameraAccessMode.StreamOnly,
             CameraStreamFormat.WebRtc or CameraStreamFormat.Rtsp when hasSnapshot => CameraAccessMode.StreamAndSnapshot,
             CameraStreamFormat.WebRtc or CameraStreamFormat.Rtsp => CameraAccessMode.StreamOnly,
+            CameraStreamFormat.Unsupported when hasSnapshot => CameraAccessMode.SnapshotOnly,
             CameraStreamFormat.Unsupported => CameraAccessMode.UnsupportedStream,
             _ when hasSnapshot => CameraAccessMode.SnapshotOnly,
             _ => CameraAccessMode.Unknown,
