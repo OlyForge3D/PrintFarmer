@@ -61,6 +61,8 @@ final class PrinterDetailViewModel {
     private var predictiveService: (any PredictiveServiceProtocol)?
     private var failureDetectionService: (any FailureDetectionServiceProtocol)?
     private var snapshotPollingTask: Task<Void, Never>?
+    private var snapshotPollingGeneration = 0
+    private var isSnapshotPollingAllowed = true
     private let snapshotPollInterval: Duration
     private let snapshotErrorBackoffBaseSeconds: Int
     private let snapshotErrorBackoffMaxSeconds: Int
@@ -535,23 +537,35 @@ final class PrinterDetailViewModel {
     }
 
     func startSnapshotPollingIfNeeded() {
-        guard isViewActive, shouldPollSnapshot else {
+        guard isViewActive, isSnapshotPollingAllowed, shouldPollSnapshot else {
             stopSnapshotPolling()
             return
         }
         guard snapshotPollingTask == nil else { return }
+        snapshotPollingGeneration += 1
+        let generation = snapshotPollingGeneration
         snapshotPollingTask = Task { [weak self] in
-            await self?.runSnapshotPollingLoop()
+            await self?.runSnapshotPollingLoop(generation: generation)
         }
     }
 
     func stopSnapshotPolling() {
+        snapshotPollingGeneration += 1
         snapshotPollingTask?.cancel()
         snapshotPollingTask = nil
         isLoadingSnapshot = false
     }
 
-    private func runSnapshotPollingLoop() async {
+    func setSnapshotPollingAllowed(_ allowed: Bool) {
+        isSnapshotPollingAllowed = allowed
+        if allowed {
+            startSnapshotPollingIfNeeded()
+        } else {
+            stopSnapshotPolling()
+        }
+    }
+
+    private func runSnapshotPollingLoop(generation: Int) async {
         var consecutiveFailures = 0
         while isViewActive && shouldPollSnapshot && !Task.isCancelled {
             let succeeded = await refreshSnapshot()
@@ -563,7 +577,9 @@ final class PrinterDetailViewModel {
                 break
             }
         }
-        snapshotPollingTask = nil
+        if snapshotPollingGeneration == generation {
+            snapshotPollingTask = nil
+        }
     }
 
     private func snapshotBackoffDuration(afterFailures failures: Int) -> Duration {
@@ -607,23 +623,26 @@ final class PrinterDetailViewModel {
     var cameraPreviewMode: CameraPreviewMode {
         guard let printer else { return .none }
 
-        if printer.cameraAccessMode == .unsupportedStream || printer.cameraStreamFormat == .unsupported {
-            return .unsupported
-        }
-
         switch printer.cameraAccessMode {
         case .snapshotOnly:
+            if printer.cameraSnapshotStrategy == .snapmakerU1MonitorJpeg {
+                return .snapshotPolling
+            }
+            if hasDirectSnapshot(printer) {
+                return .directSnapshot
+            }
             return .snapshotPolling
         case .streamOnly:
-            return hasUsableMjpegStream(printer) ? .mjpegStream : .unsupported
+            if hasUsableMjpegStream(printer) { return .mjpegStream }
+            return snapshotFallbackMode(for: printer) ?? .unsupported
         case .streamAndSnapshot:
             if hasUsableMjpegStream(printer) { return .mjpegStream }
-            return printer.cameraSnapshotUrl == nil ? .unsupported : .directSnapshot
+            return snapshotFallbackMode(for: printer) ?? .unsupported
         case .unsupportedStream:
-            return .unsupported
+            return snapshotFallbackMode(for: printer) ?? .unsupported
         case .unknown:
             if hasUsableMjpegStream(printer) { return .mjpegStream }
-            return printer.cameraSnapshotUrl == nil ? .none : .directSnapshot
+            return snapshotFallbackMode(for: printer) ?? .none
         }
     }
 
@@ -649,6 +668,21 @@ final class PrinterDetailViewModel {
     private func hasUsableMjpegStream(_ printer: Printer) -> Bool {
         guard printer.cameraStreamUrl != nil else { return false }
         return printer.cameraStreamFormat == .mjpeg || printer.cameraStreamFormat == .unknown
+    }
+
+    private func snapshotFallbackMode(for printer: Printer) -> CameraPreviewMode? {
+        if printer.cameraSnapshotStrategy == .snapmakerU1MonitorJpeg {
+            return .snapshotPolling
+        }
+        if hasDirectSnapshot(printer) {
+            return .directSnapshot
+        }
+        return nil
+    }
+
+    private func hasDirectSnapshot(_ printer: Printer) -> Bool {
+        guard let snapshotUrl = printer.cameraSnapshotUrl else { return false }
+        return !snapshotUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var isIdle: Bool {

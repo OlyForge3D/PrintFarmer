@@ -5,6 +5,7 @@ struct PrinterDetailView: View {
     @Environment(AppRouter.self) private var router
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: PrinterDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -38,7 +39,7 @@ struct PrinterDetailView: View {
         #endif
         .refreshable {
             await viewModel.loadPrinter()
-            viewModel.startSnapshotPollingIfNeeded()
+            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
         }
         .alert(
             viewModel.pendingAction?.title ?? "Confirm",
@@ -63,6 +64,7 @@ struct PrinterDetailView: View {
         }
         .task {
             viewModel.isViewActive = true
+            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
             viewModel.configure(printerService: services.printerService)
             #if canImport(UIKit)
             if let nfc = services.nfcService {
@@ -74,7 +76,7 @@ struct PrinterDetailView: View {
             viewModel.configurePredictive(services.predictiveService)
             viewModel.configureFailureDetection(services.failureDetectionService)
             await viewModel.loadPrinter()
-            viewModel.startSnapshotPollingIfNeeded()
+            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
 
             // Handle NFC "mark ready" deep link
             if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
@@ -87,6 +89,18 @@ struct PrinterDetailView: View {
             activeTasks.removeAll()
             viewModel.isViewActive = false
             viewModel.stopSnapshotPolling()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:
+                if viewModel.isViewActive {
+                    viewModel.setSnapshotPollingAllowed(true)
+                }
+            case .inactive, .background:
+                viewModel.setSnapshotPollingAllowed(false)
+            @unknown default:
+                viewModel.setSnapshotPollingAllowed(false)
+            }
         }
         .sheet(isPresented: $viewModel.showSpoolPicker) {
             SpoolPickerView { spool in

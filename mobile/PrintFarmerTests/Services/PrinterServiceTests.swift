@@ -239,7 +239,7 @@ final class PrinterServiceTests: XCTestCase {
 
         let captured = MockURLProtocol.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
-        XCTAssertTrue(captured?.url?.path.hasSuffix("/api/printers/\(TestData.testUUID)/camera-url") ?? false)
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/api/printers/\(TestData.testUUID)/camera/url") ?? false)
     }
 
     // MARK: - Command Error Handling
