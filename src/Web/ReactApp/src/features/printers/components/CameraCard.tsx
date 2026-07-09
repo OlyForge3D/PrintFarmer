@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { Printer, CameraHealthStatus } from '@/types/api';
+import { CameraHealthStatus } from '@/types/api';
+import type { Printer } from '@/types/api';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Badge } from '@/common/components/ui';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
@@ -8,6 +9,15 @@ import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
+import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import {
+  canUseMjpegStream,
+  isUnsupportedCameraPreview,
+  shouldPollPrinterSnapshot,
+} from '@/features/cameras/utils/cameraPreview';
+
+const ACTIVE_PREVIEW_REFRESH_MS = 4_000;
+const IDLE_PREVIEW_REFRESH_MS = 12_000;
 
 interface CameraCardProps {
   printer: Printer;
@@ -28,9 +38,26 @@ export function CameraCard({
   // Camera source handling
   const cameraSnapshotUrl = p.cameraSnapshotUrl;
   const cameraStreamUrl = p.cameraStreamUrl;
-  const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
-  const hasSnapshot = !!cameraSnapshotUrl;
-  const hasStream = !!cameraStreamUrl;
+  const previewContract = {
+    accessMode: p.cameraAccessMode,
+    streamFormat: p.cameraStreamFormat,
+    snapshotStrategy: p.cameraSnapshotStrategy,
+    snapshotUrl: cameraSnapshotUrl,
+  };
+  const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
+  const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
+  const hasStream = !!cameraStreamUrl && canUseMjpegStream(previewContract);
+  const refreshIntervalMs = isPrinting ? ACTIVE_PREVIEW_REFRESH_MS : IDLE_PREVIEW_REFRESH_MS;
+  const directSnapshotUrl = pollSnapshotPreview ? null : cameraSnapshotUrl;
+  const { previewContainerRef, snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
+    p.id,
+    pollSnapshotPreview,
+    refreshIntervalMs,
+    directSnapshotUrl,
+    !!directSnapshotUrl
+  );
+  const hasCameraUrls = unsupportedPreview || hasStream || pollSnapshotPreview || !!directSnapshotUrl;
+  const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
     setCameraMode,
@@ -50,15 +77,21 @@ export function CameraCard({
   const cameraCount = printerCameras?.length ?? 0;
 
   // Determine which URL to show
+  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const activeUrl = cameraMode === 'stream' && hasStream 
     ? cameraStreamUrl 
-    : cameraMode === 'snapshot' && hasSnapshot
-    ? cameraSnapshotUrl
+    : cameraMode === 'snapshot' && snapshotPreviewUrl
+    ? snapshotPreviewUrl
     : hasStream 
     ? cameraStreamUrl 
-    : cameraSnapshotUrl;
+    : snapshotPreviewUrl;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
+  const externalUrl = cameraMode === 'stream' && hasStream
+    ? cameraStreamUrl
+    : pollSnapshotPreview
+    ? null
+    : activeUrl;
 
   // Health status dot color
   const getHealthDotColor = (health: CameraHealthStatus) => {
@@ -73,7 +106,7 @@ export function CameraCard({
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
-      <div className="relative w-full aspect-video bg-pf-bg-2">
+      <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
         {cameraMode === 'stream' && hasStream && activeUrl ? (
           <iframe
             src={activeUrl}
@@ -90,10 +123,23 @@ export function CameraCard({
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
+        ) : unsupportedPreview ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+            <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
+            <span className="text-center text-sm font-medium text-pf-text-secondary">No live preview available</span>
+            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+              This camera does not provide an embeddable MJPEG live stream.
+            </span>
+          </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-sm">{hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
+            {snapshotFailed && (
+              <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+                Snapshot polling is temporarily unavailable; the preview will retry automatically.
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -192,9 +238,9 @@ export function CameraCard({
                 />
               </div>
             )}
-            {activeUrl && (
+            {externalUrl && (
               <a
-                href={cameraMode === 'stream' && hasStream ? cameraStreamUrl ?? activeUrl : activeUrl}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"

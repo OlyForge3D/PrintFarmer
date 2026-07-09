@@ -37,6 +37,7 @@ import {
   MoveRequest,
   NozzleModelDefinition,
   Printer,
+  PrinterCameraUrlResult,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
   PrinterBackendCapabilitiesDto,
@@ -645,6 +646,24 @@ export class ApiClient {
   async getPrinterCameraUrls(): Promise<PrinterCameraUrls[]> {
     const response = await this.client.get<PrinterCameraUrls[]>(
       "/printers/camera-urls"
+    );
+    return response.data;
+  }
+
+  async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
+    const response = await this.client.get<PrinterCameraUrlResult>(
+      `/printers/${id}/camera/url`
+    );
+    return response.data;
+  }
+
+  async getPrinterSnapshot(id: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/printers/${id}/snapshot`,
+      {
+        params: { _: Date.now() },
+        responseType: "blob",
+      }
     );
     return response.data;
   }

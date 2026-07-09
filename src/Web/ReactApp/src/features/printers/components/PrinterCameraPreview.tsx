@@ -1,14 +1,24 @@
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import { RotateCw } from 'lucide-react';
 import { Button } from '@/common/components/ui';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
+import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import {
+  canUseMjpegStream,
+  isUnsupportedCameraPreview,
+  shouldPollPrinterSnapshot,
+} from '@/features/cameras/utils/cameraPreview';
+import type {
+  CameraAccessMode,
+  CameraSnapshotStrategy,
+  CameraStreamFormat,
+} from '@/types/api';
 
 const ACTIVE_PREVIEW_REFRESH_MS = 4_000;
 const IDLE_PREVIEW_REFRESH_MS = 12_000;
@@ -18,85 +28,12 @@ interface PrinterCameraPreviewProps {
   printerName: string;
   cameraStreamUrl?: string | null;
   cameraSnapshotUrl?: string | null;
+  cameraAccessMode?: CameraAccessMode;
+  cameraStreamFormat?: CameraStreamFormat;
+  cameraSnapshotStrategy?: CameraSnapshotStrategy;
   isPrinting?: boolean;
   className?: string;
   overlay?: ReactNode;
-}
-
-function usePrinterSnapshotPreview(printerId: string, enabled: boolean, refreshIntervalMs: number) {
-  const [snapshotSrc, setSnapshotSrc] = useState<string | null>(null);
-  const [proxyFailed, setProxyFailed] = useState(false);
-  const objectUrlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const revokeCurrentObjectUrl = () => {
-      if (!objectUrlRef.current) {
-        return;
-      }
-
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    };
-
-    if (!enabled) {
-      revokeCurrentObjectUrl();
-      setSnapshotSrc(null);
-      setProxyFailed(false);
-      return;
-    }
-
-    let cancelled = false;
-    const apiBaseUrl = getApiBaseUrl().replace(/\/$/, '');
-    const snapshotEndpoint = `${apiBaseUrl}/printers/${encodeURIComponent(printerId)}/snapshot`;
-
-    const loadSnapshot = async () => {
-      try {
-        const response = await fetch(snapshotEndpoint, {
-          headers: getAuthHeaders() as Record<string, string>,
-          cache: 'no-store',
-        });
-
-        if (!response.ok) {
-          throw new Error(`Snapshot request failed with ${response.status}`);
-        }
-
-        const blob = await response.blob();
-        if (cancelled) {
-          return;
-        }
-
-        const nextObjectUrl = URL.createObjectURL(blob);
-        revokeCurrentObjectUrl();
-        objectUrlRef.current = nextObjectUrl;
-        setSnapshotSrc(nextObjectUrl);
-        setProxyFailed(false);
-      } catch {
-        if (cancelled) {
-          return;
-        }
-
-        revokeCurrentObjectUrl();
-        setSnapshotSrc(null);
-        setProxyFailed(true);
-      }
-    };
-
-    void loadSnapshot();
-    const intervalId = window.setInterval(() => {
-      void loadSnapshot();
-    }, refreshIntervalMs);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-      revokeCurrentObjectUrl();
-    };
-  }, [enabled, printerId, refreshIntervalMs]);
-
-  return {
-    snapshotSrc,
-    proxyFailed,
-  };
 }
 
 export function PrinterCameraPreview({
@@ -104,26 +41,41 @@ export function PrinterCameraPreview({
   printerName,
   cameraStreamUrl,
   cameraSnapshotUrl,
+  cameraAccessMode,
+  cameraStreamFormat,
+  cameraSnapshotStrategy,
   isPrinting = false,
   className,
   overlay,
 }: PrinterCameraPreviewProps) {
-  const hasCameraSource = !!(cameraStreamUrl || cameraSnapshotUrl);
+  const previewContract = {
+    accessMode: cameraAccessMode,
+    streamFormat: cameraStreamFormat,
+    snapshotStrategy: cameraSnapshotStrategy,
+    snapshotUrl: cameraSnapshotUrl,
+  };
+  const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
+  const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
+  const streamSupported = canUseMjpegStream(previewContract);
+  const hasStream = !!cameraStreamUrl && streamSupported;
+  const hasCameraSource = unsupportedPreview || hasStream || pollSnapshotPreview || !!cameraSnapshotUrl;
   const refreshIntervalMs = isPrinting ? ACTIVE_PREVIEW_REFRESH_MS : IDLE_PREVIEW_REFRESH_MS;
-  const { snapshotSrc, proxyFailed } = usePrinterSnapshotPreview(
-    printerId,
-    hasCameraSource,
-    refreshIntervalMs
-  );
   const rawSnapshotKey = `${printerId}:${cameraSnapshotUrl ?? ''}`;
   const rawStreamKey = `${printerId}:${cameraStreamUrl ?? ''}`;
   const [failedRawSnapshotKey, setFailedRawSnapshotKey] = useState<string | null>(null);
   const [failedRawStreamKey, setFailedRawStreamKey] = useState<string | null>(null);
-  const fallbackSnapshotSrc =
-    failedRawSnapshotKey === rawSnapshotKey ? null : (cameraSnapshotUrl ?? null);
-  const previewSrc = snapshotSrc ?? fallbackSnapshotSrc;
-  const hasStream = !!cameraStreamUrl;
-  const hasSnapshot = !!previewSrc;
+  const directSnapshotUrl = pollSnapshotPreview || failedRawSnapshotKey === rawSnapshotKey
+    ? null
+    : (cameraSnapshotUrl ?? null);
+  const { previewContainerRef, snapshotSrc, snapshotFailed, isPollingPaused } = usePrinterSnapshotPreview(
+    printerId,
+    pollSnapshotPreview,
+    refreshIntervalMs,
+    directSnapshotUrl,
+    !!directSnapshotUrl
+  );
+  const previewSrc = snapshotSrc ?? directSnapshotUrl;
+  const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
     setCameraMode,
@@ -137,10 +89,20 @@ export function PrinterCameraPreview({
     hasStream,
     hasSnapshot,
   });
-  const externalUrl = cameraStreamUrl ?? cameraSnapshotUrl ?? null;
+  const externalUrl = hasStream
+    ? cameraStreamUrl
+    : pollSnapshotPreview
+    ? null
+    : cameraSnapshotUrl ?? null;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
   const showLiveStream = cameraMode === 'stream' && hasStream;
   const shouldUseImageStream = showLiveStream && failedRawStreamKey !== rawStreamKey;
+  // CameraContractClassifier emits UnsupportedStream only when no snapshot exists; keep the snapshot branch defensive.
+  const placeholderTitle = unsupportedPreview
+    ? 'No live preview available'
+    : hasCameraSource
+    ? (showLiveStream ? 'Live stream unavailable' : 'Camera preview unavailable')
+    : 'No linked camera configured';
 
   return (
     <div
@@ -149,27 +111,20 @@ export function PrinterCameraPreview({
         className
       )}
     >
-      <div className="relative aspect-video w-full overflow-hidden bg-pf-bg-0">
-        {showLiveStream && cameraStreamUrl ? (
-          shouldUseImageStream ? (
-            <img
-              src={cameraStreamUrl}
-              alt={`${printerName} live camera feed`}
-              className={`h-full w-full object-contain bg-black ${mediaClassName}`}
-              loading="eager"
-              onError={() => {
-                setFailedRawStreamKey(rawStreamKey);
-              }}
-            />
-          ) : (
-            <iframe
-              src={cameraStreamUrl}
-              title={`${printerName} live camera feed`}
-              className={`h-full w-full border-0 bg-black ${mediaClassName}`}
-              loading="lazy"
-              referrerPolicy="no-referrer"
-            />
-          )
+      <div
+        ref={previewContainerRef}
+        className="relative aspect-video w-full overflow-hidden bg-pf-bg-0"
+      >
+        {showLiveStream && cameraStreamUrl && shouldUseImageStream ? (
+          <img
+            src={cameraStreamUrl}
+            alt={`${printerName} live camera feed`}
+            className={`h-full w-full object-contain bg-black ${mediaClassName}`}
+            loading="eager"
+            onError={() => {
+              setFailedRawStreamKey(rawStreamKey);
+            }}
+          />
         ) : previewSrc ? (
           <img
             src={previewSrc}
@@ -184,18 +139,36 @@ export function PrinterCameraPreview({
               setFailedRawSnapshotKey(rawSnapshotKey);
             }}
           />
+        ) : unsupportedPreview ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
+            <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
+            <p className="text-sm font-medium">{placeholderTitle}</p>
+            <p className="mt-1 text-xs text-pf-text-tertiary">
+              This camera does not provide an embeddable MJPEG live stream.
+            </p>
+          </div>
+        ) : showLiveStream && cameraStreamUrl ? (
+          <iframe
+            src={cameraStreamUrl}
+            title={`${printerName} live camera feed`}
+            className={`h-full w-full border-0 bg-black ${mediaClassName}`}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
             <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
             <p className="text-sm font-medium">
               {hasCameraSource
-                ? showLiveStream ? 'Live stream unavailable' : 'Camera preview unavailable'
+                ? (showLiveStream ? 'Live stream unavailable' : 'Camera preview unavailable')
                 : 'No linked camera configured'}
             </p>
             {hasCameraSource && (
               <p className="mt-1 text-xs text-pf-text-tertiary">
-                {proxyFailed
-                  ? 'The embedded preview fell back to snapshots. You can still switch to live mode or open the feed in a new tab.'
+                {snapshotFailed
+                  ? 'Snapshot polling is temporarily unavailable; the preview will retry automatically.'
+                  : isPollingPaused
+                  ? 'Snapshot polling is paused while the page is hidden.'
                   : 'Use live mode for the embedded stream or open the feed in a new tab.'}
               </p>
             )}
