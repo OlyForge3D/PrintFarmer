@@ -1762,6 +1762,8 @@ export interface GcodeFile {
   // Multi-toolhead filament tracking
   filamentPerExtruderWeightG?: number[];
   filamentPerExtruderLengthMm?: number[];
+  filamentPerExtruderColorHex?: string[];
+  filamentPerExtruderType?: string[];
   extruderCount?: number;
 }
 

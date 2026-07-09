@@ -925,7 +925,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int?>("ExtruderCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("FilamentPerExtruderColorHex")
+                        .HasColumnType("text");
+
                     b.Property<string>("FilamentPerExtruderLengthMm")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FilamentPerExtruderType")
                         .HasColumnType("text");
 
                     b.Property<string>("FilamentPerExtruderWeightG")
