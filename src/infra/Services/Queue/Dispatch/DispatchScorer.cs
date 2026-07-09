@@ -294,6 +294,21 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             return new FactorScore("MaterialMatch", 85, WeightMaterialMatch, 85 * WeightMaterialMatch, true);
         }
 
+        if (printer.Toolheads.Any(t =>
+            !string.IsNullOrWhiteSpace(t.CurrentMaterial) &&
+            string.Equals(t.CurrentMaterial, requiredMaterial, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new FactorScore("MaterialMatch", 100, WeightMaterialMatch, 100 * WeightMaterialMatch, true);
+        }
+
+        if (clusterMateNames.Count > 0 &&
+            printer.Toolheads.Any(t =>
+                !string.IsNullOrWhiteSpace(t.CurrentMaterial) &&
+                clusterMateNames.Contains(t.CurrentMaterial)))
+        {
+            return new FactorScore("MaterialMatch", 85, WeightMaterialMatch, 85 * WeightMaterialMatch, true);
+        }
+
         // Check toolhead supported materials
         bool anyToolheadSupports = printer.Toolheads.Any(t =>
             t.SupportedMaterials?.Any(m =>
@@ -559,16 +574,13 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             return new FactorScore("ColorMatch", 50, WeightColorMatch, 50 * WeightColorMatch, false);
         }
 
-        // Get printer's loaded filament color from primary toolhead
-        string? printerColor = printer.Toolheads
-            .Where(t => t.IsPrimary)
+        string[] printerColors = printer.Toolheads
             .Select(t => t.CurrentFilamentColor)
-            .FirstOrDefault()
-            ?? printer.Toolheads
-                .Select(t => t.CurrentFilamentColor)
-                .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!)
+            .ToArray();
 
-        if (string.IsNullOrWhiteSpace(printerColor))
+        if (printerColors.Length == 0)
         {
             // Printer has no color data — neutral
             logger.LogDebug("Dispatch color: printer {PrinterName} has no loaded color data", printer.Name);
@@ -577,9 +589,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
 
         // Exact hex match (case-insensitive, normalize # prefix)
         string jobHex = job.FilamentColor.Trim().TrimStart('#').ToUpperInvariant();
-        string printerHex = printerColor.Trim().TrimStart('#').ToUpperInvariant();
-
-        if (string.Equals(jobHex, printerHex, StringComparison.Ordinal))
+        if (printerColors.Any(c => string.Equals(jobHex, c.Trim().TrimStart('#').ToUpperInvariant(), StringComparison.Ordinal)))
         {
             logger.LogDebug(
                 "Dispatch color: exact hex match for printer {PrinterName} (#{Hex})",
@@ -589,26 +599,28 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
 
         // Compare color families
         (string Name, string Hex)? jobFamily = AutoTagService.HexToColorFamily(job.FilamentColor);
-        (string Name, string Hex)? printerFamily = AutoTagService.HexToColorFamily(printerColor);
-
-        if (jobFamily is null || printerFamily is null)
+        if (jobFamily is null)
         {
             // Can't parse color — neutral
             return new FactorScore("ColorMatch", 50, WeightColorMatch, 50 * WeightColorMatch, false);
         }
 
-        if (string.Equals(jobFamily.Value.Name, printerFamily.Value.Name, StringComparison.OrdinalIgnoreCase))
+        (string Name, string Hex)? matchingFamily = printerColors
+            .Select(AutoTagService.HexToColorFamily)
+            .FirstOrDefault(f => f is not null &&
+                string.Equals(f.Value.Name, jobFamily.Value.Name, StringComparison.OrdinalIgnoreCase));
+        if (matchingFamily is not null)
         {
             logger.LogDebug(
-                "Dispatch color: same family '{Family}' for printer {PrinterName} (job #{JobHex} vs printer #{PrinterHex})",
-                jobFamily.Value.Name, printer.Name, jobHex, printerHex);
+                "Dispatch color: same family '{Family}' for printer {PrinterName} (job #{JobHex})",
+                jobFamily.Value.Name, printer.Name, jobHex);
             return new FactorScore("ColorMatch", 80, WeightColorMatch, 80 * WeightColorMatch, false);
         }
 
         // Different color family — slight penalty, don't eliminate
         logger.LogDebug(
-            "Dispatch color: family mismatch for printer {PrinterName} (job {JobFamily} vs printer {PrinterFamily})",
-            printer.Name, jobFamily.Value.Name, printerFamily.Value.Name);
+            "Dispatch color: family mismatch for printer {PrinterName} (job {JobFamily})",
+            printer.Name, jobFamily.Value.Name);
         return new FactorScore("ColorMatch", 20, WeightColorMatch, 20 * WeightColorMatch, false);
     }
 

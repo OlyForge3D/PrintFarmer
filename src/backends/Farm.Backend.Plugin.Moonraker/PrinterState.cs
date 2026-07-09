@@ -107,6 +107,83 @@ internal sealed class PrinterState
     /// <summary>Whether an AFC Klipper add-on has been detected on this printer.</summary>
     public bool AfcDetected { get; set; }
 
+    /// <summary>Whether Snapmaker U1 print_task_config lanes have been detected on this printer.</summary>
+    public bool SnapmakerU1Detected { get; set; }
+
+    public int SnapmakerU1ActiveTool { get; set; } = -1;
+
+    public SnapmakerU1LaneStatus[] SnapmakerU1Lanes { get; set; } = SnapmakerU1PrintTaskConfigParser.CreateEmptyLanes();
+
+    public bool MergeSnapmakerU1Delta(SnapmakerU1PrintTaskConfigDelta delta)
+    {
+        SnapmakerU1LaneStatus[] lanes = SnapmakerU1Lanes.Length == SnapmakerU1PrintTaskConfigParser.LaneCount
+            ? SnapmakerU1Lanes
+            : SnapmakerU1PrintTaskConfigParser.CreateEmptyLanes();
+
+        bool lanesChanged = false;
+        foreach (SnapmakerU1LaneDelta laneDelta in delta.Lanes)
+        {
+            if (laneDelta.Index is < 0 or >= SnapmakerU1PrintTaskConfigParser.LaneCount)
+            {
+                continue;
+            }
+
+            SnapmakerU1LaneStatus current = lanes[laneDelta.Index];
+            SnapmakerU1LaneStatus merged = MergeSnapmakerU1Lane(current, laneDelta);
+            if (!Equals(current, merged))
+            {
+                lanes[laneDelta.Index] = merged;
+                lanesChanged = true;
+            }
+        }
+
+        if (delta.ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount &&
+            SnapmakerU1ActiveTool != delta.ActiveTool.Value)
+        {
+            SnapmakerU1ActiveTool = delta.ActiveTool.Value;
+            lanesChanged = true;
+        }
+
+        for (int i = 0; i < lanes.Length; i++)
+        {
+            bool isActive = i == SnapmakerU1ActiveTool;
+            if (lanes[i].IsActive != isActive)
+            {
+                lanes[i] = lanes[i] with { IsActive = isActive };
+                lanesChanged = true;
+            }
+        }
+
+        SnapmakerU1Lanes = lanes;
+        return lanesChanged;
+    }
+
+    private static SnapmakerU1LaneStatus MergeSnapmakerU1Lane(
+        SnapmakerU1LaneStatus current,
+        SnapmakerU1LaneDelta delta)
+    {
+        if (delta.Loaded == false)
+        {
+            return current with
+            {
+                Loaded = false,
+                Material = null,
+                SubType = null,
+                Color = null,
+                Official = false
+            };
+        }
+
+        return current with
+        {
+            Loaded = delta.Loaded ?? current.Loaded,
+            Material = delta.HasMaterial ? delta.Material : current.Material,
+            SubType = delta.HasSubType ? delta.SubType : current.SubType,
+            Color = delta.HasColor ? delta.Color : current.Color,
+            Official = delta.Official ?? current.Official
+        };
+    }
+
     /// <summary>AFC system state: "Idle", "Loading", "Unloading", "Error", etc.</summary>
     public string? AfcCurrentState { get; set; }
 
@@ -157,6 +234,10 @@ internal sealed class PrinterState
             {
                 MmuProtocol.Afc => i < AfcLaneNames.Count ? AfcLaneNames[i] : null,
                 MmuProtocol.Qidibox => $"slot{i}",
+
+                // Snapmaker U1 touchscreen labels are T1-T4, while Moonraker/API extruders are zero-based T0-T3.
+                // This mapping is inferred from U1Hub/SnapCon behavior and needs real-hardware confirmation.
+                MmuProtocol.SnapmakerU1 => $"T{i + 1}",
                 _ => null,
             };
 

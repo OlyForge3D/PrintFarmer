@@ -178,6 +178,49 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         return printer;
     }
 
+    private async Task<Printer> SeedSnapmakerU1StylePrinter()
+    {
+        await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
+        AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        string uniqueSuffix = Guid.NewGuid().ToString("N");
+
+        seedDb.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = $"Snapmaker {uniqueSuffix}" });
+        seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = manufacturerId, Name = $"U1 {uniqueSuffix}" });
+
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Snapmaker U1",
+            ServerUrl = "http://192.168.1.53",
+            BackendPort = 80,
+            Backend = (int)PrinterBackend.Moonraker,
+            MultiMaterial = true,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId
+        };
+
+        for (int i = 0; i < 4; i++)
+        {
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"T{i}",
+                Index = i,
+                ToolheadType = ToolheadType.Physical,
+                IsPrimary = i == 0,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        seedDb.Printers.Add(printer);
+        await seedDb.SaveChangesAsync();
+        return printer;
+    }
+
     // ------- EnsureMmuToolheadsAsync -------
 
     [Fact]
@@ -215,6 +258,24 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
 
         int toolheadCount = await _dbContext.Toolheads.CountAsync(t => t.PrinterId == printer.Id);
         toolheadCount.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task EnsureMmuToolheadsAsync_DoesNotCreateMmuGates_ForU1PhysicalToolheads()
+    {
+        Printer printer = await SeedSnapmakerU1StylePrinter();
+
+        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+
+        List<Toolhead> toolheads = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printer.Id)
+            .OrderBy(t => t.Index)
+            .ToListAsync();
+
+        toolheads.Should().HaveCount(4);
+        toolheads.Should().OnlyContain(t => t.ToolheadType == ToolheadType.Physical);
     }
 
     [Fact]
