@@ -839,6 +839,11 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                 return null;
             }
 
+            if (!IsPrinting(status))
+            {
+                return new PrintJobObjectListDto(Guid.Empty, null, Array.Empty<PrintJobObjectDto>());
+            }
+
             string? jobName = TryGetJobName(status);
             HashSet<string> excludedObjects = GetStringSet(status, "exclude_object", "excluded_objects");
             string? currentObject = TryGetNestedString(status, "exclude_object", "current_object");
@@ -875,27 +880,35 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             throw new ArgumentException("Object name is required.", nameof(objectName));
         }
 
-        string trimmedName = objectName.Trim();
-        if (trimmedName.Length > MaxExcludeObjectNameLength)
+        if (objectName.Length > MaxExcludeObjectNameLength)
         {
             throw new ArgumentException("Object name is too long.", nameof(objectName));
         }
 
-        if (trimmedName.Any(char.IsControl) || trimmedName.Contains(';', StringComparison.Ordinal))
+        if (objectName.Any(char.IsControl) || objectName.Contains(';', StringComparison.Ordinal))
         {
             throw new ArgumentException("Object name contains invalid characters.", nameof(objectName));
         }
 
-        if (SafeUnquotedObjectNamePattern.IsMatch(trimmedName))
+        if (SafeUnquotedObjectNamePattern.IsMatch(objectName))
         {
-            return $"EXCLUDE_OBJECT NAME={trimmedName}";
+            return $"EXCLUDE_OBJECT NAME={objectName}";
         }
 
-        string escapedName = trimmedName
+        string escapedName = objectName
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
 
         return $"EXCLUDE_OBJECT NAME=\"{escapedName}\"";
+    }
+
+    private static bool IsPrinting(JsonElement status)
+    {
+        return status.TryGetProperty("print_stats", out JsonElement printStats) &&
+            printStats.ValueKind == JsonValueKind.Object &&
+            printStats.TryGetProperty("state", out JsonElement state) &&
+            state.ValueKind == JsonValueKind.String &&
+            string.Equals(state.GetString(), "printing", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? TryGetJobName(JsonElement status)
@@ -989,7 +1002,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         }
 
         return metadata.ObjectInfo
-            .Select(o => o.Name?.Trim())
+            .Select(o => o.Name)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.Ordinal)
             .Select(name => new PrintJobObjectDto(

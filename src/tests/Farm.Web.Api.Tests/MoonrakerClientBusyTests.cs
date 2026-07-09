@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using Farm.Backend.Plugin.Moonraker;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -172,6 +173,14 @@ public class MoonrakerClientBusyTests
         command.Should().Be("EXCLUDE_OBJECT NAME=\"left cube\"");
     }
 
+    [Fact]
+    public void BuildExcludeObjectCommand_WhenNameHasSurroundingWhitespace_PreservesExactName()
+    {
+        string command = MoonrakerClient.BuildExcludeObjectCommand(" left cube ");
+
+        command.Should().Be("EXCLUDE_OBJECT NAME=\" left cube \"");
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -203,5 +212,112 @@ public class MoonrakerClientBusyTests
         postedJson.Should().NotBeNull();
         using JsonDocument doc = JsonDocument.Parse(postedJson!);
         doc.RootElement.GetProperty("script").GetString().Should().Be("EXCLUDE_OBJECT NAME=object_1");
+    }
+
+    [Fact]
+    public async Task ExcludeObjectAsync_WhenNameHasSurroundingWhitespace_SendsExactName()
+    {
+        string? postedJson = null;
+        (MoonrakerClient client, _) = CreateClient(req =>
+        {
+            postedJson = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            };
+        });
+
+        bool result = await client.ExcludeObjectAsync("http://moonraker:7125", " object_1 ");
+
+        result.Should().BeTrue();
+        postedJson.Should().NotBeNull();
+        using JsonDocument doc = JsonDocument.Parse(postedJson!);
+        doc.RootElement.GetProperty("script").GetString().Should().Be("EXCLUDE_OBJECT NAME=\" object_1 \"");
+    }
+
+    [Fact]
+    public async Task GetCurrentJobObjectsAsync_WhenPrintStatsStateIsComplete_ReturnsNoObjects()
+    {
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "result": {
+                    "status": {
+                      "print_stats": { "state": "complete", "filename": "plate.gcode" },
+                      "exclude_object": {
+                        "objects": [{ "name": "cube" }],
+                        "excluded_objects": [],
+                        "current_object": "cube"
+                      }
+                    }
+                  }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+
+        PrintJobObjectListDto? result = await client.GetCurrentJobObjectsAsync("http://moonraker:7125");
+
+        result.Should().NotBeNull();
+        result!.JobName.Should().BeNull();
+        result.Objects.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetCurrentJobObjectsAsync_WhenMetadataObjectHasSurroundingWhitespace_PreservesExactIdentity()
+    {
+        (MoonrakerClient client, _) = CreateClient(req =>
+        {
+            string pathAndQuery = req.RequestUri?.PathAndQuery ?? string.Empty;
+            if (pathAndQuery.StartsWith("/printer/objects/query", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """
+                        {
+                          "result": {
+                            "status": {
+                              "print_stats": { "state": "printing", "filename": "plate.gcode" },
+                              "exclude_object": {
+                                "excluded_objects": [" cube "],
+                                "current_object": " cube "
+                              }
+                            }
+                          }
+                        }
+                        """,
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "result": {
+                        "object_info": [
+                          { "name": " cube " }
+                        ]
+                      }
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        PrintJobObjectListDto? result = await client.GetCurrentJobObjectsAsync("http://moonraker:7125");
+
+        result.Should().NotBeNull();
+        PrintJobObjectDto objectState = result!.Objects.Single();
+        objectState.Name.Should().Be(" cube ");
+        objectState.IsExcluded.Should().BeTrue();
+        objectState.IsCurrent.Should().BeTrue();
     }
 }

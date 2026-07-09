@@ -203,6 +203,28 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsBadRequest_WhenServiceRejectsRequest()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.ExcludePrintJobObjectAsync(id, "cube", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(false, "No active printing job is available for object exclusion."));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest("cube"),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(badRequest.Value);
+        Assert.False(body.Success);
+        Assert.Equal("No active printing job is available for object exclusion.", body.Message);
+        telemetry.Verify(t => t.RecordPrinterOperation("exclude_object", id.ToString(), false), Times.Once);
+    }
+
+    [Fact]
     public async Task SetTempsAsync_ReturnsOk_WhenPrinterIdle()
     {
         Guid id = Guid.NewGuid();

@@ -2547,9 +2547,26 @@ public class PrintersService(
                 ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                 : printer.BackendUrl;
 
+            PrintJobObjectListDto? currentObjects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+            if (currentObjects is null || string.IsNullOrWhiteSpace(currentObjects.JobName))
+            {
+                return new CommandResult(false, "No active printing job is available for object exclusion.");
+            }
+
+            PrintJobObjectDto? objectToExclude = currentObjects.Objects.FirstOrDefault(o => string.Equals(o.Name, objectName, StringComparison.Ordinal));
+            if (objectToExclude is null)
+            {
+                return new CommandResult(false, $"Object '{objectName}' was not found in the current print job.");
+            }
+
+            if (objectToExclude.IsExcluded)
+            {
+                return new CommandResult(false, $"Object '{objectName}' is already excluded.");
+            }
+
             bool result = await objectExclusionClient.ExcludeObjectAsync(url, objectName, ct).ConfigureAwait(false);
             return result
-                ? new CommandResult(true, $"Object '{objectName.Trim()}' skipped")
+                ? new CommandResult(true, $"Object '{objectName}' skipped")
                 : new CommandResult(false, "Printer rejected the object exclusion command");
         }
         catch (ArgumentException ex)
