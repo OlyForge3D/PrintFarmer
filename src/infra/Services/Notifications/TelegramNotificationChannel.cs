@@ -68,7 +68,16 @@ public sealed class TelegramNotificationChannel(
                 byte[]? snapshot = await printersService.GetCameraSnapshotAsync(printerId.Value, cancellationToken);
                 if (snapshot is { Length: > 0 })
                 {
-                    return await sender.SendPhotoAsync(botToken, chatId, text, snapshot, "image/jpeg", cancellationToken);
+                    TelegramDispatchResult photoResult = await sender.SendPhotoAsync(botToken, chatId, text, snapshot, "image/jpeg", cancellationToken);
+                    if (photoResult.Success)
+                    {
+                        return photoResult;
+                    }
+
+                    logger.LogWarning(
+                        "Telegram delivery method {Method} failed with status {StatusCode}; falling back to text.",
+                        "sendPhoto",
+                        ExtractStatusCode(photoResult.Error));
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -85,6 +94,14 @@ public sealed class TelegramNotificationChannel(
         }
 
         return await sender.SendMessageAsync(botToken, chatId, text, cancellationToken);
+    }
+
+    private static string ExtractStatusCode(string? error)
+    {
+        const string httpPrefix = "HTTP ";
+        return error?.StartsWith(httpPrefix, StringComparison.Ordinal) == true
+            ? error[httpPrefix.Length..]
+            : "Unavailable";
     }
 
     private static string FormatMessage(NotificationChannelMessage message)

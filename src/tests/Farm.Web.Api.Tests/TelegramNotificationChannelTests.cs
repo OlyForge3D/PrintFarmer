@@ -56,6 +56,28 @@ public class TelegramNotificationChannelTests
         _sender.Verify(x => x.SendPhotoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task SendAsync_WhenPhotoSendFails_FallsBackToMessage()
+    {
+        Guid printerId = Guid.NewGuid();
+        ConfigureEnabledSettings(includeSnapshots: true);
+        _printersService.Setup(x => x.GetCameraSnapshotAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([1, 2, 3]);
+        _sender.Setup(x => x.SendPhotoAsync("plain-token", "987654", It.IsAny<string>(), It.IsAny<byte[]>(), "image/jpeg", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TelegramDispatchResult(false, "HTTP 400"));
+        _sender.Setup(x => x.SendMessageAsync("plain-token", "987654", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TelegramDispatchResult(true));
+        TelegramNotificationChannel channel = CreateChannel();
+
+        NotificationChannelDispatchResult result = await channel.SendAsync(
+            new NotificationChannelMessage(Farm.Infrastructure.Domain.Notifications.NotificationType.JobCompleted, "Done", "Body", PrinterId: printerId),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _sender.Verify(x => x.SendPhotoAsync("plain-token", "987654", It.IsAny<string>(), It.IsAny<byte[]>(), "image/jpeg", It.IsAny<CancellationToken>()), Times.Once);
+        _sender.Verify(x => x.SendMessageAsync("plain-token", "987654", "Done\n\nBody", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private void ConfigureEnabledSettings(bool includeSnapshots)
     {
         _settingsService.Setup(x => x.Get<TelegramSettings>())
