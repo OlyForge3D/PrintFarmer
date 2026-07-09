@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -108,7 +109,12 @@ public class GcodeFilesServiceTests
             Material = "PLA",
             EstimatedPrintTimeMinutes = 42,
             FilamentLengthMm = 1234,
-            FilamentWeightGrams = 56
+            FilamentWeightGrams = 56,
+            FilamentPerExtruderWeightG = [10.3, 3.8],
+            FilamentPerExtruderLengthMm = [3432.2, 1208.1],
+            FilamentPerExtruderColorHex = ["#F2AB1F", "#FFFFFF"],
+            FilamentPerExtruderType = ["PLA", "PETG"],
+            ExtruderCount = 2
         };
 
         GcodeFile? added = null;
@@ -153,6 +159,11 @@ public class GcodeFilesServiceTests
         added.EstimatedPrintTimeMinutes.Should().Be(42);
         added.EstimatedFilamentLengthMm.Should().Be(1234);
         added.EstimatedFilamentWeightG.Should().Be(56);
+        JsonSerializer.Deserialize<double[]>(added.FilamentPerExtruderWeightG!).Should().Equal(10.3, 3.8);
+        JsonSerializer.Deserialize<double[]>(added.FilamentPerExtruderLengthMm!).Should().Equal(3432.2, 1208.1);
+        JsonSerializer.Deserialize<string[]>(added.FilamentPerExtruderColorHex!).Should().Equal("#F2AB1F", "#FFFFFF");
+        JsonSerializer.Deserialize<string[]>(added.FilamentPerExtruderType!).Should().Equal("PLA", "PETG");
+        added.ExtruderCount.Should().Be(2);
 
         // FilePath should be the storage directory, construct full path with FileName
         string fullPath = Path.Combine(added.FilePath, added.FileName);

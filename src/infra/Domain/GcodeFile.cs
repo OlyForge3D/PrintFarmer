@@ -108,6 +108,20 @@ public class GcodeFile : StoredFile
     public string? FilamentPerExtruderLengthMm { get; set; }
 
     /// <summary>
+    /// JSON-serialized string array of filament color hex values per extruder (index = extruder number).
+    /// Stored as a string for EF Core compatibility; parse as <c>string[]</c> in code.
+    /// Null for single-extruder files or when per-extruder color data is unavailable.
+    /// </summary>
+    public string? FilamentPerExtruderColorHex { get; set; }
+
+    /// <summary>
+    /// JSON-serialized string array of filament material/type values per extruder (index = extruder number).
+    /// Stored as a string for EF Core compatibility; parse as <c>string[]</c> in code.
+    /// Null for single-extruder files or when per-extruder material data is unavailable.
+    /// </summary>
+    public string? FilamentPerExtruderType { get; set; }
+
+    /// <summary>
     /// Number of extruders detected in the gcode file.
     /// Null when not parsed or for single-extruder files that don't declare extruder count.
     /// </summary>

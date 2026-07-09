@@ -62,6 +62,9 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
     private static readonly Regex FilamentLengthConfigPattern = new(@";\s*filament used \[mm\]\s*[:=]\s*([\d.,\s]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FilamentWeightPattern = new(@";\s*(?:filament_g|filament_weight)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FilamentWeightConfigPattern = new(@";\s*filament used \[g\]\s*[:=]\s*([\d.,\s]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FilamentColorConfigPattern = new(@";\s*filament_colou?r\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FilamentTypeConfigPattern = new(@";\s*filament_type\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex HexColorPattern = new(@"^[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$", RegexOptions.Compiled);
     private static readonly Regex BedTempPattern = new(@";\s*first_layer_bed_temperature\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex NozzleTempPattern = new(@";\s*first_layer_temperature\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex PrinterModelPattern = new(@"; ?(?:printer_model|machine_name)\s*[:=]\s*(?!~\/)([^;]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -184,6 +187,20 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                 }
             }
 
+            // --- Per-extruder filament material/type ---
+            if (metadata.FilamentPerExtruderType == null)
+            {
+                Match match = FilamentTypeConfigPattern.Match(line);
+                if (match.Success)
+                {
+                    string[]? perExtruder = ParseSemicolonDelimitedStrings(match.Groups[1].Value);
+                    if (perExtruder is { Length: > 0 })
+                    {
+                        metadata.FilamentPerExtruderType = perExtruder;
+                    }
+                }
+            }
+
             // --- Nozzle Diameter ---
             if (metadata.NozzleDiameter == null)
             {
@@ -282,6 +299,20 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                             metadata.FilamentPerExtruderWeightG = perExtruder;
                             metadata.FilamentWeightGrams = perExtruder.Sum();
                         }
+                    }
+                }
+            }
+
+            // --- Per-extruder filament color ---
+            if (metadata.FilamentPerExtruderColorHex == null)
+            {
+                Match match = FilamentColorConfigPattern.Match(line);
+                if (match.Success)
+                {
+                    string[]? perExtruder = ParseSemicolonDelimitedStrings(match.Groups[1].Value, NormalizeHexColorToken);
+                    if (perExtruder is { Length: > 0 })
+                    {
+                        metadata.FilamentPerExtruderColorHex = perExtruder;
                     }
                 }
             }
@@ -511,7 +542,9 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         // Post-loop: derive ExtruderCount from per-extruder arrays
         int weightCount = metadata.FilamentPerExtruderWeightG?.Length ?? 0;
         int lengthCount = metadata.FilamentPerExtruderLengthMm?.Length ?? 0;
-        int maxExtruders = Math.Max(weightCount, lengthCount);
+        int colorCount = metadata.FilamentPerExtruderColorHex?.Length ?? 0;
+        int typeCount = metadata.FilamentPerExtruderType?.Length ?? 0;
+        int maxExtruders = Math.Max(Math.Max(weightCount, lengthCount), Math.Max(colorCount, typeCount));
         if (maxExtruders > 1)
         {
             metadata.ExtruderCount = maxExtruders;
@@ -536,6 +569,54 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         }
 
         return values.Count > 0 ? values.ToArray() : null;
+    }
+
+    /// <summary>
+    /// Parses semicolon-delimited string metadata while preserving empty middle positions.
+    /// Empty trailing delimiters are ignored because they do not represent extruders.
+    /// </summary>
+    private static string[]? ParseSemicolonDelimitedStrings(string value, Func<string, string>? normalize = null)
+    {
+        string[] parts = value.Split(';', StringSplitOptions.TrimEntries);
+        int count = parts.Length;
+        while (count > 0 && parts[count - 1].Length == 0)
+        {
+            count--;
+        }
+
+        if (count == 0)
+        {
+            return null;
+        }
+
+        string[] values = new string[count];
+        for (int i = 0; i < count; i++)
+        {
+            values[i] = normalize?.Invoke(parts[i]) ?? parts[i].Trim().Trim('"');
+        }
+
+        return values;
+    }
+
+    /// <summary>
+    /// Normalizes slicer color tokens to uppercase #RRGGBB when possible.
+    /// Invalid tokens are returned trimmed so extruder positions remain intact.
+    /// </summary>
+    private static string NormalizeHexColorToken(string token)
+    {
+        string trimmed = token.Trim().Trim('"');
+        if (trimmed.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        string hex = trimmed.StartsWith('#') ? trimmed[1..] : trimmed;
+        if (!HexColorPattern.IsMatch(hex))
+        {
+            return trimmed;
+        }
+
+        return "#" + hex[..6].ToUpperInvariant();
     }
 
     /// <summary>

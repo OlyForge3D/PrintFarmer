@@ -205,6 +205,23 @@ interface PrintablesSearchApiResponse<T> {
   limit?: number;
 }
 
+type SerializedArray<T> = T[] | string | null | undefined;
+
+interface GcodeFileApiResponse extends Omit<GcodeFile,
+  "filamentPerExtruderWeightG" |
+  "filamentPerExtruderLengthMm" |
+  "filamentPerExtruderColorHex" |
+  "filamentPerExtruderType"> {
+  filamentPerExtruderWeightG?: SerializedArray<number>;
+  filamentPerExtruderLengthMm?: SerializedArray<number>;
+  filamentPerExtruderColorHex?: SerializedArray<string>;
+  filamentPerExtruderType?: SerializedArray<string>;
+}
+
+interface GetGcodeFilesApiResponse extends Omit<GetGcodeFilesResponse, "files"> {
+  files: GcodeFileApiResponse[];
+}
+
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
   private static generateCorrelationId(): string {
@@ -238,6 +255,57 @@ export class ApiClient {
       downloadsCount: model.downloadsCount ?? model.downloadCount,
       fileCount: model.fileCount,
       sourceUrl: model.sourceUrl,
+    };
+  }
+
+  private static parseSerializedNumberArray(value: SerializedArray<number>): number[] | undefined {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((item) => typeof item === "number") ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static parseSerializedStringArray(value: SerializedArray<string>): string[] | undefined {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static mapGcodeFile(file: GcodeFileApiResponse): GcodeFile {
+    return {
+      ...file,
+      filamentPerExtruderWeightG: ApiClient.parseSerializedNumberArray(file.filamentPerExtruderWeightG),
+      filamentPerExtruderLengthMm: ApiClient.parseSerializedNumberArray(file.filamentPerExtruderLengthMm),
+      filamentPerExtruderColorHex: ApiClient.parseSerializedStringArray(file.filamentPerExtruderColorHex),
+      filamentPerExtruderType: ApiClient.parseSerializedStringArray(file.filamentPerExtruderType),
+    };
+  }
+
+  private static mapGcodeFilesResponse(response: GetGcodeFilesApiResponse): GetGcodeFilesResponse {
+    return {
+      ...response,
+      files: response.files.map(ApiClient.mapGcodeFile),
     };
   }
 
@@ -1763,15 +1831,15 @@ export class ApiClient {
   // ============ G-code library methods ============
 
   async getGcodeFiles(page = 1, pageSize = 50): Promise<GcodeFile[]> {
-    const response = await this.client.get<GcodeFile[]>("/gcode-files", {
+    const response = await this.client.get<GcodeFileApiResponse[]>("/gcode-files", {
       params: { page, pageSize },
     });
-    return response.data;
+    return response.data.map(ApiClient.mapGcodeFile);
   }
 
   async getGcodeFile(id: string): Promise<GcodeFile> {
-    const response = await this.client.get<GcodeFile>(`/gcode-files/${id}`);
-    return response.data;
+    const response = await this.client.get<GcodeFileApiResponse>(`/gcode-files/${id}`);
+    return ApiClient.mapGcodeFile(response.data);
   }
 
   async uploadGcodeFile(
@@ -1784,7 +1852,7 @@ export class ApiClient {
     if (description) formData.append("description", description);
     if (tags) formData.append("tags", JSON.stringify(tags));
 
-    const response = await this.client.post<GcodeFile>(
+    const response = await this.client.post<GcodeFileApiResponse>(
       "/gcode-files/upload",
       formData,
       {
@@ -1793,7 +1861,7 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    return ApiClient.mapGcodeFile(response.data);
   }
 
   async deleteGcodeFile(id: string): Promise<void> {
@@ -2029,11 +2097,11 @@ export class ApiClient {
       console.log('[API Client] getGcodeFilesWithFilter params after filtering:', params);
     }
     
-    const response = await this.client.get<GetGcodeFilesResponse>(
+    const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files",
       { params }
     );
-    return response.data;
+    return ApiClient.mapGcodeFilesResponse(response.data);
   }
 
   async getGcodeFilesQuery(
@@ -2052,11 +2120,11 @@ export class ApiClient {
       console.log('[API Client] getGcodeFilesQuery params after filtering:', params);
     }
     
-    const response = await this.client.get<GetGcodeFilesResponse>(
+    const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files/query",
       { params }
     );
-    return response.data;
+    return ApiClient.mapGcodeFilesResponse(response.data);
   }
 
   async getGcodeFilesFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
