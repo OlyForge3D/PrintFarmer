@@ -68,18 +68,20 @@ export function ToolheadSpoolPicker({
 
   const suggestions = useMemo(() => {
     if (!showAutoMatch) return [];
+    const unlockedTargets = buildFilamentMatchTargets(targetFilamentColorHex, targetFilamentType)
+      .filter(target => !manualOverrideIndexes.has(target.toolheadIndex));
 
     return assignSpoolsToToolheads(
-      buildFilamentMatchTargets(targetFilamentColorHex, targetFilamentType),
+      unlockedTargets,
       toolheads
-        .filter(toolhead => toolhead.currentSpoolId != null)
+        .filter(toolhead => toolhead.currentSpoolId != null && !manualOverrideIndexes.has(toolhead.index))
         .map(toolhead => ({
           spoolId: toolhead.currentSpoolId!,
           colorHex: toolhead.currentFilamentColor,
           material: toolhead.currentMaterial,
         })),
     );
-  }, [showAutoMatch, targetFilamentColorHex, targetFilamentType, toolheads]);
+  }, [showAutoMatch, targetFilamentColorHex, targetFilamentType, toolheads, manualOverrideIndexes]);
 
   const suggestionsByToolhead = useMemo(() => new Map(
     suggestions.map(suggestion => [suggestion.toolheadIndex, suggestion]),
@@ -314,12 +316,12 @@ export function ToolheadSpoolPicker({
                             Apply suggestion
                           </Button>
                         )}
-                        {isManualOverride && (
-                          <Badge variant="info" size="sm">Manual override</Badge>
-                        )}
                       </>
                     ) : (
                       <span className="text-pf-text-tertiary">No loaded spool has a usable color for this file tool.</span>
+                    )}
+                    {isManualOverride && (
+                      <Badge variant="info" size="sm">Manual override</Badge>
                     )}
                   </div>
                 </div>

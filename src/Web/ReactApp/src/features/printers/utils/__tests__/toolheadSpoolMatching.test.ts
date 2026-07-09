@@ -88,4 +88,31 @@ describe('toolheadSpoolMatching', () => {
     expect(getSpoolMatchConfidence(20)).toBe('poor');
     expect(getSpoolMatchConfidence(null)).toBe('unknown');
   });
+
+  it('assigns sixteen toolheads quickly with one-to-one results', () => {
+    const colors = [
+      '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
+      '#FF00FF', '#00FFFF', '#880000', '#008800',
+      '#000088', '#888800', '#880088', '#008888',
+      '#FFFFFF', '#111111', '#FF8800', '#8844FF',
+    ];
+    const spools = colors.map((colorHex, index) => ({
+      spoolId: index + 1,
+      colorHex,
+      material: 'PLA',
+    })).reverse();
+
+    const startedAt = performance.now();
+    const matches = assignSpoolsToToolheads(
+      buildFilamentMatchTargets(colors, Array(colors.length).fill('PLA')),
+      spools,
+    );
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(100);
+    expect(matches).toHaveLength(16);
+    const assignedSpoolIds = matches.map(match => match.spoolId);
+    expect(new Set(assignedSpoolIds).size).toBe(16);
+    expect(assignedSpoolIds.every(spoolId => spoolId != null)).toBe(true);
+  });
 });

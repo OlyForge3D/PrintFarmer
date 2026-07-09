@@ -21,7 +21,7 @@ vi.mock('@/common/hooks/useApi', () => ({
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({ onSelect }: { onSelect: (spoolId: number, spool: SpoolmanSpool) => void }) => (
-    <button type="button" onClick={() => onSelect(99, { id: 99, name: 'Manual', material: 'PLA', inUse: false })}>
+    <button type="button" onClick={() => onSelect(1, { id: 1, name: 'Manual', material: 'PLA', inUse: false })}>
       Pick manual spool
     </button>
   ),
@@ -85,20 +85,20 @@ describe('ToolheadSpoolPicker', () => {
     await waitFor(() => expect(mocks.setSpoolMutateAsync).toHaveBeenCalledWith({
       printerId: 'printer-1',
       toolheadIndex: 0,
-      spoolId: 99,
+      spoolId: 1,
     }));
+    await waitFor(() => expect(screen.queryByText('Suggested spool #1')).not.toBeInTheDocument());
+    expect(screen.getByText('Suggested spool #2')).toBeInTheDocument();
+    expect(screen.getByText('Manual override')).toBeInTheDocument();
 
+    mocks.setSpoolMutateAsync.mockClear();
     fireEvent.click(screen.getByText('Auto-match all'));
 
-    await waitFor(() => expect(mocks.setSpoolMutateAsync).toHaveBeenCalledWith({
+    expect(mocks.setSpoolMutateAsync).not.toHaveBeenCalled();
+    expect(mocks.setSpoolMutateAsync).not.toHaveBeenCalledWith({
       printerId: 'printer-1',
       toolheadIndex: 1,
       spoolId: 1,
-    }));
-    expect(mocks.setSpoolMutateAsync).not.toHaveBeenCalledWith({
-      printerId: 'printer-1',
-      toolheadIndex: 0,
-      spoolId: 2,
     });
   });
 });

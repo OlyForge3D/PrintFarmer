@@ -3,7 +3,8 @@ import { colorDistance, INVALID_COLOR_DISTANCE } from '@/common/utils/colorDista
 const EXACT_MATCH_DELTA_E = 2;
 const CLOSE_MATCH_DELTA_E = 10;
 const NULL_ASSIGNMENT_PENALTY = INVALID_COLOR_DISTANCE;
-const FLOAT_TOLERANCE = 0.000001;
+const INVALID_ASSIGNMENT_PENALTY = INVALID_COLOR_DISTANCE * 2;
+const TIE_BREAK_EPSILON = 0.000000001;
 
 export type SpoolMatchConfidence = 'exact' | 'close' | 'poor' | 'unknown';
 
@@ -31,42 +32,85 @@ export interface ToolheadSpoolMatch {
   materialMismatch: boolean;
 }
 
-interface CandidateWithDistance {
-  candidateIndex: number;
-  distance: number;
-}
-
-interface SearchResult {
-  score: number;
-  assignments: Array<number | null>;
-}
-
 function normalizeMaterial(material: string | null | undefined): string | null {
   const normalized = material?.trim().toLowerCase();
   return normalized ? normalized : null;
 }
 
-function compareAssignments(left: Array<number | null>, right: Array<number | null>, spools: LoadedSpoolMatchCandidate[]): number {
-  const maxComparableId = Number.MAX_SAFE_INTEGER;
-
-  for (let index = 0; index < left.length; index += 1) {
-    const leftAssignment = left[index];
-    const rightAssignment = right[index];
-    const leftId = leftAssignment == null ? maxComparableId : spools[leftAssignment].spoolId;
-    const rightId = rightAssignment == null ? maxComparableId : spools[rightAssignment].spoolId;
-    if (leftId !== rightId) return leftId - rightId;
-  }
-
-  return 0;
+function isValidHexColor(hex: string | null | undefined): boolean {
+  return colorDistance(hex, '#000000') < INVALID_COLOR_DISTANCE;
 }
 
-function isBetterResult(next: SearchResult, current: SearchResult | null, spools: LoadedSpoolMatchCandidate[]): boolean {
-  if (!current) return true;
-  if (next.score < current.score - FLOAT_TOLERANCE) return true;
-  if (Math.abs(next.score - current.score) <= FLOAT_TOLERANCE) {
-    return compareAssignments(next.assignments, current.assignments, spools) < 0;
+function solveHungarian(costs: number[][]): number[] {
+  const rowCount = costs.length;
+  const columnCount = costs[0]?.length ?? 0;
+  if (rowCount === 0 || columnCount === 0) return [];
+  if (rowCount > columnCount) {
+    throw new Error('Hungarian assignment requires at least as many columns as rows');
   }
-  return false;
+
+  const potentialsByRow = Array(rowCount + 1).fill(0);
+  const potentialsByColumn = Array(columnCount + 1).fill(0);
+  const matchedRowByColumn = Array(columnCount + 1).fill(0);
+  const previousColumn = Array(columnCount + 1).fill(0);
+
+  // Rectangular Hungarian/Munkres shortest augmenting path. Rows are file
+  // targets, columns are loaded spools plus high-cost dummy null assignments.
+  for (let row = 1; row <= rowCount; row += 1) {
+    matchedRowByColumn[0] = row;
+    let currentColumn = 0;
+    const minColumnCost = Array(columnCount + 1).fill(Number.POSITIVE_INFINITY);
+    const usedColumns = Array(columnCount + 1).fill(false);
+
+    do {
+      usedColumns[currentColumn] = true;
+      const currentRow = matchedRowByColumn[currentColumn];
+      let delta = Number.POSITIVE_INFINITY;
+      let nextColumn = 0;
+
+      for (let column = 1; column <= columnCount; column += 1) {
+        if (usedColumns[column]) continue;
+
+        const reducedCost = costs[currentRow - 1][column - 1]
+          - potentialsByRow[currentRow]
+          - potentialsByColumn[column];
+
+        if (reducedCost < minColumnCost[column]) {
+          minColumnCost[column] = reducedCost;
+          previousColumn[column] = currentColumn;
+        }
+
+        if (minColumnCost[column] < delta) {
+          delta = minColumnCost[column];
+          nextColumn = column;
+        }
+      }
+
+      for (let column = 0; column <= columnCount; column += 1) {
+        if (usedColumns[column]) {
+          potentialsByRow[matchedRowByColumn[column]] += delta;
+          potentialsByColumn[column] -= delta;
+        } else {
+          minColumnCost[column] -= delta;
+        }
+      }
+
+      currentColumn = nextColumn;
+    } while (matchedRowByColumn[currentColumn] !== 0);
+
+    do {
+      const nextColumn = previousColumn[currentColumn];
+      matchedRowByColumn[currentColumn] = matchedRowByColumn[nextColumn];
+      currentColumn = nextColumn;
+    } while (currentColumn !== 0);
+  }
+
+  const assignment = Array(rowCount).fill(-1);
+  for (let column = 1; column <= columnCount; column += 1) {
+    const row = matchedRowByColumn[column];
+    if (row > 0) assignment[row - 1] = column - 1;
+  }
+  return assignment;
 }
 
 export function getSpoolMatchConfidence(deltaE: number | null): SpoolMatchConfidence {
@@ -110,7 +154,9 @@ export function assignSpoolsToToolheads(
       uniqueSpools.set(spool.spoolId, spool);
     }
   }
-  const spools = [...uniqueSpools.values()].sort((left, right) => left.spoolId - right.spoolId);
+  const spools = [...uniqueSpools.values()]
+    .filter(spool => isValidHexColor(spool.colorHex))
+    .sort((left, right) => left.spoolId - right.spoolId);
   const matches: ToolheadSpoolMatch[] = targets.map(target => ({
     toolheadIndex: target.toolheadIndex,
     targetColorHex: target.colorHex,
@@ -123,77 +169,33 @@ export function assignSpoolsToToolheads(
 
   const matchableTargets = targets
     .map((target, targetIndex) => ({ target, targetIndex }))
-    .filter(({ target }) => colorDistance(target.colorHex, '#000000') < INVALID_COLOR_DISTANCE);
+    .filter(({ target }) => isValidHexColor(target.colorHex));
 
-  if (matchableTargets.length === 0 || spools.length === 0) return matches;
+  if (matchableTargets.length === 0) return matches;
 
-  const distances = matchableTargets.map(({ target }) => spools
-    .map((spool, candidateIndex): CandidateWithDistance => ({
-      candidateIndex,
-      distance: colorDistance(target.colorHex, spool.colorHex),
-    }))
-    .filter(candidate => candidate.distance < INVALID_COLOR_DISTANCE)
-    .sort((left, right) => {
-      if (Math.abs(left.distance - right.distance) > FLOAT_TOLERANCE) {
-        return left.distance - right.distance;
-      }
-      return spools[left.candidateIndex].spoolId - spools[right.candidateIndex].spoolId;
-    }));
+  const dummyColumnCount = matchableTargets.length;
+  const costs = matchableTargets.map(({ target }, targetOffset) => [
+    ...spools.map((spool, spoolOffset) => {
+      const distance = colorDistance(target.colorHex, spool.colorHex);
+      const assignmentCost = distance >= INVALID_COLOR_DISTANCE ? INVALID_ASSIGNMENT_PENALTY : distance;
+      return assignmentCost + ((spoolOffset + 1) * TIE_BREAK_EPSILON);
+    }),
+    ...Array.from(
+      { length: dummyColumnCount },
+      (_, dummyOffset) => NULL_ASSIGNMENT_PENALTY + ((targetOffset + dummyOffset + 1) * TIE_BREAK_EPSILON),
+    ),
+  ]);
 
-  const search = (
-    matchableIndex: number,
-    usedCandidateIndexes: Set<number>,
-    currentAssignments: Array<number | null>,
-    currentScore: number,
-  ): SearchResult => {
-    if (matchableIndex >= matchableTargets.length) {
-      return { score: currentScore, assignments: [...currentAssignments] };
-    }
+  const assignments = solveHungarian(costs);
 
-    const remainingTargets = matchableTargets.length - matchableIndex;
-    const remainingCandidates = spools.length - usedCandidateIndexes.size;
-    const allowNull = remainingCandidates < remainingTargets;
-    let best: SearchResult | null = null;
-
-    for (const candidate of distances[matchableIndex]) {
-      if (usedCandidateIndexes.has(candidate.candidateIndex)) continue;
-
-      usedCandidateIndexes.add(candidate.candidateIndex);
-      currentAssignments[matchableIndex] = candidate.candidateIndex;
-      const result = search(
-        matchableIndex + 1,
-        usedCandidateIndexes,
-        currentAssignments,
-        currentScore + candidate.distance,
-      );
-      if (isBetterResult(result, best, spools)) best = result;
-      usedCandidateIndexes.delete(candidate.candidateIndex);
-      currentAssignments[matchableIndex] = null;
-    }
-
-    if (allowNull || distances[matchableIndex].length === 0) {
-      currentAssignments[matchableIndex] = null;
-      const result = search(
-        matchableIndex + 1,
-        usedCandidateIndexes,
-        currentAssignments,
-        currentScore + NULL_ASSIGNMENT_PENALTY,
-      );
-      if (isBetterResult(result, best, spools)) best = result;
-      currentAssignments[matchableIndex] = null;
-    }
-
-    return best ?? { score: currentScore + NULL_ASSIGNMENT_PENALTY, assignments: [...currentAssignments] };
-  };
-
-  const best = search(0, new Set<number>(), Array<number | null>(matchableTargets.length).fill(null), 0);
-
-  best.assignments.forEach((candidateIndex, matchableIndex) => {
+  assignments.forEach((candidateIndex, matchableIndex) => {
     const target = matchableTargets[matchableIndex];
-    if (candidateIndex == null) return;
+    if (candidateIndex == null || candidateIndex < 0 || candidateIndex >= spools.length) return;
 
     const spool = spools[candidateIndex];
     const deltaE = colorDistance(target.target.colorHex, spool.colorHex);
+    if (deltaE >= INVALID_COLOR_DISTANCE) return;
+
     matches[target.targetIndex] = {
       ...matches[target.targetIndex],
       spoolId: spool.spoolId,
