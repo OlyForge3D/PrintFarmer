@@ -271,6 +271,24 @@ public interface IMoonrakerClient : IBackendClient
     Task<bool> SendGcodeAsync(Uri baseUrl, string gcode, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets object-exclusion metadata for the active print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="credential">Optional printer credential.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>The active job objects, or null when unavailable.</returns>
+    Task<PrintJobObjectListDto?> GetCurrentJobObjectsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Excludes a named object from the active print.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="objectName">The object name from object-exclusion metadata.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>True if Moonraker accepted the command.</returns>
+    Task<bool> ExcludeObjectAsync(string baseUrl, string objectName, CancellationToken ct = default);
+
+    /// <summary>
     /// Starts printing a G-code file by name.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>

@@ -15,6 +15,7 @@ import type {
   PrinterFast,
   PrinterFileDto,
   PrinterVersionInfo,
+  PrintJobObjectListDto,
   PrintJobStatusDto,
   SpoolmanSpool,
   StartDiscoveryRequest,
@@ -186,6 +187,14 @@ export const printerService = {
 
   async disableMotors(printerId: string): Promise<CommandResult> {
     return apiClient.disableMotors(printerId);
+  },
+
+  async getPrintJobObjects(printerId: string): Promise<PrintJobObjectListDto> {
+    return apiClient.getPrintJobObjects(printerId);
+  },
+
+  async excludePrintJobObject(printerId: string, name: string): Promise<CommandResult> {
+    return apiClient.excludePrintJobObject(printerId, name);
   },
 
   // ── Filament ──────────────────────────────────────────────────────────

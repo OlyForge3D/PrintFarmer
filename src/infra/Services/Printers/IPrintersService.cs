@@ -414,6 +414,23 @@ public interface IPrintersService
     Task<bool> SendGcodeAsync(Guid id, string gcode, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves object-exclusion state for the active print job.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Current job objects, or null if the printer does not exist.</returns>
+    Task<PrintJobObjectListDto?> GetPrintJobObjectsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Excludes a named object from the active print job.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="objectName">The object name from object-exclusion metadata</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Command result indicating success or validation/backend failure.</returns>
+    Task<CommandResult> ExcludePrintJobObjectAsync(Guid id, string objectName, CancellationToken ct);
+
+    /// <summary>
     /// Loads filament into the extruder via the backend's filament control capability.
     /// </summary>
     /// <param name="id">The printer ID</param>

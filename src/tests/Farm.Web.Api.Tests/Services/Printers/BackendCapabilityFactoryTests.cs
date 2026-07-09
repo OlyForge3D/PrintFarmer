@@ -76,6 +76,35 @@ public class BackendCapabilityFactoryTests
     }
 
     [Fact]
+    public void Moonraker_ClientShouldAdvertiseObjectExclusionCapability()
+    {
+        var factory = new BackendCapabilityFactory(_clientFactory, _mockLogger.Object);
+
+        BackendCapabilities capabilities = factory.GetSupportedCapabilities(PrinterBackend.Moonraker);
+        bool supportsObjectExclusion = factory.TryGetObjectExclusionClientTyped(PrinterBackend.Moonraker, out ISupportsObjectExclusion? client);
+
+        Assert.True((capabilities & BackendCapabilities.ObjectExclusion) == BackendCapabilities.ObjectExclusion);
+        Assert.True(supportsObjectExclusion);
+        Assert.NotNull(client);
+    }
+
+    [Theory]
+    [InlineData(PrinterBackend.PrusaLink)]
+    [InlineData(PrinterBackend.SDCP)]
+    [InlineData(PrinterBackend.FlashForge)]
+    public void UnsupportedBackends_ShouldNotAdvertiseObjectExclusionCapability(PrinterBackend backend)
+    {
+        var factory = new BackendCapabilityFactory(_clientFactory, _mockLogger.Object);
+
+        BackendCapabilities capabilities = factory.GetSupportedCapabilities(backend);
+        bool supportsObjectExclusion = factory.TryGetObjectExclusionClientTyped(backend, out ISupportsObjectExclusion? client);
+
+        Assert.False((capabilities & BackendCapabilities.ObjectExclusion) == BackendCapabilities.ObjectExclusion);
+        Assert.False(supportsObjectExclusion);
+        Assert.Null(client);
+    }
+
+    [Fact]
     public void OctoPrint_ClientShouldImplementISupportsFileList()
     {
         // Arrange
@@ -183,6 +212,7 @@ public class BackendCapabilityFactoryTests
         moonrakerClient.As<ISupportsMovement>();
         moonrakerClient.As<ISupportsTemperatureControl>();
         moonrakerClient.As<ISupportsPrinterInformation>();
+        moonrakerClient.As<ISupportsObjectExclusion>();
 
         var prusaLinkClient = new Mock<IPrusaLinkClient>();
         prusaLinkClient.As<ISupportsFileList>();
@@ -243,7 +273,8 @@ public class BackendCapabilityFactoryTests
                 typeof(ISupportsFileMetadata),
                 typeof(ISupportsMovement),
                 typeof(ISupportsTemperatureControl),
-                typeof(ISupportsPrinterInformation)
+                typeof(ISupportsPrinterInformation),
+                typeof(ISupportsObjectExclusion)
             },
             PrinterBackend.PrusaLink => new[]
             {
@@ -275,4 +306,3 @@ public class BackendCapabilityFactoryTests
 
     #endregion
 }
-

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -122,6 +123,105 @@ public class PrintersControllerControlGuardsTests
         Assert.False(body.Success);
         Assert.Equal("Printer not found.", body.Message);
         printersService.Verify(s => s.MoveAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetPrintJobObjectsAsync_ReturnsOk_WithObjects()
+    {
+        Guid id = Guid.NewGuid();
+        var objects = new PrintJobObjectListDto(
+            id,
+            "plate.gcode",
+            new[] { new PrintJobObjectDto("cube", IsExcluded: false, IsCurrent: true) });
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.GetPrintJobObjectsAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(objects);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<PrintJobObjectListDto> result = await controller.GetPrintJobObjectsAsync(id, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PrintJobObjectListDto body = Assert.IsType<PrintJobObjectListDto>(ok.Value);
+        Assert.Equal(id, body.PrinterId);
+        Assert.Equal("cube", body.Objects.Single().Name);
+    }
+
+    [Fact]
+    public async Task GetPrintJobObjectsAsync_ReturnsNotFound_WhenPrinterMissing()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.GetPrintJobObjectsAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJobObjectListDto?)null);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<PrintJobObjectListDto> result = await controller.GetPrintJobObjectsAsync(id, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsBadRequest_WhenObjectNameEmpty()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest(" "),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(badRequest.Value);
+        Assert.False(body.Success);
+        printersService.Verify(s => s.ExcludePrintJobObjectAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsOk_WhenServiceSucceeds()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.ExcludePrintJobObjectAsync(id, "cube", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(true, "Object skipped"));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest("cube"),
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(ok.Value);
+        Assert.True(body.Success);
+        telemetry.Verify(t => t.RecordPrinterOperation("exclude_object", id.ToString(), true), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsBadRequest_WhenServiceRejectsRequest()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.ExcludePrintJobObjectAsync(id, "cube", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(false, "No active printing job is available for object exclusion."));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest("cube"),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(badRequest.Value);
+        Assert.False(body.Success);
+        Assert.Equal("No active printing job is available for object exclusion.", body.Message);
+        telemetry.Verify(t => t.RecordPrinterOperation("exclude_object", id.ToString(), false), Times.Once);
     }
 
     [Fact]

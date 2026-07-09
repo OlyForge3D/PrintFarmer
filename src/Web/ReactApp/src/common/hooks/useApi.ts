@@ -31,6 +31,7 @@ import {
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  PrintJobObjectListDto,
   QueuedPrintJobWithFileMetaDto,
   StartDiscoveryRequest,
   ToolheadModelDefinition,
@@ -90,6 +91,7 @@ export const queryKeys = {
     ['printers', id, 'history', options] as const,
   printerHistoryJob: (printerId: string, jobId: string) => ['printers', printerId, 'history', jobId] as const,
   printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
+  printJobObjects: (printerId: string) => ['printers', printerId, 'printjob', 'objects'] as const,
   manufacturers: ['manufacturers'] as const,
   models: (manufacturerId?: string) => ['models', manufacturerId] as const,
   hotendModels: ['hotend-models'] as const,
@@ -199,6 +201,19 @@ export function usePrinterBackendCapabilitiesSingle(printerId: string | null, op
     },
     enabled: !!printerId,
     staleTime: 600000, // 10 minutes
+    ...options,
+  });
+}
+
+export function usePrintJobObjects(printerId: string | null, options?: QueryOptions<PrintJobObjectListDto>) {
+  return useQuery({
+    queryKey: printerId ? queryKeys.printJobObjects(printerId) : ['printers', 'missing-printer', 'printjob', 'objects'],
+    queryFn: () => {
+      if (!printerId) throw new Error('printerId is required');
+      return apiClient.getPrintJobObjects(printerId);
+    },
+    enabled: !!printerId,
+    staleTime: 10_000,
     ...options,
   });
 }
