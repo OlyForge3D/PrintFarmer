@@ -15,7 +15,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
+public class MoonrakerClient(
+    HttpClient http,
+    ILogger<MoonrakerClient> logger,
+    BackendTimeoutSettings timeouts,
+    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -25,6 +29,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsControlOperations,
     ISupportsCamera,
     ISupportsConfiguredCameraDetection,
+    ISupportsTriggeredCameraSnapshot,
     ISupportsFileMetadata,
     ISupportsMovement,
     ISupportsTemperatureControl,
@@ -45,6 +50,9 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
+    private readonly ISnapmakerU1CameraMonitorManager _snapmakerU1CameraMonitorManager =
+        snapmakerU1CameraMonitorManager ?? new SnapmakerU1CameraMonitorManager(new MoonrakerJsonRpcClient());
+
     private static readonly Regex SafeUnquotedObjectNamePattern = new(@"^[A-Za-z0-9_.:+/@-]+$", RegexOptions.Compiled);
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -374,6 +382,69 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             cts.CancelAfter(_timeouts.StatusPollTimeout);
             using HttpResponseMessage resp = await _http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
             return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public Task<(string? StreamUrl, string? SnapshotUrl)> GetSnapmakerU1CameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            Uri baseUri = new(baseUrl);
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "server/files/camera/monitor.jpg",
+                Query = string.Empty
+            };
+
+            return Task.FromResult<(string? StreamUrl, string? SnapshotUrl)>((null, builder.Uri.ToString()));
+        }
+        catch
+        {
+            return Task.FromResult<(string? StreamUrl, string? SnapshotUrl)>((null, null));
+        }
+    }
+
+    public async Task<byte[]?> GetSnapmakerU1CameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
+
+            bool started = await _snapmakerU1CameraMonitorManager
+                .EnsureMonitorStartedAsync(baseUrl, credential, cts.Token)
+                .ConfigureAwait(false);
+            if (!started)
+            {
+                return null;
+            }
+
+            (_, string? snapshotUrl) = await GetSnapmakerU1CameraUrlsAsync(baseUrl, null, cts.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(snapshotUrl))
+            {
+                return null;
+            }
+
+            using HttpRequestMessage request = new(HttpMethod.Get, snapshotUrl);
+            if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+            {
+                _ = request.Headers.TryAddWithoutValidation("X-Api-Key", credential.ApiKey);
+            }
+
+            using HttpResponseMessage response = await _http.SendAsync(request, cts.Token).ConfigureAwait(false);
+            return !response.IsSuccessStatusCode
+                ? null
+                : await response.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -2959,6 +3030,9 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
         return (stream, snapshot);
     }
+
+    async Task<byte[]?> ISupportsTriggeredCameraSnapshot.GetTriggeredCameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => await GetSnapmakerU1CameraSnapshotAsync(baseUrl, credential, ct);
 
     /// <summary>
     /// ISupportsFileMetadata implementation - gets metadata for a file on the printer.

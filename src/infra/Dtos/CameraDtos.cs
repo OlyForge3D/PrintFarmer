@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Cameras;
 
 namespace Farm.Infrastructure;
 
@@ -48,6 +49,21 @@ public class CameraDto
     public string? StreamUrl { get; set; }
 
     public string? SnapshotUrl { get; set; }
+
+    /// <summary>
+    /// Client presentation mode. Stock Snapmaker U1 is SnapshotOnly because it exposes monitor.jpg, not MJPEG.
+    /// </summary>
+    public CameraAccessMode AccessMode => CameraContractClassifier.GetAccessMode(StreamUrl, SnapshotUrl);
+
+    /// <summary>
+    /// Live stream transport. WebRTC/RTSP are exposed so clients can avoid treating them as MJPEG.
+    /// </summary>
+    public CameraStreamFormat StreamFormat => CameraContractClassifier.GetStreamFormat(StreamUrl);
+
+    /// <summary>
+    /// Snapshot capture strategy. SnapmakerU1MonitorJpeg means the API wakes the monitor over Moonraker websocket.
+    /// </summary>
+    public CameraSnapshotStrategy SnapshotStrategy => CameraContractClassifier.GetSnapshotStrategy(SnapshotUrl);
 
     public bool IsEnabled { get; set; } = true;
 
@@ -117,6 +133,12 @@ public class CreateCameraDto
     [OptionalUrl(ErrorMessage = "Snapshot URL must be a valid URL.")]
     [StringLength(2048, ErrorMessage = "Snapshot URL cannot exceed 2048 characters.")]
     public string? SnapshotUrl { get; set; }
+
+    public CameraAccessMode AccessMode => CameraContractClassifier.GetAccessMode(StreamUrl, SnapshotUrl);
+
+    public CameraStreamFormat StreamFormat => CameraContractClassifier.GetStreamFormat(StreamUrl);
+
+    public CameraSnapshotStrategy SnapshotStrategy => CameraContractClassifier.GetSnapshotStrategy(SnapshotUrl);
 
     public bool IsEnabled { get; set; } = true;
 

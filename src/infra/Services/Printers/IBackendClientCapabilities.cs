@@ -224,6 +224,21 @@ public interface ISupportsConfiguredCameraDetection
 }
 
 /// <summary>
+/// Capability marker for cameras that require a backend wake/start action before snapshot fetch.
+/// </summary>
+public interface ISupportsTriggeredCameraSnapshot
+{
+    /// <summary>
+    /// Captures a snapshot after performing the backend-specific wake/start operation.
+    /// </summary>
+    /// <param name="baseUrl">The backend base URL.</param>
+    /// <param name="credential">Optional backend credential.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>JPEG bytes, or null if wake or fetch failed gracefully.</returns>
+    Task<byte[]?> GetTriggeredCameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support file metadata extraction.
 /// Extracts detailed information from G-code files including print time estimates, layer information, thumbnails, and slicer settings.
 /// </summary>
