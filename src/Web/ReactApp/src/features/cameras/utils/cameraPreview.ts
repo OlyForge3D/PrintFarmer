@@ -8,24 +8,35 @@ interface CameraPreviewContract {
   accessMode?: CameraAccessMode;
   streamFormat?: CameraStreamFormat;
   snapshotStrategy?: CameraSnapshotStrategy;
+  snapshotUrl?: string | null;
 }
 
 export function shouldPollPrinterSnapshot({
   accessMode,
   snapshotStrategy,
+  snapshotUrl,
 }: CameraPreviewContract): boolean {
-  return (
-    accessMode === CameraAccessMode.SnapshotOnly ||
-    snapshotStrategy === CameraSnapshotStrategy.SnapmakerU1MonitorJpeg
-  );
+  if (snapshotStrategy === CameraSnapshotStrategy.SnapmakerU1MonitorJpeg) {
+    return true;
+  }
+
+  if (
+    snapshotStrategy === CameraSnapshotStrategy.DirectUrl ||
+    snapshotStrategy === CameraSnapshotStrategy.None
+  ) {
+    return false;
+  }
+
+  return accessMode === CameraAccessMode.SnapshotOnly && !snapshotUrl;
 }
 
 export function isUnsupportedCameraPreview({
   accessMode,
   streamFormat,
   snapshotStrategy,
+  snapshotUrl,
 }: CameraPreviewContract): boolean {
-  if (shouldPollPrinterSnapshot({ accessMode, snapshotStrategy })) {
+  if (shouldPollPrinterSnapshot({ accessMode, snapshotStrategy, snapshotUrl })) {
     return false;
   }
 
@@ -39,12 +50,13 @@ export function canUseMjpegStream({
   accessMode,
   streamFormat,
   snapshotStrategy,
+  snapshotUrl,
 }: CameraPreviewContract): boolean {
-  if (shouldPollPrinterSnapshot({ accessMode, snapshotStrategy })) {
+  if (shouldPollPrinterSnapshot({ accessMode, snapshotStrategy, snapshotUrl })) {
     return false;
   }
 
-  if (isUnsupportedCameraPreview({ accessMode, streamFormat })) {
+  if (isUnsupportedCameraPreview({ accessMode, streamFormat, snapshotStrategy, snapshotUrl })) {
     return false;
   }
 

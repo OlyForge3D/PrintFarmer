@@ -42,17 +42,20 @@ export function CameraCard({
     accessMode: p.cameraAccessMode,
     streamFormat: p.cameraStreamFormat,
     snapshotStrategy: p.cameraSnapshotStrategy,
+    snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
   const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
   const hasStream = !!cameraStreamUrl && canUseMjpegStream(previewContract);
   const refreshIntervalMs = isPrinting ? ACTIVE_PREVIEW_REFRESH_MS : IDLE_PREVIEW_REFRESH_MS;
-  const { snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
+  const directSnapshotUrl = pollSnapshotPreview ? null : cameraSnapshotUrl;
+  const { previewContainerRef, snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
     p.id,
     pollSnapshotPreview,
-    refreshIntervalMs
+    refreshIntervalMs,
+    directSnapshotUrl,
+    !!directSnapshotUrl
   );
-  const directSnapshotUrl = pollSnapshotPreview ? null : cameraSnapshotUrl;
   const hasCameraUrls = unsupportedPreview || hasStream || pollSnapshotPreview || !!directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
@@ -103,16 +106,8 @@ export function CameraCard({
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
-      <div className="relative w-full aspect-video bg-pf-bg-2">
-        {unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
-            <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-center text-sm font-medium text-pf-text-secondary">No live preview available</span>
-            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
-              This camera does not provide an embeddable MJPEG live stream.
-            </span>
-          </div>
-        ) : cameraMode === 'stream' && hasStream && activeUrl ? (
+      <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
+        {cameraMode === 'stream' && hasStream && activeUrl ? (
           <iframe
             src={activeUrl}
             title={`${p.name} live camera feed`}
@@ -128,6 +123,14 @@ export function CameraCard({
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
+        ) : unsupportedPreview ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+            <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
+            <span className="text-center text-sm font-medium text-pf-text-secondary">No live preview available</span>
+            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+              This camera does not provide an embeddable MJPEG live stream.
+            </span>
+          </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />

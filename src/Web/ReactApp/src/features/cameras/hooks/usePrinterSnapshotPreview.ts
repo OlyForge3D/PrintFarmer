@@ -9,22 +9,45 @@ interface SnapshotPreviewState {
   failed: boolean;
 }
 
+interface DirectSnapshotState {
+  sourceUrl: string;
+  src: string | null;
+}
+
 function getIsDocumentVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
 }
 
+function getCacheBustedSnapshotUrl(snapshotUrl: string): string {
+  const separator = snapshotUrl.includes('?') ? '&' : '?';
+  return `${snapshotUrl}${separator}_=${Date.now()}`;
+}
+
 export function usePrinterSnapshotPreview(
   printerId: string | undefined,
-  enabled: boolean,
-  refreshIntervalMs: number
+  proxyEnabled: boolean,
+  refreshIntervalMs: number,
+  directSnapshotUrl?: string | null,
+  directEnabled = false
 ) {
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [snapshotState, setSnapshotState] = useState<SnapshotPreviewState>({
     printerId: '',
     src: null,
     failed: false,
   });
+  const [directSnapshotState, setDirectSnapshotState] = useState<DirectSnapshotState>({
+    sourceUrl: '',
+    src: null,
+  });
   const [isDocumentVisible, setIsDocumentVisible] = useState(getIsDocumentVisible);
+  const [isIntersectingViewport, setIsIntersectingViewport] = useState(
+    () => typeof IntersectionObserver === 'undefined'
+  );
   const objectUrlRef = useRef<string | null>(null);
+
+  const effectiveDirectSnapshotUrl = directSnapshotUrl ?? null;
+  const isPreviewVisible = isDocumentVisible && isIntersectingViewport;
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -42,6 +65,26 @@ export function usePrinterSnapshotPreview(
   }, []);
 
   useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+
+    const element = previewContainerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      setIsIntersectingViewport(entries.some((entry) => entry.isIntersecting));
+    });
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
     const revokeCurrentObjectUrl = () => {
       if (!objectUrlRef.current) {
         return;
@@ -51,7 +94,7 @@ export function usePrinterSnapshotPreview(
       objectUrlRef.current = null;
     };
 
-    if (!enabled || !printerId) {
+    if (!proxyEnabled || !printerId) {
       revokeCurrentObjectUrl();
       const resetTimeoutId = window.setTimeout(() => {
         setSnapshotState({
@@ -65,7 +108,7 @@ export function usePrinterSnapshotPreview(
       };
     }
 
-    if (!isDocumentVisible) {
+    if (!isPreviewVisible) {
       return;
     }
 
@@ -117,7 +160,50 @@ export function usePrinterSnapshotPreview(
         window.clearTimeout(timeoutId);
       }
     };
-  }, [enabled, isDocumentVisible, printerId, refreshIntervalMs]);
+  }, [isPreviewVisible, printerId, proxyEnabled, refreshIntervalMs]);
+
+  useEffect(() => {
+    if (!directEnabled || !effectiveDirectSnapshotUrl) {
+      const resetTimeoutId = window.setTimeout(() => {
+        setDirectSnapshotState({
+          sourceUrl: '',
+          src: null,
+        });
+      }, 0);
+      return () => {
+        window.clearTimeout(resetTimeoutId);
+      };
+    }
+
+    if (!isPreviewVisible) {
+      return;
+    }
+
+    const sourceUrl = effectiveDirectSnapshotUrl;
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    function refreshDirectSnapshot() {
+      if (cancelled) {
+        return;
+      }
+
+      setDirectSnapshotState({
+        sourceUrl,
+        src: getCacheBustedSnapshotUrl(sourceUrl),
+      });
+      timeoutId = window.setTimeout(refreshDirectSnapshot, refreshIntervalMs);
+    }
+
+    timeoutId = window.setTimeout(refreshDirectSnapshot, 0);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [directEnabled, effectiveDirectSnapshotUrl, isPreviewVisible, refreshIntervalMs]);
 
   useEffect(() => {
     return () => {
@@ -127,11 +213,18 @@ export function usePrinterSnapshotPreview(
     };
   }, []);
 
-  const hasCurrentSnapshot = enabled && snapshotState.printerId === printerId;
+  const hasCurrentProxySnapshot = proxyEnabled && snapshotState.printerId === printerId;
+  const hasCurrentDirectSnapshot =
+    directEnabled && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl;
 
   return {
-    snapshotSrc: hasCurrentSnapshot ? snapshotState.src : null,
-    snapshotFailed: hasCurrentSnapshot ? snapshotState.failed : false,
-    isPollingPaused: enabled && !isDocumentVisible,
+    previewContainerRef,
+    snapshotSrc: hasCurrentProxySnapshot
+      ? snapshotState.src
+      : hasCurrentDirectSnapshot
+      ? directSnapshotState.src
+      : null,
+    snapshotFailed: hasCurrentProxySnapshot ? snapshotState.failed : false,
+    isPollingPaused: (proxyEnabled || directEnabled) && !isPreviewVisible,
   };
 }

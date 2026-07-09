@@ -52,6 +52,7 @@ export function PrinterCameraPreview({
     accessMode: cameraAccessMode,
     streamFormat: cameraStreamFormat,
     snapshotStrategy: cameraSnapshotStrategy,
+    snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
   const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
@@ -59,20 +60,22 @@ export function PrinterCameraPreview({
   const hasStream = !!cameraStreamUrl && streamSupported;
   const hasCameraSource = unsupportedPreview || hasStream || pollSnapshotPreview || !!cameraSnapshotUrl;
   const refreshIntervalMs = isPrinting ? ACTIVE_PREVIEW_REFRESH_MS : IDLE_PREVIEW_REFRESH_MS;
-  const { snapshotSrc, snapshotFailed, isPollingPaused } = usePrinterSnapshotPreview(
-    printerId,
-    pollSnapshotPreview,
-    refreshIntervalMs
-  );
   const rawSnapshotKey = `${printerId}:${cameraSnapshotUrl ?? ''}`;
   const rawStreamKey = `${printerId}:${cameraStreamUrl ?? ''}`;
   const [failedRawSnapshotKey, setFailedRawSnapshotKey] = useState<string | null>(null);
   const [failedRawStreamKey, setFailedRawStreamKey] = useState<string | null>(null);
-  const fallbackSnapshotSrc = pollSnapshotPreview || failedRawSnapshotKey === rawSnapshotKey
+  const directSnapshotUrl = pollSnapshotPreview || failedRawSnapshotKey === rawSnapshotKey
     ? null
     : (cameraSnapshotUrl ?? null);
-  const previewSrc = snapshotSrc ?? fallbackSnapshotSrc;
-  const hasSnapshot = pollSnapshotPreview || !!previewSrc;
+  const { previewContainerRef, snapshotSrc, snapshotFailed, isPollingPaused } = usePrinterSnapshotPreview(
+    printerId,
+    pollSnapshotPreview,
+    refreshIntervalMs,
+    directSnapshotUrl,
+    !!directSnapshotUrl
+  );
+  const previewSrc = snapshotSrc ?? directSnapshotUrl;
+  const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
     setCameraMode,
@@ -94,6 +97,7 @@ export function PrinterCameraPreview({
   const mediaClassName = getCameraMediaTransformClassName(rotation);
   const showLiveStream = cameraMode === 'stream' && hasStream;
   const shouldUseImageStream = showLiveStream && failedRawStreamKey !== rawStreamKey;
+  // CameraContractClassifier emits UnsupportedStream only when no snapshot exists; keep the snapshot branch defensive.
   const placeholderTitle = unsupportedPreview
     ? 'No live preview available'
     : hasCameraSource
@@ -107,35 +111,20 @@ export function PrinterCameraPreview({
         className
       )}
     >
-      <div className="relative aspect-video w-full overflow-hidden bg-pf-bg-0">
-        {unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
-            <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
-            <p className="text-sm font-medium">{placeholderTitle}</p>
-            <p className="mt-1 text-xs text-pf-text-tertiary">
-              This camera does not provide an embeddable MJPEG live stream.
-            </p>
-          </div>
-        ) : showLiveStream && cameraStreamUrl ? (
-          shouldUseImageStream ? (
-            <img
-              src={cameraStreamUrl}
-              alt={`${printerName} live camera feed`}
-              className={`h-full w-full object-contain bg-black ${mediaClassName}`}
-              loading="eager"
-              onError={() => {
-                setFailedRawStreamKey(rawStreamKey);
-              }}
-            />
-          ) : (
-            <iframe
-              src={cameraStreamUrl}
-              title={`${printerName} live camera feed`}
-              className={`h-full w-full border-0 bg-black ${mediaClassName}`}
-              loading="lazy"
-              referrerPolicy="no-referrer"
-            />
-          )
+      <div
+        ref={previewContainerRef}
+        className="relative aspect-video w-full overflow-hidden bg-pf-bg-0"
+      >
+        {showLiveStream && cameraStreamUrl && shouldUseImageStream ? (
+          <img
+            src={cameraStreamUrl}
+            alt={`${printerName} live camera feed`}
+            className={`h-full w-full object-contain bg-black ${mediaClassName}`}
+            loading="eager"
+            onError={() => {
+              setFailedRawStreamKey(rawStreamKey);
+            }}
+          />
         ) : previewSrc ? (
           <img
             src={previewSrc}
@@ -149,6 +138,22 @@ export function PrinterCameraPreview({
 
               setFailedRawSnapshotKey(rawSnapshotKey);
             }}
+          />
+        ) : unsupportedPreview ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
+            <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
+            <p className="text-sm font-medium">{placeholderTitle}</p>
+            <p className="mt-1 text-xs text-pf-text-tertiary">
+              This camera does not provide an embeddable MJPEG live stream.
+            </p>
+          </div>
+        ) : showLiveStream && cameraStreamUrl ? (
+          <iframe
+            src={cameraStreamUrl}
+            title={`${printerName} live camera feed`}
+            className={`h-full w-full border-0 bg-black ${mediaClassName}`}
+            loading="lazy"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
