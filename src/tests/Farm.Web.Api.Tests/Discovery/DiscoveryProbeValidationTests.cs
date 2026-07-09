@@ -410,6 +410,37 @@ public class DiscoveryProbeValidationTests
     }
 
     [Fact]
+    public async Task ResolveAsync_ExplicitUrlPortWithDefaultPreferredPort_ProbesOnlyUrlPort()
+    {
+        var requestedPaths = new List<string>();
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            requestedPaths.Add($"{request.RequestUri?.Port}{request.RequestUri?.AbsolutePath}");
+            if (request.RequestUri?.Port == 8123 && request.RequestUri.AbsolutePath == "/printer/info")
+            {
+                return JsonResponse("""{ "result": { "state_message": "ready", "hostname": "url-port" } }""");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.49:8123"),
+            preferredBackendPort: 7125,
+            cancellationToken: default);
+
+        resolution.Should().NotBeNull();
+        resolution!.BackendPort.Should().Be(8123);
+        resolution.EndpointPath.Should().Be("/printer/info");
+        requestedPaths.Should().Equal("8123/printer/info");
+    }
+
+    [Fact]
     public async Task ResolveAsync_PreferredCustomPort_HonorsCustomPortWithoutFallback()
     {
         var requestedPaths = new List<string>();

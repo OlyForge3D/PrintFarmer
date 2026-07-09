@@ -28,9 +28,13 @@ public static class MoonrakerOnboardingResolver
         ArgumentNullException.ThrowIfNull(serverUrl);
 
         bool hasExplicitUrlPort = !serverUrl.IsDefaultPort;
-        int? portToProbe = preferredBackendPort ?? (hasExplicitUrlPort ? serverUrl.Port : null);
-        bool isAuthoritativePort = hasExplicitUrlPort ||
-                                   (preferredBackendPort.HasValue && preferredBackendPort.Value != DefaultMoonrakerPort);
+        bool hasCustomPreferredPort = preferredBackendPort.HasValue && preferredBackendPort.Value != DefaultMoonrakerPort;
+        int? portToProbe = hasExplicitUrlPort
+            ? serverUrl.Port
+            : hasCustomPreferredPort
+                ? preferredBackendPort
+                : null;
+        bool isAuthoritativePort = hasExplicitUrlPort || hasCustomPreferredPort;
 
         foreach (MoonrakerEndpointCandidate candidate in GetEndpointCandidates(portToProbe, isAuthoritativePort))
         {
