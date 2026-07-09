@@ -2448,6 +2448,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("EnablePushNotifications")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("EnableTelegramNotifications")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("Frequency")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -2509,6 +2512,18 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(30);
+
+                    b.Property<bool>("TelegramOnJobCompleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("TelegramOnJobFailed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("TelegramOnJobPaused")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("TelegramOnJobStarted")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

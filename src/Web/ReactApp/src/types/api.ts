@@ -3553,6 +3553,7 @@ export interface NotificationEventChannelPreferenceDto {
   inApp: boolean;
   email: boolean;
   push: boolean;
+  telegram: boolean;
 }
 
 export interface NotificationDto {
@@ -3573,6 +3574,7 @@ export interface NotificationPreferencesDto {
   enableEmailNotifications: boolean;
   enablePushNotifications: boolean;
   enableInAppNotifications: boolean;
+  enableTelegramNotifications: boolean;
   notifyOnCompletion: boolean;
   notifyOnFailure: boolean;
   notifyOnStart: boolean;
@@ -3586,6 +3588,7 @@ export interface UpdateNotificationPreferencesRequest {
   enableEmailNotifications: boolean;
   enablePushNotifications: boolean;
   enableInAppNotifications: boolean;
+  enableTelegramNotifications: boolean;
   notifyOnCompletion: boolean;
   notifyOnFailure: boolean;
   notifyOnStart: boolean;
@@ -3597,6 +3600,25 @@ export interface UpdateNotificationPreferencesRequest {
 
 export interface UnreadCountResponse {
   unreadCount: number;
+}
+
+export interface TelegramSettingsDto {
+  enabled: boolean;
+  chatId: string;
+  includeSnapshots: boolean;
+  botTokenMasked: string;
+}
+
+export interface UpdateTelegramSettingsRequest {
+  enabled: boolean;
+  chatId?: string;
+  includeSnapshots: boolean;
+  botToken?: string;
+}
+
+export interface TelegramTestResult {
+  success: boolean;
+  message: string;
 }
 
 // ============== Job Scheduling ==============

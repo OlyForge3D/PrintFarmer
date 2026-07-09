@@ -26,7 +26,8 @@ public class UnifiedSettingsController(
     // dedicated admin controller that handles masking / encryption correctly.
     private static readonly HashSet<string> _settingsBlocklist = new(StringComparer.OrdinalIgnoreCase)
     {
-        HomeAssistantSettings.SectionName
+        HomeAssistantSettings.SectionName,
+        TelegramSettings.SectionName
     };
 
     // Lazy-initialize this since it depends on _modularSettingsService
@@ -241,7 +242,9 @@ public class UnifiedSettingsController(
             // [JsonPropertyName]) would happen during response serialization — after the 200 status
             // and headers are already on the wire — surfacing to the browser as a truncated
             // ERR_INCOMPLETE_CHUNKED_ENCODING instead of a clean error. ToList() forces failure here.
-            List<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata().ToList();
+            List<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata()
+                .Where(meta => !_settingsBlocklist.Contains(meta.Key))
+                .ToList();
             return Ok(metadata);
         }
         catch (Exception ex)

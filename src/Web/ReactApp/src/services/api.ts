@@ -111,7 +111,10 @@ import {
   FailureDetectionEvent,
   NotificationDto,
   NotificationPreferencesDto,
+  TelegramSettingsDto,
+  TelegramTestResult,
   UpdateBedTypeRequest,
+  UpdateTelegramSettingsRequest,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
   ScheduledJob,
@@ -4423,6 +4426,21 @@ export class ApiClient {
 
   async updateNotificationPreferences(preferences: UpdateNotificationPreferencesRequest): Promise<NotificationPreferencesDto> {
     const response = await this.client.put('/notifications/preferences', preferences);
+    return response.data;
+  }
+
+  async getTelegramSettings(): Promise<TelegramSettingsDto> {
+    const response = await this.client.get('/admin/integrations/telegram/settings');
+    return response.data;
+  }
+
+  async updateTelegramSettings(settings: UpdateTelegramSettingsRequest): Promise<TelegramSettingsDto> {
+    const response = await this.client.put('/admin/integrations/telegram/settings', settings);
+    return response.data;
+  }
+
+  async sendTelegramTestMessage(): Promise<TelegramTestResult> {
+    const response = await this.client.post('/admin/integrations/telegram/test');
     return response.data;
   }
 

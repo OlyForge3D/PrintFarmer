@@ -232,6 +232,7 @@ public class NotificationsController(INotificationService notificationService) :
                 EnableEmailNotifications = request.EnableEmailNotifications,
                 EnablePushNotifications = request.EnablePushNotifications,
                 EnableInAppNotifications = request.EnableInAppNotifications,
+                EnableTelegramNotifications = request.EnableTelegramNotifications,
                 NotifyOnCompletion = request.NotifyOnCompletion,
                 NotifyOnFailure = request.NotifyOnFailure,
                 NotifyOnStart = request.NotifyOnStart,
@@ -352,6 +353,7 @@ public class NotificationsController(INotificationService notificationService) :
             EnableEmailNotifications = preferences.EnableEmailNotifications,
             EnablePushNotifications = preferences.EnablePushNotifications,
             EnableInAppNotifications = preferences.EnableInAppNotifications,
+            EnableTelegramNotifications = preferences.EnableTelegramNotifications,
             NotifyOnCompletion = preferences.NotifyOnCompletion,
             NotifyOnFailure = preferences.NotifyOnFailure,
             NotifyOnStart = preferences.NotifyOnStart,
@@ -381,28 +383,32 @@ public class NotificationsController(INotificationService notificationService) :
                 EventType = NotificationPreferenceEventType.JobStarted,
                 InApp = preferences.InAppOnJobStarted,
                 Email = preferences.EmailOnJobStarted,
-                Push = preferences.PushOnJobStarted
+                Push = preferences.PushOnJobStarted,
+                Telegram = preferences.TelegramOnJobStarted
             },
             new()
             {
                 EventType = NotificationPreferenceEventType.JobCompleted,
                 InApp = preferences.InAppOnJobCompleted,
                 Email = preferences.EmailOnJobCompleted,
-                Push = preferences.PushOnJobCompleted
+                Push = preferences.PushOnJobCompleted,
+                Telegram = preferences.TelegramOnJobCompleted
             },
             new()
             {
                 EventType = NotificationPreferenceEventType.JobFailed,
                 InApp = true,
                 Email = preferences.EmailOnJobFailed,
-                Push = preferences.PushOnJobFailed
+                Push = preferences.PushOnJobFailed,
+                Telegram = preferences.TelegramOnJobFailed
             },
             new()
             {
                 EventType = NotificationPreferenceEventType.JobPaused,
                 InApp = preferences.InAppOnJobPaused,
                 Email = preferences.EmailOnJobPaused,
-                Push = preferences.PushOnJobPaused
+                Push = preferences.PushOnJobPaused,
+                Telegram = preferences.TelegramOnJobPaused
             }
         };
     }
@@ -424,6 +430,10 @@ public class NotificationsController(INotificationService notificationService) :
             preferences.PushOnJobCompleted = request.EnablePushNotifications && request.NotifyOnCompletion;
             preferences.PushOnJobFailed = request.EnablePushNotifications && request.NotifyOnFailure;
             preferences.PushOnJobPaused = request.EnablePushNotifications && request.NotifyOnPause;
+            preferences.TelegramOnJobStarted = request.EnableTelegramNotifications && request.NotifyOnStart;
+            preferences.TelegramOnJobCompleted = request.EnableTelegramNotifications && request.NotifyOnCompletion;
+            preferences.TelegramOnJobFailed = request.EnableTelegramNotifications && request.NotifyOnFailure;
+            preferences.TelegramOnJobPaused = request.EnableTelegramNotifications && request.NotifyOnPause;
             return;
         }
 
@@ -439,6 +449,10 @@ public class NotificationsController(INotificationService notificationService) :
         preferences.PushOnJobCompleted = true;
         preferences.PushOnJobFailed = true;
         preferences.PushOnJobPaused = true;
+        preferences.TelegramOnJobStarted = false;
+        preferences.TelegramOnJobCompleted = false;
+        preferences.TelegramOnJobFailed = false;
+        preferences.TelegramOnJobPaused = false;
 
         foreach (NotificationEventChannelPreferenceDto item in matrix)
         {
@@ -453,21 +467,25 @@ public class NotificationsController(INotificationService notificationService) :
                     preferences.InAppOnJobStarted = item.InApp;
                     preferences.EmailOnJobStarted = item.Email;
                     preferences.PushOnJobStarted = item.Push;
+                    preferences.TelegramOnJobStarted = item.Telegram;
                     break;
                 case NotificationPreferenceEventType.JobCompleted:
                     preferences.InAppOnJobCompleted = item.InApp;
                     preferences.EmailOnJobCompleted = item.Email;
                     preferences.PushOnJobCompleted = item.Push;
+                    preferences.TelegramOnJobCompleted = item.Telegram;
                     break;
                 case NotificationPreferenceEventType.JobFailed:
                     preferences.InAppOnJobFailed = true;
                     preferences.EmailOnJobFailed = item.Email;
                     preferences.PushOnJobFailed = item.Push;
+                    preferences.TelegramOnJobFailed = item.Telegram;
                     break;
                 case NotificationPreferenceEventType.JobPaused:
                     preferences.InAppOnJobPaused = item.InApp;
                     preferences.EmailOnJobPaused = item.Email;
                     preferences.PushOnJobPaused = item.Push;
+                    preferences.TelegramOnJobPaused = item.Telegram;
                     break;
             }
         }
@@ -487,11 +505,16 @@ public class NotificationsController(INotificationService notificationService) :
             || preferences.PushOnJobCompleted
             || preferences.PushOnJobFailed
             || preferences.PushOnJobPaused;
+        preferences.EnableTelegramNotifications =
+            preferences.TelegramOnJobStarted
+            || preferences.TelegramOnJobCompleted
+            || preferences.TelegramOnJobFailed
+            || preferences.TelegramOnJobPaused;
 
-        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted;
-        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted;
+        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted || preferences.TelegramOnJobStarted;
+        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted || preferences.TelegramOnJobCompleted;
         preferences.NotifyOnFailure = true;
-        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused;
+        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused || preferences.TelegramOnJobPaused;
     }
 
     /// <summary>
@@ -531,6 +554,9 @@ public class UpdateNotificationPreferencesRequest
 
     /// <summary>Enable in-app notifications</summary>
     public bool EnableInAppNotifications { get; set; } = true;
+
+    /// <summary>Enable Telegram notifications</summary>
+    public bool EnableTelegramNotifications { get; set; } = false;
 
     /// <summary>Notify on job completion</summary>
     public bool NotifyOnCompletion { get; set; } = true;
@@ -616,6 +642,9 @@ public class NotificationPreferencesDto
     /// <summary>Enable in-app notifications</summary>
     public bool EnableInAppNotifications { get; set; }
 
+    /// <summary>Enable Telegram notifications</summary>
+    public bool EnableTelegramNotifications { get; set; }
+
     /// <summary>Notify on job completion</summary>
     public bool NotifyOnCompletion { get; set; }
 
@@ -655,6 +684,8 @@ public class NotificationEventChannelPreferenceDto
     public bool Email { get; set; }
 
     public bool Push { get; set; }
+
+    public bool Telegram { get; set; }
 }
 
 /// <summary>

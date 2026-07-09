@@ -51,7 +51,14 @@ public static class FeatureServicesStartup
         // Notification Module (job event notifications broadcast to all users)
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.INotificationRepository, Farm.Infrastructure.Repositories.Notifications.EfNotificationRepository>();
         services.AddSingleton<Farm.Infrastructure.Services.Notifications.IWebPushNotificationSender, Farm.Infrastructure.Services.Notifications.WebPushNotificationSender>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.ITelegramNotificationSender, Farm.Infrastructure.Services.Notifications.TelegramNotificationSender>();
+        services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationChannel, Farm.Infrastructure.Services.Notifications.TelegramNotificationChannel>();
         services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationService, Farm.Infrastructure.Services.Notifications.NotificationService>();
+        services.AddHttpClient("TelegramDelivery", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-Telegram/1.0");
+        });
 
         // Webhooks (event delivery via HTTP POST to external consumers)
         services.AddSingleton<Farm.Infrastructure.Services.Webhooks.WebhookService>();

@@ -21,6 +21,7 @@ public class NotificationServiceDeliveryTests : IDisposable
     private readonly Mock<IUsersRepository> _usersRepository = new();
     private readonly Mock<IEmailService> _emailService = new();
     private readonly Mock<IWebPushNotificationSender> _webPushSender = new();
+    private readonly Mock<INotificationChannel> _telegramChannel = new();
 
     public NotificationServiceDeliveryTests()
     {
@@ -31,6 +32,9 @@ public class NotificationServiceDeliveryTests : IDisposable
         _dbContext = new AppDbContext(options);
         _notificationRepository.Setup(x => x.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _telegramChannel.SetupGet(x => x.Channel).Returns(NotificationDeliveryChannel.Telegram);
+        _telegramChannel.Setup(x => x.SendAsync(It.IsAny<NotificationChannelMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NotificationChannelDispatchResult.Succeeded);
     }
 
     public static IEnumerable<object[]> MatrixCellCases()
@@ -47,7 +51,8 @@ public class NotificationServiceDeliveryTests : IDisposable
         [
             NotificationDeliveryChannel.InApp,
             NotificationDeliveryChannel.Email,
-            NotificationDeliveryChannel.Push
+            NotificationDeliveryChannel.Push,
+            NotificationDeliveryChannel.Telegram
         ];
 
         foreach (NotificationType eventType in eventTypes)
@@ -497,6 +502,41 @@ public class NotificationServiceDeliveryTests : IDisposable
         remaining.Should().Be(0);
     }
 
+    [Fact]
+    public async Task UpdatePreferencesAsync_ExistingPreferences_PersistsTelegramMatrixFields()
+    {
+        UserDto user = CreateUser();
+        _dbContext.NotificationPreferences.Add(new NotificationPreferences
+        {
+            UserId = user.Id,
+            EnableTelegramNotifications = false,
+            TelegramOnJobCompleted = false,
+            TelegramOnJobFailed = false
+        });
+        await _dbContext.SaveChangesAsync();
+        NotificationService service = CreateService();
+
+        await service.UpdatePreferencesAsync(user.Id, new NotificationPreferences
+        {
+            UserId = user.Id,
+            EnableEmailNotifications = false,
+            EnablePushNotifications = false,
+            EnableInAppNotifications = true,
+            EnableTelegramNotifications = true,
+            InAppOnJobFailed = true,
+            TelegramOnJobCompleted = true,
+            TelegramOnJobFailed = true,
+            Frequency = NotificationFrequency.RealTime,
+            RetentionDays = 14
+        });
+
+        NotificationPreferences stored = await _dbContext.NotificationPreferences.SingleAsync(p => p.UserId == user.Id);
+        stored.EnableTelegramNotifications.Should().BeTrue();
+        stored.TelegramOnJobCompleted.Should().BeTrue();
+        stored.TelegramOnJobFailed.Should().BeTrue();
+        stored.RetentionDays.Should().Be(14);
+    }
+
     private static UserDto CreateUser(string email = "user@example.com")
     {
         return new UserDto
@@ -531,6 +571,7 @@ public class NotificationServiceDeliveryTests : IDisposable
             EnableEmailNotifications = true,
             EnablePushNotifications = true,
             EnableInAppNotifications = true,
+            EnableTelegramNotifications = true,
             InAppOnJobStarted = false,
             InAppOnJobCompleted = false,
             InAppOnJobFailed = false,
@@ -542,7 +583,11 @@ public class NotificationServiceDeliveryTests : IDisposable
             PushOnJobStarted = false,
             PushOnJobCompleted = false,
             PushOnJobFailed = false,
-            PushOnJobPaused = false
+            PushOnJobPaused = false,
+            TelegramOnJobStarted = false,
+            TelegramOnJobCompleted = false,
+            TelegramOnJobFailed = false,
+            TelegramOnJobPaused = false
         };
 
         SetMatrixCell(preferences, eventType, channel, enabled);
@@ -593,6 +638,18 @@ public class NotificationServiceDeliveryTests : IDisposable
             case (NotificationType.JobPaused, NotificationDeliveryChannel.Push):
                 preferences.PushOnJobPaused = enabled;
                 break;
+            case (NotificationType.JobStarted, NotificationDeliveryChannel.Telegram):
+                preferences.TelegramOnJobStarted = enabled;
+                break;
+            case (NotificationType.JobCompleted, NotificationDeliveryChannel.Telegram):
+                preferences.TelegramOnJobCompleted = enabled;
+                break;
+            case (NotificationType.JobFailed, NotificationDeliveryChannel.Telegram):
+                preferences.TelegramOnJobFailed = enabled;
+                break;
+            case (NotificationType.JobPaused, NotificationDeliveryChannel.Telegram):
+                preferences.TelegramOnJobPaused = enabled;
+                break;
         }
     }
 
@@ -616,6 +673,7 @@ public class NotificationServiceDeliveryTests : IDisposable
             : eventType == NotificationType.JobFailed;
         bool expectedEmail = channel == NotificationDeliveryChannel.Email && enabled;
         bool expectedPush = channel == NotificationDeliveryChannel.Push && enabled;
+        bool expectedTelegram = channel == NotificationDeliveryChannel.Telegram && enabled;
 
         _notificationRepository.Verify(
             x => x.AddAsync(It.Is<Notification>(n => n.Type == eventType), It.IsAny<CancellationToken>()),
@@ -626,6 +684,11 @@ public class NotificationServiceDeliveryTests : IDisposable
         _webPushSender.Verify(
             x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             expectedPush ? Times.Once() : Times.Never());
+        _telegramChannel.Verify(
+            x => x.SendAsync(
+                It.Is<NotificationChannelMessage>(m => m.Type == eventType),
+                It.IsAny<CancellationToken>()),
+            expectedTelegram ? Times.Once() : Times.Never());
     }
 
     private NotificationService CreateService(Func<string, CancellationToken, Task<bool>>? endpointValidator = null)
@@ -639,7 +702,8 @@ public class NotificationServiceDeliveryTests : IDisposable
             null,
             _emailService.Object,
             _webPushSender.Object,
-            endpointValidator);
+            endpointValidator,
+            [_telegramChannel.Object]);
     }
 
     public void Dispose()
