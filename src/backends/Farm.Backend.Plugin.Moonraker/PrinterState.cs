@@ -107,6 +107,9 @@ internal sealed class PrinterState
     /// <summary>Whether an AFC Klipper add-on has been detected on this printer.</summary>
     public bool AfcDetected { get; set; }
 
+    /// <summary>Whether Snapmaker U1 print_task_config lanes have been detected on this printer.</summary>
+    public bool SnapmakerU1Detected { get; set; }
+
     /// <summary>AFC system state: "Idle", "Loading", "Unloading", "Error", etc.</summary>
     public string? AfcCurrentState { get; set; }
 
@@ -157,6 +160,10 @@ internal sealed class PrinterState
             {
                 MmuProtocol.Afc => i < AfcLaneNames.Count ? AfcLaneNames[i] : null,
                 MmuProtocol.Qidibox => $"slot{i}",
+
+                // Snapmaker U1 touchscreen labels are T1-T4, while Moonraker/API extruders are zero-based T0-T3.
+                // This mapping is inferred from U1Hub/SnapCon behavior and needs real-hardware confirmation.
+                MmuProtocol.SnapmakerU1 => $"T{i + 1}",
                 _ => null,
             };
 

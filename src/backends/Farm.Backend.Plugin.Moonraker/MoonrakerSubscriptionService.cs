@@ -1069,6 +1069,10 @@ public sealed class MoonrakerSubscriptionService(
         // AFC uses "AFC" Moonraker object + "AFC_stepper <lane>" per-lane objects
         HandleAfcUpdates(printerId, state, statusObj);
 
+        // Snapmaker U1 lane updates
+        // U1 exposes four physical toolheads through print_task_config, not MMU virtual gates.
+        await HandleSnapmakerU1PrintTaskConfigUpdateAsync(printerId, state, statusObj, ct);
+
         // State/progress updates can come from multiple sources (display_status, print_stats, webhooks)
         if (statusObj.TryGetProperty("display_status", out _) ||
             statusObj.TryGetProperty("print_stats", out _) ||
@@ -1374,6 +1378,126 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         return result;
+    }
+
+    // ── Snapmaker U1 print_task_config handling ──
+
+    /// <summary>
+    /// Detects and handles Snapmaker U1 physical lane updates from Moonraker print_task_config.
+    /// </summary>
+    private async Task HandleSnapmakerU1PrintTaskConfigUpdateAsync(
+        Guid printerId,
+        PrinterState state,
+        JsonElement statusObj,
+        CancellationToken ct)
+    {
+        if (!SnapmakerU1PrintTaskConfigParser.TryParse(statusObj, out SnapmakerU1PrintTaskConfigStatus u1Status))
+        {
+            return;
+        }
+
+        if (state.MmuDetected && state.MmuType is not MmuProtocol.Unknown and not MmuProtocol.SnapmakerU1)
+        {
+            return;
+        }
+
+        if (!state.SnapmakerU1Detected)
+        {
+            state.SnapmakerU1Detected = true;
+            _logger.LogInformation(
+                "Snapmaker U1 print_task_config lane status detected for printer {PrinterId}",
+                printerId);
+        }
+
+        state.MmuDetected = true;
+        state.MmuEnabled = true;
+        state.MmuIsHomed = true;
+        state.MmuType = MmuProtocol.SnapmakerU1;
+        state.MmuNumGates = SnapmakerU1PrintTaskConfigParser.LaneCount;
+        state.MmuHasBypass = false;
+        state.MmuEndlessSpool = false;
+        state.MmuClogDetection = false;
+        state.MmuAction = "Idle";
+        state.MmuActiveTool = u1Status.ActiveTool;
+        state.MmuActiveGate = u1Status.ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount
+            ? u1Status.ActiveTool
+            : -1;
+
+        EnsureSlotArrays(state, SnapmakerU1PrintTaskConfigParser.LaneCount);
+
+        for (int i = 0; i < u1Status.Lanes.Length; i++)
+        {
+            SnapmakerU1LaneStatus lane = u1Status.Lanes[i];
+            state.MmuGateStatus![i] = lane.Loaded ? 1 : 0;
+            state.MmuGateMaterial![i] = lane.Material ?? string.Empty;
+            state.MmuGateColor![i] = lane.Color ?? string.Empty;
+            state.MmuGateFilamentName![i] = lane.FilamentName ?? string.Empty;
+            state.MmuGateSpoolId![i] = -1;
+        }
+
+        SnapmakerU1LaneStatus? activeLane = u1Status.ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount
+            ? u1Status.Lanes[u1Status.ActiveTool]
+            : null;
+        state.MmuFilamentState = activeLane is not null
+            ? activeLane.Loaded ? "Loaded" : "Unloaded"
+            : u1Status.Lanes.Any(l => l.Loaded) ? "Loaded" : "Unloaded";
+        state.MmuDirty = true;
+
+        await PersistSnapmakerU1ToolheadStateAsync(printerId, u1Status.Lanes, ct);
+    }
+
+    private async Task PersistSnapmakerU1ToolheadStateAsync(
+        Guid printerId,
+        IReadOnlyList<SnapmakerU1LaneStatus> lanes,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            Printer? printer = await unitOfWork.Printers.FindByIdWithToolheadsAsync(printerId, ct);
+            if (printer?.Toolheads is null || printer.Toolheads.Count == 0)
+            {
+                return;
+            }
+
+            bool hasChanges = false;
+            foreach (SnapmakerU1LaneStatus lane in lanes)
+            {
+                Toolhead? toolhead = printer.Toolheads.FirstOrDefault(t =>
+                    t.ToolheadType == ToolheadType.Physical &&
+                    t.Index == lane.Index);
+                if (toolhead is null)
+                {
+                    continue;
+                }
+
+                string? material = lane.Loaded ? lane.Material : null;
+                string? color = lane.Loaded ? lane.Color : null;
+                if (toolhead.CurrentMaterial == material && toolhead.CurrentFilamentColor == color)
+                {
+                    continue;
+                }
+
+                toolhead.CurrentMaterial = material;
+                toolhead.CurrentFilamentColor = color;
+                toolhead.UpdatedAt = DateTime.UtcNow;
+                hasChanges = true;
+            }
+
+            if (hasChanges)
+            {
+                await unitOfWork.SaveChangesAsync(ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist Snapmaker U1 lane state for printer {PrinterId}", printerId);
+        }
     }
 
     // ── Qidibox filament box handling ──
