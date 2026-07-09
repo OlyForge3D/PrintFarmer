@@ -652,7 +652,7 @@ export class ApiClient {
 
   async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
     const response = await this.client.get<PrinterCameraUrlResult>(
-      `/printers/${id}/camera-url`
+      `/printers/${id}/camera/url`
     );
     return response.data;
   }
