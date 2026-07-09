@@ -25,6 +25,7 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
@@ -679,7 +680,7 @@ public class PrintersService(
                 };
             }
 
-            return dto;
+            return ApplyCameraContract(dto);
         }
         catch (Exception ex)
         {
@@ -705,7 +706,7 @@ public class PrintersService(
         PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
         {
             (string? streamUrl, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(p.Id, ct).ConfigureAwait(false);
-            return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
+            return PrinterCameraUrlsDto.FromUrls(p.Id, p.Name, streamUrl, snapshotUrl);
         }));
         return dtos;
     }
@@ -1369,7 +1370,7 @@ public class PrintersService(
 
     private static PrinterDto CreateOfflinePrinterDto(Printer p, string? cameraStreamUrl = null, string? cameraSnapshotUrl = null)
     {
-        return new PrinterDto(
+        return ApplyCameraContract(new PrinterDto(
             Id: p.Id,
             Name: p.Name,
             Notes: p.Notes,
@@ -1404,7 +1405,17 @@ public class PrintersService(
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
             HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
-            UseModelDispatchDefaults: p.UseModelDispatchDefaults);
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+    }
+
+    private static PrinterDto ApplyCameraContract(PrinterDto dto)
+    {
+        return dto with
+        {
+            CameraAccessMode = CameraContractClassifier.GetAccessMode(dto.CameraStreamUrl, dto.CameraSnapshotUrl),
+            CameraStreamFormat = CameraContractClassifier.GetStreamFormat(dto.CameraStreamUrl),
+            CameraSnapshotStrategy = CameraContractClassifier.GetSnapshotStrategy(dto.CameraSnapshotUrl)
+        };
     }
 
     /// <summary>
@@ -1907,7 +1918,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        Printer? p = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
             return null;
@@ -1929,6 +1940,16 @@ public class PrintersService(
                         : p.BackendUrl;
 
                     snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (IsSnapmakerU1Printer(p) &&
+                (string.IsNullOrWhiteSpace(snapshotUrl) || CameraContractClassifier.IsSnapmakerU1MonitorSnapshotUrl(snapshotUrl)))
+            {
+                byte[]? u1Snapshot = await TryGetSnapmakerU1CameraSnapshotAsync(p, ct).ConfigureAwait(false);
+                if (u1Snapshot is { Length: > 0 })
+                {
+                    return u1Snapshot;
                 }
             }
 
@@ -4140,6 +4161,7 @@ public class PrintersService(
         var backend = (PrinterBackend)printer.Backend;
         string? streamUrl = null;
         string? snapshotUrl = null;
+        bool isSnapmakerU1 = IsSnapmakerU1Printer(printer);
 
         try
         {
@@ -4163,6 +4185,12 @@ public class PrintersService(
                     ct).ConfigureAwait(false);
 
                 _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
+
+                if (isSnapmakerU1 && string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl))
+                {
+                    (streamUrl, snapshotUrl) = GetSnapmakerU1CameraUrls(printer);
+                    _logger.LogInformation("RefreshCameraUrlsAsync: Using Snapmaker U1 snapshot-only camera strategy - snapshot={SnapshotUrl}", snapshotUrl);
+                }
             }
             else
             {
@@ -4263,6 +4291,50 @@ public class PrintersService(
         PrinterBackend.FlashForge => CameraSource.FlashForge,
         _ => CameraSource.Standalone,
     };
+
+    private async Task<byte[]?> TryGetSnapmakerU1CameraSnapshotAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            IBackendClient client = _backendFactory.GetClient(PrinterBackend.Moonraker);
+            if (client is not ISupportsTriggeredCameraSnapshot triggeredSnapshotClient)
+            {
+                return null;
+            }
+
+            string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+            return await triggeredSnapshotClient.GetTriggeredCameraSnapshotAsync(moonrakerUrl, printer.Credential, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Snapmaker U1 camera snapshot failed for printer {PrinterId}: {Message}", printer.Id, ex.Message);
+            return null;
+        }
+    }
+
+    private static (string? StreamUrl, string? SnapshotUrl) GetSnapmakerU1CameraUrls(Printer printer)
+    {
+        string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+        Uri baseUri = new(moonrakerUrl);
+        UriBuilder builder = new(baseUri)
+        {
+            Path = "server/files/camera/monitor.jpg",
+            Query = string.Empty
+        };
+
+        return (null, builder.Uri.ToString());
+    }
+
+    private static bool IsSnapmakerU1Printer(Printer printer)
+    {
+        if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
+        {
+            return false;
+        }
+
+        return printer.Manufacturer?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerManufacturerName, StringComparison.OrdinalIgnoreCase) == true &&
+               printer.Model?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerU1ModelName, StringComparison.OrdinalIgnoreCase) == true;
+    }
 
     /// <inheritdoc/>
     public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)

@@ -72,6 +72,8 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     public void RegisterAdditionalServices(IServiceCollection services)
     {
         services.AddScoped<IPrinterCameraProbe, MoonrakerPrinterCameraProbe>();
+        services.AddSingleton<IMoonrakerJsonRpcClient, MoonrakerJsonRpcClient>();
+        services.AddSingleton<ISnapmakerU1CameraMonitorManager, SnapmakerU1CameraMonitorManager>();
 
         // Register the Moonraker client interface with its implementation
         services.AddScoped<IMoonrakerClient>(provider =>
@@ -85,7 +87,8 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             ILogger<MoonrakerClient> logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<MoonrakerClient>();
-            return new MoonrakerClient(httpClient, logger, timeouts);
+            ISnapmakerU1CameraMonitorManager monitorManager = provider.GetRequiredService<ISnapmakerU1CameraMonitorManager>();
+            return new MoonrakerClient(httpClient, logger, timeouts, monitorManager);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated

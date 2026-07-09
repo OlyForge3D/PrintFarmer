@@ -2874,7 +2874,7 @@ public class PrintersController(
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
-        return streamUrl == null && snapshotUrl == null ? NotFound() : new CameraUrlResult(streamUrl, snapshotUrl);
+        return streamUrl == null && snapshotUrl == null ? NotFound() : CameraUrlResult.FromUrls(streamUrl, snapshotUrl);
     }
 
     [HttpPost("{id:guid}/files/upload")]

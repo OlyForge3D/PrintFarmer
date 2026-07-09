@@ -91,6 +91,19 @@ public interface IMoonrakerClient : IBackendClient
     Task<byte[]?> GetCameraSnapshotAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
+    /// Captures a stock Snapmaker U1 camera frame. U1 stock firmware exposes a snapshot file only
+    /// after camera.start_monitor is sent over Moonraker websocket JSON-RPC; it is not a plain MJPEG stream.
+    /// LAN cleartext HTTP/ws is supported because stock U1 and SnapCon use that transport. If an API key is
+    /// configured it is sent as X-Api-Key for HTTP and token= on the websocket for firmware variants that require it.
+    /// </summary>
+    Task<byte[]?> GetSnapmakerU1CameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets stock Snapmaker U1 snapshot-only URLs. StreamUrl is null because stock U1 monitor.jpg is not MJPEG/WebRTC/RTSP.
+    /// </summary>
+    Task<(string? StreamUrl, string? SnapshotUrl)> GetSnapmakerU1CameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Queries the Moonraker API for actual camera URLs configured on the printer.
     /// This queries /server/webcams/list API and returns the first enabled camera's URLs.
     /// </summary>
