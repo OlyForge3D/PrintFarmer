@@ -1391,7 +1391,10 @@ public sealed class MoonrakerSubscriptionService(
         JsonElement statusObj,
         CancellationToken ct)
     {
-        if (!SnapmakerU1PrintTaskConfigParser.TryParse(statusObj, out SnapmakerU1PrintTaskConfigStatus u1Status))
+        if (!SnapmakerU1PrintTaskConfigParser.TryParseDelta(
+            statusObj,
+            allowToolheadOnly: state.SnapmakerU1Detected,
+            out SnapmakerU1PrintTaskConfigDelta delta))
         {
             return;
         }
@@ -1401,7 +1404,7 @@ public sealed class MoonrakerSubscriptionService(
             return;
         }
 
-        if (!state.SnapmakerU1Detected)
+        if (!state.SnapmakerU1Detected && delta.HasLaneFields)
         {
             state.SnapmakerU1Detected = true;
             _logger.LogInformation(
@@ -1409,6 +1412,22 @@ public sealed class MoonrakerSubscriptionService(
                 printerId);
         }
 
+        if (!state.SnapmakerU1Detected)
+        {
+            return;
+        }
+
+        bool lanesChanged = state.MergeSnapmakerU1Delta(delta);
+        UpdateSnapmakerU1LiveStatus(state);
+
+        if (lanesChanged && delta.HasLaneFields)
+        {
+            await PersistSnapmakerU1ToolheadStateAsync(printerId, state.SnapmakerU1Lanes, ct);
+        }
+    }
+
+    private static void UpdateSnapmakerU1LiveStatus(PrinterState state)
+    {
         state.MmuDetected = true;
         state.MmuEnabled = true;
         state.MmuIsHomed = true;
@@ -1418,16 +1437,15 @@ public sealed class MoonrakerSubscriptionService(
         state.MmuEndlessSpool = false;
         state.MmuClogDetection = false;
         state.MmuAction = "Idle";
-        state.MmuActiveTool = u1Status.ActiveTool;
-        state.MmuActiveGate = u1Status.ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount
-            ? u1Status.ActiveTool
+        state.MmuActiveTool = state.SnapmakerU1ActiveTool;
+        state.MmuActiveGate = state.SnapmakerU1ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount
+            ? state.SnapmakerU1ActiveTool
             : -1;
 
         EnsureSlotArrays(state, SnapmakerU1PrintTaskConfigParser.LaneCount);
-
-        for (int i = 0; i < u1Status.Lanes.Length; i++)
+        for (int i = 0; i < state.SnapmakerU1Lanes.Length; i++)
         {
-            SnapmakerU1LaneStatus lane = u1Status.Lanes[i];
+            SnapmakerU1LaneStatus lane = state.SnapmakerU1Lanes[i];
             state.MmuGateStatus![i] = lane.Loaded ? 1 : 0;
             state.MmuGateMaterial![i] = lane.Material ?? string.Empty;
             state.MmuGateColor![i] = lane.Color ?? string.Empty;
@@ -1435,15 +1453,13 @@ public sealed class MoonrakerSubscriptionService(
             state.MmuGateSpoolId![i] = -1;
         }
 
-        SnapmakerU1LaneStatus? activeLane = u1Status.ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount
-            ? u1Status.Lanes[u1Status.ActiveTool]
+        SnapmakerU1LaneStatus? activeLane = state.SnapmakerU1ActiveTool is >= 0 and < SnapmakerU1PrintTaskConfigParser.LaneCount
+            ? state.SnapmakerU1Lanes[state.SnapmakerU1ActiveTool]
             : null;
         state.MmuFilamentState = activeLane is not null
             ? activeLane.Loaded ? "Loaded" : "Unloaded"
-            : u1Status.Lanes.Any(l => l.Loaded) ? "Loaded" : "Unloaded";
+            : state.SnapmakerU1Lanes.Any(l => l.Loaded) ? "Loaded" : "Unloaded";
         state.MmuDirty = true;
-
-        await PersistSnapmakerU1ToolheadStateAsync(printerId, u1Status.Lanes, ct);
     }
 
     private async Task PersistSnapmakerU1ToolheadStateAsync(

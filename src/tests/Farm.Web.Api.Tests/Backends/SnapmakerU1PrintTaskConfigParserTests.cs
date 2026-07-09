@@ -9,9 +9,10 @@ namespace Farm.Web.Api.Tests.Backends;
 public class SnapmakerU1PrintTaskConfigParserTests
 {
     [Fact]
-    public void TryParse_PopulatedLanes_ReturnsPerToolheadMaterialColorAndActiveTool()
+    public void TryParseDelta_PopulatedLanes_ReturnsPerToolheadMaterialColorAndActiveTool()
     {
-        using JsonDocument doc = JsonDocument.Parse(
+        PrinterState state = Apply(
+            new PrinterState(),
             """
             {
               "toolhead": { "extruder": "extruder2" },
@@ -23,14 +24,12 @@ public class SnapmakerU1PrintTaskConfigParserTests
                 "filament_official": [true, false, true, false]
               }
             }
-            """);
+            """,
+            allowToolheadOnly: false);
 
-        bool parsed = SnapmakerU1PrintTaskConfigParser.TryParse(doc.RootElement, out SnapmakerU1PrintTaskConfigStatus status);
-
-        parsed.Should().BeTrue();
-        status.ActiveTool.Should().Be(2);
-        status.Lanes.Should().HaveCount(4);
-        status.Lanes[0].Should().BeEquivalentTo(new
+        state.SnapmakerU1ActiveTool.Should().Be(2);
+        state.SnapmakerU1Lanes.Should().HaveCount(4);
+        state.SnapmakerU1Lanes[0].Should().BeEquivalentTo(new
         {
             Index = 0,
             Loaded = true,
@@ -41,17 +40,18 @@ public class SnapmakerU1PrintTaskConfigParserTests
             IsActive = false,
             FilamentName = "PLA Matte"
         });
-        status.Lanes[1].Material.Should().Be("PETG");
-        status.Lanes[1].SubType.Should().BeNull();
-        status.Lanes[1].Color.Should().Be("#00FF00");
-        status.Lanes[2].IsActive.Should().BeTrue();
-        status.Lanes[2].FilamentName.Should().Be("ASA CF");
+        state.SnapmakerU1Lanes[1].Material.Should().Be("PETG");
+        state.SnapmakerU1Lanes[1].SubType.Should().BeNull();
+        state.SnapmakerU1Lanes[1].Color.Should().Be("#00FF00");
+        state.SnapmakerU1Lanes[2].IsActive.Should().BeTrue();
+        state.SnapmakerU1Lanes[2].FilamentName.Should().Be("ASA CF");
     }
 
     [Fact]
-    public void TryParse_EmptyLane_ReturnsEmptyMaterialAndColor()
+    public void TryParseDelta_EmptyLane_ClearsMaterialAndColor()
     {
-        using JsonDocument doc = JsonDocument.Parse(
+        PrinterState state = Apply(
+            new PrinterState(),
             """
             {
               "toolhead": { "extruder": "extruder" },
@@ -63,33 +63,116 @@ public class SnapmakerU1PrintTaskConfigParserTests
                 "filament_official": [false, true, false, true]
               }
             }
-            """);
+            """,
+            allowToolheadOnly: false);
 
-        bool parsed = SnapmakerU1PrintTaskConfigParser.TryParse(doc.RootElement, out SnapmakerU1PrintTaskConfigStatus status);
+        state.SnapmakerU1ActiveTool.Should().Be(0);
+        state.SnapmakerU1Lanes[1].Loaded.Should().BeFalse();
+        state.SnapmakerU1Lanes[1].Material.Should().BeNull();
+        state.SnapmakerU1Lanes[1].SubType.Should().BeNull();
+        state.SnapmakerU1Lanes[1].Color.Should().BeNull();
+        state.SnapmakerU1Lanes[1].Official.Should().BeFalse();
+    }
 
-        parsed.Should().BeTrue();
-        status.ActiveTool.Should().Be(0);
-        status.Lanes[1].Loaded.Should().BeFalse();
-        status.Lanes[1].Material.Should().BeNull();
-        status.Lanes[1].SubType.Should().BeNull();
-        status.Lanes[1].Color.Should().BeNull();
-        status.Lanes[1].Official.Should().BeFalse();
+    [Fact]
+    public void TryParseDelta_PartialDeltas_MergeWithoutWipingAbsentFields()
+    {
+        PrinterState state = Apply(
+            new PrinterState(),
+            """
+            {
+              "toolhead": { "extruder": "extruder" },
+              "print_task_config": {
+                "filament_exist": [true, true, false, false],
+                "filament_color_rgba": ["#ff0000ff", "#00ff00ff", "", ""],
+                "filament_type": ["PLA", "PETG", "", ""],
+                "filament_sub_type": ["Matte", "NONE", "", ""],
+                "filament_official": [true, false, false, false]
+              }
+            }
+            """,
+            allowToolheadOnly: false);
+
+        Apply(
+            state,
+            """{ "print_task_config": { "filament_exist": [true, true, false, false] } }""",
+            allowToolheadOnly: true,
+            expectedStateChange: false);
+
+        state.SnapmakerU1Lanes[0].Material.Should().Be("PLA");
+        state.SnapmakerU1Lanes[0].SubType.Should().Be("Matte");
+        state.SnapmakerU1Lanes[0].Color.Should().Be("#FF0000");
+
+        Apply(
+            state,
+            """{ "print_task_config": { "filament_color_rgba": ["#112233ff", "#00ff00ff", "", ""] } }""",
+            allowToolheadOnly: true);
+
+        state.SnapmakerU1Lanes[0].Loaded.Should().BeTrue();
+        state.SnapmakerU1Lanes[0].Material.Should().Be("PLA");
+        state.SnapmakerU1Lanes[0].Color.Should().Be("#112233");
+
+        Apply(state, """{ "toolhead": { "extruder": "extruder2" } }""", allowToolheadOnly: true);
+
+        state.SnapmakerU1ActiveTool.Should().Be(2);
+        state.SnapmakerU1Lanes[2].IsActive.Should().BeTrue();
+
+        Apply(
+            state,
+            """{ "print_task_config": { "filament_exist": [false, true, false, false] } }""",
+            allowToolheadOnly: true);
+
+        state.SnapmakerU1Lanes[0].Loaded.Should().BeFalse();
+        state.SnapmakerU1Lanes[0].Material.Should().BeNull();
+        state.SnapmakerU1Lanes[0].SubType.Should().BeNull();
+        state.SnapmakerU1Lanes[0].Color.Should().BeNull();
+
+        using JsonDocument unrelated = JsonDocument.Parse("""{ "display_status": { "progress": 0.5 } }""");
+        bool parsed = SnapmakerU1PrintTaskConfigParser.TryParseDelta(
+            unrelated.RootElement,
+            allowToolheadOnly: true,
+            out SnapmakerU1PrintTaskConfigDelta _);
+
+        parsed.Should().BeFalse();
+        state.SnapmakerU1Lanes[1].Material.Should().Be("PETG");
+        state.SnapmakerU1Lanes[1].Color.Should().Be("#00FF00");
     }
 
     [Theory]
     [InlineData("{}")]
     [InlineData("""{ "print_task_config": null }""")]
-    [InlineData("""{ "print_task_config": { "filament_type": ["PLA"] } }""")]
     [InlineData("""{ "print_task_config": { "filament_exist": "bad" } }""")]
-    public void TryParse_MalformedOrMissingConfig_ReturnsFalseWithoutFalseState(string json)
+    [InlineData("""{ "print_task_config": { "unknown": ["PLA"] } }""")]
+    public void TryParseDelta_MalformedOrMissingConfig_ReturnsFalseWithoutFalseState(string json)
     {
         using JsonDocument doc = JsonDocument.Parse(json);
 
-        bool parsed = SnapmakerU1PrintTaskConfigParser.TryParse(doc.RootElement, out SnapmakerU1PrintTaskConfigStatus status);
+        bool parsed = SnapmakerU1PrintTaskConfigParser.TryParseDelta(
+            doc.RootElement,
+            allowToolheadOnly: false,
+            out SnapmakerU1PrintTaskConfigDelta delta);
 
         parsed.Should().BeFalse();
-        status.Lanes.Should().BeEmpty();
-        status.ActiveTool.Should().Be(-2);
+        delta.Lanes.Should().BeEmpty();
+        delta.ActiveTool.Should().BeNull();
+        delta.HasLaneFields.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryParseDelta_TypeOnlyDelta_AppliesToMergedState()
+    {
+        PrinterState state = Apply(
+            new PrinterState(),
+            """{ "print_task_config": { "filament_exist": [true, false, false, false] } }""",
+            allowToolheadOnly: false);
+
+        Apply(
+            state,
+            """{ "print_task_config": { "filament_type": ["ABS"] } }""",
+            allowToolheadOnly: true);
+
+        state.SnapmakerU1Lanes[0].Loaded.Should().BeTrue();
+        state.SnapmakerU1Lanes[0].Material.Should().Be("ABS");
     }
 
     [Fact]
@@ -162,5 +245,22 @@ public class SnapmakerU1PrintTaskConfigParserTests
 
         status.MmuType.Should().Be(MmuProtocol.SnapmakerU1);
         status.Gates.Select(g => g.Name).Should().Equal("T1", "T2", "T3", "T4");
+    }
+
+    private static PrinterState Apply(
+        PrinterState state,
+        string json,
+        bool allowToolheadOnly,
+        bool expectedStateChange = true)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        bool parsed = SnapmakerU1PrintTaskConfigParser.TryParseDelta(
+            doc.RootElement,
+            allowToolheadOnly,
+            out SnapmakerU1PrintTaskConfigDelta delta);
+
+        parsed.Should().BeTrue();
+        state.MergeSnapmakerU1Delta(delta).Should().Be(expectedStateChange);
+        return state;
     }
 }

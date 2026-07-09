@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { shouldHideToolheadSpoolPicker } from '../shouldHideToolheadSpoolPicker';
 import { MmuGateStatus, type MmuGate, type ToolheadDto } from '@/types/api';
+import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 
 function makeGate(index: number): MmuGate {
   return { index, status: MmuGateStatus.Empty, spoolId: 0 };
@@ -17,6 +18,12 @@ describe('shouldHideToolheadSpoolPicker', () => {
 
   it('returns true when live MMU gates are present (Klipper Happy-Hare path)', () => {
     expect(shouldHideToolheadSpoolPicker([makeGate(0), makeGate(1)], undefined)).toBe(true);
+  });
+
+  it('returns false for live Snapmaker U1 lanes because they are physical toolheads', () => {
+    const toolheads = [makeToolhead(0, 'Physical'), makeToolhead(1, 'Physical')];
+
+    expect(shouldHideToolheadSpoolPicker([makeGate(0), makeGate(1)], toolheads, MmuProtocol.SnapmakerU1)).toBe(false);
   });
 
   it('returns false when live MMU gates array is empty', () => {

@@ -239,6 +239,51 @@ public class DispatchScorerTests : IDisposable
         score.ScoreBreakdown["ColorMatch"].Score.Should().Be(100);
     }
 
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScorePrintersForJobAsync_ToolheadLoadedMaterialAndColor_MatchesNonU1MultiToolheadPrinter()
+    {
+        Printer printer = CreateTestPrinter(name: "Generic IDEX", currentMaterial: null);
+        printer.MultiMaterial = true;
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Dispatch IDEX Mfg" };
+        var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturer.Id, Name = "Generic IDEX" };
+        printer.ManufacturerId = manufacturer.Id;
+        printer.ModelId = model.Id;
+
+        Toolhead t0 = CreateToolhead(printer.Id, isPrimary: true);
+        t0.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t0.Name = "Left Toolhead";
+        t0.CurrentMaterial = "PLA";
+        t0.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(t0);
+
+        Toolhead t1 = CreateToolhead(printer.Id, isPrimary: false);
+        t1.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t1.Index = 1;
+        t1.Name = "Right Toolhead";
+        t1.CurrentMaterial = "ASA";
+        t1.CurrentFilamentColor = "#0000FF";
+        printer.Toolheads.Add(t1);
+
+        PrintJob job = CreateTestJob(requiredMaterial: "ASA");
+        job.FilamentColor = "#0000FF";
+
+        _context.Manufacturers.Add(manufacturer);
+        _context.PrinterModels.Add(model);
+        _context.Printers.Add(printer);
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+
+        DispatchScore score = scores.Should().ContainSingle().Subject;
+        score.Eliminated.Should().BeFalse();
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(100);
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(100);
+    }
+
     // =========================================================================
     // MATERIAL MATCH FACTOR TESTS
     // =========================================================================

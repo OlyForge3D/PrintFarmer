@@ -613,7 +613,7 @@ export interface MmuStatus {
   clogDetection: boolean;
   /** Per-gate slot information */
   gates: MmuGate[];
-  /** MMU protocol type: "HappyHare", "Qidibox", or "AFC" */
+  /** MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1" */
   mmuType?: string;
 }
 
