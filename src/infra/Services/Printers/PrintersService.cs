@@ -120,6 +120,71 @@ public class PrintersService(
     }
 
     /// <summary>
+    /// Resolves Snapmaker U1-style Moonraker port and catalog hints during manual onboarding.
+    /// </summary>
+    private async Task ApplyMoonrakerOnboardingHintsAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
+    {
+        if (dto.Backend != PrinterBackend.Moonraker ||
+            !Uri.TryCreate(dto.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        {
+            return;
+        }
+
+        using HttpClient client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(5);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            serverUri,
+            dto.BackendPort,
+            ct);
+
+        if (resolution is null)
+        {
+            return;
+        }
+
+        dto.BackendPort = resolution.BackendPort;
+        if (resolution.BackendPort == MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort)
+        {
+            dto.FrontendPort = MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort;
+        }
+
+        if (resolution.IsSnapmakerU1)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Manufacturer))
+            {
+                dto.Manufacturer = resolution.Manufacturer;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Model))
+            {
+                dto.Model = resolution.Model;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+            {
+                dto.NewManufacturerName = resolution.Manufacturer;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.NewModelName))
+            {
+                dto.NewModelName = resolution.Model;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Name) && !string.IsNullOrWhiteSpace(resolution.DeviceName))
+            {
+                dto.Name = resolution.DeviceName;
+            }
+        }
+    }
+
+    private static string? FirstNonWhiteSpace(params string?[] values)
+    {
+        return values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    /// <summary>
     /// Retrieves print job history for a printer from its backend API.
     /// </summary>
     /// <param name="printerId">Unique printer identifier (GUID)</param>
@@ -1414,14 +1479,17 @@ public class PrintersService(
             throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
         }
 
+        await ApplyMoonrakerOnboardingHintsAsync(dto, ct);
+
         // resolve manufacturer/model - use Unknown if not found
         // NOTE: We use CatalogService for all catalog lookups, which provides caching
         // to avoid repeated database queries during bulk operations like CSV import.
         // We don't create new manufacturers/models - if not found, we default to "Unknown" instead.
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
-        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        string? manufacturerName = FirstNonWhiteSpace(dto.NewManufacturerName, dto.Manufacturer);
+        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(manufacturerName))
         {
-            string name = dto.NewManufacturerName!.Trim();
+            string name = manufacturerName.Trim();
 
             // Try to find existing manufacturer from catalog service (with caching), but don't create - use Unknown if not found
             ManufacturerDto? existingMfg = await _catalogService.FindManufacturerByNameAsync(name, ct);
@@ -1439,9 +1507,10 @@ public class PrintersService(
         }
 
         Guid modelId = dto.ModelId ?? Guid.Empty;
-        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
+        string? modelName = FirstNonWhiteSpace(dto.NewModelName, dto.Model);
+        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(modelName) && manufacturerId != Guid.Empty)
         {
-            string mname = dto.NewModelName!.Trim();
+            string mname = modelName.Trim();
 
             // Try to find existing model from catalog service (with caching), but don't create - use Unknown if not found
             PrinterModelDto? existingModel = await _catalogService.FindModelByNameAsync(mname, manufacturerId, ct);
