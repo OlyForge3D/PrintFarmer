@@ -633,7 +633,7 @@ struct PrinterDetailView: View {
                     
                     if !viewModel.showLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
                         Button {
-                            let task = Task { await viewModel.refreshSnapshot() }
+                            let task = Task { _ = await viewModel.refreshSnapshot() }
                             activeTasks.append(task)
                         } label: {
                             Image(systemName: "arrow.clockwise")
