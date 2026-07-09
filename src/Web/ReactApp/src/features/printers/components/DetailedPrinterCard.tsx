@@ -564,6 +564,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             printerName={printer.name}
             cameraStreamUrl={cameraStreamUrl}
             cameraSnapshotUrl={cameraSnapshotUrl}
+            cameraAccessMode={printer.cameraAccessMode}
+            cameraStreamFormat={printer.cameraStreamFormat}
+            cameraSnapshotStrategy={printer.cameraSnapshotStrategy}
             isPrinting={isPrinting}
             className="pf-detailed-printer-camera-preview mt-3 w-full"
           />

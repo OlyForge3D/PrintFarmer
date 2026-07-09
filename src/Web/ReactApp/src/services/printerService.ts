@@ -10,6 +10,7 @@ import type {
   MoveRequest,
   Printer,
   PrinterBackendCapabilitiesDto,
+  PrinterCameraUrlResult,
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
@@ -121,6 +122,14 @@ export const printerService = {
 
   async getPrinterCameraUrls(): Promise<PrinterCameraUrls[]> {
     return apiClient.getPrinterCameraUrls();
+  },
+
+  async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
+    return apiClient.getPrinterCameraUrl(id);
+  },
+
+  async getPrinterSnapshot(id: string): Promise<Blob> {
+    return apiClient.getPrinterSnapshot(id);
   },
 
   async refreshCameraUrls(id: string): Promise<Printer> {

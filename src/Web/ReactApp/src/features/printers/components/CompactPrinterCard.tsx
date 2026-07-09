@@ -307,6 +307,9 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               printerName={printer.name}
               cameraStreamUrl={cameraStreamUrl}
               cameraSnapshotUrl={cameraSnapshotUrl}
+              cameraAccessMode={printer.cameraAccessMode}
+              cameraStreamFormat={printer.cameraStreamFormat}
+              cameraSnapshotStrategy={printer.cameraSnapshotStrategy}
               isPrinting={isPrinting}
               className="mt-2"
             />

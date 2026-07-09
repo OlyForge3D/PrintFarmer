@@ -16,7 +16,15 @@ import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
+import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
 import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
+import {
+  canUseMjpegStream,
+  isUnsupportedCameraPreview,
+  shouldPollPrinterSnapshot,
+} from '@/features/cameras/utils/cameraPreview';
+
+const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -217,8 +225,21 @@ const cameraTypeLabels: Record<CameraType, string> = {
 function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardProps) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
-  const hasSnapshot = !!camera.snapshotUrl;
-  const hasStream = !!camera.streamUrl;
+  const previewContract = {
+    accessMode: camera.accessMode,
+    streamFormat: camera.streamFormat,
+    snapshotStrategy: camera.snapshotStrategy,
+  };
+  const pollSnapshotPreview = !!camera.printerId && shouldPollPrinterSnapshot(previewContract);
+  const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
+  const hasStream = !!camera.streamUrl && canUseMjpegStream(previewContract);
+  const { snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
+    camera.printerId,
+    pollSnapshotPreview,
+    CAMERA_SNAPSHOT_REFRESH_MS
+  );
+  const directSnapshotUrl = pollSnapshotPreview ? null : camera.snapshotUrl;
+  const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
     setCameraMode,
@@ -233,21 +254,27 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
   });
 
   // Determine which URL to show
+  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const activeUrl = cameraMode === 'stream' && hasStream
     ? camera.streamUrl
-    : cameraMode === 'snapshot' && hasSnapshot
-    ? camera.snapshotUrl
+    : cameraMode === 'snapshot' && snapshotPreviewUrl
+    ? snapshotPreviewUrl
     : hasStream
     ? camera.streamUrl
-    : camera.snapshotUrl;
+    : snapshotPreviewUrl;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
+  const externalUrl = cameraMode === 'stream' && hasStream
+    ? camera.streamUrl
+    : pollSnapshotPreview
+    ? null
+    : activeUrl;
   const cameraAttention = getCameraAttentionContent({
     healthStatus: camera.healthStatus,
     healthMessage: camera.healthMessage,
     hasStream,
     hasSnapshot,
-    imageError,
+    imageError: imageError || snapshotFailed,
     cameraMode,
   });
   const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
@@ -256,7 +283,17 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
       {/* Camera feed */}
       <div className="relative w-full aspect-video bg-pf-bg-2">
-        {cameraMode === 'stream' && hasStream && activeUrl ? (
+        {unsupportedPreview ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+            <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
+            <span className="text-center text-sm font-medium text-pf-text-secondary">
+              No live preview available
+            </span>
+            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+              This camera does not provide an embeddable MJPEG live stream.
+            </span>
+          </div>
+        ) : cameraMode === 'stream' && hasStream && activeUrl ? (
           <iframe
             src={activeUrl}
             title={`${camera.name} live camera feed`}
@@ -396,9 +433,9 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
                 />
               </div>
             )}
-            {activeUrl && (
+            {externalUrl && (
               <a
-                href={cameraMode === 'stream' && hasStream ? camera.streamUrl : activeUrl}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"

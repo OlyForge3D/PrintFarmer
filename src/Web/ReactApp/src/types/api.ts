@@ -166,11 +166,36 @@ export interface PrinterMetadata {
 /**
  * Camera URL information for a printer.
  */
+export enum CameraAccessMode {
+  Unknown = 'Unknown',
+  StreamAndSnapshot = 'StreamAndSnapshot',
+  SnapshotOnly = 'SnapshotOnly',
+  StreamOnly = 'StreamOnly',
+  UnsupportedStream = 'UnsupportedStream',
+}
+
+export enum CameraStreamFormat {
+  Unknown = 'Unknown',
+  Mjpeg = 'Mjpeg',
+  WebRtc = 'WebRtc',
+  Rtsp = 'Rtsp',
+  Unsupported = 'Unsupported',
+}
+
+export enum CameraSnapshotStrategy {
+  None = 'None',
+  DirectUrl = 'DirectUrl',
+  SnapmakerU1MonitorJpeg = 'SnapmakerU1MonitorJpeg',
+}
+
 export interface PrinterCameraInfo {
   /** Live camera stream URL (MJPEG, etc.) */
   cameraStreamUrl?: string;
   /** Single frame snapshot URL */
   cameraSnapshotUrl?: string;
+  cameraAccessMode?: CameraAccessMode;
+  cameraStreamFormat?: CameraStreamFormat;
+  cameraSnapshotStrategy?: CameraSnapshotStrategy;
 }
 
 /**
@@ -376,6 +401,17 @@ export interface PrinterCameraUrls {
   name: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
+  cameraAccessMode?: CameraAccessMode;
+  cameraStreamFormat?: CameraStreamFormat;
+  cameraSnapshotStrategy?: CameraSnapshotStrategy;
+}
+
+export interface PrinterCameraUrlResult {
+  streamUrl?: string | null;
+  snapshotUrl?: string | null;
+  accessMode?: CameraAccessMode;
+  streamFormat?: CameraStreamFormat;
+  snapshotStrategy?: CameraSnapshotStrategy;
 }
 
 export interface PrinterVersionInfo {
@@ -2541,6 +2577,9 @@ export interface CameraDto {
   description?: string;
   streamUrl?: string;
   snapshotUrl?: string;
+  accessMode?: CameraAccessMode;
+  streamFormat?: CameraStreamFormat;
+  snapshotStrategy?: CameraSnapshotStrategy;
   isEnabled: boolean;
   sortOrder: number;
   location?: string;
@@ -2603,6 +2642,9 @@ export interface DisplayCameraDto {
   description?: string;
   streamUrl?: string;
   snapshotUrl?: string;
+  accessMode?: CameraAccessMode;
+  streamFormat?: CameraStreamFormat;
+  snapshotStrategy?: CameraSnapshotStrategy;
   isEnabled: boolean;
   sortOrder: number;
   location?: string;
