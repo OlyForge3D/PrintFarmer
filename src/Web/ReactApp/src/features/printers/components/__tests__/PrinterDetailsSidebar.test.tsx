@@ -288,4 +288,34 @@ describe('PrinterDetailsSidebar', () => {
       isCurrent: false,
     });
   });
+
+  it('enables object skipping while a print is paused', async () => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: 'plate.gcode',
+      objects: [
+        { name: 'cube', isExcluded: false, isCurrent: true },
+      ],
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, backend: PrinterBackend.Moonraker, state: 'Paused' }}
+        backendCapabilities={capabilities({
+          backend: PrinterBackend.Moonraker,
+          supportsObjectExclusion: true,
+        })}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Skip object cube'));
+    fireEvent.click(screen.getByRole('button', { name: 'Skip object' }));
+
+    await waitFor(() => {
+      expect(mockExcludePrintJobObject).toHaveBeenCalledWith(printer.id, 'cube');
+    });
+  });
 });

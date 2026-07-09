@@ -107,7 +107,7 @@ export function canFilamentChange(args: { isOnline: boolean; isEnabled?: boolean
   return isEnabled && args.isOnline && args.support.supportsFilamentControl;
 }
 
-export function canExcludeObject(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; support: PrinterSupport }): boolean {
+export function canExcludeObject(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; isPaused?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.isPrinting && args.support.supportsObjectExclusion;
+  return isEnabled && args.isOnline && (args.isPrinting || !!args.isPaused) && args.support.supportsObjectExclusion;
 }

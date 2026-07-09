@@ -839,7 +839,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                 return null;
             }
 
-            if (!IsPrinting(status))
+            if (!IsActivePrint(status))
             {
                 return new PrintJobObjectListDto(Guid.Empty, null, Array.Empty<PrintJobObjectDto>());
             }
@@ -902,13 +902,19 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         return $"EXCLUDE_OBJECT NAME=\"{escapedName}\"";
     }
 
-    private static bool IsPrinting(JsonElement status)
+    private static bool IsActivePrint(JsonElement status)
     {
-        return status.TryGetProperty("print_stats", out JsonElement printStats) &&
+        if (status.TryGetProperty("print_stats", out JsonElement printStats) &&
             printStats.ValueKind == JsonValueKind.Object &&
             printStats.TryGetProperty("state", out JsonElement state) &&
-            state.ValueKind == JsonValueKind.String &&
-            string.Equals(state.GetString(), "printing", StringComparison.OrdinalIgnoreCase);
+            state.ValueKind == JsonValueKind.String)
+        {
+            string? printState = state.GetString();
+            return string.Equals(printState, "printing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(printState, "paused", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 
     private static string? TryGetJobName(JsonElement status)

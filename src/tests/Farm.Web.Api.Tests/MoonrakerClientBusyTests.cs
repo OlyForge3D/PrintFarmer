@@ -267,6 +267,40 @@ public class MoonrakerClientBusyTests
     }
 
     [Fact]
+    public async Task GetCurrentJobObjectsAsync_WhenPrintStatsStateIsPaused_ReturnsObjects()
+    {
+        (MoonrakerClient client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "result": {
+                    "status": {
+                      "print_stats": { "state": "paused", "filename": "plate.gcode" },
+                      "exclude_object": {
+                        "objects": [{ "name": "cube" }],
+                        "excluded_objects": [],
+                        "current_object": "cube"
+                      }
+                    }
+                  }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+
+        PrintJobObjectListDto? result = await client.GetCurrentJobObjectsAsync("http://moonraker:7125");
+
+        result.Should().NotBeNull();
+        result!.JobName.Should().Be("plate.gcode");
+        PrintJobObjectDto objectState = result.Objects.Single();
+        objectState.Name.Should().Be("cube");
+        objectState.IsExcluded.Should().BeFalse();
+        objectState.IsCurrent.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task GetCurrentJobObjectsAsync_WhenMetadataObjectHasSurroundingWhitespace_PreservesExactIdentity()
     {
         (MoonrakerClient client, _) = CreateClient(req =>

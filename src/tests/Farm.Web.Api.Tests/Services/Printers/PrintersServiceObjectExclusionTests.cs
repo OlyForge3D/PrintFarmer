@@ -91,6 +91,28 @@ public class PrintersServiceObjectExclusionTests
         objectExclusionClient.Verify(c => c.ExcludeObjectAsync(It.IsAny<string>(), objectName, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_WhenPausedJobHasObject_SendsCommand()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter();
+        Mock<ISupportsObjectExclusion> objectExclusionClient = CreateObjectExclusionClient(
+            new PrintJobObjectListDto(
+                printer.Id,
+                "paused-plate.gcode",
+                new[] { new PrintJobObjectDto("cube", IsExcluded: false, IsCurrent: true) }));
+        objectExclusionClient
+            .Setup(c => c.ExcludeObjectAsync(It.IsAny<string>(), "cube", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        PrintersService service = CreateService(db, printer, objectExclusionClient);
+
+        CommandResult result = await service.ExcludePrintJobObjectAsync(printer.Id, "cube", CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Message.Should().Be("Object 'cube' skipped");
+        objectExclusionClient.Verify(c => c.ExcludeObjectAsync(It.IsAny<string>(), "cube", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private static AppDbContext CreateDbContext()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()

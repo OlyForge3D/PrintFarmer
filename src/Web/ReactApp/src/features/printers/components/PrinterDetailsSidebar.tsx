@@ -310,9 +310,10 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
-  const isPrintingForObjectQuery = preRenderRawState.toLowerCase().includes('printing');
+  const isActivePrintForObjectQuery = preRenderRawState.toLowerCase().includes('printing') ||
+    preRenderRawState.toLowerCase().includes('paused');
   const printJobObjectsQuery = usePrintJobObjects(printerId, {
-    enabled: !!printerId && support.supportsObjectExclusion && isPrintingForObjectQuery,
+    enabled: !!printerId && support.supportsObjectExclusion && isActivePrintForObjectQuery,
   });
   const excludeObjectMutation = useMutation({
     mutationFn: (name: string) => apiClient.excludePrintJobObject(printerId!, name),
@@ -394,7 +395,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
-  const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, support });
+  const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
   const printJobObjects = printJobObjectsQuery.data?.objects ?? [];
 
   const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
@@ -899,7 +900,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           >
             {printJobObjectsQuery.isLoading ? (
               <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting ? (
+            ) : !isPrinting && !isPaused ? (
               <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
             ) : printJobObjects.length === 0 ? (
               <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
