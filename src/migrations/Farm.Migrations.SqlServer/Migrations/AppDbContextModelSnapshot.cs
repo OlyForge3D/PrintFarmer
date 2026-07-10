@@ -97,6 +97,41 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("ApiKeys");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.AttentionSnooze", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AttentionItemAnchorAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AttentionItemId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("SnoozedUntilUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SnoozedUntilUtc")
+                        .HasDatabaseName("IX_AttentionSnoozes_SnoozedUntilUtc");
+
+                    b.HasIndex("UserId", "AttentionItemId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_AttentionSnoozes_UserId_AttentionItemId");
+
+                    b.ToTable("AttentionSnoozes");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
                 {
                     b.Property<Guid>("Id")

@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
@@ -20,7 +21,8 @@ public class MaintenanceAlertEngine(
     IMaintenanceLogRepository logRepo,
     IHubContext<MaintenanceHub> hubContext,
     IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
-    ILogger<MaintenanceAlertEngine> logger) : IMaintenanceAlertService
+    ILogger<MaintenanceAlertEngine> logger,
+    IAttentionBroadcaster? attentionBroadcaster = null) : IMaintenanceAlertService
 {
     private readonly IPrinterStatisticsRepository _statsRepo = statsRepo ?? throw new ArgumentNullException(nameof(statsRepo));
     private readonly IPrinterMaintenanceScheduleRepository _deploymentRepo = deploymentRepo ?? throw new ArgumentNullException(nameof(deploymentRepo));
@@ -29,6 +31,9 @@ public class MaintenanceAlertEngine(
     private readonly IHubContext<MaintenanceHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
     private readonly IOptionsMonitor<MaintenanceAlertSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     private readonly ILogger<MaintenanceAlertEngine> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    // Attention feed invalidation (issue #707). Optional to preserve existing test constructors.
+    private readonly IAttentionBroadcaster? _attentionBroadcaster = attentionBroadcaster;
 
     public async Task<int> EvaluatePrinterMaintenanceAsync(
         Guid printerId,
@@ -306,6 +311,12 @@ public class MaintenanceAlertEngine(
         {
             _logger.LogWarning(ex, "Failed to broadcast maintenance alert {AlertId} via SignalR", alert.Id);
         }
+
+        // Invalidate the unified attention feed (issue #707).
+        if (_attentionBroadcaster is not null)
+        {
+            await _attentionBroadcaster.NotifyChangedAsync();
+        }
     }
 
     public async Task AcknowledgeAlertAsync(
@@ -425,6 +436,12 @@ public class MaintenanceAlertEngine(
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to broadcast alert status change for {AlertId} via SignalR", alert.Id);
+        }
+
+        // Invalidate the unified attention feed (issue #707).
+        if (_attentionBroadcaster is not null)
+        {
+            await _attentionBroadcaster.NotifyChangedAsync();
         }
     }
 

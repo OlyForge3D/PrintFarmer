@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Attention;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Services.FailureDetection;
@@ -39,14 +40,19 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
 
     private readonly AppDbContext _dbContext;
 
+    // Attention feed invalidation (issue #707). Optional to preserve existing test constructors.
+    private readonly IAttentionBroadcaster? _attentionBroadcaster;
+
     /// <summary>
     /// Creates the service.
     /// </summary>
     /// <param name="dbContext">The application database context.</param>
-    public FailureDetectionIncidentHistoryService(AppDbContext dbContext)
+    /// <param name="attentionBroadcaster">Optional broadcaster for attention-feed invalidation.</param>
+    public FailureDetectionIncidentHistoryService(AppDbContext dbContext, IAttentionBroadcaster? attentionBroadcaster = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         _dbContext = dbContext;
+        _attentionBroadcaster = attentionBroadcaster;
     }
 
     /// <summary>
@@ -87,6 +93,13 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
 
         _ = _dbContext.FailureDetectionIncidents.Add(incident);
         _ = await _dbContext.SaveChangesAsync(ct);
+
+        // Invalidate the unified attention feed (issue #707).
+        if (_attentionBroadcaster is not null)
+        {
+            await _attentionBroadcaster.NotifyChangedAsync(ct);
+        }
+
         return incident;
     }
 
