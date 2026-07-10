@@ -234,6 +234,8 @@
 		F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */; };
 		F7060001000000000000A032 /* SystemCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A031 /* SystemCapabilities.swift */; };
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
+		F7060003000000000000A002 /* UITestBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000A001 /* UITestBootstrap.swift */; };
+		F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000B001 /* UITestBootstrapTests.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
 		F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B011 /* SystemCapabilitiesTests.swift */; };
 		F7060002000000000000C012 /* PrintFarmerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C011 /* PrintFarmerUITests.swift */; };
@@ -489,6 +491,8 @@
 		F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A031 /* SystemCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilities.swift; sourceTree = "<group>"; };
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
+		F7060003000000000000A001 /* UITestBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrap.swift; sourceTree = "<group>"; };
+		F7060003000000000000B001 /* UITestBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrapTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B011 /* SystemCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesTests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C011 /* PrintFarmerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintFarmerUITests.swift; sourceTree = "<group>"; };
@@ -984,6 +988,7 @@
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParser.swift */,
 				B2C3D4E5F6A7B8C9D0E1F2A3 /* QRCodeParser.swift */,
 				AA1BB2CC3DD4EE5FF6A7B8C9 /* LocalNetworkAuthorization.swift */,
+				F7060003000000000000A001 /* UITestBootstrap.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -1049,6 +1054,7 @@
 			children = (
 				F1B2C3D4E5F6A7B8C9D0E1F2 /* QRCodeParserTests.swift */,
 				F1D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParserTests.swift */,
+				F7060003000000000000B001 /* UITestBootstrapTests.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -1255,6 +1261,7 @@
 				F6E5D4C3B2A1F2E1D0C9B8A7 /* MockNFCService.swift in Sources */,
 				F1A1B2C3D4E5F6A7B8C9D0E1 /* QRCodeParserTests.swift in Sources */,
 				F1C3D4E5F6A7B8C9D0E1F2A3 /* NFCTagParserTests.swift in Sources */,
+				F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */,
 				F1E5F6A7B8C9D0E1F2A3B4C5 /* MockScannerService.swift in Sources */,
 				F1A7B8C9D0E1F2A3B4C5D6E7 /* SpoolPickerViewModelScanTests.swift in Sources */,
 				F1C9D0E1F2A3B4C5D6E7F8A9 /* MockSpoolService.swift in Sources */,
@@ -1280,6 +1287,7 @@
 				CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */,
 				CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */,
 				20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */,
+				F7060003000000000000A002 /* UITestBootstrap.swift in Sources */,
 				9E95C65470445D11D1AC62E4 /* AuthServiceProtocol.swift in Sources */,
 				F7A48E9C1C18B76092C052AE /* LocationServiceProtocol.swift in Sources */,
 				168C55CF29586F848BE4B869 /* DemoData.swift in Sources */,

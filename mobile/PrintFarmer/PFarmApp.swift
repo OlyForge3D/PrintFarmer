@@ -12,6 +12,18 @@ struct PFarmApp: App {
     @State private var themeManager = ThemeManager()
 
     init() {
+        if UITestBootstrap.isEnabled {
+            // Deterministic UI-test bootstrap (#706): seed an ephemeral
+            // registry with an active server, wire demo services, and
+            // pre-authenticate so RootView renders ContentView instead of
+            // AddFirstServer / onboarding / LoginView on a fresh simulator.
+            let bundle = UITestBootstrap.makeBundle()
+            _serverRegistry = State(initialValue: bundle.serverRegistry)
+            _services = State(initialValue: bundle.services)
+            _authViewModel = State(initialValue: bundle.authViewModel)
+            return
+        }
+
         let registry = ServerRegistry()
         _serverRegistry = State(initialValue: registry)
         if DemoMode.shared.isActive {
