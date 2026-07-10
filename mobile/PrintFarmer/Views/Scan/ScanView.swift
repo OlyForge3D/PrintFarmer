@@ -101,4 +101,3 @@ private enum ScanFlow: String, Identifiable {
 
     var id: String { rawValue }
 }
-
