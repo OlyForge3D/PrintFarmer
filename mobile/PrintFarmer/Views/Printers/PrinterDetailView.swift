@@ -289,7 +289,7 @@ struct PrinterDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     headerSection(printer)
                     temperatureSection(printer)
-                    PrinterControlsSection(printer: printer, printerService: services.printerService)
+                    advancedControlsLink(for: printer)
 
                     if let jobName = printer.fileName ?? printer.jobName,
                        let state = printer.state?.lowercased(),
@@ -337,7 +337,7 @@ struct PrinterDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 headerSection(printer)
                 temperatureSection(printer)
-                PrinterControlsSection(printer: printer, printerService: services.printerService)
+                advancedControlsLink(for: printer)
                 filamentSection(printer)
                 AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
 
@@ -586,6 +586,49 @@ struct PrinterDetailView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
+        }
+    }
+
+    // MARK: - Advanced Controls Entry
+    //
+    // F1 (#706) gates jog/preheat/z-offset/home controls behind this link.
+    // The section is hidden when the printer is offline (mirroring the
+    // previous inline behavior via `PrinterControlsSection.isHidden`).
+
+    @ViewBuilder
+    private func advancedControlsLink(for printer: Printer) -> some View {
+        if !PrinterControlsSection.isHidden(for: printer) {
+            NavigationLink(value: AppDestination.advancedPrinterControls(printerId: printer.id)) {
+                HStack(spacing: 12) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.headline)
+                        .foregroundStyle(Color.pfAccent)
+                        .frame(width: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Advanced")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.pfTextPrimary)
+                        Text("Jog, preheat, home, z-offset")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding()
+                .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.pfBorder, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("printer.detail.advanced")
         }
     }
 

@@ -229,6 +229,10 @@
 		A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000A1 /* JogSubgroup.swift */; };
 		A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000B1 /* JogSubgroupTests.swift */; };
 		A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */; };
+		F7060001000000000000A002 /* AttentionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A001 /* AttentionView.swift */; };
+		F7060001000000000000A012 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A011 /* ScanView.swift */; };
+		F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */; };
+		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -466,6 +470,10 @@
 		BC2000000000000000000009 /* BarcodeIntakeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeViewModelTests.swift; sourceTree = "<group>"; };
 		BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeIntakeServiceTests.swift; sourceTree = "<group>"; };
 		BC20000000000000000000FA /* SpoolServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolServiceTests.swift; sourceTree = "<group>"; };
+		F7060001000000000000A001 /* AttentionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionView.swift; sourceTree = "<group>"; };
+		F7060001000000000000A011 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsView.swift; sourceTree = "<group>"; };
+		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -585,6 +593,7 @@
 				155C4B82FFC562FFB12AEC00 /* Helpers */,
 				112CA2CF0EBF047E45F8F300 /* Mocks */,
 				E5820B747E34564BD76FED89 /* Models */,
+				F7060001000000000000B003 /* Navigation */,
 				D7EABE37D6B7E8A44802BE1A /* Services */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* Utilities */,
 				4D7DEC203F06522448F70C97 /* ViewModels */,
@@ -594,6 +603,14 @@
 				CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */,
 			);
 			path = PrintFarmerTests;
+			sourceTree = "<group>";
+		};
+		F7060001000000000000B003 /* Navigation */ = {
+			isa = PBXGroup;
+			children = (
+				F7060001000000000000B001 /* AppRouterTests.swift */,
+			);
+			path = Navigation;
 			sourceTree = "<group>";
 		};
 		A2D4EF0123456789ABCD0006 /* Views */ = {
@@ -769,6 +786,7 @@
 		9DEC4721376EF809C40ACF4D /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				F7060001000000000000A003 /* Attention */,
 				707B7EA94C57005EC3C622EC /* Auth */,
 				CF12EED79C368B077ED14222 /* Components */,
 				CC3B7B4670D1DE3829893360 /* Dashboard */,
@@ -781,11 +799,28 @@
 				549E659961D3A9E494F5ADEF /* Printers */,
 				A2D4EF0123456789ABCD0003 /* PrinterControls */,
 				A1C5DEF1234567890ABC0012 /* PrinterControls */,
+				F7060001000000000000A013 /* Scan */,
 				CBAC88193AFA3F2403893113 /* Settings */,
 				255B7030A4CC2759FC7FC79B /* ContentView.swift */,
 				C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		F7060001000000000000A003 /* Attention */ = {
+			isa = PBXGroup;
+			children = (
+				F7060001000000000000A001 /* AttentionView.swift */,
+			);
+			path = Attention;
+			sourceTree = "<group>";
+		};
+		F7060001000000000000A013 /* Scan */ = {
+			isa = PBXGroup;
+			children = (
+				F7060001000000000000A011 /* ScanView.swift */,
+			);
+			path = Scan;
 			sourceTree = "<group>";
 		};
 		B979E1FF0D2B4792DE5025A3 /* PrintFarmer */ = {
@@ -837,6 +872,7 @@
 				A2B6286100000000000000A1 /* JogSubgroup.swift */,
 				A3E7287000000000000000A1 /* PrinterControlsSection.swift */,
 				A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */,
+				F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */,
 			);
 			path = PrinterControls;
 			sourceTree = "<group>";
@@ -1159,6 +1195,7 @@
 				F1C9D0E1F2A3B4C5D6E7F8A9 /* MockSpoolService.swift in Sources */,
 				F2A1B2C3D4E5F6A7B8C9D0E1 /* AddSpoolViewModelTests.swift in Sources */,
 				F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */,
+				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1324,6 +1361,9 @@
 				D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */,
 				A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */,
 				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
+				F7060001000000000000A002 /* AttentionView.swift in Sources */,
+				F7060001000000000000A012 /* ScanView.swift in Sources */,
+				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

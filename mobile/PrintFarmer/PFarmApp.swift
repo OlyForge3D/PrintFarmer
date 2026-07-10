@@ -61,7 +61,9 @@ struct PFarmApp: App {
                        let printerId = UUID(uuidString: printerIdString) {
                         router.navigate(to: .printerReady(id: printerId))
                     } else {
-                        router.selectedTab = .printers
+                        // F1 (#706): notification-tap without a printer ID lands
+                        // on Attention where the notification itself lives.
+                        router.selectedTab = .attention
                     }
                 }
                 #endif

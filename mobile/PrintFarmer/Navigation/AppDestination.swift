@@ -12,4 +12,8 @@ enum AppDestination: Hashable {
     case jobHistory
     case jobTimeline
     case dispatchDashboard
+    /// Advanced printer controls (jog, preheat, z-offset, disable motors).
+    /// F1 (#706) moves these off the printer detail scroll and gates them
+    /// behind an "Advanced" navigation destination inside Printer Detail.
+    case advancedPrinterControls(printerId: UUID)
 }
