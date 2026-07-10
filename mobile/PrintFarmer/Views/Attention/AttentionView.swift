@@ -20,15 +20,25 @@ struct AttentionView: View {
     @State private var showingSettings = false
     @State private var showingDashboard = false
     @State private var showingMaintenance = false
+    @State private var showingNotifications = false
+    /// Locally observed feature-disabled flag. Populated from the shared
+    /// operator feature gate (#725) via `SystemCapabilitiesService` and
+    /// also flipped locally when a downstream request returns
+    /// ProblemDetails with `code == "featureDisabled"` so the fallback
+    /// stays sticky for the session.
+    @State private var attentionEnabled: Bool = true
 
     var body: some View {
         @Bindable var router = router
 
         NavigationStack(path: $router.notificationsPath) {
             Group {
-                if viewModel.isLoading && viewModel.notifications.isEmpty {
+                if !attentionEnabled {
+                    disabledFallback
+                } else if viewModel.isLoading && viewModel.notifications.isEmpty {
                     ProgressView("Loading attention…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityIdentifier("attention.loading")
                 } else if let error = viewModel.errorMessage, viewModel.notifications.isEmpty {
                     ContentUnavailableView {
                         Label("Error", systemImage: "exclamationmark.triangle")
@@ -39,13 +49,16 @@ struct AttentionView: View {
                             let task = Task { await viewModel.loadNotifications() }
                             activeTasks.append(task)
                         }
+                        .accessibilityIdentifier("attention.retry")
                     }
+                    .accessibilityIdentifier("attention.error")
                 } else if viewModel.notifications.isEmpty {
                     EmptyStateView(
                         icon: "bell.slash",
                         title: "Nothing needs attention",
                         message: "You're all caught up. Alerts, completions, and issues will surface here."
                     )
+                    .accessibilityIdentifier("attention.empty")
                 } else {
                     attentionList
                 }
@@ -53,19 +66,31 @@ struct AttentionView: View {
             .navigationTitle("Attention")
             .toolbar { toolbarContent }
             .refreshable {
-                await viewModel.loadNotifications()
+                if attentionEnabled {
+                    await viewModel.loadNotifications()
+                }
+                await services.capabilitiesService.refresh()
+                attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
             }
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
             }
         }
         .task {
+            // #725: fetch shared operator feature gates before loading any
+            // downstream feature-owned endpoints so we can render the safe
+            // fallback without a flash of the enabled UI.
+            await services.capabilitiesService.refresh()
+            attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
+
             viewModel.isViewActive = true
             viewModel.configure(notificationService: services.notificationService)
-            await viewModel.loadNotifications()
+            if attentionEnabled {
+                await viewModel.loadNotifications()
+            }
         }
         .onChange(of: viewModel.unreadCount) { _, newValue in
-            router.notificationBadgeCount = newValue
+            router.notificationBadgeCount = attentionEnabled ? newValue : 0
         }
         .onDisappear {
             viewModel.isViewActive = false
@@ -80,6 +105,108 @@ struct AttentionView: View {
         .sheet(isPresented: $showingMaintenance) {
             MaintenanceView()
         }
+        .sheet(isPresented: $showingNotifications) {
+            NotificationsView()
+        }
+    }
+
+    // MARK: - Feature-disabled fallback (#725)
+
+    /// Safe fallback shown when `attentionEnabled` resolves to `false`
+    /// or when `/api/attention` returns ProblemDetails with
+    /// `code == "featureDisabled"`. The three legacy source screens are
+    /// preserved as non-tab destinations so operators can still reach
+    /// notifications, maintenance, and the dashboard through the beta.
+    private var disabledFallback: some View {
+        VStack(spacing: 24) {
+            VStack(spacing: 12) {
+                Image(systemName: "bell.slash.circle")
+                    .font(.system(size: 44, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                Text("Operator feed disabled")
+                    .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
+
+                Text("The operator attention feed is turned off on this server. Use the legacy screens below while it's disabled.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 24)
+            .accessibilityElement(children: .combine)
+
+            VStack(spacing: 12) {
+                fallbackButton(
+                    title: "Notifications",
+                    systemImage: "bell",
+                    hint: "Opens the classic notifications list.",
+                    identifier: "attention.fallback.notifications"
+                ) {
+                    showingNotifications = true
+                }
+                fallbackButton(
+                    title: "Dashboard",
+                    systemImage: "square.grid.2x2",
+                    hint: "Opens the printer dashboard summary.",
+                    identifier: "attention.fallback.dashboard"
+                ) {
+                    showingDashboard = true
+                }
+                fallbackButton(
+                    title: "Maintenance",
+                    systemImage: "wrench.adjustable",
+                    hint: "Opens the maintenance tasks screen.",
+                    identifier: "attention.fallback.maintenance"
+                ) {
+                    showingMaintenance = true
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("attention.disabled.fallback")
+    }
+
+    @ViewBuilder
+    private func fallbackButton(
+        title: String,
+        systemImage: String,
+        hint: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.body.weight(.semibold))
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity)
+            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.pfBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(hint)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier(identifier)
     }
 
     // MARK: - Toolbar
@@ -108,6 +235,7 @@ struct AttentionView: View {
                         Label("Mark all read", systemImage: "envelope.open")
                     }
                     .disabled(viewModel.unreadCount == 0)
+                    .accessibilityIdentifier("attention.overflow.markAllRead")
                     Divider()
                 }
 
@@ -116,12 +244,14 @@ struct AttentionView: View {
                 } label: {
                     Label("Dashboard", systemImage: "square.grid.2x2")
                 }
+                .accessibilityIdentifier("attention.overflow.dashboard")
 
                 Button {
                     showingMaintenance = true
                 } label: {
                     Label("Maintenance", systemImage: "wrench.adjustable")
                 }
+                .accessibilityIdentifier("attention.overflow.maintenance")
 
                 Divider()
 
@@ -130,10 +260,14 @@ struct AttentionView: View {
                 } label: {
                     Label("Settings", systemImage: "gear")
                 }
+                .accessibilityIdentifier("attention.overflow.settings")
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .accessibilityLabel("More")
+                    .imageScale(.large)
+                    .frame(minWidth: 44, minHeight: 44)
             }
+            .accessibilityLabel("More")
+            .accessibilityHint("Opens dashboard, maintenance, and settings.")
             .accessibilityIdentifier("attention.overflow")
         }
     }
@@ -195,34 +329,62 @@ private struct AttentionRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // Unread indicator combines a shape AND a text label. Color
+            // alone is never used to convey unread state (WCAG 1.4.1).
             Circle()
                 .fill(notification.isRead ? Color.clear : Color.pfAccent)
                 .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
 
             Image(systemName: iconName)
                 .font(.title3)
                 .foregroundStyle(iconColor)
                 .frame(width: 32)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(notification.subject)
                     .font(.subheadline.weight(notification.isRead ? .regular : .semibold))
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 Text(notification.body)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(3)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Text(notification.createdAt.relativeFormatted)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .frame(minHeight: 44)
         .opacity(notification.isRead ? 0.7 : 1.0)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var accessibilityLabel: String {
+        let status = notification.isRead ? "Read" : "Unread"
+        return "\(status). \(kindLabel). \(notification.subject). \(notification.body). \(notification.createdAt.relativeFormatted)."
+    }
+
+    private var kindLabel: String {
+        switch notification.type {
+        case .jobCompleted: "Job completed"
+        case .jobFailed: "Job failed"
+        case .jobStarted: "Job started"
+        case .jobPaused: "Job paused"
+        case .jobResumed: "Job resumed"
+        case .queueAlert: "Queue alert"
+        case .systemAlert: "System alert"
+        case .bedClearRequired: "Bed clear required"
+        }
     }
 
     private var iconName: String {

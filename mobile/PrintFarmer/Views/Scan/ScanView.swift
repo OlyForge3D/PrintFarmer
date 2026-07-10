@@ -64,6 +64,7 @@ struct ScanView: View {
                     .foregroundStyle(Color.pfAccent)
                     .frame(width: 44, height: 44)
                     .background(Color.pfAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
@@ -74,6 +75,7 @@ struct ScanView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
@@ -81,11 +83,16 @@ struct ScanView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, 4)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(description)
+        .accessibilityAddTraits(.isButton)
     }
 }
 

@@ -604,6 +604,7 @@ struct PrinterDetailView: View {
                         .font(.headline)
                         .foregroundStyle(Color.pfAccent)
                         .frame(width: 32)
+                        .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Advanced")
@@ -613,14 +614,17 @@ struct PrinterDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    Spacer()
+                    Spacer(minLength: 8)
 
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                 }
                 .padding()
+                .frame(minHeight: 44)
                 .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
@@ -628,6 +632,9 @@ struct PrinterDetailView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Advanced controls")
+            .accessibilityHint("Opens jog, preheat, home, and z-offset controls.")
+            .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("printer.detail.advanced")
         }
     }

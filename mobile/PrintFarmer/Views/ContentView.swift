@@ -29,23 +29,28 @@ struct ContentView: View {
                 .tabItem { Label("Attention", systemImage: "bell.badge") }
                 .tag(AppTab.attention)
                 .badge(router.notificationBadgeCount)
+                .accessibilityIdentifier("tab.attention")
 
             PrinterListView()
                 .tabItem { Label("Farm", systemImage: "printer") }
                 .tag(AppTab.farm)
                 .badge(router.pendingReadyCount)
+                .accessibilityIdentifier("tab.farm")
 
             JobListView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
                 .tag(AppTab.tasks)
+                .accessibilityIdentifier("tab.tasks")
 
             ScanView()
                 .tabItem { Label("Scan", systemImage: "barcode.viewfinder") }
                 .tag(AppTab.scan)
+                .accessibilityIdentifier("tab.scan")
 
             SpoolInventoryView()
                 .tabItem { Label("Inventory", systemImage: "cylinder.fill") }
                 .tag(AppTab.inventory)
+                .accessibilityIdentifier("tab.inventory")
         }
     }
 
@@ -59,9 +64,9 @@ struct ContentView: View {
                 Section {
                     sidebarAttentionButton
                     sidebarFarmButton
-                    sidebarButton(tab: .tasks, title: "Tasks", icon: "checklist")
-                    sidebarButton(tab: .scan, title: "Scan", icon: "barcode.viewfinder")
-                    sidebarButton(tab: .inventory, title: "Inventory", icon: "cylinder.fill")
+                    sidebarButton(tab: .tasks, title: "Tasks", icon: "checklist", identifier: "sidebar.tasks")
+                    sidebarButton(tab: .scan, title: "Scan", icon: "barcode.viewfinder", identifier: "sidebar.scan")
+                    sidebarButton(tab: .inventory, title: "Inventory", icon: "cylinder.fill", identifier: "sidebar.inventory")
                 } header: {
                     Text("Operator")
                 }
@@ -74,14 +79,19 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
     }
 
-    private func sidebarButton(tab: AppTab, title: String, icon: String) -> some View {
+    private func sidebarButton(tab: AppTab, title: String, icon: String, identifier: String) -> some View {
         Button {
             router.selectedTab = tab
         } label: {
             Label(title, systemImage: icon)
+                .frame(minHeight: 44)
         }
         .listRowBackground(router.selectedTab == tab ? Color.accentColor.opacity(0.15) : nil)
         .foregroundStyle(router.selectedTab == tab ? Color.accentColor : .primary)
+        .accessibilityLabel(title)
+        .accessibilityHint("Opens the \(title) destination.")
+        .accessibilityAddTraits(router.selectedTab == tab ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(identifier)
     }
 
     private var sidebarFarmButton: some View {
@@ -98,11 +108,17 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                         .background(Color.pfWarning, in: Capsule())
                         .foregroundStyle(.white)
+                        .accessibilityHidden(true)
                 }
             }
+            .frame(minHeight: 44)
         }
         .listRowBackground(router.selectedTab == .farm ? Color.accentColor.opacity(0.15) : nil)
         .foregroundStyle(router.selectedTab == .farm ? Color.accentColor : .primary)
+        .accessibilityLabel(router.pendingReadyCount > 0 ? "Farm, \(router.pendingReadyCount) ready" : "Farm")
+        .accessibilityHint("Opens the Farm destination.")
+        .accessibilityAddTraits(router.selectedTab == .farm ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("sidebar.farm")
     }
 
     private var sidebarAttentionButton: some View {
@@ -119,11 +135,17 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                         .background(Color.red, in: Capsule())
                         .foregroundStyle(.white)
+                        .accessibilityHidden(true)
                 }
             }
+            .frame(minHeight: 44)
         }
         .listRowBackground(router.selectedTab == .attention ? Color.accentColor.opacity(0.15) : nil)
         .foregroundStyle(router.selectedTab == .attention ? Color.accentColor : .primary)
+        .accessibilityLabel(router.notificationBadgeCount > 0 ? "Attention, \(router.notificationBadgeCount) unread" : "Attention")
+        .accessibilityHint("Opens the Attention destination.")
+        .accessibilityAddTraits(router.selectedTab == .attention ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("sidebar.attention")
     }
 
     @ViewBuilder
