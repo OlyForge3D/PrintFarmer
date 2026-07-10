@@ -349,6 +349,12 @@ public static class ServiceCollectionExtensions
     {
         // Register SettingsService AFTER repositories - requires IAppSettingsRepository
         _ = services.AddScoped<ISettingsService, SettingsService>();
+
+        // Operator feature gate (#725) - scoped so it observes DB updates on the next request.
+        // Depends on ISettingsService and IConfiguration; registered here to keep the ordering
+        // invariant that scoped settings dependents come after ISettingsService.
+        _ = services.AddScoped<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate,
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeatureGate>();
     }
 
     #endregion
