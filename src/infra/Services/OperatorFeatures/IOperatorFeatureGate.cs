@@ -10,11 +10,20 @@ namespace Farm.Infrastructure.Services.OperatorFeatures;
 /// <list type="number">
 ///   <item>If the ASP.NET configuration key <c>OperatorFeatures:&lt;flagName&gt;</c> resolves to
 ///     an explicit <c>false</c>, the feature is disabled regardless of the database value.</item>
-///   <item>Otherwise, the runtime database value from <see cref="Farm.Infrastructure.Settings.OperatorFeatureSettings"/>
-///     is used.</item>
+///   <item>Otherwise, the persisted row from the AppSettings table under key
+///     <c>OperatorFeatures</c> is deserialized as
+///     <see cref="Farm.Infrastructure.Settings.OperatorFeatureSettings"/>. If no row exists
+///     yet, the property defaults on that class apply.</item>
 /// </list>
 ///
-/// Absent or explicitly <c>true</c> environment values do NOT force-enable a feature.
+/// Absent or explicitly <c>true</c> environment values do NOT force-enable a feature; the
+/// <c>OperatorFeatures</c> configuration section is intentionally never bound as the base
+/// value. When persisted-settings acquisition fails (DB down, malformed row), the gate
+/// logs and falls back to the documented defaults so the capability endpoint keeps working.
+///
+/// Implementations are registered <b>scoped</b>. Singleton consumers (e.g. hosted services)
+/// must inject <c>IServiceScopeFactory</c> and resolve the gate inside a per-tick scope
+/// rather than caching a gate instance.
 /// </summary>
 public interface IOperatorFeatureGate
 {

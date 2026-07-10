@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -10,14 +13,38 @@ namespace Farm.Infrastructure.Services.OperatorFeatures;
 /// <summary>
 /// Default <see cref="IOperatorFeatureGate"/> implementation.
 ///
-/// Reads the runtime <see cref="OperatorFeatureSettings"/> instance from the scoped
-/// <see cref="ISettingsService"/> and applies the environment hard-disable override from
-/// <see cref="IConfiguration"/>. Registered scoped so it observes DB updates on the next
-/// request without needing to invalidate a singleton cache.
+/// <para>
+/// Reads the persisted <see cref="OperatorFeatureSettings"/> JSON directly from
+/// <see cref="IAppSettingsRepository"/> under key <c>OperatorFeatures</c> and applies the
+/// explicit-<c>false</c> environment hard-disable override on top. This intentionally does
+/// NOT go through <see cref="ISettingsService"/> so that
+/// <c>OperatorFeatures:&lt;flagName&gt;</c> configuration values are never bound as the base
+/// value — the wider <c>SettingsService</c> falls back to
+/// <c>config.GetSection("OperatorFeatures").Get(type)</c> when the row is missing, which
+/// would silently force-enable a flag from an env var like
+/// <c>OperatorFeatures__nativePushEnabled=true</c>. Only explicit-<c>false</c> may take
+/// effect (via <see cref="IsEnvironmentHardDisable"/>); every other configuration form
+/// (absent, non-boolean, <c>true</c>) falls through to the DB/default base.
+/// </para>
+///
+/// <para>
+/// Construction is deliberately DB-independent — the repository ctor holds only a scoped
+/// <c>AppDbContext</c> reference and does no I/O — so <c>GET /api/system/capabilities</c>
+/// never fails at DI activation. Any repository failure during a read (DB down, provider
+/// misconfigured, malformed row) is logged and swallowed with a fall-back to
+/// <c>new OperatorFeatureSettings()</c> defaults, ensuring the capability endpoint keeps
+/// returning the documented defaults even when persisted settings are unavailable.
+/// </para>
+///
+/// <para>
+/// Writes still flow through <see cref="ISettingsService"/> from the Unified Settings admin
+/// page, which persists the same JSON under the same key; this gate observes those changes
+/// on the next request without needing to invalidate a cache.
+/// </para>
 /// </summary>
 public sealed class OperatorFeatureGate : IOperatorFeatureGate
 {
-    private readonly ISettingsService _settings;
+    private readonly IAppSettingsRepository _repository;
     private readonly IConfiguration _configuration;
     private readonly ILogger<OperatorFeatureGate> _logger;
 
@@ -43,11 +70,11 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
         Descriptors.Select(d => (d.Feature, d.FlagName)).ToArray();
 
     public OperatorFeatureGate(
-        ISettingsService settings,
+        IAppSettingsRepository repository,
         IConfiguration configuration,
         ILogger<OperatorFeatureGate> logger)
     {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -83,15 +110,43 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
 
     private OperatorFeatureSettings LoadSettings()
     {
+        // Read the persisted JSON row directly. We block on the async repository because the
+        // gate surface is sync (controllers, worker gate checks) and the wider settings
+        // pipeline uses the same sync-over-async pattern (see SettingsService.Save<T>). No
+        // SynchronizationContext exists in ASP.NET Core, so there is no deadlock risk.
+        //
+        // Every failure mode — DB down, provider misconfigured, malformed JSON — falls back
+        // to class defaults. Configuration-section binding is intentionally NOT consulted
+        // here so that `OperatorFeatures__<flag>=true` cannot force-enable a feature.
         try
         {
-            return _settings.Get<OperatorFeatureSettings>();
+#pragma warning disable VSTHRD002 // Synchronously waiting on tasks — required to keep the gate sync surface
+            AppSettingsEntity? row = _repository
+                .GetAsync(OperatorFeatureSettings.SectionName)
+                .GetAwaiter()
+                .GetResult();
+#pragma warning restore VSTHRD002
+
+            if (row is null || string.IsNullOrWhiteSpace(row.SettingsJson))
+            {
+                return new OperatorFeatureSettings();
+            }
+
+            OperatorFeatureSettings? parsed = JsonSerializer.Deserialize<OperatorFeatureSettings>(row.SettingsJson);
+            return parsed ?? new OperatorFeatureSettings();
         }
-        catch (InvalidOperationException ex)
+        catch (JsonException ex)
         {
-            // SettingsService can throw on cold start / mis-registration. Fall back to the
-            // section defaults rather than 500-ing every operator endpoint.
-            _logger.LogWarning(ex, "OperatorFeatureSettings unavailable, using defaults");
+            _logger.LogWarning(ex, "OperatorFeatureSettings row is malformed JSON; falling back to defaults");
+            return new OperatorFeatureSettings();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // Broad catch is scoped strictly to persisted-settings acquisition so a DB outage,
+            // provider startup race, or missing table does not turn every request into a 500.
+            // Feature endpoints that perform normal writes must NOT copy this pattern — the
+            // gate is the single degradation point.
+            _logger.LogWarning(ex, "Unable to read persisted OperatorFeatureSettings; falling back to defaults");
             return new OperatorFeatureSettings();
         }
     }

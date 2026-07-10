@@ -34,13 +34,30 @@ For each feature, the effective value is computed per request as:
    environment form) is present **and parses as `false`**, the feature is
    hard-disabled regardless of the database value.
 2. Otherwise, the runtime database value from `OperatorFeatureSettings`
-   (persisted via the Unified Settings page and `SettingsService`) is used.
+   (persisted via the Unified Settings page under key `OperatorFeatures`) is
+   used. If no row exists yet, the property defaults on
+   `OperatorFeatureSettings` apply.
 
 Absent, non-boolean, or explicitly `true` environment values do **not**
 force-enable a feature — only explicit `false` acts as an override.
 
+`IOperatorFeatureGate` reads the persisted JSON row directly through
+`IAppSettingsRepository`; the `OperatorFeatures` configuration section is
+never bound as the base value. Without this, the wider `SettingsService`
+fallback (`config.GetSection("OperatorFeatures").Get(type)`) would let an
+env value like `OperatorFeatures__nativePushEnabled=true` silently
+force-enable the flag and let non-boolean values throw at startup. Reading
+the row directly means those cases fall through to defaults or trigger the
+gate's degradation path instead.
+
 Runtime database changes take effect on the very next request because
-`IOperatorFeatureGate` is scoped and re-reads `ISettingsService` on every call.
+`IOperatorFeatureGate` is scoped and re-queries `IAppSettingsRepository` on
+every property access. No cache invalidation is required.
+
+If the DB is unavailable or the row is malformed, the gate logs and
+degrades to the property defaults on `OperatorFeatureSettings` so that
+`GET /api/system/capabilities` and gated endpoints keep returning documented
+defaults rather than a 500.
 
 ## Client-facing surface
 
@@ -97,6 +114,10 @@ public IActionResult ExecuteAction(Guid id, ActionRequest body)
 }
 ```
 
+The unit test for `OperatorFeatureProblemDetails` verifies the helper itself is
+side-effect-free; the per-endpoint "no writes or broadcasts before returning"
+integration test lives with the first feature PR (#707) that adopts the helper.
+
 The resulting response is HTTP 404 with a ProblemDetails body carrying two
 extensions the frontend depends on:
 
@@ -117,8 +138,8 @@ canonical camelCase flag name.
 
 ## SignalR and background services
 
-For SignalR broadcasts and background workers, gate the emit/execute call the
-same way:
+For SignalR hubs and any service resolved per-request, inject
+`IOperatorFeatureGate` directly and gate the emit call:
 
 ```csharp
 if (_gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
@@ -129,6 +150,47 @@ if (_gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
 
 Lowercase SignalR event naming is unchanged; the gate only decides whether the
 broadcast happens.
+
+### Hosted services and background workers
+
+`IOperatorFeatureGate` is registered **scoped**, so a singleton
+`IHostedService` / `BackgroundService` cannot inject it directly — the DI
+container will fail the activation. Inject `IServiceScopeFactory`, open a
+scope per tick / per work item, and resolve the gate inside that scope:
+
+```csharp
+public sealed class InventorySyncBackgroundService(
+    IServiceScopeFactory scopeFactory,
+    ILogger<InventorySyncBackgroundService> logger) : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            using (IServiceScope scope = _scopeFactory.CreateScope())
+            {
+                IOperatorFeatureGate gate = scope.ServiceProvider
+                    .GetRequiredService<IOperatorFeatureGate>();
+
+                if (gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+                {
+                    IWorkService worker = scope.ServiceProvider
+                        .GetRequiredService<IWorkService>();
+                    await worker.RunAsync(stoppingToken);
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+        }
+    }
+}
+```
+
+Re-open a scope on every tick — do not hoist the resolved gate outside the
+`using` block. This is the pattern used elsewhere in the repo (see
+`TokenRevocationCleanupService`, `FileConsistencyAuditService`).
 
 ## Emergency rollback path
 
@@ -150,13 +212,21 @@ cannot be trusted.
          environment:
            OperatorFeatures__attentionEnabled: "false"
      ```
-2. Restart the API process (and slicer-host, if a slicer-side feature is
-   gated). Environment overrides are picked up on configuration reload/restart;
-   they are not hot-swappable.
+2. Apply the change:
+   - **Environment variables require a process restart** to be picked up
+     (both the API process and slicer-host if the gated feature lives on
+     the slicer side). Environment variables are read once when the .NET
+     configuration provider is built at startup.
+   - **File-based providers may be reloadable.** `appsettings.json` and
+     overlays are wired with `reloadOnChange: true` by default, so an
+     edit-and-save will be observed on the next gate call without a
+     restart. Verify with the capabilities endpoint before relying on it
+     in a specific deployment.
 3. Verify by curling `GET /api/system/capabilities` — the affected flag under
    `operatorFeatures` must be `false` and the on-call runbook update is done.
-4. Once the underlying issue is resolved, remove the override, restart, and
-   verify the capability endpoint reports `true` again.
+4. Once the underlying issue is resolved, remove the override, restart (or
+   re-save the file if using a reloadable provider), and verify the
+   capability endpoint reports `true` again.
 
 The database value is left untouched by the environment override; clearing
 the override restores the persisted state. This is the mechanism Kane's
@@ -191,12 +261,19 @@ and `src/tests/Farm.Web.Api.Tests/Controllers/SystemCapabilitiesControllerTests.
 They cover:
 
 - Default values match the issue specification.
-- Runtime database values take effect on the next call.
-- Environment `false` hard-disables, environment `true` does not force-enable,
-  non-boolean values fall through.
+- Runtime database values take effect on the next call (real
+  `EfAppSettingsRepository` + `AppDbContext` in `OperatorFeatureGateRealStorageTests`).
+- With an empty AppSettings table, config `true` never force-enables and
+  non-boolean config never crashes gate construction — the gate is
+  DB-independent at DI activation and falls back to defaults on any read
+  failure (blocker 2 from the #725 convergence).
+- Environment `false` hard-disables, environment `true` does not
+  force-enable, non-boolean values fall through.
 - The capabilities controller exposes `operatorFeatures` in the response.
-- The shared ProblemDetails helper produces `code: "featureDisabled"` and does
-  not perform any writes or broadcasts.
+- The shared ProblemDetails helper produces `code: "featureDisabled"` and
+  its builder is itself side-effect-free. The full "gated endpoint performs
+  no writes or broadcasts" integration test belongs in the first feature PR
+  (#707) that consumes the helper.
 - Older clients decoding a payload without `operatorFeatures` fall back to
   documented defaults.
 

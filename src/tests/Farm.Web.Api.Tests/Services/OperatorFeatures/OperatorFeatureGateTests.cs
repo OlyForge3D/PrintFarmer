@@ -1,7 +1,12 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
@@ -13,8 +18,11 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Services.OperatorFeatures;
 
 /// <summary>
-/// Unit tests for <see cref="OperatorFeatureGate"/> covering defaults, database values, and
-/// the environment hard-disable override precedence required by issue #725.
+/// Unit tests for <see cref="OperatorFeatureGate"/> covering defaults, persisted DB values,
+/// the environment hard-disable override, and the DB-independent degradation path required
+/// by issue #725. These tests use a mock <see cref="IAppSettingsRepository"/>; a companion
+/// integration-style suite exercises the real EF Core repository against an in-memory
+/// AppSettings store.
 /// </summary>
 public class OperatorFeatureGateTests
 {
@@ -27,19 +35,35 @@ public class OperatorFeatureGateTests
                 new KeyValuePair<string, string?>(e.Key, e.Value)))
             .Build();
 
-    private static IOperatorFeatureGate CreateGate(
-        OperatorFeatureSettings? settings = null,
-        IConfiguration? configuration = null)
+    private static Mock<IAppSettingsRepository> RepoWith(OperatorFeatureSettings? persisted)
     {
-        Mock<ISettingsService> settingsService = new();
-        settingsService.Setup(s => s.Get<OperatorFeatureSettings>())
-            .Returns(settings ?? new OperatorFeatureSettings());
+        Mock<IAppSettingsRepository> repo = new();
+        if (persisted is null)
+        {
+            repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((AppSettingsEntity?)null);
+        }
+        else
+        {
+            repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new AppSettingsEntity
+                {
+                    Key = OperatorFeatureSettings.SectionName,
+                    SettingsJson = JsonSerializer.Serialize(persisted),
+                    UpdatedAt = DateTime.UtcNow,
+                });
+        }
 
-        return new OperatorFeatureGate(
-            settingsService.Object,
+        return repo;
+    }
+
+    private static IOperatorFeatureGate CreateGate(
+        OperatorFeatureSettings? persisted = null,
+        IConfiguration? configuration = null)
+        => new OperatorFeatureGate(
+            RepoWith(persisted).Object,
             configuration ?? EmptyConfig(),
             NullLogger<OperatorFeatureGate>.Instance);
-    }
 
     [Fact]
     public void Defaults_MatchIssueSpecification()
@@ -79,7 +103,7 @@ public class OperatorFeatureGateTests
         IOperatorFeatureGate gate = CreateGate();
 
         gate.AllFeatures.Select(f => f.Feature)
-            .Should().BeEquivalentTo(System.Enum.GetValues<OperatorFeature>());
+            .Should().BeEquivalentTo(Enum.GetValues<OperatorFeature>());
     }
 
     [Fact]
@@ -162,20 +186,58 @@ public class OperatorFeatureGateTests
     }
 
     [Fact]
-    public void GetEffectiveFlags_UsesDefaults_WhenSettingsServiceThrows()
+    public void GetEffectiveFlags_UsesDefaults_WhenRepositoryThrows()
     {
-        Mock<ISettingsService> settingsService = new();
-        settingsService.Setup(s => s.Get<OperatorFeatureSettings>())
-            .Throws(new System.InvalidOperationException("cold start"));
+        // Blocker 2 from the #725 convergence: capability lookup MUST NOT 500 when the
+        // persisted-settings acquisition throws. Any repository failure (DB down, provider
+        // startup race, malformed row) must degrade to the documented defaults.
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("cold start / DB unavailable"));
 
-        OperatorFeatureGate gate = new(
-            settingsService.Object,
-            EmptyConfig(),
-            NullLogger<OperatorFeatureGate>.Instance);
+        OperatorFeatureGate gate = new(repo.Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
 
         OperatorFeatureFlagsDto flags = gate.GetEffectiveFlags();
         flags.AttentionEnabled.Should().BeTrue();
         flags.NativePushEnabled.Should().BeFalse();
+        flags.FilamentCoverageEnabled.Should().BeTrue();
+        flags.OfflineWriteReplayEnabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void GetEffectiveFlags_UsesDefaults_WhenPersistedRowIsMalformedJson()
+    {
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppSettingsEntity
+            {
+                Key = OperatorFeatureSettings.SectionName,
+                SettingsJson = "{ not-json",
+                UpdatedAt = DateTime.UtcNow,
+            });
+
+        OperatorFeatureGate gate = new(repo.Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
+
+        OperatorFeatureFlagsDto flags = gate.GetEffectiveFlags();
+        flags.AttentionEnabled.Should().BeTrue("malformed rows fall back to defaults");
+        flags.NativePushEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public void EnvironmentFalse_StillApplies_WhenRepositoryThrows()
+    {
+        // Env override must remain effective even in the DB-degraded path so on-call rollback
+        // works when the DB itself is the incident.
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DB unavailable"));
+
+        IConfiguration config = ConfigWith(("OperatorFeatures:attentionEnabled", "false"));
+        OperatorFeatureGate gate = new(repo.Object, config, NullLogger<OperatorFeatureGate>.Instance);
+
+        OperatorFeatureFlagsDto flags = gate.GetEffectiveFlags();
+        flags.AttentionEnabled.Should().BeFalse();
+        flags.FilamentCoverageEnabled.Should().BeTrue("only the overridden flag flips");
     }
 
     [Fact]
@@ -197,22 +259,26 @@ public class OperatorFeatureGateTests
     [Fact]
     public void RuntimeDatabaseUpdate_ObservedOnNextGateCall()
     {
-        // Runtime DB updates take effect "on the next request" (issue #725 acceptance criterion).
-        // In production this is achieved because IOperatorFeatureGate is scoped and re-reads the
-        // scoped ISettingsService on every property access; here we simulate the next request by
-        // returning a different settings snapshot from ISettingsService.
-        OperatorFeatureSettings before = new() { AttentionEnabled = true };
-        OperatorFeatureSettings after = new() { AttentionEnabled = false };
+        // Runtime DB updates take effect on the very next request (issue #725 acceptance).
+        // In production the gate is scoped and re-reads the repository on every property
+        // access; here we simulate the next request by returning a different row on the
+        // second call.
+        Mock<IAppSettingsRepository> repo = new();
+        repo.SetupSequence(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppSettingsEntity
+            {
+                Key = OperatorFeatureSettings.SectionName,
+                SettingsJson = JsonSerializer.Serialize(new OperatorFeatureSettings { AttentionEnabled = true }),
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ReturnsAsync(new AppSettingsEntity
+            {
+                Key = OperatorFeatureSettings.SectionName,
+                SettingsJson = JsonSerializer.Serialize(new OperatorFeatureSettings { AttentionEnabled = false }),
+                UpdatedAt = DateTime.UtcNow,
+            });
 
-        Mock<ISettingsService> settingsService = new();
-        settingsService.SetupSequence(s => s.Get<OperatorFeatureSettings>())
-            .Returns(before)
-            .Returns(after);
-
-        OperatorFeatureGate gate = new(
-            settingsService.Object,
-            EmptyConfig(),
-            NullLogger<OperatorFeatureGate>.Instance);
+        OperatorFeatureGate gate = new(repo.Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
 
         gate.IsEnabled(OperatorFeature.Attention).Should().BeTrue();
         gate.IsEnabled(OperatorFeature.Attention).Should().BeFalse();
@@ -222,21 +288,18 @@ public class OperatorFeatureGateTests
     public void GateInstance_DoesNotCacheSettingsBetweenCalls()
     {
         // Guards against a regression where the gate might snapshot settings in its ctor
-        // instead of consulting ISettingsService on every call. Each IsEnabled() call must
-        // trigger a fresh Get<OperatorFeatureSettings>().
-        Mock<ISettingsService> settingsService = new();
-        settingsService.Setup(s => s.Get<OperatorFeatureSettings>())
-            .Returns(new OperatorFeatureSettings());
+        // instead of consulting the repository on every call. Each IsEnabled() call must
+        // trigger a fresh GetAsync(OperatorFeatures).
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AppSettingsEntity?)null);
 
-        OperatorFeatureGate gate = new(
-            settingsService.Object,
-            EmptyConfig(),
-            NullLogger<OperatorFeatureGate>.Instance);
+        OperatorFeatureGate gate = new(repo.Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
 
         gate.IsEnabled(OperatorFeature.Attention);
         gate.IsEnabled(OperatorFeature.FilamentCoverage);
         gate.GetEffectiveFlags();
 
-        settingsService.Verify(s => s.Get<OperatorFeatureSettings>(), Times.Exactly(3));
+        repo.Verify(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 }

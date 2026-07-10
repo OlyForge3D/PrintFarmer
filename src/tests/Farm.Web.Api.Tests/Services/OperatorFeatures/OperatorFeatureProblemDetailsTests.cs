@@ -1,6 +1,9 @@
 ﻿using System.Linq;
 using System.Reflection;
 using System.Text.Json.Serialization;
+using System.Threading;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
@@ -73,10 +76,11 @@ public class OperatorFeatureProblemDetailsTests
     [Fact]
     public void NotFound_HelperIsPure_NoWritesOrBroadcasts()
     {
-        // Enforces the acceptance criterion: "a disabled HTTP feature returns 404 with
-        // ProblemDetails and performs no writes or broadcasts". The helper is the sanctioned
-        // way to build that response; verify it only asks the gate for the canonical flag name
-        // and touches nothing else.
+        // Guards the helper's internal contract: the ProblemDetails builder only asks the
+        // gate for the canonical flag name and touches nothing else. This does NOT prove
+        // that a real gated endpoint performs no writes/broadcasts before returning — the
+        // acceptance-criterion integration test for a specific endpoint lives with the first
+        // feature PR (#707) that consumes this helper.
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.GetFlagName(OperatorFeature.OfflineWriteReplay))
             .Returns("offlineWriteReplayEnabled");
@@ -93,7 +97,7 @@ public class OperatorFeatureProblemDetailsTests
         body.Detail.Should().Be("Write queue is disabled; using direct writes.");
 
         // Strict mock rejects any call other than GetFlagName; this is the assertion that the
-        // helper never invokes IsEnabled, GetEffectiveFlags, or any settings API.
+        // helper itself never invokes IsEnabled, GetEffectiveFlags, or any settings API.
         gate.Verify(g => g.GetFlagName(OperatorFeature.OfflineWriteReplay), Times.Once);
         gate.VerifyNoOtherCalls();
     }
@@ -118,11 +122,12 @@ public class OperatorFeatureProblemDetailsTests
     [Fact]
     public void OperatorFeatureSettings_JsonPropertyNames_MatchGateFlagNames()
     {
-        Mock<ISettingsService> settingsService = new();
-        settingsService.Setup(s => s.Get<OperatorFeatureSettings>()).Returns(new OperatorFeatureSettings());
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AppSettingsEntity?)null);
         IConfiguration config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
         IOperatorFeatureGate gate = new OperatorFeatureGate(
-            settingsService.Object,
+            repo.Object,
             config,
             NullLogger<OperatorFeatureGate>.Instance);
 
