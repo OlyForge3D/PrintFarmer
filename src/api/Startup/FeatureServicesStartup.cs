@@ -98,6 +98,23 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
+        // Printed-part inventory (see #714). Distinct from MaintenanceComponents
+        // (replacement parts) — this module tracks parts produced by prints.
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartInventoryRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IBinRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfBinRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryAdjustmentRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartInventoryAdjustmentRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartOutputMappingRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartOutputMappingRepository>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartInventoryService,
+            Farm.Infrastructure.Services.PartsInventory.PartInventoryService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService,
+            Farm.Infrastructure.Services.PartsInventory.PartHarvestService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IReorderEvaluationService,
+            Farm.Infrastructure.Services.PartsInventory.ReorderEvaluationService>();
+
         // SPA services (only for monolithic deployments)
         bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
         if (isMonolithicDeployment)

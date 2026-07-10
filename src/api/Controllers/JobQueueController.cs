@@ -1,8 +1,10 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -28,6 +30,7 @@ public class JobQueueController(
     IBatchDispatchService batchDispatchService,
     IPrinterStatusCacheReader printerStatusCache,
     IPrintFarmerTelemetryService telemetryService,
+    IPartHarvestService partHarvestService,
     ILogger<JobQueueController> logger) : ControllerBase
 {
     /// <summary>
@@ -309,6 +312,55 @@ public class JobQueueController(
             logger.LogError(ex, "Error rerunning print job {Id}", id);
             return Problem("An error occurred while rerunning the job", statusCode: 500);
         }
+    }
+
+    /// <summary>
+    /// Harvest a completed print job into printed-part stock.
+    /// Atomically stamps the job as harvested, increments the mapped SKU(s),
+    /// and records ledger entries. Idempotent: replaying against an already
+    /// harvested job returns the original result without applying deltas twice.
+    /// </summary>
+    /// <remarks>
+    /// <b>#725 rebase seam</b>: gate this endpoint on
+    /// <c>printedPartsInventoryEnabled</c> via <c>IOperatorFeatureGate</c> when
+    /// the service lands (see epic #705 / issue #725). When disabled the
+    /// endpoint must return HTTP 404 ProblemDetails with
+    /// <c>extensions.code = "featureDisabled"</c> and must not stamp the job or
+    /// write ledger entries. Normal job completion (delete, requeue, etc.) must
+    /// remain functional when the flag is off.
+    /// </remarks>
+    /// <param name="id">Completed print job to harvest.</param>
+    /// <param name="request">Optional bin code, quantity override, or manual SKU mapping fallback.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("{id:guid}/harvest")]
+    [ProducesResponseType(typeof(HarvestJobResponse), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(422)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<HarvestJobResponse>> HarvestJobAsync(
+        Guid id,
+        [FromBody] HarvestJobRequest? request,
+        CancellationToken ct)
+    {
+        HarvestJobRequest payload = request ?? new HarvestJobRequest();
+        string? userId = User.Identity?.Name;
+
+        HarvestResult result = await partHarvestService.HarvestJobAsync(id, payload, userId, ct);
+        return result.Outcome switch
+        {
+            PartInventoryOutcome.Ok => Ok(result.Response),
+            PartInventoryOutcome.IdempotentReplay => Ok(result.Response),
+            PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
+            PartInventoryOutcome.JobNotCompleted => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
+            PartInventoryOutcome.NoMappings => UnprocessableEntity(new { message = result.Message }),
+            PartInventoryOutcome.PartNotFound => NotFound(new { message = result.Message }),
+            PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
+            PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
+            _ => Problem(result.Message ?? "Harvest failed.", statusCode: 500),
+        };
     }
 
     /// <summary>

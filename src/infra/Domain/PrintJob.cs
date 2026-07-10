@@ -291,4 +291,32 @@ public class PrintJob
     /// (material, color, nozzle) and user-applied manual tags.
     /// </summary>
     public ICollection<Tag> Tags { get; set; } = new List<Tag>();
+
+    // Printed-part harvest metadata (see #714).
+    // Harvested jobs remain PrintJobStatus.Completed — harvest is orthogonal to lifecycle.
+
+    /// <summary>
+    /// UTC timestamp when this job was harvested into printed-part stock.
+    /// A non-null value marks the job as already harvested; subsequent harvest
+    /// requests are treated as idempotent replays.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
+
+    /// <summary>
+    /// Unique key used to serialize concurrent/duplicate harvest requests for
+    /// this job. Persisted so a retried harvest returns the original response
+    /// without creating additional ledger entries.
+    /// </summary>
+    [MaxLength(128)]
+    public string? HarvestOperationKey { get; set; }
+
+    /// <summary>User who initiated the successful harvest, if authenticated.</summary>
+    [MaxLength(450)]
+    public string? HarvestedByUserId { get; set; }
+
+    /// <summary>
+    /// Bin the harvested parts were placed into. Denormalized for read paths;
+    /// authoritative per-adjustment bins live on <see cref="PartInventoryAdjustment"/>.
+    /// </summary>
+    public Guid? HarvestedIntoBinId { get; set; }
 }

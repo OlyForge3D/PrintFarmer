@@ -25,6 +25,7 @@ public class JobQueueControllerTests
     private readonly Mock<IBatchDispatchService> _batchDispatchServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly Mock<IPrintFarmerTelemetryService> _telemetryServiceMock;
+    private readonly Mock<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService> _partHarvestServiceMock;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
@@ -37,6 +38,7 @@ public class JobQueueControllerTests
         _batchDispatchServiceMock = new Mock<IBatchDispatchService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
         _telemetryServiceMock = new Mock<IPrintFarmerTelemetryService>();
+        _partHarvestServiceMock = new Mock<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService>();
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
@@ -45,6 +47,7 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
+            _partHarvestServiceMock.Object,
             _loggerMock.Object);
 
         // Set up authenticated user with valid GUID claim for ACL enforcement
@@ -69,6 +72,7 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
+            _partHarvestServiceMock.Object,
             _loggerMock.Object);
 
         // Assert
@@ -411,5 +415,76 @@ public class JobQueueControllerTests
         // Assert
         ObjectResult problemResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, problemResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_MapsOkResultFromService()
+    {
+        var jobId = Guid.NewGuid();
+        var expectedResponse = new Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse(
+            jobId,
+            DateTime.UtcNow,
+            null,
+            null,
+            AlreadyHarvested: false,
+            new List<Farm.Infrastructure.Dtos.PartsInventory.PartAdjustmentResponse>());
+        _partHarvestServiceMock
+            .Setup(s => s.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.Ok,
+                expectedResponse,
+                null));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(expectedResponse, ok.Value);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_JobNotCompleted_MapsToConflict()
+    {
+        var jobId = Guid.NewGuid();
+        _partHarvestServiceMock
+            .Setup(s => s.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.JobNotCompleted,
+                null,
+                "not completed"));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        _ = Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_NoMappings_MapsToUnprocessableEntity()
+    {
+        var jobId = Guid.NewGuid();
+        _partHarvestServiceMock
+            .Setup(s => s.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.NoMappings,
+                null,
+                "no mappings"));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        _ = Assert.IsType<UnprocessableEntityObjectResult>(result.Result);
     }
 }

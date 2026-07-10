@@ -225,6 +225,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Per-user settings (theme, locale, slicer defaults, etc.)
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
 
+    // Printed-part inventory (see #714). Distinct from MaintenanceComponents which
+    // are consumed by printer maintenance, not produced by prints.
+    public DbSet<PartInventory> PartInventories => Set<PartInventory>();
+
+    public DbSet<Bin> Bins => Set<Bin>();
+
+    public DbSet<PartInventoryAdjustment> PartInventoryAdjustments => Set<PartInventoryAdjustment>();
+
+    public DbSet<PartOutputMapping> PartOutputMappings => Set<PartOutputMapping>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

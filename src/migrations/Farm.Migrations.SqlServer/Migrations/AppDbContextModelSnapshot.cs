@@ -208,6 +208,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<Guid?>("BinId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("CreatedSpoolId")
                         .HasColumnType("int");
 
@@ -226,6 +229,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<Guid?>("PartInventoryId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("datetime2");
 
@@ -239,7 +245,11 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("Barcode");
 
+                    b.HasIndex("BinId");
+
                     b.HasIndex("Outcome");
+
+                    b.HasIndex("PartInventoryId");
 
                     b.HasIndex("Timestamp");
 
@@ -280,6 +290,54 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsUnique();
 
                     b.ToTable("BedTypes");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Bin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("IsActive");
+
+                    b.ToTable("Bins");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
@@ -2658,6 +2716,165 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("ObicoServers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DefaultBinId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ModelFileRef")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("OnHand")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReorderPoint")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefaultBinId");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("Sku")
+                        .IsUnique();
+
+                    b.ToTable("PartInventories");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventoryAdjustment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("BinId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Delta")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("OperationKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("PartInventoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("UserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BinId");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique()
+                        .HasFilter("\"OperationKey\" IS NOT NULL");
+
+                    b.HasIndex("PartInventoryId");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("Reason");
+
+                    b.HasIndex("PartInventoryId", "CreatedAt");
+
+                    b.ToTable("PartInventoryAdjustments");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartOutputMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("GcodeFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PartInventoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PrintProjectFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GcodeFileId");
+
+                    b.HasIndex("PartInventoryId");
+
+                    b.HasIndex("PrintProjectFileId");
+
+                    b.HasIndex("GcodeFileId", "PartInventoryId")
+                        .IsUnique()
+                        .HasFilter("\"GcodeFileId\" IS NOT NULL");
+
+                    b.HasIndex("PrintProjectFileId", "PartInventoryId")
+                        .IsUnique()
+                        .HasFilter("\"PrintProjectFileId\" IS NOT NULL");
+
+                    b.ToTable("PartOutputMappings");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordPolicyEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -2958,6 +3175,20 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(128)");
 
                     b.Property<Guid?>("GcodeFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("HarvestOperationKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("HarvestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("HarvestedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid?>("HarvestedIntoBinId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsExternalPrint")
@@ -5656,6 +5887,66 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Manufacturer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventory", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Bin", "DefaultBin")
+                        .WithMany()
+                        .HasForeignKey("DefaultBinId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("DefaultBin");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventoryAdjustment", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Bin", "Bin")
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
+                        .WithMany("Adjustments")
+                        .HasForeignKey("PartInventoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Bin");
+
+                    b.Navigation("PartInventory");
+
+                    b.Navigation("PrintJob");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartOutputMapping", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
+                        .WithMany()
+                        .HasForeignKey("GcodeFileId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
+                        .WithMany("Mappings")
+                        .HasForeignKey("PartInventoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintProjectFile", "PrintProjectFile")
+                        .WithMany()
+                        .HasForeignKey("PrintProjectFileId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("GcodeFile");
+
+                    b.Navigation("PartInventory");
+
+                    b.Navigation("PrintProjectFile");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordResetToken", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
@@ -6348,6 +6639,13 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
                 {
                     b.Navigation("PrinterServiceStates");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventory", b =>
+                {
+                    b.Navigation("Adjustments");
+
+                    b.Navigation("Mappings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
