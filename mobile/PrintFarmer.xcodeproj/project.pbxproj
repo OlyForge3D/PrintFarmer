@@ -236,10 +236,21 @@
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
 		F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B011 /* SystemCapabilitiesTests.swift */; };
+		F7060002000000000000C012 /* PrintFarmerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C011 /* PrintFarmerUITests.swift */; };
+		F7060002000000000000C022 /* LoginFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C021 /* LoginFlowUITests.swift */; };
+		F7060002000000000000C032 /* PrinterListUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C031 /* PrinterListUITests.swift */; };
+		F7060002000000000000C042 /* OperatorShellUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C041 /* OperatorShellUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		1E8F22CF21D5AF80AA9B5A55 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C6D0A32F942F8C6A3D5F22BE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA9CB9901F607FAA5F633728;
+			remoteInfo = PrintFarmer;
+		};
+		F7060002000000000000D031 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C6D0A32F942F8C6A3D5F22BE /* Project object */;
 			proxyType = 1;
@@ -480,6 +491,11 @@
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B011 /* SystemCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesTests.swift; sourceTree = "<group>"; };
+		F7060002000000000000C011 /* PrintFarmerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintFarmerUITests.swift; sourceTree = "<group>"; };
+		F7060002000000000000C021 /* LoginFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginFlowUITests.swift; sourceTree = "<group>"; };
+		F7060002000000000000C031 /* PrinterListUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListUITests.swift; sourceTree = "<group>"; };
+		F7060002000000000000C041 /* OperatorShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperatorShellUITests.swift; sourceTree = "<group>"; };
+		F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrintFarmerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -496,6 +512,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				D1A6C200000000000000F001 /* SnapshotTesting in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F7060002000000000000D021 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -750,6 +773,7 @@
 			children = (
 				B979E1FF0D2B4792DE5025A3 /* PrintFarmer */,
 				1DB4E3FFFEF4C001E8972F09 /* PrintFarmerTests */,
+				F7060002000000000000C001 /* PrintFarmerUITests */,
 				6D159F361021D92BC3E10E55 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -759,8 +783,20 @@
 			children = (
 				AD5B287E56228618B9E1A0C4 /* PrintFarmer.app */,
 				DBF8A7CD5FCE695B24F4AD00 /* PrintFarmerTests.xctest */,
+				F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		F7060002000000000000C001 /* PrintFarmerUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F7060002000000000000C011 /* PrintFarmerUITests.swift */,
+				F7060002000000000000C021 /* LoginFlowUITests.swift */,
+				F7060002000000000000C031 /* PrinterListUITests.swift */,
+				F7060002000000000000C041 /* OperatorShellUITests.swift */,
+			);
+			path = PrintFarmerUITests;
 			sourceTree = "<group>";
 		};
 		707B7EA94C57005EC3C622EC /* Auth */ = {
@@ -1094,6 +1130,25 @@
 			productReference = AD5B287E56228618B9E1A0C4 /* PrintFarmer.app */;
 			productType = "com.apple.product-type.application";
 		};
+		F7060002000000000000D001 /* PrintFarmerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F7060002000000000000D051 /* Build configuration list for PBXNativeTarget "PrintFarmerUITests" */;
+			buildPhases = (
+				F7060002000000000000D011 /* Sources */,
+				F7060002000000000000D021 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F7060002000000000000D041 /* PBXTargetDependency */,
+			);
+			name = PrintFarmerUITests;
+			packageProductDependencies = (
+			);
+			productName = PrintFarmerUITests;
+			productReference = F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -1123,6 +1178,7 @@
 			targets = (
 				DA9CB9901F607FAA5F633728 /* PrintFarmer */,
 				AFC2BA1C050C049765D60160 /* PrintFarmerTests */,
+				F7060002000000000000D001 /* PrintFarmerUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -1379,6 +1435,17 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F7060002000000000000D011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F7060002000000000000C012 /* PrintFarmerUITests.swift in Sources */,
+				F7060002000000000000C022 /* LoginFlowUITests.swift in Sources */,
+				F7060002000000000000C032 /* PrinterListUITests.swift in Sources */,
+				F7060002000000000000C042 /* OperatorShellUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1386,6 +1453,11 @@
 			isa = PBXTargetDependency;
 			target = DA9CB9901F607FAA5F633728 /* PrintFarmer */;
 			targetProxy = 1E8F22CF21D5AF80AA9B5A55 /* PBXContainerItemProxy */;
+		};
+		F7060002000000000000D041 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA9CB9901F607FAA5F633728 /* PrintFarmer */;
+			targetProxy = F7060002000000000000D031 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1587,6 +1659,52 @@
 			};
 			name = Release;
 		};
+		F7060002000000000000D061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.printfarmer.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PrintFarmer;
+			};
+			name = Debug;
+		};
+		F7060002000000000000D071 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.printfarmer.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PrintFarmer;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1613,6 +1731,15 @@
 			buildConfigurations = (
 				5F6732A15130ADFD4A20D414 /* Debug */,
 				91C01608A8F8B5555C1821E7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F7060002000000000000D051 /* Build configuration list for PBXNativeTarget "PrintFarmerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F7060002000000000000D061 /* Debug */,
+				F7060002000000000000D071 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

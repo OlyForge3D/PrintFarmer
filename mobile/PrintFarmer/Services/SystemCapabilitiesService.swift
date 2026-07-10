@@ -4,6 +4,17 @@ import OSLog
 
 /// Service protocol for `/api/system/capabilities` used by the operator
 /// feature gate (issue #725).
+///
+/// The protocol is `@MainActor`-isolated to match every concrete
+/// conformance (`SystemCapabilitiesService` and
+/// `StubSystemCapabilitiesService`) and every existing call site
+/// (`AttentionView`, `ServiceContainer`). Under Swift 6 strict
+/// concurrency, an unannotated protocol requirement forces conformances
+/// to be nonisolated, which conflicts with both `@MainActor`
+/// conformances and produces the compile break Bishop reproduced on
+/// Swift 6.1.3 / 6.2.4. Marking the protocol requirements MainActor
+/// keeps the caller and callee actor contexts aligned.
+@MainActor
 protocol SystemCapabilitiesServiceProtocol: AnyObject, Sendable {
     /// Latest resolved snapshot. Defaults to
     /// `ResolvedSystemCapabilities.defaults` before the first successful

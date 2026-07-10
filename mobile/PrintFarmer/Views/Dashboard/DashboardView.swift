@@ -1011,6 +1011,16 @@ private struct AdvancedPrinterControlsDestination: View {
         .task {
             viewModel.isViewActive = true
             viewModel.configure(printerService: services.printerService)
+            // F1 (#706) — reviewer fix: without a SignalR subscription
+            // the Advanced screen renders a stale snapshot forever.
+            // Pending-command state (jog/preheat/home) never clears
+            // because `PrinterControlsViewModel.handlePrinterUpdate(_:)`
+            // is only invoked when the parent view forwards a fresh
+            // `Printer` after `printerupdated` fires. Mirror
+            // `PrinterDetailView.task` and wire the same SignalR handle
+            // so state transitions and per-command lockouts refresh
+            // live while the operator is on Advanced.
+            viewModel.configureSignalR(services.signalRService)
             await viewModel.loadPrinter()
         }
         .onDisappear {
