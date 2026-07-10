@@ -254,10 +254,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isExecuting)
     }
 
-    func test_isExecuting_falseAfterSuccess() async throws {
+    func test_isExecuting_staysTrueAfterSuccessfulSend_untilConfirmingTargetSnapshot() async throws {
         let gate = AsyncGate()
         mockService.beforeSetTemperatures = { await gate.wait() }
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
         await vm.loadCapabilities()
 
         async let first: Void = vm.preheat(.pla)
@@ -266,10 +267,20 @@ final class PrinterControlsViewModelTests: XCTestCase {
         while await !gate.hasWaiters { await Task.yield() }
         XCTAssertTrue(vm.isExecuting)
 
-        // Let it succeed (no error set).
+        // A *successful* HTTP response (no error set) must NOT clear the
+        // command: pending persists until SignalR confirms the effect.
         await gate.open()
         await first
-        XCTAssertFalse(vm.isExecuting)
+        XCTAssertTrue(vm.isExecuting,
+                      "A successful send keeps the command pending until a confirming snapshot arrives")
+        XCTAssertNil(vm.lastError)
+
+        // Only a confirming target snapshot releases it.
+        var warmed = base
+        warmed.hotendTarget = 200 // base is 215 → moves
+        vm.handlePrinterUpdate(warmed)
+        XCTAssertFalse(vm.isExecuting,
+                       "The confirming target snapshot clears pending / isExecuting")
     }
 
     // MARK: - Live snapshot forwarding (issue #706 F1 review)
@@ -306,7 +317,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
                      "Position-only update must clear pending — regression from #706 review")
     }
 
-    func test_handlePrinterUpdate_clearsPending_onTemperatureOnlyUpdate() async throws {
+    func test_handlePrinterUpdate_measuredTemperatureOnly_doesNotClearPendingPreheat() async throws {
         let base = try idlePrinter()
         let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
         await vm.loadCapabilities()
@@ -314,21 +325,22 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.preheat(.pla)
         XCTAssertNotNil(vm.pendingCommand, "preheat leaves pending set until SignalR confirms")
 
-        // Snapshot mutates only hotend/bed telemetry.
-        var warmed = base
-        warmed.hotendTemp = 42
-        warmed.bedTemp = 55
-        warmed.hotendTarget = 200
-        warmed.bedTarget = 60
-        XCTAssertEqual(warmed.state, base.state)
+        // Measured hotend/bed drift only — the commanded *targets* are unchanged.
+        var drifted = base
+        drifted.hotendTemp = 42
+        drifted.bedTemp = 55
+        XCTAssertEqual(drifted.hotendTarget, base.hotendTarget)
+        XCTAssertEqual(drifted.bedTarget, base.bedTarget)
+        // The update is still forwarded, but must not confirm the preheat.
         XCTAssertNotEqual(
             PrinterControlsUpdateSignal(printer: base),
-            PrinterControlsUpdateSignal(printer: warmed)
+            PrinterControlsUpdateSignal(printer: drifted)
         )
 
-        vm.handlePrinterUpdate(warmed)
-        XCTAssertNil(vm.pendingCommand,
-                     "Temperature-only update must clear pending — regression from #706 review")
+        vm.handlePrinterUpdate(drifted)
+        XCTAssertNotNil(vm.pendingCommand,
+                        "Measured-temperature drift must NOT clear a pending preheat — only the target confirms it")
+        XCTAssertEqual(vm.printer.hotendTemp, 42, "Cached snapshot must still advance")
     }
 
     func test_handlePrinterUpdate_clearsPending_onHomingOnlyUpdate() async throws {
@@ -497,6 +509,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         var warmed = base
         warmed.hotendTarget = 200 // base is 215 → moves
+        XCTAssertEqual(warmed.hotendTemp, base.hotendTemp, "Target-only change: measured temp stays put")
         vm.handlePrinterUpdate(warmed)
         XCTAssertNil(vm.pendingCommand, "Target change confirms a preheat")
     }

@@ -336,6 +336,53 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.printer?.bedTemp, 60.0)
     }
 
+    /// Unanimous #706 BLOCK: a live `printerupdated` carrying `homedAxes`
+    /// must propagate into `viewModel.printer.homedAxes`. Before the fix
+    /// `applyLiveUpdate` mutated position/temperature/spool but silently
+    /// dropped `homedAxes`, so `PrinterControlsViewModel.handlePrinterUpdate`
+    /// never saw the homing confirmation and a pending Home command could
+    /// stick forever. This exercises the real SignalR → applyLiveUpdate
+    /// pipeline (not a hand-built Printer) so the home-command correlation
+    /// has genuine production evidence to correlate against.
+    func testConfigureSignalRAppliesLiveHomedAxesUpdate() async throws {
+        let printer = try TestData.decodePrinter() // testUUID, homedAxes: "xyz"
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        viewModel.isViewActive = true
+        XCTAssertEqual(viewModel.printer?.homedAxes, "xyz")
+
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+
+        let update = PrinterStatusUpdate(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: nil, // no state transition — homing arrives on its own
+            progress: nil,
+            jobName: nil,
+            fileName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil,
+            bedTemp: nil,
+            hotendTarget: nil,
+            bedTarget: nil,
+            homedAxes: "xy",
+            spoolInfo: nil,
+            mmuStatus: nil
+        )
+        signalR.simulatePrinterUpdate(update)
+
+        // Live update is dispatched via `Task { @MainActor }`; yield to the
+        // runloop so the hop lands before we assert.
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertEqual(viewModel.printer?.homedAxes, "xy",
+                       "Live homedAxes must propagate so the controls VM can confirm a Home command")
+    }
+
     /// Ignores updates targeting a different printer so the Advanced
     /// destination does not clobber its own state with unrelated
     /// broadcasts on the shared SignalR channel.

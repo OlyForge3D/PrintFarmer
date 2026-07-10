@@ -175,9 +175,10 @@ final class PrinterControlsViewModel: ObservableObject {
     /// temperatures/targets, homed axes, state, online status). Ambient churn
     /// in an unrelated field must not release the wrong command: temperature
     /// drift must not clear a pending jog, position noise must not clear a
-    /// pending preheat, and so on. Correlation is a targeted diff from the
-    /// previously cached snapshot to `updated`, scoped to the fields the
-    /// specific command drives.
+    /// pending preheat, measured-temperature drift must not clear a pending
+    /// preheat (only the commanded target counts), and so on. Correlation is a
+    /// targeted diff from the previously cached snapshot to `updated`, scoped
+    /// to the fields the specific command drives.
     func handlePrinterUpdate(_ updated: Printer) {
         guard updated.id == printer.id else { return }
         let previous = printer
@@ -212,7 +213,11 @@ final class PrinterControlsViewModel: ObservableObject {
         case .jog(let axis, _):
             return jogAxisMoved(axis: axis, from: previous, to: updated)
         case .preheat:
-            return temperaturesChanged(from: previous, to: updated)
+            // A preheat is confirmed by the commanded *targets* moving, never
+            // by measured `hotendTemp`/`bedTemp` drift — otherwise ambient
+            // cooling/heating noise would release the command before the
+            // setpoint is acknowledged.
+            return targetTemperaturesChanged(from: previous, to: updated)
         case .home:
             // `homedAxes` is the authoritative homing confirmation; position
             // resets are a side effect and must not couple homing to jog noise.
@@ -232,10 +237,11 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
-    private static func temperaturesChanged(from previous: Printer, to updated: Printer) -> Bool {
-        previous.hotendTemp != updated.hotendTemp
-            || previous.bedTemp != updated.bedTemp
-            || previous.hotendTarget != updated.hotendTarget
+    /// True when either commanded temperature *target* moved. Deliberately
+    /// excludes measured `hotendTemp`/`bedTemp`: only the setpoint confirms a
+    /// preheat, so live thermal drift can never clear a pending command.
+    private static func targetTemperaturesChanged(from previous: Printer, to updated: Printer) -> Bool {
+        previous.hotendTarget != updated.hotendTarget
             || previous.bedTarget != updated.bedTarget
     }
 
