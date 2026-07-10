@@ -154,13 +154,21 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_signalRClearsPendingCommand() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
         await vm.loadCapabilities()
 
         await vm.preheat(.pla)
         XCTAssertNotNil(vm.pendingCommand, "Pending stays set after success — cleared by SignalR")
 
-        vm.handlePrinterUpdate(vm.printer)
+        // A *confirming* snapshot must move the preheat's own domain (targets).
+        // An identical snapshot carries no evidence and must NOT clear pending.
+        vm.handlePrinterUpdate(base)
+        XCTAssertNotNil(vm.pendingCommand, "No-op snapshot must not release the command")
+
+        var warmed = base
+        warmed.hotendTarget = 200
+        vm.handlePrinterUpdate(warmed)
         XCTAssertNil(vm.pendingCommand)
     }
 
@@ -369,6 +377,162 @@ final class PrinterControlsViewModelTests: XCTestCase {
         vm.handlePrinterUpdate(other)
         XCTAssertNotNil(vm.pendingCommand,
                         "Snapshots for a different printer id must never clear pending state")
+    }
+
+    // MARK: - Command correlation: cross-talk must NOT clear pending
+    //
+    // The controls surface consumes a merged telemetry stream. Ambient churn
+    // in a field the pending command does not drive must leave it pending
+    // (issue #706 F1 review defect A). Each negative test also proves the
+    // cached snapshot is still advanced so the *next* diff is measured from
+    // the freshly received values.
+
+    func test_handlePrinterUpdate_temperatureNoise_doesNotClearPendingJog() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.jog(axis: "X", distanceMm: 10)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var warmed = base
+        warmed.hotendTemp = (base.hotendTemp ?? 0) + 3
+        warmed.bedTemp = (base.bedTemp ?? 0) + 1
+        warmed.hotendTarget = 240
+        warmed.bedTarget = 80
+        XCTAssertEqual(warmed.x, base.x)
+
+        vm.handlePrinterUpdate(warmed)
+        XCTAssertNotNil(vm.pendingCommand,
+                        "Temperature/target noise must not clear a pending jog")
+        XCTAssertEqual(vm.printer.hotendTarget, 240,
+                       "Cached snapshot must still advance even when pending is retained")
+    }
+
+    func test_handlePrinterUpdate_positionNoise_doesNotClearPendingPreheat() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.pla)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var moved = base
+        moved.x = (base.x ?? 0) + 25
+        moved.y = (base.y ?? 0) - 5
+        moved.z = (base.z ?? 0) + 1
+        XCTAssertEqual(moved.hotendTarget, base.hotendTarget)
+
+        vm.handlePrinterUpdate(moved)
+        XCTAssertNotNil(vm.pendingCommand,
+                        "Position noise must not clear a pending preheat")
+        XCTAssertEqual(vm.printer.x, moved.x, "Cached snapshot must still advance")
+    }
+
+    func test_handlePrinterUpdate_otherAxisMotion_doesNotClearPendingJogX() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.jog(axis: "X", distanceMm: 10)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        // Only Z moves; the pending jog is on X.
+        var moved = base
+        moved.z = (base.z ?? 0) + 5
+        XCTAssertEqual(moved.x, base.x)
+
+        vm.handlePrinterUpdate(moved)
+        XCTAssertNotNil(vm.pendingCommand,
+                        "Motion on an unrelated axis must not clear a jog on X")
+    }
+
+    func test_handlePrinterUpdate_homingNoise_doesNotClearPendingPreheat() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.abs)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var rehomed = base
+        rehomed.homedAxes = "xy"
+        XCTAssertEqual(rehomed.hotendTarget, base.hotendTarget)
+
+        vm.handlePrinterUpdate(rehomed)
+        XCTAssertNotNil(vm.pendingCommand,
+                        "Homed-axes churn must not clear a pending preheat")
+    }
+
+    func test_handlePrinterUpdate_positionAndTempNoise_doesNotClearPendingHome() async throws {
+        // Start from a printer already reporting all axes homed so re-homing
+        // does not move `homedAxes`; only unrelated telemetry drifts.
+        let base = try idlePrinter()
+        XCTAssertEqual(base.homedAxes, "xyz")
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.homeAll()
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var drifted = base
+        drifted.x = (base.x ?? 0) + 10
+        drifted.hotendTemp = (base.hotendTemp ?? 0) + 4
+        XCTAssertEqual(drifted.homedAxes, base.homedAxes)
+
+        vm.handlePrinterUpdate(drifted)
+        XCTAssertNotNil(vm.pendingCommand,
+                        "Position/temperature noise must not clear a pending home; homedAxes is the signal")
+    }
+
+    // MARK: - Command correlation: relevant evidence DOES clear pending
+
+    func test_handlePrinterUpdate_targetChange_clearsPendingPreheat() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.pla)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var warmed = base
+        warmed.hotendTarget = 200 // base is 215 → moves
+        vm.handlePrinterUpdate(warmed)
+        XCTAssertNil(vm.pendingCommand, "Target change confirms a preheat")
+    }
+
+    func test_handlePrinterUpdate_offlineTransition_clearsAnyPending() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.jog(axis: "X", distanceMm: 10)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var offline = base
+        offline.isOnline = false // no position/temp change — lifecycle only
+        XCTAssertEqual(offline.x, base.x)
+
+        vm.handlePrinterUpdate(offline)
+        XCTAssertNil(vm.pendingCommand,
+                     "Going offline invalidates any in-flight command")
+    }
+
+    func test_handlePrinterUpdate_stateTransition_clearsAnyPending() async throws {
+        let base = try idlePrinter()
+        let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.pla)
+        XCTAssertNotNil(vm.pendingCommand)
+
+        var printing = base
+        printing.state = "printing" // no temp/target change — lifecycle only
+        XCTAssertEqual(printing.hotendTarget, base.hotendTarget)
+
+        vm.handlePrinterUpdate(printing)
+        XCTAssertNil(vm.pendingCommand,
+                     "A state transition supersedes any in-flight command")
     }
 
     // MARK: - PrinterControlsUpdateSignal

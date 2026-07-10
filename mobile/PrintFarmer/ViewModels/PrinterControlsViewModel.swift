@@ -166,12 +166,77 @@ final class PrinterControlsViewModel: ObservableObject {
     // MARK: - SignalR Hook
 
     /// View layer calls this when a `printerupdated` SignalR event arrives for
-    /// `printer.id`. Updates the cached printer (so `canControl` reflects fresh
-    /// state) and clears `pendingCommand` — the command's effect has landed.
+    /// `printer.id`. Always refreshes the cached printer snapshot (so
+    /// `canControl` reflects fresh state and the next diff is measured from
+    /// here), then clears `pendingCommand` **only** when the incoming snapshot
+    /// actually confirms — or legitimately invalidates — the in-flight command.
+    ///
+    /// The controls surface receives a merged telemetry stream (position,
+    /// temperatures/targets, homed axes, state, online status). Ambient churn
+    /// in an unrelated field must not release the wrong command: temperature
+    /// drift must not clear a pending jog, position noise must not clear a
+    /// pending preheat, and so on. Correlation is a targeted diff from the
+    /// previously cached snapshot to `updated`, scoped to the fields the
+    /// specific command drives.
     func handlePrinterUpdate(_ updated: Printer) {
         guard updated.id == printer.id else { return }
+        let previous = printer
         printer = updated
-        pendingCommand = nil
+        guard let pending = pendingCommand else { return }
+        if Self.transition(from: previous, to: updated, resolves: pending) {
+            pendingCommand = nil
+        }
+    }
+
+    /// Decides whether the transition `previous → updated` confirms or
+    /// invalidates `command`.
+    ///
+    /// Two lifecycle transitions release *any* pending command:
+    ///   * an `isOnline` change — going offline invalidates the in-flight
+    ///     command; a reconnect resets control state, and
+    ///   * a `state` transition — a print starting/stopping/pausing completes
+    ///     or supersedes the command.
+    ///
+    /// Otherwise the diff is confined to the fields the command actually
+    /// affects, so unrelated telemetry never clears it. There is deliberately
+    /// no time-based fallback: a command is released only on real evidence.
+    static func transition(
+        from previous: Printer,
+        to updated: Printer,
+        resolves command: ControlCommand
+    ) -> Bool {
+        if previous.isOnline != updated.isOnline { return true }
+        if previous.state != updated.state { return true }
+
+        switch command.kind {
+        case .jog(let axis, _):
+            return jogAxisMoved(axis: axis, from: previous, to: updated)
+        case .preheat:
+            return temperaturesChanged(from: previous, to: updated)
+        case .home:
+            // `homedAxes` is the authoritative homing confirmation; position
+            // resets are a side effect and must not couple homing to jog noise.
+            return previous.homedAxes != updated.homedAxes
+        }
+    }
+
+    private static func jogAxisMoved(axis: String, from previous: Printer, to updated: Printer) -> Bool {
+        switch axis.uppercased() {
+        case "X": return previous.x != updated.x
+        case "Y": return previous.y != updated.y
+        case "Z": return previous.z != updated.z
+        default:
+            return previous.x != updated.x
+                || previous.y != updated.y
+                || previous.z != updated.z
+        }
+    }
+
+    private static func temperaturesChanged(from previous: Printer, to updated: Printer) -> Bool {
+        previous.hotendTemp != updated.hotendTemp
+            || previous.bedTemp != updated.bedTemp
+            || previous.hotendTarget != updated.hotendTarget
+            || previous.bedTarget != updated.bedTarget
     }
 
     // MARK: - Computed

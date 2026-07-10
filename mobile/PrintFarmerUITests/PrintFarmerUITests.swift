@@ -2,23 +2,26 @@ import XCTest
 
 /// Base class for all PrintFarmer UI tests.
 ///
-/// Launches the app with `--uitesting` flag so the app can switch to mock mode.
-/// Subclasses should override `setUp()` to add additional launch arguments.
-///
-/// ## Connecting to a Mock Server
-/// The `--uitesting` launch argument signals the app to use mock/stub data.
-/// Lambert is building a separate mock server; when ready, add:
-///   `app.launchArguments.append("--mock-server-url=http://localhost:8080")`
-/// The app's `ServiceContainer` should check for these arguments at init time.
+/// Launches the app with `--uitesting` so the app switches to the
+/// deterministic bootstrap. By default this is the **authenticated**
+/// operator-shell mode. Subclasses that need a different deterministic
+/// launch mode (e.g. the unauthenticated login flow) override
+/// `additionalLaunchArguments`; those are applied before the app launches.
 class PrintFarmerUITestCase: XCTestCase {
 
     var app: XCUIApplication!
+
+    /// Extra launch arguments contributed by a subclass, applied before the
+    /// app launches. Base tests run in the authenticated operator-shell
+    /// bootstrap; override to select a different explicit launch mode.
+    var additionalLaunchArguments: [String] { [] }
 
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments.append("--uitesting")
+        app.launchArguments.append(contentsOf: additionalLaunchArguments)
         app.launch()
     }
 

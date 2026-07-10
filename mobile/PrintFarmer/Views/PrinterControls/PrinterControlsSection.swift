@@ -42,22 +42,32 @@ struct PrinterControlsSection: View {
     }
 
     var body: some View {
-        if Self.isHidden(for: printer) {
-            EmptyView()
-        } else {
-            content
-                // Forward every meaningful live snapshot to the VM so
-                // `pendingCommand` clears after jog/preheat/home effects
-                // land even when `state` / `isOnline` did not change
-                // (issue #706 F1 review — position/temp/homing updates
-                // typically arrive without a state transition). The
-                // signal captures only the fields the VM actually reads,
-                // so unrelated churn (camera URLs, spool metadata,
-                // notes) does not thrash `.onChange`.
-                .onChange(of: PrinterControlsUpdateSignal(printer: printer)) { _, _ in
-                    viewModel.handlePrinterUpdate(printer)
-                }
-                .task { await viewModel.loadCapabilities() }
+        // Wrap both the hidden and visible branches so the `.onChange`
+        // observer is installed unconditionally. Otherwise a printer going
+        // offline swaps the visible `content` (which owned the observer) for
+        // `EmptyView` before the offline snapshot is delivered, and
+        // `pendingCommand` sticks forever (issue #706 F1 review defect B).
+        //
+        // The wrapper view identity is stable across the online/offline swap,
+        // and the signal is derived from the immutable `printer` prop, so
+        // re-renders triggered by the VM's own `@Published` state cannot
+        // re-fire `.onChange` — no update loop.
+        ZStack {
+            if Self.isHidden(for: printer) {
+                EmptyView()
+            } else {
+                content
+                    .task { await viewModel.loadCapabilities() }
+            }
+        }
+        // Forward every meaningful live snapshot to the VM so
+        // `pendingCommand` clears after jog/preheat/home effects land even
+        // when `state` / `isOnline` did not change (position/temp/homing
+        // updates typically arrive without a state transition). The signal
+        // captures only the fields the VM actually reads, so unrelated churn
+        // (camera URLs, spool metadata, notes) does not thrash `.onChange`.
+        .onChange(of: PrinterControlsUpdateSignal(printer: printer)) { _, _ in
+            viewModel.handlePrinterUpdate(printer)
         }
     }
 

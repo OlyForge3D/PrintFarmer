@@ -31,6 +31,26 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertEqual(UITestBootstrap.launchArgument, "--uitesting")
     }
 
+    func test_unauthenticatedLaunchArgument_matchesUITestsHarness() {
+        // Contract with LoginFlowUITests.additionalLaunchArguments, which
+        // hardcodes this literal (UI test targets cannot import the app).
+        XCTAssertEqual(UITestBootstrap.unauthenticatedLaunchArgument, "--uitesting-unauthenticated")
+    }
+
+    // MARK: - Launch mode
+
+    func test_mode_defaultsToAuthenticated() {
+        XCTAssertEqual(UITestBootstrap.mode(in: ["--uitesting"]), .authenticated)
+        XCTAssertEqual(UITestBootstrap.mode(in: []), .authenticated)
+    }
+
+    func test_mode_isUnauthenticated_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: ["--uitesting", "--uitesting-unauthenticated"]),
+            .unauthenticated
+        )
+    }
+
     // MARK: - Bundle wiring
 
     func test_makeBundle_seedsActiveServer() throws {
@@ -68,6 +88,36 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertTrue(bundle.services.printerService is DemoPrinterService)
         XCTAssertNil(bundle.services.apiClient,
                      "Demo container must not carry a live APIClient")
+    }
+
+    // MARK: - Unauthenticated (login-flow) mode
+
+    func test_makeBundle_unauthenticated_leavesSessionSignedOut() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(mode: .unauthenticated, defaults: defaults)
+
+        XCTAssertFalse(bundle.authViewModel.isAuthenticated,
+                       "Unauthenticated mode must leave the session signed out so LoginView renders")
+        XCTAssertNil(bundle.authViewModel.currentUser)
+    }
+
+    func test_makeBundle_unauthenticated_stillSeedsActiveServer() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(mode: .unauthenticated, defaults: defaults)
+
+        // A registered active server keeps RootView on LoginView instead of
+        // AddFirstServerView.
+        XCTAssertFalse(bundle.serverRegistry.servers.isEmpty)
+        XCTAssertNotNil(bundle.serverRegistry.activeServerID)
+    }
+
+    func test_makeBundle_unauthenticated_usesDemoServices_noNetwork() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(mode: .unauthenticated, defaults: defaults)
+
+        // The sign-in path must stay off the real network in the login flow.
+        XCTAssertTrue(bundle.services.authService is DemoAuthService)
+        XCTAssertNil(bundle.services.apiClient)
     }
 
     func test_restoreSession_isNoOp_afterBootstrap() async throws {
