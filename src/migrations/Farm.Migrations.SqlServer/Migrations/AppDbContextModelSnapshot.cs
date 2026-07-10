@@ -3020,6 +3020,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("RequiredMaterialType")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("RequiredMaterialsPerToolJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<decimal?>("RequiredNozzleDiameter")
                         .HasColumnType("decimal(18,2)");
 

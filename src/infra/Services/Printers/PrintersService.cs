@@ -2703,12 +2703,47 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    public async Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        Printer? p = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return new CommandResult(false, $"Printer {id} not found");
+            return new FilamentUnloadResult(false, $"Printer {id} not found");
+        }
+
+        // Capture outgoing spool details BEFORE unload so we can return residual weight even
+        // if the printer command later fails partway. The primary toolhead represents the
+        // spool the operator is physically removing on single-tool printers; MMU/multi-tool
+        // configurations still expose the currently active gate as primary.
+        Toolhead? primary = p.Toolheads?
+            .OrderByDescending(t => t.IsPrimary)
+            .ThenBy(t => t.Index)
+            .FirstOrDefault();
+
+        int? outgoingSpoolId = primary?.CurrentSpoolId;
+        string? outgoingMaterial = primary?.CurrentMaterial;
+        double? residualWeightG = null;
+
+        if (outgoingSpoolId is int spoolId)
+        {
+            try
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+                if (spool is not null)
+                {
+                    residualWeightG = spool.RemainingWeightG;
+                    outgoingMaterial ??= spool.Material;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "UnloadFilamentAsync: Spoolman lookup for outgoing spool {SpoolId} on printer {PName} ({Id}) failed",
+                    spoolId,
+                    p.Name,
+                    id);
+            }
         }
 
         try
@@ -2718,19 +2753,32 @@ public class PrintersService(
 
             if (client is not ISupportsFilamentControl filamentClient)
             {
-                return new CommandResult(false, $"Backend '{backend}' does not support filament control");
+                return new FilamentUnloadResult(
+                    false,
+                    $"Backend '{backend}' does not support filament control",
+                    outgoingSpoolId,
+                    outgoingMaterial,
+                    residualWeightG);
             }
 
             string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             bool result = await filamentClient.UnloadFilamentAsync(url, ct).ConfigureAwait(false);
-            return result
-                ? new CommandResult(true, "Filament unload initiated")
-                : new CommandResult(false, "Printer rejected the filament unload command");
+            return new FilamentUnloadResult(
+                result,
+                result ? "Filament unload initiated" : "Printer rejected the filament unload command",
+                outgoingSpoolId,
+                outgoingMaterial,
+                residualWeightG);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to unload filament on printer {PName} ({Id})", p.Name, id);
-            return new CommandResult(false, $"Failed to unload filament: {ex.Message}");
+            return new FilamentUnloadResult(
+                false,
+                $"Failed to unload filament: {ex.Message}",
+                outgoingSpoolId,
+                outgoingMaterial,
+                residualWeightG);
         }
     }
 

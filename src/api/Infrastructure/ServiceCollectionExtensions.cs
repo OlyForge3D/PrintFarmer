@@ -595,6 +595,11 @@ public static class ServiceCollectionExtensions
 
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
+
+        // Guided filament swap validation (per-tool material requirement check against a scanned spool).
+        _ = services.AddScoped<
+            Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator,
+            Farm.Infrastructure.Services.Printers.PrinterToolheadSwapValidator>();
     }
 
     #endregion

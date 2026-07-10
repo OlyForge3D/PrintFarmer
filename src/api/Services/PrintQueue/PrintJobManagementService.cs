@@ -519,6 +519,10 @@ public class PrintJobManagementService(
             int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
             job.QueuePosition = maxPosition + 1;
 
+            // Project per-extruder G-code metadata into per-tool material requirements.
+            // Preserves RequiredMaterialType for legacy dispatch / reporting.
+            PopulatePerToolRequirementsFromGcode(job, gcodeFile);
+
             _ = await _repository.AddAsync(job, cancellationToken);
 
             _logger.LogInformation("Print job {JobId} enqueued by user {UserId}", job.Id.ToString(), userId);
@@ -528,6 +532,74 @@ public class PrintJobManagementService(
         {
             _logger.LogError(ex, "Error enqueueing print job from gcode file {GcodeFileId}", request.GcodeFileId);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Projects per-extruder G-code metadata into the job's per-tool material requirements.
+    /// Populates <see cref="PrintJob.RequiredMaterialsPerTool"/> when the source file has
+    /// per-extruder material types; falls back silently when no per-extruder data exists so
+    /// legacy single-material <see cref="PrintJob.RequiredMaterialType"/> behaviour is preserved.
+    /// </summary>
+    /// <param name="job">The newly constructed print job to mutate.</param>
+    /// <param name="gcodeFile">The G-code file supplying slicer metadata.</param>
+    /// <remarks>
+    /// This mirrors the JSON storage pattern used on <see cref="GcodeFile.FilamentPerExtruderType"/>
+    /// (see <c>SnapshotSlicerEstimatesAsync</c>) rather than adding a parallel entity hierarchy.
+    /// </remarks>
+    internal static void PopulatePerToolRequirementsFromGcode(PrintJob job, GcodeFile gcodeFile)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(gcodeFile);
+
+        string[]? materials = TryParseJsonArray<string>(gcodeFile.FilamentPerExtruderType);
+        if (materials is null || materials.Length == 0)
+        {
+            return;
+        }
+
+        double[]? weights = TryParseJsonArray<double>(gcodeFile.FilamentPerExtruderWeightG);
+        string[]? colors = TryParseJsonArray<string>(gcodeFile.FilamentPerExtruderColorHex);
+
+        var reqs = new List<PrintJobToolMaterialRequirement>(materials.Length);
+        for (int tool = 0; tool < materials.Length; tool++)
+        {
+            string? material = materials[tool];
+            if (string.IsNullOrWhiteSpace(material))
+            {
+                continue;
+            }
+
+            double? grams = weights is not null && tool < weights.Length ? weights[tool] : (double?)null;
+            string? color = colors is not null && tool < colors.Length ? colors[tool] : null;
+            if (string.IsNullOrWhiteSpace(color))
+            {
+                color = null;
+            }
+
+            reqs.Add(new PrintJobToolMaterialRequirement(tool, material, color, grams));
+        }
+
+        if (reqs.Count > 0)
+        {
+            job.RequiredMaterialsPerTool = reqs;
+        }
+    }
+
+    private static T[]? TryParseJsonArray<T>(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<T[]>(json);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
         }
     }
 

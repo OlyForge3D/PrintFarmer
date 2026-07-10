@@ -17,6 +17,24 @@ namespace Farm.Infrastructure;
 public record CommandResult(bool Success, string? Message = null);
 
 /// <summary>
+/// Result of a filament-unload command. Extends the generic <see cref="CommandResult"/> shape
+/// with the residual weight of the spool that was just unloaded so the guided swap flow
+/// (and mobile "return to shelf" workflow) can record inventory without an extra Spoolman
+/// round-trip on the client.
+/// </summary>
+/// <param name="Success">Whether the unload command completed successfully.</param>
+/// <param name="Message">Optional descriptive message.</param>
+/// <param name="SpoolId">Spoolman spool ID that was loaded on the primary toolhead prior to unload, if any.</param>
+/// <param name="Material">Material family (e.g., "PLA") captured from the outgoing spool, if any.</param>
+/// <param name="ResidualWeightG">Remaining filament weight in grams reported by Spoolman for the outgoing spool.</param>
+public record FilamentUnloadResult(
+    bool Success,
+    string? Message = null,
+    int? SpoolId = null,
+    string? Material = null,
+    double? ResidualWeightG = null);
+
+/// <summary>
 /// Result of uploading a G-code file directly to a printer backend.
 /// </summary>
 /// <param name="Message">Status message from the upload operation.</param>

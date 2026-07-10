@@ -440,11 +440,13 @@ public interface IPrintersService
 
     /// <summary>
     /// Unloads filament from the extruder via the backend's filament control capability.
+    /// Returns the residual weight of the primary toolhead's currently loaded spool so the
+    /// operator's "return to shelf" workflow can log inventory in one round-trip.
     /// </summary>
     /// <param name="id">The printer ID</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>CommandResult with success/failure and descriptive message</returns>
-    Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct);
+    /// <returns>FilamentUnloadResult with success/failure, message, and residual spool weight.</returns>
+    Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, CancellationToken ct);
 
     /// <summary>
     /// Initiates a filament change procedure via the backend's filament control capability.
