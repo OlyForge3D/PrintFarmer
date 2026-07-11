@@ -1,7 +1,10 @@
+﻿using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -26,25 +29,12 @@ namespace Farm.Web.Api.Controllers;
 /// disclose existence.
 /// </para>
 /// <para>
-/// <b>Feature-gate integration handoff (#725):</b> when the shared
-/// <c>IOperatorFeatureGate</c> lands, insert the following check as the first line of
-/// every action here (before <see cref="TryGetUserId"/>):
-/// <code>
-/// if (!_operatorFeatureGate.IsEnabled("attentionEnabled"))
-/// {
-///     return Problem(
-///         type: "https://printfarmer/errors/feature-disabled",
-///         title: "Attention feature is disabled",
-///         statusCode: StatusCodes.Status404NotFound,
-///         extensions: new Dictionary&lt;string, object?&gt; { ["code"] = "featureDisabled" });
-/// }
-/// </code>
-/// Also gate <see cref="IAttentionBroadcaster.NotifyChangedAsync"/> in
-/// <see cref="Farm.Infrastructure.Services.Attention.AttentionBroadcaster"/> and the
-/// two invalidation call sites in
-/// <see cref="Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine"/> and
-/// <see cref="Farm.Infrastructure.Services.FailureDetection.FailureDetectionIncidentHistoryService"/>
-/// so a disabled feature performs no broadcasts, per #725 acceptance criteria.
+/// <b>Feature gate (#725):</b> every endpoint consults the shared
+/// <see cref="Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate"/> for
+/// <see cref="Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.Attention"/>.
+/// When disabled it returns <c>404</c> ProblemDetails with <c>code=featureDisabled</c>
+/// before any read, write, or broadcast. Broadcast suppression when disabled is enforced
+/// centrally in <see cref="Farm.Infrastructure.Services.Attention.AttentionBroadcaster"/>.
 /// </para>
 /// </remarks>
 [ApiController]
@@ -54,11 +44,18 @@ namespace Farm.Web.Api.Controllers;
 public sealed class AttentionController(
     IAttentionService attentionService,
     IAttentionBroadcaster broadcaster,
+    IOperatorFeatureGate featureGate,
     ILogger<AttentionController> logger) : ControllerBase
 {
     private readonly IAttentionService _service = attentionService ?? throw new ArgumentNullException(nameof(attentionService));
     private readonly IAttentionBroadcaster _broadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
+    private readonly IOperatorFeatureGate _featureGate = featureGate ?? throw new ArgumentNullException(nameof(featureGate));
     private readonly ILogger<AttentionController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    private NotFoundObjectResult? FeatureDisabledResult()
+        => _featureGate.IsEnabled(OperatorFeature.Attention)
+            ? null
+            : OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.Attention);
 
     /// <summary>Returns the composed, paginated attention feed for the current user.</summary>
     /// <param name="page">1-based page index. Values &lt;= 0 are clamped to 1.</param>
@@ -76,6 +73,11 @@ public sealed class AttentionController(
         [FromQuery] int pageSize = 50,
         CancellationToken cancellationToken = default)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (!TryGetUserId(out Guid userId, out ActionResult? error))
         {
             return error!;
@@ -99,6 +101,11 @@ public sealed class AttentionController(
         [FromBody] SnoozeAttentionRequest request,
         CancellationToken cancellationToken)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (request is null)
         {
             return BadRequest(new { error = "Request body is required." });
@@ -120,7 +127,11 @@ public sealed class AttentionController(
             return BadRequest(new { error = result.Reason ?? "Snooze rejected." });
         }
 
-        await _broadcaster.NotifyChangedAsync(cancellationToken);
+        // Snooze is per-user state — target only this user's connections.
+        await _broadcaster.NotifyUserChangedAsync(
+            userId,
+            new AttentionChangedPayload(attentionItemId, AttentionChangeKind.Updated, DateTime.UtcNow),
+            cancellationToken);
         return Ok(new
         {
             snoozedUntilUtc = result.Snooze!.SnoozedUntilUtc,
@@ -140,6 +151,11 @@ public sealed class AttentionController(
         [FromRoute] string attentionItemId,
         CancellationToken cancellationToken)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (!TryGetUserId(out Guid userId, out ActionResult? error))
         {
             return error!;
@@ -151,7 +167,11 @@ public sealed class AttentionController(
             return NotFound(new { error = result.Reason ?? "No active snooze." });
         }
 
-        await _broadcaster.NotifyChangedAsync(cancellationToken);
+        // Clearing a snooze changes only this user's view — target their connections.
+        await _broadcaster.NotifyUserChangedAsync(
+            userId,
+            new AttentionChangedPayload(attentionItemId, AttentionChangeKind.Updated, DateTime.UtcNow),
+            cancellationToken);
         return NoContent();
     }
 
@@ -177,6 +197,11 @@ public sealed class AttentionController(
         [FromRoute] AttentionActionKind actionKind,
         CancellationToken cancellationToken)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (!TryGetUserId(out Guid userId, out ActionResult? error))
         {
             return error!;
@@ -184,7 +209,7 @@ public sealed class AttentionController(
 
         string userName = User?.Identity?.Name
             ?? User?.FindFirst("preferred_username")?.Value
-            ?? userId.ToString("D");
+            ?? userId.ToString("D", CultureInfo.InvariantCulture);
 
         bool isFarmAdmin = User?.IsInRole(AttentionService.MaintenanceRoleName) ?? false;
         AttentionActionResult result = await _service.ExecuteActionAsync(userId, userName, isFarmAdmin, attentionItemId, actionKind, cancellationToken);
@@ -200,7 +225,16 @@ public sealed class AttentionController(
 
         if (result.Outcome == AttentionActionOutcome.Ok)
         {
-            await _broadcaster.NotifyChangedAsync(cancellationToken);
+            // A successful action mutates shared source state, so notify all clients. Cancel
+            // and maintenance resolve/dismiss retire the item; other actions update it.
+            AttentionChangeKind changeKind = actionKind is AttentionActionKind.Cancel
+                or AttentionActionKind.Resolve
+                or AttentionActionKind.Dismiss
+                ? AttentionChangeKind.Resolved
+                : AttentionChangeKind.Updated;
+            await _broadcaster.NotifyChangedAsync(
+                new AttentionChangedPayload(attentionItemId, changeKind, DateTime.UtcNow),
+                cancellationToken);
         }
 
         return response;

@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
 using Microsoft.EntityFrameworkCore;
 
@@ -97,7 +98,10 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
         // Invalidate the unified attention feed (issue #707).
         if (_attentionBroadcaster is not null)
         {
-            await _attentionBroadcaster.NotifyChangedAsync(ct);
+            await _attentionBroadcaster.NotifyChangedAsync(new AttentionChangedPayload(
+                AttentionIdPrefixes.Build(AttentionIdPrefixes.Failure, incident.Id),
+                AttentionChangeKind.Created,
+                incident.DetectedAt));
         }
 
         return incident;

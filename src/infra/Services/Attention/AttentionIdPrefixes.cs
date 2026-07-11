@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Attention;
+﻿namespace Farm.Infrastructure.Services.Attention;
 
 /// <summary>
 /// Prefixes used to build stable attention item identifiers. The public id is

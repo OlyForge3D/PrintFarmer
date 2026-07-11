@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
@@ -315,7 +316,10 @@ public class MaintenanceAlertEngine(
         // Invalidate the unified attention feed (issue #707).
         if (_attentionBroadcaster is not null)
         {
-            await _attentionBroadcaster.NotifyChangedAsync();
+            await _attentionBroadcaster.NotifyChangedAsync(new AttentionChangedPayload(
+                AttentionIdPrefixes.Build(AttentionIdPrefixes.Maintenance, alert.Id),
+                AttentionChangeKind.Created,
+                alert.CreatedAt));
         }
     }
 
@@ -441,7 +445,19 @@ public class MaintenanceAlertEngine(
         // Invalidate the unified attention feed (issue #707).
         if (_attentionBroadcaster is not null)
         {
-            await _attentionBroadcaster.NotifyChangedAsync();
+            // Resolved/Dismissed retire the item; Acknowledged (and anything else) updates it.
+            AttentionChangeKind changeKind = alert.Status is MaintenanceAlertStatus.Resolved
+                or MaintenanceAlertStatus.Dismissed
+                ? AttentionChangeKind.Resolved
+                : AttentionChangeKind.Updated;
+            DateTime occurredAt = alert.ResolvedAt
+                ?? alert.DismissedAt
+                ?? alert.AcknowledgedAt
+                ?? DateTime.UtcNow;
+            await _attentionBroadcaster.NotifyChangedAsync(new AttentionChangedPayload(
+                AttentionIdPrefixes.Build(AttentionIdPrefixes.Maintenance, alert.Id),
+                changeKind,
+                occurredAt));
         }
     }
 

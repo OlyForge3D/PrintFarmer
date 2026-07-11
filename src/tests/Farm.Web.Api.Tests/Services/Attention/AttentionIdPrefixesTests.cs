@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Attention;
+﻿using Farm.Infrastructure.Services.Attention;
 using FluentAssertions;
 using Xunit;
 

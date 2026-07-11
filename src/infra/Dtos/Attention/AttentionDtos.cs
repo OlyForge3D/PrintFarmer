@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -116,11 +116,57 @@ public sealed class AttentionActionKindConverter : JsonStringEnumConverter<Atten
 }
 
 /// <summary>
+/// Kind of change carried by an <c>attentionchanged</c> SignalR event (issue #707 /
+/// Dallas realtime contract). Wire values are lowercase (<c>created</c>, <c>updated</c>,
+/// <c>resolved</c>) via a feature-local converter so the repository-wide PascalCase enum
+/// convention is left untouched.
+/// </summary>
+[JsonConverter(typeof(AttentionChangeKindConverter))]
+public enum AttentionChangeKind
+{
+    /// <summary>A new attention item became visible.</summary>
+    Created,
+
+    /// <summary>An existing attention item changed (including per-user snooze state).</summary>
+    Updated,
+
+    /// <summary>An attention item was resolved / cleared and should disappear.</summary>
+    Resolved,
+}
+
+/// <summary>Per-enum converter emitting lowercase names for <see cref="AttentionChangeKind"/>.</summary>
+public sealed class AttentionChangeKindConverter : JsonStringEnumConverter<AttentionChangeKind>
+{
+    /// <inheritdoc />
+    public AttentionChangeKindConverter()
+        : base(JsonNamingPolicy.CamelCase)
+    {
+    }
+}
+
+/// <summary>
+/// Payload for the lowercase <c>attentionchanged</c> SignalR invalidation event. This is an
+/// invalidation hint, not a second source of item truth: clients always refetch
+/// <c>GET /api/attention</c>. The small typed payload preserves deterministic timing tests
+/// and item-level diagnostics per the Dallas F2 realtime adjudication.
+/// </summary>
+/// <param name="ItemId">Computed attention item id (for example <c>failure:{incidentId}</c>).</param>
+/// <param name="ChangeKind">Transition kind: created, updated, or resolved.</param>
+/// <param name="OccurredAt">
+/// Authoritative source-transition/commit timestamp used for the ≤1s dispatch and ≤5s
+/// visible-refresh targets.
+/// </param>
+public sealed record AttentionChangedPayload(
+    string ItemId,
+    [property: JsonConverter(typeof(AttentionChangeKindConverter))] AttentionChangeKind ChangeKind,
+    DateTime OccurredAt);
+
+/// <summary>
 /// A typed action a client can invoke on an attention item. Clients dispatch by
 /// <see cref="Kind"/>, not by any URL the server returns.
 /// </summary>
 public sealed record AttentionActionDto(
-    AttentionActionKind Kind,
+    [property: JsonConverter(typeof(AttentionActionKindConverter))] AttentionActionKind Kind,
     string Label,
     bool RequiresConfirmation);
 
@@ -157,8 +203,8 @@ public sealed record AttentionActionDto(
 /// </param>
 public sealed record AttentionItemDto(
     string Id,
-    AttentionKind Kind,
-    AttentionSeverity Severity,
+    [property: JsonConverter(typeof(AttentionKindConverter))] AttentionKind Kind,
+    [property: JsonConverter(typeof(AttentionSeverityConverter))] AttentionSeverity Severity,
     Guid PrinterId,
     string PrinterName,
     string Title,

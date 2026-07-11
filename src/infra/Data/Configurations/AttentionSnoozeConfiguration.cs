@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 

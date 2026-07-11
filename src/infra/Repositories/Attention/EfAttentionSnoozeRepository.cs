@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -29,11 +29,13 @@ public sealed class EfAttentionSnoozeRepository(AppDbContext dbContext) : IAtten
 
     /// <inheritdoc />
     /// <remarks>
-    /// The <c>UX_AttentionSnooze_User_Item</c> unique index (see
+    /// The <c>IX_AttentionSnoozes_UserId_AttentionItemId</c> unique index (see
     /// <c>AttentionSnoozeConfiguration</c>) makes racing inserts by the same user for the
-    /// same item collide at commit time. We handle that by retrying once as an update:
-    /// on the retry pass the other transaction has already written the row, so
-    /// <c>FirstOrDefault</c> returns it and the second caller updates the winning row.
+    /// same item collide at commit time. Only that unique/primary-key violation is caught
+    /// (via <see cref="IsUniqueViolation"/>, mirroring the provider-agnostic detection used
+    /// by <c>TagService</c>); we then retry once as a read-modify-save so exactly one
+    /// logical snooze survives. Any other <see cref="DbUpdateException"/> (NOT NULL, foreign
+    /// key, connection failure, …) propagates unchanged.
     /// </remarks>
     public async Task<AttentionSnooze> UpsertAsync(
         Guid userId,
@@ -69,31 +71,42 @@ public sealed class EfAttentionSnoozeRepository(AppDbContext dbContext) : IAtten
                     _ = await _db.SaveChangesAsync(cancellationToken);
                     return inserted;
                 }
-                catch (DbUpdateException) when (attempt == 0)
+                catch (DbUpdateException ex) when (attempt == 0 && IsUniqueViolation(ex))
                 {
-                    // Racing insert from another request won. Detach our tentative entity
-                    // and re-fetch so the second pass sees the winning row and updates it.
-                    _db.ChangeTracker.Clear();
+                    // A concurrent insert by the same (user, item) won the unique index.
+                    // Detach our tentative row and loop so the second pass reads the winner
+                    // and updates it. Non-unique failures fall through and propagate.
+                    _db.Entry(inserted).State = EntityState.Detached;
                     continue;
                 }
             }
 
+            // Update path: a concurrent update cannot violate the unique index, so no retry
+            // is needed here. Optimistic/other failures propagate to the caller.
             existing.SnoozedUntilUtc = snoozedUntilUtc;
             existing.AttentionItemAnchorAtUtc = attentionItemAnchorAtUtc;
-            try
-            {
-                _ = await _db.SaveChangesAsync(cancellationToken);
-                return existing;
-            }
-            catch (DbUpdateException) when (attempt == 0)
-            {
-                _db.ChangeTracker.Clear();
-                continue;
-            }
+            _ = await _db.SaveChangesAsync(cancellationToken);
+            return existing;
         }
 
-        // Unreachable: the loop either returns or throws on the second attempt.
-        throw new InvalidOperationException("AttentionSnooze upsert failed after retry.");
+        // Unreachable: attempt 0 either returns, updates, or rethrows a non-unique failure;
+        // attempt 1 always finds the winning row and returns via the update path.
+        throw new InvalidOperationException("AttentionSnooze upsert failed after a unique-violation retry.");
+    }
+
+    /// <summary>
+    /// Provider-agnostic detection of a unique/primary-key constraint violation, matching the
+    /// established pattern in <c>Farm.Infrastructure.Services.Tags.TagService</c> (SQLite,
+    /// SQL Server, and PostgreSQL wordings).
+    /// </summary>
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        string? message = ex.InnerException?.Message;
+        return message is not null
+            && (message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Violation of PRIMARY KEY", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Violation of UNIQUE KEY", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <inheritdoc />

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -311,11 +311,21 @@ public sealed class AttentionService(
         }
 
         PrintJob? job = await _queueData.GetPrintJobByIdAsync(incidentJobId, ct);
-        if (job is null || job.AssignedPrinterId != item.PrinterId)
+        if (job is null)
         {
             return new AttentionActionResult(
                 AttentionActionOutcome.NotFound,
-                "The incident's print job is no longer on this printer.");
+                "The incident's print job no longer exists.");
+        }
+
+        if (job.AssignedPrinterId != item.PrinterId)
+        {
+            // The job still exists but has moved to a different printer — acting now would
+            // mutate the wrong (newer) plate. Reject as a conflict rather than fabricating
+            // success or touching this printer.
+            return new AttentionActionResult(
+                AttentionActionOutcome.Conflict,
+                "The incident's print job has moved to a different printer; refusing to mutate.");
         }
 
         // The incident may have auto-paused the job, so accept Paused in addition to the
