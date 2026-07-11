@@ -39,7 +39,7 @@ struct PrinterListView: View {
                     printerList
                 }
             }
-            .navigationTitle("Printers")
+            .navigationTitle("Farm")
             .searchable(text: $viewModel.searchText, prompt: "Search printers")
             .refreshable {
                 await viewModel.loadPrinters()
