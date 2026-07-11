@@ -125,7 +125,20 @@ public sealed class EfAttentionSnoozeRepository(AppDbContext dbContext) : IAtten
         }
 
         _ = _db.AttentionSnoozes.Remove(existing);
-        _ = await _db.SaveChangesAsync(cancellationToken);
-        return true;
+        try
+        {
+            _ = await _db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // A concurrent request already deleted this row between our read and save. The
+            // desired end state (no snooze) is achieved, so this DELETE is idempotently
+            // successful and consistent with the endpoint's 204 contract (issue #707, R5).
+            // Detach the phantom entity so the tracker is left in a safe state; other
+            // DbUpdateExceptions are NOT caught and continue to propagate.
+            _db.Entry(existing).State = EntityState.Detached;
+            return true;
+        }
     }
 }

@@ -36,6 +36,20 @@ public enum AttentionActionOutcome
 public sealed record SnoozeResult(bool Success, string? Reason, AttentionSnooze? Snooze);
 
 /// <summary>
+/// Outcome of composing the attention feed. When <see cref="InvalidCursor"/> is <c>true</c>
+/// the supplied cursor was malformed or unsupported and <see cref="Feed"/> is <c>null</c>;
+/// the caller should surface an explicit validation error rather than restart from page 1.
+/// </summary>
+public sealed record AttentionFeedResult(AttentionFeedDto? Feed, bool InvalidCursor)
+{
+    /// <summary>Wraps a successfully composed feed.</summary>
+    public static AttentionFeedResult Success(AttentionFeedDto feed) => new(feed, InvalidCursor: false);
+
+    /// <summary>Signals that the supplied cursor could not be decoded.</summary>
+    public static AttentionFeedResult BadCursor() => new(Feed: null, InvalidCursor: true);
+}
+
+/// <summary>
 /// Result of an action-dispatch operation.
 /// </summary>
 public sealed record AttentionActionResult(AttentionActionOutcome Outcome, string? Reason);
@@ -48,28 +62,31 @@ public sealed record AttentionActionResult(AttentionActionOutcome Outcome, strin
 public interface IAttentionService
 {
     /// <summary>
-    /// Returns the composed feed for <paramref name="userId"/>. Items snoozed by this
-    /// user are excluded (subject to fresh-occurrence bypass); snoozes are strictly per-user.
-    /// When <paramref name="isFarmAdmin"/> is <c>false</c>, maintenance items are filtered
-    /// out <b>before</b> composition/pagination/totals so non-admins never see or page
-    /// over maintenance ids, details, or counts.
+    /// Returns the composed feed for <paramref name="userId"/> using cursor pagination.
+    /// Items snoozed by this user are excluded (subject to fresh-occurrence bypass); snoozes
+    /// are strictly per-user. When <paramref name="isFarmAdmin"/> is <c>false</c>, maintenance
+    /// items are filtered out <b>before</b> composition/sort/cursor slicing so non-admins never
+    /// see or page over maintenance ids, details, or counts.
     /// </summary>
     /// <param name="userId">Owning user.</param>
     /// <param name="isFarmAdmin">
     /// True when the caller holds the <c>farm_admin</c> role. Callers MUST pass the
     /// authoritative claim; the service does not consult HttpContext.
     /// </param>
-    /// <param name="page">1-based page number; values &lt;= 0 are clamped to 1.</param>
-    /// <param name="pageSize">
-    /// Page size; values &lt;= 0 fall back to the default and values are capped by
-    /// <c>AttentionService.MaxPageSize</c>.
+    /// <param name="cursor">
+    /// Opaque cursor from a previous page's <c>nextCursor</c>, or <c>null</c> for the first
+    /// page. A malformed/unsupported cursor yields <see cref="AttentionFeedResult.BadCursor"/>.
+    /// </param>
+    /// <param name="limit">
+    /// Maximum items to return. Callers are responsible for validating the range (default
+    /// <see cref="AttentionService.DefaultLimit"/>, max <see cref="AttentionService.MaxLimit"/>).
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<AttentionFeedDto> GetFeedAsync(
+    Task<AttentionFeedResult> GetFeedAsync(
         Guid userId,
         bool isFarmAdmin,
-        int page = 1,
-        int pageSize = 50,
+        string? cursor = null,
+        int limit = 100,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -34,13 +34,15 @@ public sealed class AttentionService(
     IMaintenanceAlertService maintenanceAlerts,
     IQueueDataService queueData,
     ILogger<AttentionService> logger,
-    TimeProvider? timeProvider = null) : IAttentionService
+    TimeProvider? timeProvider = null,
+    IAttentionBroadcaster? broadcaster = null,
+    Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? failureHistory = null) : IAttentionService
 {
-    /// <summary>Default page size when the caller does not specify one.</summary>
-    public const int DefaultPageSize = 50;
+    /// <summary>Default number of items returned when the caller does not specify a limit.</summary>
+    public const int DefaultLimit = 100;
 
-    /// <summary>Maximum page size the API will honour.</summary>
-    public const int MaxPageSize = 200;
+    /// <summary>Maximum number of items the API will return in a single page.</summary>
+    public const int MaxLimit = 250;
 
     /// <summary>Role required to see or act on maintenance attention items.</summary>
     public const string MaintenanceRoleName = "farm_admin";
@@ -52,17 +54,26 @@ public sealed class AttentionService(
     private readonly IQueueDataService _queueData = queueData ?? throw new ArgumentNullException(nameof(queueData));
     private readonly ILogger<AttentionService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
+    private readonly IAttentionBroadcaster? _broadcaster = broadcaster;
+    private readonly Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? _failureHistory = failureHistory;
 
     /// <inheritdoc />
-    public async Task<AttentionFeedDto> GetFeedAsync(
+    public async Task<AttentionFeedResult> GetFeedAsync(
         Guid userId,
         bool isFarmAdmin,
-        int page = 1,
-        int pageSize = DefaultPageSize,
+        string? cursor = null,
+        int limit = DefaultLimit,
         CancellationToken cancellationToken = default)
     {
-        int effectivePage = Math.Max(page, 1);
-        int effectivePageSize = pageSize <= 0 ? DefaultPageSize : Math.Min(pageSize, MaxPageSize);
+        // Decode the cursor up front so a malformed token fails explicitly (no silent
+        // restart from page 1). A null/blank cursor means "first page".
+        AttentionFeedCursor? decodedCursor = null;
+        if (!string.IsNullOrWhiteSpace(cursor) && !AttentionFeedCursor.TryDecode(cursor, out decodedCursor))
+        {
+            return AttentionFeedResult.BadCursor();
+        }
+
+        int effectiveLimit = limit <= 0 ? DefaultLimit : Math.Min(limit, MaxLimit);
 
         DateTime now = _clock.GetUtcNow().UtcDateTime;
 
@@ -82,8 +93,8 @@ public sealed class AttentionService(
         }
 
         // Role-based filter: non-admin operators must not see maintenance items, ids, or
-        // detail. Filter BEFORE dedupe/pagination/totals so pagination totals match what
-        // the caller is actually authorized to see.
+        // detail. Filter BEFORE dedupe/sort/cursor so a non-admin can never observe a
+        // maintenance item through a page boundary.
         if (!isFarmAdmin)
         {
             merged.RemoveAll(i => i.Kind == AttentionKind.Maintenance);
@@ -124,30 +135,70 @@ public sealed class AttentionService(
             }
         }
 
-        // Severity primary, then nearest deadline, then oldest first.
-        List<AttentionItemDto> sorted = visible
-            .OrderByDescending(i => (int)i.Severity)
-            .ThenBy(i => i.DeadlineAt ?? DateTime.MaxValue)
-            .ThenBy(i => i.OccurredAt)
-            .ToList();
+        // Canonical ordering: severity DESC → nearest deadline (nulls last) → oldest first
+        // → stable item id. The id tiebreak is mandatory because offline items all share a
+        // single stable OccurredAt anchor; without it, cursor paging could duplicate or omit
+        // tied items.
+        visible.Sort(CompareCanonical);
 
-        int totalCount = sorted.Count;
-        int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)effectivePageSize);
+        // Cursor slice — take up to `limit` items strictly after the cursor position. All
+        // filtering/dedupe/snooze/sort happen BEFORE this slice.
+        IEnumerable<AttentionItemDto> afterCursor = decodedCursor is null
+            ? visible
+            : visible.Where(i => IsAfterCursor(i, decodedCursor));
 
-        List<AttentionItemDto> pageItems = sorted
-            .Skip((effectivePage - 1) * effectivePageSize)
-            .Take(effectivePageSize)
-            .ToList();
+        List<AttentionItemDto> pageItems = afterCursor.Take(effectiveLimit + 1).ToList();
 
-        // Healthy printers = enabled printers with no visible items (page-independent).
+        // A full extra item proves more results exist; emit a nextCursor only then.
+        string? nextCursor = null;
+        if (pageItems.Count > effectiveLimit)
+        {
+            pageItems.RemoveAt(pageItems.Count - 1);
+            nextCursor = AttentionFeedCursor.FromItem(pageItems[^1]).Encode();
+        }
+
+        // Healthy printers = enabled printers with no visible items (page-independent). Only
+        // the count crosses the wire (never the id list).
         HashSet<Guid> printersWithItems = new(visible.Select(i => i.PrinterId));
         List<Printer> allPrinters = await _printers.GetAllAsync(cancellationToken);
-        List<Guid> healthy = allPrinters
-            .Where(p => p.IsEnabled && !printersWithItems.Contains(p.Id))
-            .Select(p => p.Id)
-            .ToList();
+        int healthyPrinterCount = allPrinters.Count(p => p.IsEnabled && !printersWithItems.Contains(p.Id));
 
-        return new AttentionFeedDto(pageItems, totalCount, effectivePage, effectivePageSize, totalPages, healthy);
+        return AttentionFeedResult.Success(new AttentionFeedDto(pageItems, nextCursor, healthyPrinterCount));
+    }
+
+    /// <summary>
+    /// Total canonical ordering used for the feed and for cursor comparison:
+    /// severity DESC → (deadlineAt ?? MaxValue) ASC → occurredAt ASC → item id ordinal ASC.
+    /// </summary>
+    private static int CompareCanonical(AttentionItemDto a, AttentionItemDto b)
+        => CompareKeys(
+            (int)a.Severity, (a.DeadlineAt ?? DateTime.MaxValue).Ticks, a.OccurredAt.Ticks, a.Id,
+            (int)b.Severity, (b.DeadlineAt ?? DateTime.MaxValue).Ticks, b.OccurredAt.Ticks, b.Id);
+
+    /// <summary>Returns true when <paramref name="item"/> sorts strictly after the cursor.</summary>
+    private static bool IsAfterCursor(AttentionItemDto item, AttentionFeedCursor cursor)
+        => CompareKeys(
+            (int)item.Severity, (item.DeadlineAt ?? DateTime.MaxValue).Ticks, item.OccurredAt.Ticks, item.Id,
+            cursor.Severity, cursor.DeadlineTicks, cursor.OccurredTicks, cursor.Id) > 0;
+
+    private static int CompareKeys(
+        int severityA, long deadlineA, long occurredA, string idA,
+        int severityB, long deadlineB, long occurredB, string idB)
+    {
+        int c = severityB.CompareTo(severityA); // severity DESC
+        if (c != 0)
+        {
+            return c;
+        }
+
+        c = deadlineA.CompareTo(deadlineB); // deadline ASC (nulls already mapped to MaxValue)
+        if (c != 0)
+        {
+            return c;
+        }
+
+        c = occurredA.CompareTo(occurredB); // occurredAt ASC
+        return c != 0 ? c : string.CompareOrdinal(idA, idB); // stable id ASC
     }
 
     /// <inheritdoc />
@@ -270,7 +321,7 @@ public sealed class AttentionService(
             AttentionKind.Failure => await DispatchFailureAsync(item, actionKind, cancellationToken),
             AttentionKind.Maintenance => await DispatchMaintenanceAsync(item, actionKind, userName, cancellationToken),
             AttentionKind.Offline => new AttentionActionResult(AttentionActionOutcome.InvalidAction, "Offline items expose snooze only."),
-            AttentionKind.Harvest => new AttentionActionResult(AttentionActionOutcome.NotImplemented, "Harvest execution lands with F9/#714."),
+            AttentionKind.Harvest => new AttentionActionResult(AttentionActionOutcome.InvalidAction, "Harvest items are deferred until #714; no action is offered."),
             AttentionKind.Runout => new AttentionActionResult(AttentionActionOutcome.NotImplemented, "Runout execution lands with F4/#709."),
             _ => new AttentionActionResult(AttentionActionOutcome.Failed, "Unknown attention kind."),
         };
@@ -350,9 +401,33 @@ public sealed class AttentionService(
                 AttentionActionKind.Cancel => await _printers.CancelPrintAsync(item.PrinterId, ct),
                 _ => false,
             };
-            return ok
-                ? new AttentionActionResult(AttentionActionOutcome.Ok, null)
-                : new AttentionActionResult(AttentionActionOutcome.Failed, "Downstream refused the command.");
+
+            if (!ok)
+            {
+                // Downstream refused; leave the incident unresolved and emit no event.
+                return new AttentionActionResult(AttentionActionOutcome.Failed, "Downstream refused the command.");
+            }
+
+            // Persist the resolution ONLY after the printer/job mutation succeeded, so a card
+            // cannot be resolved without a real state change. The incident row is retained for
+            // history/audit (issue #707, R2). Resume/Pause leave the job active, so the active
+            // -status check alone would not retire the card — the resolved marker does.
+            if (_failureHistory is not null
+                && TryParseSuffixGuid(item.Id, AttentionIdPrefixes.Failure, out Guid incidentId))
+            {
+                _ = await _failureHistory.MarkResolvedAsync(incidentId, _clock.GetUtcNow().UtcDateTime, ct);
+            }
+
+            // Exactly one shared resolved event after the authoritative mutation + resolution
+            // commit (issue #707, R2/R3). The broadcaster gate honours #725 attentionEnabled.
+            if (_broadcaster is not null)
+            {
+                await _broadcaster.NotifyChangedAsync(
+                    new AttentionChangedPayload(item.Id, AttentionChangeKind.Resolved, _clock.GetUtcNow().UtcDateTime),
+                    ct);
+            }
+
+            return new AttentionActionResult(AttentionActionOutcome.Ok, null);
         }
         catch (PrinterBackendBusyException ex)
         {

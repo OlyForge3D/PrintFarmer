@@ -122,4 +122,60 @@ public class EfAttentionSnoozeRepositoryRaceTests
 
         await act.Should().ThrowAsync<DbUpdateException>();
     }
+
+    [Fact]
+    public async Task RemoveAsync_ConcurrentDeleteRace_IsIdempotentlySuccessful()
+    {
+        var userId = Guid.NewGuid();
+        const string itemId = "failure:33333333-3333-3333-3333-333333333333";
+
+        await using SqliteConnection connection =
+            new("Data Source=file:attention-snooze-delete-race?mode=memory&cache=shared");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = OptionsFor(connection);
+
+        await using (AppDbContext seedDb = new(options))
+        {
+            await seedDb.Database.EnsureCreatedAsync();
+            _ = seedDb.AttentionSnoozes.Add(new AttentionSnooze
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                AttentionItemId = itemId,
+                SnoozedUntilUtc = new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc),
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext db = new(options);
+        var repository = new EfAttentionSnoozeRepository(db);
+
+        bool deleted = false;
+        db.SavingChanges += (_, _) =>
+        {
+            if (deleted)
+            {
+                return;
+            }
+
+            deleted = true;
+            // A concurrent request deletes the same row between our read and our save,
+            // so the tracked DELETE affects zero rows and EF raises a concurrency
+            // exception. The desired end state (no snooze) is nonetheless achieved.
+            using AppDbContext concurrentDb = new(options);
+            AttentionSnooze? row = concurrentDb.AttentionSnoozes
+                .Single(s => s.UserId == userId && s.AttentionItemId == itemId);
+            _ = concurrentDb.AttentionSnoozes.Remove(row);
+            _ = concurrentDb.SaveChanges();
+        };
+
+        bool result = await repository.RemoveAsync(userId, itemId, CancellationToken.None);
+
+        result.Should().BeTrue("a concurrent delete leaves the desired end state, so RemoveAsync is idempotently successful");
+
+        await using AppDbContext assertDb = new(options);
+        int count = await assertDb.AttentionSnoozes.CountAsync(s => s.UserId == userId && s.AttentionItemId == itemId);
+        count.Should().Be(0, "the row must be gone regardless of which request won the race");
+    }
 }

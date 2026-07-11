@@ -74,6 +74,7 @@ public class MaintenanceAlertEngine(
                 g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
         int alertsGenerated = 0;
+        List<MaintenanceAlert> createdAlerts = new();
 
         // Evaluate each deployment → plan → tasks
         foreach (PrinterMaintenanceSchedule deployment in deployments)
@@ -114,7 +115,8 @@ public class MaintenanceAlertEngine(
 
                     if (!hasActiveAlert)
                     {
-                        await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, cancellationToken);
+                        MaintenanceAlert created = await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, cancellationToken);
+                        createdAlerts.Add(created);
                         alertsGenerated++;
                     }
                     else
@@ -135,6 +137,14 @@ public class MaintenanceAlertEngine(
                 "Generated {Count} maintenance alerts for printer {PrinterId}",
                 alertsGenerated,
                 printerId);
+
+            // Broadcast only after the commit succeeds (issue #707, review R3). The legacy
+            // MaintenanceHub notification honours EnableSignalRNotifications, but the attention
+            // feed invalidation is independent of that toggle.
+            foreach (MaintenanceAlert created in createdAlerts)
+            {
+                await BroadcastAlertCreatedAsync(created);
+            }
         }
 
         return alertsGenerated;
@@ -190,7 +200,7 @@ public class MaintenanceAlertEngine(
         return false;
     }
 
-    private async Task GenerateAlertAsync(
+    private async Task<MaintenanceAlert> GenerateAlertAsync(
         PrinterStatistics stats,
         PrinterMaintenanceSchedule deployment,
         MaintenanceTask task,
@@ -199,8 +209,6 @@ public class MaintenanceAlertEngine(
         MaintenanceLog? lastLog,
         CancellationToken cancellationToken)
     {
-        MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
-
         double? hoursSinceLast = effectiveHours.HasValue
             ? ComputeHoursSinceLastMaintenance(stats, lastLog)
             : null;
@@ -232,11 +240,10 @@ public class MaintenanceAlertEngine(
             stats.PrinterId,
             alert.Title);
 
-        // Send SignalR notification if enabled
-        if (settings.EnableSignalRNotifications)
-        {
-            await BroadcastAlertCreatedAsync(alert);
-        }
+        // Broadcasts are deferred until AFTER the batch SaveChangesAsync succeeds (issue
+        // #707, review R3) so the attention feed is never invalidated for an alert that was
+        // never committed.
+        return alert;
     }
 
     private static string BuildAlertMessage(
@@ -292,28 +299,36 @@ public class MaintenanceAlertEngine(
 
     private async Task BroadcastAlertCreatedAsync(MaintenanceAlert alert)
     {
-        try
-        {
-            await _hubContext.Clients.All.SendAsync(
-                MaintenanceHubEvents.AlertCreated,
-                new
-                {
-                    id = alert.Id,
-                    printerId = alert.PrinterId,
-                    title = alert.Title,
-                    message = alert.Message,
-                    severity = alert.Severity,
-                    createdAt = alert.CreatedAt
-                });
+        MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
 
-            _logger.LogDebug("Broadcast maintenance alert {AlertId} via SignalR", alert.Id);
-        }
-        catch (Exception ex)
+        // Legacy MaintenanceHub notification remains gated on the operator toggle.
+        if (settings.EnableSignalRNotifications)
         {
-            _logger.LogWarning(ex, "Failed to broadcast maintenance alert {AlertId} via SignalR", alert.Id);
+            try
+            {
+                await _hubContext.Clients.All.SendAsync(
+                    MaintenanceHubEvents.AlertCreated,
+                    new
+                    {
+                        id = alert.Id,
+                        printerId = alert.PrinterId,
+                        title = alert.Title,
+                        message = alert.Message,
+                        severity = alert.Severity,
+                        createdAt = alert.CreatedAt
+                    });
+
+                _logger.LogDebug("Broadcast maintenance alert {AlertId} via SignalR", alert.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast maintenance alert {AlertId} via SignalR", alert.Id);
+            }
         }
 
-        // Invalidate the unified attention feed (issue #707).
+        // Invalidate the unified attention feed (issue #707). This is INDEPENDENT of the
+        // legacy MaintenanceAlertSettings.EnableSignalRNotifications toggle (review R3) — the
+        // attention feed must reflect committed maintenance state regardless of that setting.
         if (_attentionBroadcaster is not null)
         {
             await _attentionBroadcaster.NotifyChangedAsync(new AttentionChangedPayload(
@@ -413,36 +428,38 @@ public class MaintenanceAlertEngine(
     private async Task BroadcastAlertStatusChangedAsync(MaintenanceAlert alert)
     {
         MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
-        if (!settings.EnableSignalRNotifications)
+
+        // Legacy MaintenanceHub notification remains gated on the operator toggle.
+        if (settings.EnableSignalRNotifications)
         {
-            return;
+            try
+            {
+                await _hubContext.Clients.All.SendAsync(
+                    MaintenanceHubEvents.AlertStatusChanged,
+                    new
+                    {
+                        id = alert.Id,
+                        printerId = alert.PrinterId,
+                        status = alert.Status.ToString(),
+                        acknowledgedAt = alert.AcknowledgedAt,
+                        acknowledgedBy = alert.AcknowledgedBy,
+                        resolvedAt = alert.ResolvedAt,
+                        resolvedBy = alert.ResolvedBy,
+                        dismissedAt = alert.DismissedAt,
+                        dismissedBy = alert.DismissedBy
+                    });
+
+                _logger.LogDebug("Broadcast alert status change for {AlertId} via SignalR", alert.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast alert status change for {AlertId} via SignalR", alert.Id);
+            }
         }
 
-        try
-        {
-            await _hubContext.Clients.All.SendAsync(
-                MaintenanceHubEvents.AlertStatusChanged,
-                new
-                {
-                    id = alert.Id,
-                    printerId = alert.PrinterId,
-                    status = alert.Status.ToString(),
-                    acknowledgedAt = alert.AcknowledgedAt,
-                    acknowledgedBy = alert.AcknowledgedBy,
-                    resolvedAt = alert.ResolvedAt,
-                    resolvedBy = alert.ResolvedBy,
-                    dismissedAt = alert.DismissedAt,
-                    dismissedBy = alert.DismissedBy
-                });
-
-            _logger.LogDebug("Broadcast alert status change for {AlertId} via SignalR", alert.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to broadcast alert status change for {AlertId} via SignalR", alert.Id);
-        }
-
-        // Invalidate the unified attention feed (issue #707).
+        // Invalidate the unified attention feed (issue #707). INDEPENDENT of the legacy
+        // EnableSignalRNotifications toggle (review R3); fires after the committed status
+        // mutation in Acknowledge/Resolve/Dismiss.
         if (_attentionBroadcaster is not null)
         {
             // Resolved/Dismissed retire the item; Acknowledged (and anything else) updates it.

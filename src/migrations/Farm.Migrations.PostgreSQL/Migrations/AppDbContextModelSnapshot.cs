@@ -781,6 +781,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("SnapshotUrl")
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)");

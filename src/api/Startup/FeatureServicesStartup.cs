@@ -99,7 +99,8 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
         // Attention Feed (issue #707) — unified operator feed composed from failure,
-        // maintenance, offline, and harvest sources. Runout joins via F4/#709.
+        // maintenance, and offline sources. Harvest items join after the #714 ledger exists;
+        // runout items join via #709.
         services.AddScoped<Farm.Infrastructure.Repositories.Attention.IAttentionSnoozeRepository,
             Farm.Infrastructure.Repositories.Attention.EfAttentionSnoozeRepository>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
@@ -108,8 +109,10 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.Attention.Sources.MaintenanceAttentionSource>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
             Farm.Infrastructure.Services.Attention.Sources.OfflineAttentionSource>();
-        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
-            Farm.Infrastructure.Services.Attention.Sources.HarvestAttentionSource>();
+
+        // Harvest attention items are deferred until the #714 harvest ledger exists; the
+        // HarvestAttentionSource is intentionally NOT registered so no harvest cards are
+        // composed and no Harvest action path is reachable from a feed item (review R4).
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionService,
             Farm.Infrastructure.Services.Attention.AttentionService>();
         services.AddSingleton<Farm.Infrastructure.Services.Attention.IAttentionBroadcaster,

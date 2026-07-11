@@ -69,7 +69,35 @@ public class AttentionControllerTests : IAsyncLifetime
         AttentionFeedDto? feed = await response.Content.ReadFromJsonAsync<AttentionFeedDto>(JsonOptions);
         feed.Should().NotBeNull();
         feed!.Items.Should().NotBeNull();
-        feed.HealthyPrinterIds.Should().NotBeNull();
+        feed.HealthyPrinterCount.Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    [Fact(DisplayName = "GET /api/attention with limit above max returns 400 (no clamp)")]
+    public async Task GetAttention_OversizeLimit_Returns400()
+    {
+        HttpResponseMessage response = await _authClient!.GetAsync("/api/attention?limit=251");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "GET /api/attention with limit below 1 returns 400 (no clamp)")]
+    public async Task GetAttention_ZeroLimit_Returns400()
+    {
+        HttpResponseMessage response = await _authClient!.GetAsync("/api/attention?limit=0");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "GET /api/attention with malformed cursor returns 400 (no silent restart)")]
+    public async Task GetAttention_MalformedCursor_Returns400()
+    {
+        HttpResponseMessage response = await _authClient!.GetAsync("/api/attention?cursor=%21%21not-a-cursor%21%21");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "GET /api/attention with max limit is accepted")]
+    public async Task GetAttention_MaxLimit_Returns200()
+    {
+        HttpResponseMessage response = await _authClient!.GetAsync("/api/attention?limit=250");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact(DisplayName = "POST snooze with past deadline returns 400")]

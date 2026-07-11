@@ -1,8 +1,10 @@
 ﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.FailureDetection;
+using Farm.Infrastructure.Services.Queue;
 
 namespace Farm.Infrastructure.Services.Attention.Sources;
 
@@ -19,9 +21,17 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// A stale incident window keeps the feed to actionable items only; older incidents
 /// remain queryable via the failure-detection history endpoint.
 /// </para>
+/// <para>
+/// Composition suppresses incidents that can no longer be truthfully acted on (issue #707,
+/// review R2): incidents already resolved by a successful action, incidents whose job has
+/// gone missing, moved to a different printer, or is no longer active (superseded). This
+/// guarantees a card disappears on refetch after its advertised action succeeds rather than
+/// lingering for the full stale window.
+/// </para>
 /// </remarks>
 public sealed class FailureAttentionSource(
     IFailureDetectionIncidentHistoryService history,
+    IQueueDataService queueData,
     TimeProvider? timeProvider = null) : IAttentionSource
 {
     /// <summary>Only surface incidents newer than this window.</summary>
@@ -32,6 +42,9 @@ public sealed class FailureAttentionSource(
 
     private readonly IFailureDetectionIncidentHistoryService _history =
         history ?? throw new ArgumentNullException(nameof(history));
+
+    private readonly IQueueDataService _queueData =
+        queueData ?? throw new ArgumentNullException(nameof(queueData));
 
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -54,6 +67,13 @@ public sealed class FailureAttentionSource(
                 continue;
             }
 
+            // A successful attention action already resolved this incident; suppress the card
+            // even if the underlying job is still active (issue #707, R2).
+            if (incident.ResolvedAtUtc is not null)
+            {
+                continue;
+            }
+
             if (incident.Id is not Guid incidentId)
             {
                 continue;
@@ -63,6 +83,15 @@ public sealed class FailureAttentionSource(
             // (we can't verify the printer's active job still matches). Suppress it from the
             // feed rather than surface an unactionable card.
             if (incident.JobId is not Guid incidentJobId)
+            {
+                continue;
+            }
+
+            // Job-identity suppression: only surface incidents whose referenced job still
+            // exists, is still on this printer, and is still active. A missing, moved, or
+            // superseded job means the card is no longer actionable and must not linger.
+            PrintJob? job = await _queueData.GetPrintJobByIdAsync(incidentJobId, cancellationToken);
+            if (job is null || job.AssignedPrinterId != incident.PrinterId || !IsActionable(job.Status))
             {
                 continue;
             }
@@ -105,4 +134,7 @@ public sealed class FailureAttentionSource(
 
         return items;
     }
+
+    private static bool IsActionable(PrintJobStatus status)
+        => status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused;
 }

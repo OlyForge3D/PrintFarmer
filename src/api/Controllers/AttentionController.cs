@@ -57,20 +57,26 @@ public sealed class AttentionController(
             ? null
             : OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.Attention);
 
-    /// <summary>Returns the composed, paginated attention feed for the current user.</summary>
-    /// <param name="page">1-based page index. Values &lt;= 0 are clamped to 1.</param>
-    /// <param name="pageSize">
-    /// Items per page. Defaults to 50 and is capped at 200 by the service.
+    /// <summary>Returns the composed, cursor-paginated attention feed for the current user.</summary>
+    /// <param name="cursor">
+    /// Opaque cursor from a previous page's <c>nextCursor</c>. Omit for the first page.
+    /// A malformed or unsupported cursor returns <c>400</c> (no silent restart from page 1).
+    /// </param>
+    /// <param name="limit">
+    /// Maximum items to return. Defaults to 100; values above 250 or below 1 return a
+    /// validation error (the server does not clamp).
     /// </param>
     /// <param name="cancellationToken">Request cancellation token.</param>
-    /// <response code="200">Paginated feed of severity-ordered items and healthy printer ids.</response>
+    /// <response code="200">Cursor-paginated feed: items, nextCursor, and healthy printer count.</response>
+    /// <response code="400">The cursor is malformed/unsupported or the limit is out of range.</response>
     /// <response code="401">User id could not be resolved from the token.</response>
     [HttpGet]
     [ProducesResponseType(typeof(AttentionFeedDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AttentionFeedDto>> GetFeedAsync(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50,
+        [FromQuery] string? cursor = null,
+        [FromQuery] int limit = AttentionService.DefaultLimit,
         CancellationToken cancellationToken = default)
     {
         if (FeatureDisabledResult() is NotFoundObjectResult disabled)
@@ -83,9 +89,24 @@ public sealed class AttentionController(
             return error!;
         }
 
+        // Validate the limit explicitly (do not clamp) per the R1 contract.
+        if (limit < 1 || limit > AttentionService.MaxLimit)
+        {
+            ModelState.AddModelError(
+                nameof(limit),
+                $"limit must be between 1 and {AttentionService.MaxLimit}.");
+            return ValidationProblem(ModelState);
+        }
+
         bool isFarmAdmin = User?.IsInRole(AttentionService.MaintenanceRoleName) ?? false;
-        AttentionFeedDto feed = await _service.GetFeedAsync(userId, isFarmAdmin, page, pageSize, cancellationToken);
-        return Ok(feed);
+        AttentionFeedResult result = await _service.GetFeedAsync(userId, isFarmAdmin, cursor, limit, cancellationToken);
+        if (result.InvalidCursor)
+        {
+            ModelState.AddModelError(nameof(cursor), "The supplied cursor is malformed or unsupported.");
+            return ValidationProblem(ModelState);
+        }
+
+        return Ok(result.Feed);
     }
 
     /// <summary>Snoozes an attention item for the current user until the given UTC instant.</summary>
@@ -223,20 +244,12 @@ public sealed class AttentionController(
             _ => StatusCode(StatusCodes.Status502BadGateway, new { error = result.Reason ?? "Action failed." }),
         };
 
-        if (result.Outcome == AttentionActionOutcome.Ok)
-        {
-            // A successful action mutates shared source state, so notify all clients. Cancel
-            // and maintenance resolve/dismiss retire the item; other actions update it.
-            AttentionChangeKind changeKind = actionKind is AttentionActionKind.Cancel
-                or AttentionActionKind.Resolve
-                or AttentionActionKind.Dismiss
-                ? AttentionChangeKind.Resolved
-                : AttentionChangeKind.Updated;
-            await _broadcaster.NotifyChangedAsync(
-                new AttentionChangedPayload(attentionItemId, changeKind, DateTime.UtcNow),
-                cancellationToken);
-        }
-
+        // Single-owner broadcast topology (issue #707, review R3): the underlying source
+        // mutator owns its shared attentionchanged event. The maintenance engine broadcasts
+        // after its committed status mutation; the failure dispatch broadcasts one resolved
+        // event after the printer mutation + resolution commit. The controller therefore does
+        // NOT emit a blanket shared event here (that would double-fire). Per-user snooze/clear
+        // events remain controller-owned on their dedicated endpoints.
         return response;
     }
 

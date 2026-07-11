@@ -217,25 +217,28 @@ public sealed record AttentionItemDto(
     bool AllowFreshOccurrenceBypass = true);
 
 /// <summary>
-/// Response payload for <c>GET /api/attention</c>.
+/// Response payload for <c>GET /api/attention</c> (issue #707, review R1).
 /// </summary>
-/// <param name="Items">Severity-ordered items for the requested page.</param>
-/// <param name="TotalCount">Total items across every page after snooze suppression.</param>
-/// <param name="Page">1-based page number the caller received.</param>
-/// <param name="PageSize">Item cap applied to <paramref name="Items"/>.</param>
-/// <param name="TotalPages">Total pages available for <paramref name="TotalCount"/>.</param>
-/// <param name="HealthyPrinterIds">
-/// Enabled printers with no visible items. Page-independent; the full set is returned
-/// on every page so the client can render the "N printers running normally" row without
-/// paging.
+/// <param name="Items">
+/// Canonically-ordered items for the requested page. Ordering is severity DESC →
+/// (deadlineAt ?? MaxValue) ASC → occurredAt ASC → stable item id ASC. Authorization,
+/// source filtering, dedupe, and snooze/fresh-occurrence logic are all applied before the
+/// cursor/limit slice.
+/// </param>
+/// <param name="NextCursor">
+/// Opaque, versioned cursor to fetch the next page. <c>null</c> when the current page is
+/// the last one (no more results exist). Callers pass this back verbatim as the
+/// <c>cursor</c> query parameter.
+/// </param>
+/// <param name="HealthyPrinterCount">
+/// Count of enabled printers with no visible items. Page-independent; the count (never the
+/// id list) is returned on every page so the client can render the "N printers running
+/// normally" row without paging.
 /// </param>
 public sealed record AttentionFeedDto(
     IReadOnlyList<AttentionItemDto> Items,
-    int TotalCount,
-    int Page,
-    int PageSize,
-    int TotalPages,
-    IReadOnlyList<Guid> HealthyPrinterIds);
+    string? NextCursor,
+    int HealthyPrinterCount);
 
 /// <summary>
 /// Request payload for <c>POST /api/attention/{itemId}/snooze</c>.
