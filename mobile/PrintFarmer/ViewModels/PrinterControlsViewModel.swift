@@ -29,7 +29,12 @@ struct ControlCommand: Equatable, Sendable {
     let startedAt: Date
 
     enum Kind: Equatable, Sendable {
-        case preheat(PreheatPreset)
+        /// A preheat/cool-down carries the concrete target setpoints it
+        /// requested (not just the preset) so confirmation compares against the
+        /// exact values sent. A `nil` component means that setpoint isn't
+        /// controllable on this backend (e.g. the bed on a bed-less printer)
+        /// and must be treated as already satisfied — never waited on.
+        case preheat(PreheatPreset, hotendTarget: Double?, bedTarget: Double?)
         case home(axes: [String])
         case jog(axis: String, distanceMm: Double)
     }
@@ -92,31 +97,46 @@ final class PrinterControlsViewModel: ObservableObject {
     // MARK: - Commands
 
     func preheat(_ preset: PreheatPreset) async {
-        let command = ControlCommand(kind: .preheat(preset), startedAt: clock())
+        let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
+
+        // Values actually sent to the backend:
+        //   * coolDown always sends 0/0 (safe even if the backend ignores bed).
+        //   * A preset's hotend requires temperature control (gated below).
+        //   * A preset's bed is silently dropped when bed control is unsupported.
+        let sentHotend: Double?
+        let sentBed: Double?
+        if preset == .coolDown {
+            sentHotend = 0
+            sentBed = 0
+        } else {
+            sentHotend = preset.hotend
+            sentBed = caps.supportsBedTemperature ? preset.bed : nil
+        }
+
+        // Confirmation targets carried on the pending command. A setpoint the
+        // backend can't drive is `nil` so we treat it as already satisfied and
+        // never wait for an unobservable value. The preset setpoints are the
+        // source of truth (0/0 for coolDown).
+        let confirmHotend: Double? = caps.supportsTemperatureControl ? preset.hotend : nil
+        let confirmBed: Double? = (caps.supportsTemperatureControl && caps.supportsBedTemperature)
+            ? preset.bed : nil
+
+        let command = ControlCommand(
+            kind: .preheat(preset, hotendTarget: confirmHotend, bedTarget: confirmBed),
+            startedAt: clock()
+        )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
 
-        // Capability gating:
-        //   * coolDown always sends 0/0 (safe even if backend ignores bed).
-        //   * Preset hotend requires temperature control.
-        //   * Preset bed silently dropped when bed control is unsupported (e.g. FlashForge).
-        let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
-        let hotend: Double?
-        let bed: Double?
-        if preset == .coolDown {
-            hotend = 0
-            bed = 0
-        } else {
+        if preset != .coolDown {
             guard caps.supportsTemperatureControl else {
                 setError(command: command, message: "Printer doesn't support temperature control.", isRetryable: false)
                 return
             }
-            hotend = preset.hotend
-            bed = caps.supportsBedTemperature ? preset.bed : nil
         }
 
         do {
-            try await printerService.setTemperatures(printerId: printer.id, hotend: hotend, bed: bed)
+            try await printerService.setTemperatures(printerId: printer.id, hotend: sentHotend, bed: sentBed)
         } catch {
             setError(command: command, error: error)
         }
@@ -212,12 +232,12 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .jog(let axis, _):
             return jogAxisMoved(axis: axis, from: previous, to: updated)
-        case .preheat:
-            // A preheat is confirmed by the commanded *targets* moving, never
-            // by measured `hotendTemp`/`bedTemp` drift — otherwise ambient
-            // cooling/heating noise would release the command before the
-            // setpoint is acknowledged.
-            return targetTemperaturesChanged(from: previous, to: updated)
+        case let .preheat(_, hotendTarget, bedTarget):
+            // A preheat/cool-down is confirmed when the snapshot's commanded
+            // *targets* satisfy the requested setpoints — never by measured
+            // `hotendTemp`/`bedTemp` drift, and with no delta required so a
+            // printer already sitting at the setpoint still confirms.
+            return targetsSatisfied(hotendTarget: hotendTarget, bedTarget: bedTarget, in: updated)
         case .home:
             // `homedAxes` is the authoritative homing confirmation; position
             // resets are a side effect and must not couple homing to jog noise.
@@ -237,12 +257,17 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
-    /// True when either commanded temperature *target* moved. Deliberately
-    /// excludes measured `hotendTemp`/`bedTemp`: only the setpoint confirms a
-    /// preheat, so live thermal drift can never clear a pending command.
-    private static func targetTemperaturesChanged(from previous: Printer, to updated: Printer) -> Bool {
-        previous.hotendTarget != updated.hotendTarget
-            || previous.bedTarget != updated.bedTarget
+    /// True when `printer`'s commanded *target* setpoints satisfy the requested
+    /// targets. A `nil` requested target — a setpoint the backend can't drive,
+    /// e.g. the bed on a bed-less printer — is treated as already satisfied so
+    /// control never waits for an unobservable value. Measured
+    /// `hotendTemp`/`bedTemp` are intentionally ignored: only the commanded
+    /// setpoint confirms a preheat, and a snapshot already at the requested
+    /// target is valid confirmation (no delta required).
+    private static func targetsSatisfied(hotendTarget: Double?, bedTarget: Double?, in printer: Printer) -> Bool {
+        let hotendSatisfied = hotendTarget.map { printer.hotendTarget == $0 } ?? true
+        let bedSatisfied = bedTarget.map { printer.bedTarget == $0 } ?? true
+        return hotendSatisfied && bedSatisfied
     }
 
     // MARK: - Computed
@@ -302,11 +327,23 @@ final class PrinterControlsViewModel: ObservableObject {
         return true
     }
 
-    /// Note: pendingCommand is *not* cleared here on success — it stays until
-    /// SignalR confirms the effect via `handlePrinterUpdate(_:)`. We only clear
-    /// it on failure so the user can retry. See controls UX spec §"5-state model".
+    /// On failure we clear the failed command so the user can retry. On success
+    /// we do *not* blanket-clear: pending normally persists until a live
+    /// snapshot confirms the effect (see `handlePrinterUpdate(_:)`). The one
+    /// exception is when the latest cached same-printer snapshot *already*
+    /// satisfies the command's confirmation domain — e.g. a same-preset preheat
+    /// on a printer already at the requested targets, an already-zero cool-down,
+    /// or a confirming snapshot that landed before the HTTP response. In that
+    /// case waiting for a further delta would hang forever, so we clear now.
+    /// Single-flight identity is enforced (`pendingCommand == command`) so an
+    /// old/stale response can never clear a newer pending command.
     private func endCommand(_ command: ControlCommand) {
         if lastError?.command == command {
+            pendingCommand = nil
+            return
+        }
+        guard pendingCommand == command else { return }
+        if Self.transition(from: printer, to: printer, resolves: command) {
             pendingCommand = nil
         }
     }
