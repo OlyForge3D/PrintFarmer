@@ -41,6 +41,17 @@
                ReferencedContainer = "container:PrintFarmer.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F7060002000000000000D001"
+               BuildableName = "PrintFarmerUITests.xctest"
+               BlueprintName = "PrintFarmerUITests"
+               ReferencedContainer = "container:PrintFarmer.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

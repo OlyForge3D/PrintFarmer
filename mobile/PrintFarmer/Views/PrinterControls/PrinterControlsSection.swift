@@ -42,17 +42,32 @@ struct PrinterControlsSection: View {
     }
 
     var body: some View {
-        if Self.isHidden(for: printer) {
-            EmptyView()
-        } else {
-            content
-                .onChange(of: printer.isOnline) { _, _ in
-                    viewModel.handlePrinterUpdate(printer)
-                }
-                .onChange(of: printer.state) { _, _ in
-                    viewModel.handlePrinterUpdate(printer)
-                }
-                .task { await viewModel.loadCapabilities() }
+        // Wrap both the hidden and visible branches so the `.onChange`
+        // observer is installed unconditionally. Otherwise a printer going
+        // offline swaps the visible `content` (which owned the observer) for
+        // `EmptyView` before the offline snapshot is delivered, and
+        // `pendingCommand` sticks forever (issue #706 F1 review defect B).
+        //
+        // The wrapper view identity is stable across the online/offline swap,
+        // and the signal is derived from the immutable `printer` prop, so
+        // re-renders triggered by the VM's own `@Published` state cannot
+        // re-fire `.onChange` — no update loop.
+        ZStack {
+            if Self.isHidden(for: printer) {
+                EmptyView()
+            } else {
+                content
+                    .task { await viewModel.loadCapabilities() }
+            }
+        }
+        // Forward every meaningful live snapshot to the VM so
+        // `pendingCommand` clears after jog/preheat/home effects land even
+        // when `state` / `isOnline` did not change (position/temp/homing
+        // updates typically arrive without a state transition). The signal
+        // captures only the fields the VM actually reads, so unrelated churn
+        // (camera URLs, spool metadata, notes) does not thrash `.onChange`.
+        .onChange(of: PrinterControlsUpdateSignal(printer: printer)) { _, _ in
+            viewModel.handlePrinterUpdate(printer)
         }
     }
 
@@ -148,5 +163,48 @@ struct PrinterControlsSection: View {
         .padding(10)
         .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Update Signal
+
+/// Snapshot of the printer fields that the controls VM cares about when
+/// deciding whether a live update should clear an in-flight command
+/// (`PrinterControlsViewModel.handlePrinterUpdate`).
+///
+/// Two signals compare equal iff none of these fields moved: only then
+/// can we safely skip forwarding the snapshot to the VM. Any drift in
+/// state, online status, homing status, position or temperatures is
+/// treated as evidence that the last jog/preheat/home command produced
+/// an effect and the pending state should be released.
+///
+/// The signal deliberately excludes churn-heavy metadata (camera URLs,
+/// spool info, progress %, thumbnails) so `.onChange` fires exactly
+/// when it is meaningful for the controls surface.
+struct PrinterControlsUpdateSignal: Hashable {
+    let id: UUID
+    let isOnline: Bool
+    let state: String?
+    let x: Double?
+    let y: Double?
+    let z: Double?
+    let hotendTemp: Double?
+    let bedTemp: Double?
+    let hotendTarget: Double?
+    let bedTarget: Double?
+    let homedAxes: String?
+
+    init(printer: Printer) {
+        self.id = printer.id
+        self.isOnline = printer.isOnline
+        self.state = printer.state
+        self.x = printer.x
+        self.y = printer.y
+        self.z = printer.z
+        self.hotendTemp = printer.hotendTemp
+        self.bedTemp = printer.bedTemp
+        self.hotendTarget = printer.hotendTarget
+        self.bedTarget = printer.bedTarget
+        self.homedAxes = printer.homedAxes
     }
 }

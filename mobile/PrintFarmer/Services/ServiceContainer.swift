@@ -25,6 +25,10 @@ final class ServiceContainer: @unchecked Sendable {
     var predictiveService: any PredictiveServiceProtocol
     var dispatchService: any DispatchServiceProtocol
     var failureDetectionService: any FailureDetectionServiceProtocol
+    /// Operator feature gate snapshot (issue #725). Views observe
+    /// `resolved.attentionEnabled` etc. to render safe fallbacks when a
+    /// gated feature is disabled server-side.
+    var capabilitiesService: any SystemCapabilitiesServiceProtocol
     var activeServerGeneration = 0
     #if canImport(UIKit)
     var qrScannerService: QRSpoolScannerService?
@@ -97,6 +101,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.predictiveService = PredictiveService(apiClient: client)
         self.dispatchService = DispatchService(apiClient: client)
         self.failureDetectionService = FailureDetectionService(apiClient: client)
+        self.capabilitiesService = SystemCapabilitiesService(apiClient: client)
         self.signalRService = signalRServiceFactory(resolvedURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
         self.activeServerID = activeServer?.id
@@ -134,7 +139,8 @@ final class ServiceContainer: @unchecked Sendable {
             jobAnalyticsService: DemoJobAnalyticsService(),
             predictiveService: DemoPredictiveService(),
             dispatchService: DemoDispatchService(),
-            failureDetectionService: DemoFailureDetectionService()
+            failureDetectionService: DemoFailureDetectionService(),
+            capabilitiesService: StubSystemCapabilitiesService()
         )
     }
 
@@ -156,6 +162,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.predictiveService = DemoPredictiveService()
         self.dispatchService = DemoDispatchService()
         self.failureDetectionService = DemoFailureDetectionService()
+        self.capabilitiesService = StubSystemCapabilitiesService()
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
@@ -280,6 +287,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.predictiveService = PredictiveService(apiClient: client)
         self.dispatchService = DispatchService(apiClient: client)
         self.failureDetectionService = FailureDetectionService(apiClient: client)
+        self.capabilitiesService = SystemCapabilitiesService(apiClient: client)
         self.signalRService = signalRServiceFactory(baseURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
         self.activeServerID = server?.id
@@ -326,7 +334,8 @@ final class ServiceContainer: @unchecked Sendable {
         jobAnalyticsService: any JobAnalyticsServiceProtocol,
         predictiveService: any PredictiveServiceProtocol,
         dispatchService: any DispatchServiceProtocol,
-        failureDetectionService: any FailureDetectionServiceProtocol
+        failureDetectionService: any FailureDetectionServiceProtocol,
+        capabilitiesService: any SystemCapabilitiesServiceProtocol
     ) {
         self.serverRegistry = nil
         self.credentialsStore = ServerCredentialsStore()
@@ -361,6 +370,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.predictiveService = predictiveService
         self.dispatchService = dispatchService
         self.failureDetectionService = failureDetectionService
+        self.capabilitiesService = capabilitiesService
         #if canImport(UIKit)
         self.qrScannerService = nil
         self.barcodeScannerService = nil
