@@ -12,26 +12,19 @@ import XCTest
 @MainActor
 final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
-    private var mockService: MockPrinterService!
-
-    override func setUp() {
-        super.setUp()
-        mockService = MockPrinterService()
-    }
-
-    override func tearDown() {
-        mockService = nil
-        super.tearDown()
-    }
-
     // MARK: - Helpers
 
+    /// Builds a view model over a per-test `MockPrinterService`. The service is
+    /// created and owned by each test (never a shared mutable property) so no
+    /// MainActor-isolated state is mutated from the nonisolated
+    /// `setUp()`/`tearDown()`.
     private func makeViewModel(
         printer: Printer,
-        capabilities: PrinterBackendCapabilities
+        capabilities: PrinterBackendCapabilities,
+        service: MockPrinterService
     ) -> PrinterControlsViewModel {
-        mockService.capabilitiesToReturn = capabilities
-        return PrinterControlsViewModel(printerService: mockService, printer: printer)
+        service.capabilitiesToReturn = capabilities
+        return PrinterControlsViewModel(printerService: service, printer: printer)
     }
 
     /// Online + idle (state="ready") printer; base targets are 215/60.
@@ -63,10 +56,11 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     // MARK: - Already-at-target confirmation (the core regression)
 
     func test_preheat_alreadyAtRequestedTargets_confirmsOnSuccess_notStuck() async throws {
+        let service = MockPrinterService()
         var base = try idlePrinter()
         base.hotendTarget = 200
         base.bedTarget = 60 // already exactly at PLA targets — no delta will ever arrive
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         await vm.preheat(.pla)
@@ -77,10 +71,11 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     }
 
     func test_coolDown_alreadyAtZero_confirmsOnSuccess_notStuck() async throws {
+        let service = MockPrinterService()
         var base = try idlePrinter()
         base.hotendTarget = 0
         base.bedTarget = 0 // already cooled — Cool Down commands 0/0
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         await vm.preheat(.coolDown)
@@ -90,9 +85,10 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     }
 
     func test_preheat_bedUnsupported_hotendTargetConfirms_bedIgnored() async throws {
+        let service = MockPrinterService()
         var base = try idlePrinter()
         base.hotendTarget = 200 // at PLA hotend; the bed is uncontrollable here
-        let vm = makeViewModel(printer: base, capabilities: Self.noBedCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.noBedCaps, service: service)
         await vm.loadCapabilities()
 
         await vm.preheat(.pla)
@@ -105,8 +101,9 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     // MARK: - Non-matching cached targets keep waiting for live evidence
 
     func test_preheat_successWithNonmatchingCachedTargets_staysPendingUntilMatchingSnapshot() async throws {
+        let service = MockPrinterService()
         let base = try idlePrinter() // targets 215/60; PLA requests 200/60
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         await vm.preheat(.pla)
@@ -120,8 +117,9 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     }
 
     func test_preheat_measuredTempDriftWithNonmatchingTargets_staysPending() async throws {
+        let service = MockPrinterService()
         let base = try idlePrinter() // targets 215/60; PLA requests 200/60
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         await vm.preheat(.pla)
@@ -138,10 +136,11 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     // MARK: - Single-flight identity under a stale response race
 
     func test_staleSuccessResponse_doesNotClearNewerPendingCommand() async throws {
+        let service = MockPrinterService()
         let gate = AsyncGate()
-        mockService.beforeSetTemperatures = { await gate.wait() }
+        service.beforeSetTemperatures = { await gate.wait() }
         let base = try idlePrinter()
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         // C1: a preheat blocked in-flight at the gate.
@@ -169,10 +168,11 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     }
 
     func test_staleFailureResponse_doesNotClearNewerPendingCommand_norOverwriteError() async throws {
+        let service = MockPrinterService()
         let gate = AsyncGate()
-        mockService.beforeSetTemperatures = { await gate.wait() }
+        service.beforeSetTemperatures = { await gate.wait() }
         let base = try idlePrinter()
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         // C1: a preheat blocked in-flight at the gate.
@@ -194,7 +194,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.lastError, "C2 started cleanly with no error")
 
         // Arm the error so C1 fails *late* when it resumes past the gate.
-        mockService.errorToThrow = NetworkError.serverError(500)
+        service.errorToThrow = NetworkError.serverError(500)
         await gate.open()
         await first
 
@@ -208,8 +208,9 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     }
 
     func test_currentCommandFailure_recordsError_andClearsPending() async throws {
-        mockService.errorToThrow = NetworkError.serverError(500)
-        let vm = makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        let service = MockPrinterService()
+        service.errorToThrow = NetworkError.serverError(500)
+        let vm = makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         await vm.preheat(.pla)
