@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
@@ -59,6 +60,18 @@ public class PrintersControllerSwapFlowTests
             printerStatusCache: statusCache.Object);
     }
 
+    /// <summary>
+    /// Builds an <see cref="IOperatorFeatureGate"/> mock for the guided-swap feature (#725).
+    /// Defaults to enabled; pass <c>false</c> to exercise the disabled no-op path.
+    /// </summary>
+    private static IOperatorFeatureGate Gate(bool guidedSwapEnabled = true)
+    {
+        var gate = new Mock<IOperatorFeatureGate>();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.GuidedSwap)).Returns(guidedSwapEnabled);
+        gate.Setup(g => g.GetFlagName(OperatorFeature.GuidedSwap)).Returns("guidedSwapEnabled");
+        return gate.Object;
+    }
+
     [Fact]
     public void PrintersController_ClassLevel_HasAuthorizeAttribute()
     {
@@ -88,7 +101,7 @@ public class PrintersControllerSwapFlowTests
         var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
 
         ActionResult<SwapValidationResultDto> result = await controller.GetToolheadSwapValidationAsync(
-            Guid.NewGuid(), 0, spoolId: null, validator.Object, CancellationToken.None);
+            Guid.NewGuid(), 0, spoolId: null, validator.Object, Gate(), CancellationToken.None);
 
         BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
         CommandResult body = Assert.IsType<CommandResult>(bad.Value);
@@ -103,7 +116,7 @@ public class PrintersControllerSwapFlowTests
         var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
 
         ActionResult<SwapValidationResultDto> result = await controller.GetToolheadSwapValidationAsync(
-            Guid.NewGuid(), -1, spoolId: 1, validator.Object, CancellationToken.None);
+            Guid.NewGuid(), -1, spoolId: 1, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
         validator.VerifyNoOtherCalls();
@@ -118,7 +131,7 @@ public class PrintersControllerSwapFlowTests
             .ReturnsAsync((SwapValidationResultDto?)null);
 
         ActionResult<SwapValidationResultDto> result = await controller.GetToolheadSwapValidationAsync(
-            Guid.NewGuid(), 0, 42, validator.Object, CancellationToken.None);
+            Guid.NewGuid(), 0, 42, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(result.Result);
     }
@@ -145,7 +158,7 @@ public class PrintersControllerSwapFlowTests
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry);
 
         ActionResult<SwapValidationResultDto> result = await controller.GetToolheadSwapValidationAsync(
-            printerId, 0, 42, validator.Object, CancellationToken.None);
+            printerId, 0, 42, validator.Object, Gate(), CancellationToken.None);
 
         SwapValidationResultDto body = Assert.IsType<SwapValidationResultDto>(result.Value);
         Assert.Same(expected, body);
@@ -291,7 +304,7 @@ public class PrintersControllerSwapFlowTests
         var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 0, request, validator.Object, CancellationToken.None);
+            printerId, 0, request, validator.Object, Gate(), CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.True(Assert.IsType<CommandResult>(ok.Value).Success);
@@ -321,7 +334,7 @@ public class PrintersControllerSwapFlowTests
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, CancellationToken.None);
+            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
@@ -354,7 +367,7 @@ public class PrintersControllerSwapFlowTests
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, CancellationToken.None);
+            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
 
         ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
         SwapValidationResultDto body = Assert.IsType<SwapValidationResultDto>(conflict.Value);
@@ -393,7 +406,7 @@ public class PrintersControllerSwapFlowTests
         };
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 1, request, validator.Object, CancellationToken.None);
+            printerId, 1, request, validator.Object, Gate(), CancellationToken.None);
 
         BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.False(Assert.IsType<CommandResult>(bad.Value).Success);
@@ -420,7 +433,7 @@ public class PrintersControllerSwapFlowTests
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, CancellationToken.None);
+            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result.Result);
     }
@@ -436,6 +449,102 @@ public class PrintersControllerSwapFlowTests
         Assert.Equal(9, request!.SpoolId);
         Assert.True(request.OverrideMismatch);
         Assert.Equal("loaded PLA over PETG", request.OverrideReason);
+    }
+
+    [Fact]
+    public async Task GetToolheadSwapValidationAsync_ReturnsFeatureDisabled404_WhenGuidedSwapDisabled()
+    {
+        // #725 gate: when guidedSwapEnabled is off the endpoint must short-circuit to the
+        // standard featureDisabled 404 ProblemDetails BEFORE any validator read or telemetry.
+        var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
+
+        PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<SwapValidationResultDto> result = await controller.GetToolheadSwapValidationAsync(
+            Guid.NewGuid(), 0, spoolId: 42, validator.Object, Gate(guidedSwapEnabled: false), CancellationToken.None);
+
+        NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(notFound.Value);
+        Assert.Equal(404, problem.Status);
+        Assert.Equal("featureDisabled", problem.Extensions["code"]);
+        Assert.Equal("guidedSwapEnabled", problem.Extensions["feature"]);
+        validator.VerifyNoOtherCalls();
+        telemetry.Verify(
+            t => t.RecordPrinterOperation("swap_validation", It.IsAny<string>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_SkipsValidationAndAudit_WhenGuidedSwapDisabled()
+    {
+        // #725 gate: when guidedSwapEnabled is off the spool-binding control REMAINS available
+        // (direct capability-gated control), but reverts to pre-#710 blind assignment: no
+        // pre-flight validation, no override audit. Strict validator proves it is never called
+        // even though the request carries a valid override.
+        Guid printerId = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(true, "assigned"));
+
+        var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
+
+        PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        var request = new SetActiveSpoolRequest
+        {
+            SpoolId = 42,
+            OverrideMismatch = true,
+            OverrideReason = "would-be override, but feature disabled",
+        };
+
+        ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
+            printerId, 0, request, validator.Object, Gate(guidedSwapEnabled: false), CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        validator.VerifyNoOtherCalls();
+        // Assignment telemetry still fires; override audit telemetry must NOT (no audit writes when disabled).
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool", printerId.ToString(), true), Times.Once);
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_OverrideWithoutReason_StillValidates_AndConflictsOnMismatch()
+    {
+        // Issue #710 contract: an override flag WITHOUT a non-empty reason is not a valid
+        // override. Validation still runs, so a genuine mismatch is rejected with 409 until
+        // the operator supplies a reason. Guards against bypassing the hard-stop by setting the
+        // flag alone.
+        Guid printerId = Guid.NewGuid();
+        var mismatch = new SwapValidationResultDto(
+            Ok: false,
+            Expected: "PLA",
+            Scanned: "PETG",
+            AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
+            Reason: "Scanned material 'PETG' does not match expected 'PLA'.");
+
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var validator = new Mock<IPrinterToolheadSwapValidator>();
+        validator.Setup(v => v.ValidateAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mismatch);
+
+        PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        var request = new SetActiveSpoolRequest
+        {
+            SpoolId = 42,
+            OverrideMismatch = true,
+            OverrideReason = "   ", // whitespace-only: not a valid reason
+        };
+
+        ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
+            printerId, 0, request, validator.Object, Gate(), CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.False(Assert.IsType<SwapValidationResultDto>(conflict.Value).Ok);
+        printersService.VerifyNoOtherCalls();
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
     // Local alias so the test file avoids a namespace clash with Farm.Infrastructure enum converters.

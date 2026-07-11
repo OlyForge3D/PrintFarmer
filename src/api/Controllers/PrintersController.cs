@@ -2758,21 +2758,20 @@ public class PrintersController(
     /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.).</param>
     /// <param name="request">Request containing the spool ID to assign and optional override flag.</param>
     /// <param name="validator">Injected swap validator (server-enforced material check).</param>
+    /// <param name="featureGate">Injected operator-feature gate (#725) controlling the guided-swap path.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Result indicating success or failure with descriptive message.</returns>
     /// <response code="200">Spool was assigned successfully.</response>
     /// <response code="400">If the request failed (invalid spool ID, Spoolman not configured).</response>
     /// <response code="404">If the printer or toolhead was not found.</response>
-    /// <response code="409">Material mismatch and no override — body carries the SwapValidationResultDto.</response>
+    /// <response code="409">Material mismatch and no valid override — body carries the SwapValidationResultDto.</response>
     /// <remarks>
-    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725, delivered
-    /// separately): once <c>IOperatorFeatureGate</c> lands, this endpoint MUST wrap the
-    /// override / validation path with a check against <c>guidedSwapEnabled</c>. When
-    /// disabled, the pre-assignment validator call and the override log/telemetry must
-    /// be skipped entirely and behaviour must revert to the pre-#710 blind assignment
-    /// (so environments that disable the guided flow do not lose their ability to
-    /// assign spools). This method deliberately does not import that service so PR #710
-    /// can land without duplicating the gate contract.
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725): the
+    /// server-enforced validation / override-audit path is wrapped in a
+    /// <c>guidedSwapEnabled</c> check. This binding endpoint itself stays available even
+    /// when the guided flow is disabled (it is a direct capability-gated control per the
+    /// #710 acceptance addendum); when disabled it reverts to the pre-#710 blind
+    /// assignment (no pre-flight validation 409, no override log/telemetry).
     /// </remarks>
     [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
     [ProducesResponseType(typeof(CommandResult), 200)]
@@ -2784,6 +2783,7 @@ public class PrintersController(
         int toolheadIndex,
         [FromBody] SetActiveSpoolRequest? request,
         [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
         if (request?.SpoolId is not { } spoolId)
@@ -2791,12 +2791,25 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "SpoolId is required"));
         }
 
-        // Server-enforced material check (guided swap flow, per issue #710).
-        // Without an override, a mismatch MUST reject with a typed 409 and perform
-        // no write, no log, no telemetry — thin clients cannot bypass by skipping
-        // the pre-flight GET .../swap-validation endpoint.
-        if (!request.OverrideMismatch)
+        // An override is only honoured when the operator both set the flag AND supplied a
+        // non-empty reason (issue #710 contract: mismatch overrides are recorded with a
+        // reason). A flag without a reason is NOT a valid override — validation still runs,
+        // so a genuine mismatch is rejected until the operator provides a reason.
+        bool hasValidOverride = request.OverrideMismatch
+            && !string.IsNullOrWhiteSpace(request.OverrideReason);
+
+        // Guided-swap gate (#725): the server-enforced material check and override audit
+        // only apply when guidedSwapEnabled is on. When disabled, revert to the pre-#710
+        // blind assignment so the direct spool-binding control remains usable.
+        bool guidedSwapEnabled = featureGate.IsEnabled(
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap);
+
+        if (guidedSwapEnabled && !hasValidOverride)
         {
+            // Server-enforced material check (guided swap flow, per issue #710).
+            // Without a valid override, a mismatch MUST reject with a typed 409 and perform
+            // no write, no log, no telemetry — thin clients cannot bypass by skipping
+            // the pre-flight GET .../swap-validation endpoint.
             Farm.Infrastructure.Services.Printers.SwapValidationResultDto? preAssignment =
                 await validator.ValidateAsync(id, toolheadIndex, spoolId, ct).ConfigureAwait(false);
 
@@ -2811,10 +2824,11 @@ public class PrintersController(
         CommandResult result = await _printersService.SetToolheadSpoolAsync(id, toolheadIndex, spoolId, ct);
         _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
 
-        // Audit override intent ONLY after the assignment succeeded — a failed write
-        // must not leave a "user forced through" audit trail for an action that never
-        // happened. Match/no-expected paths never emit override telemetry.
-        if (request.OverrideMismatch && result.Success)
+        // Audit override intent ONLY after the assignment succeeded, and only while the
+        // guided flow is enabled — a failed write must not leave a "user forced through"
+        // audit trail, and a disabled feature must perform no audit writes. Match /
+        // no-expected paths never emit override telemetry.
+        if (guidedSwapEnabled && hasValidOverride && result.Success)
         {
             _logger.LogWarning(
                 "Toolhead spool override: user {User} loaded spool {SpoolId} on printer {PrinterId} toolhead T{ToolheadIndex} despite mismatch. Reason: {Reason}",
@@ -2822,7 +2836,7 @@ public class PrintersController(
                 spoolId,
                 id,
                 toolheadIndex,
-                string.IsNullOrWhiteSpace(request.OverrideReason) ? "(none provided)" : request.OverrideReason);
+                request.OverrideReason);
             _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
         }
 
@@ -2881,19 +2895,17 @@ public class PrintersController(
     /// <param name="toolheadIndex">Zero-based toolhead index (T0, T1, T2, ...).</param>
     /// <param name="spoolId">Spoolman spool identifier being scanned.</param>
     /// <param name="validator">Injected swap validator service.</param>
+    /// <param name="featureGate">Injected operator-feature gate (#725).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Typed validation result describing ok/mismatch, expected/scanned material, and affected jobs.</returns>
     /// <response code="200">Validation completed (ok or mismatch result in body).</response>
     /// <response code="400">If the query is missing or invalid (e.g., spoolId missing).</response>
-    /// <response code="404">If the printer or toolhead was not found.</response>
+    /// <response code="404">If the printer or toolhead was not found, or the guided-swap feature is disabled (ProblemDetails code=featureDisabled).</response>
     /// <remarks>
-    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725, delivered
-    /// separately): once <c>IOperatorFeatureGate</c> lands, this endpoint MUST be wrapped
-    /// with a check against <c>guidedSwapEnabled</c>. When the flag is disabled it must
-    /// short-circuit to <c>404 Not Found</c> with ProblemDetails extension
-    /// <c>code: "featureDisabled"</c>, perform no reads/writes, and record no telemetry —
-    /// matching the shape defined by #725. This method deliberately does not import that
-    /// service so PR #710 can land without duplicating the gate contract.
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725): this guided-swap
+    /// validation endpoint is gated by <c>guidedSwapEnabled</c>. When disabled it short-circuits
+    /// to <c>404 Not Found</c> with ProblemDetails extension <c>code: "featureDisabled"</c> before
+    /// any read or telemetry, matching the shape defined by #725.
     /// </remarks>
     [HttpGet("{id:guid}/toolheads/{toolheadIndex:int}/swap-validation")]
     [ProducesResponseType(typeof(Farm.Infrastructure.Services.Printers.SwapValidationResultDto), 200)]
@@ -2904,8 +2916,18 @@ public class PrintersController(
         int toolheadIndex,
         [FromQuery] int? spoolId,
         [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
+        // Guided-swap gate (#725): when disabled, return the standard featureDisabled 404
+        // ProblemDetails before any read/validation/telemetry.
+        if (!featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap))
+        {
+            return Farm.Web.Api.Infrastructure.OperatorFeatures.OperatorFeatureProblemDetails.NotFound(
+                featureGate,
+                Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap);
+        }
+
         if (spoolId is null || spoolId <= 0)
         {
             return BadRequest(new CommandResult(false, "spoolId query parameter is required and must be positive."));
