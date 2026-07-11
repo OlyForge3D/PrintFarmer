@@ -15,14 +15,15 @@ namespace Farm.Infrastructure.Services.Spoolman;
 /// Composes existing PrintFarmer building blocks: toolhead-spool bindings on
 /// <see cref="Toolhead"/>, per-extruder gcode metadata on <see cref="GcodeFile"/>,
 /// active + assigned-queued <see cref="PrintJob"/> rows, <see cref="ISpoolmanService"/>
-/// for remaining weight, and <see cref="IPrintersService.GetPrintJobStatusAsync"/>
-/// for live progress. Never mutates spool remaining — completion reconciliation
+/// for remaining weight, and <see cref="IPrinterStatusCacheReader"/> for batched
+/// fleet progress. Never mutates spool remaining — completion reconciliation
 /// remains owned by <see cref="PrintJobCompletionService"/>.
 /// </summary>
 public class FilamentCoverageService(
     AppDbContext db,
     IFilamentCoverageSpoolResolver spoolResolver,
     IPrintersService printersService,
+    IPrinterStatusCacheReader printerStatusCache,
     ISettingsService settingsService,
     IOperatorFeatureGate featureGate,
     ILogger<FilamentCoverageService> logger)
@@ -44,6 +45,7 @@ public class FilamentCoverageService(
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
+    private readonly IPrinterStatusCacheReader _printerStatusCache = printerStatusCache ?? throw new ArgumentNullException(nameof(printerStatusCache));
     private readonly ISettingsService _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
     private readonly IOperatorFeatureGate _featureGate = featureGate ?? throw new ArgumentNullException(nameof(featureGate));
     private readonly ILogger<FilamentCoverageService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -94,8 +96,8 @@ public class FilamentCoverageService(
 
         SpoolCoverageSettings settings = GetSettings();
 
-        // Fetch live progress synchronously for the single-printer path; the
-        // fleet path pre-fetches sequentially so it can call the pure compute.
+        // Fetch one bounded live status for the single-printer path; the fleet
+        // path uses the batched status-cache snapshot instead.
         bool hasActive = jobs.Any(j =>
             j.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
         double? liveProgress = hasActive
@@ -108,8 +110,6 @@ public class FilamentCoverageService(
     /// <inheritdoc />
     public async Task<FleetFilamentCoverageDto> GetForFleetAsync(CancellationToken ct)
     {
-        SpoolCoverageSettings settings = GetSettings();
-
         List<Printer> printers = await _db.Printers
             .AsNoTracking()
             .Include(p => p.Toolheads)
@@ -147,22 +147,10 @@ public class FilamentCoverageService(
         IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> fleetSpoolLookup =
             await _spoolResolver.ResolveAsync(printers, ct).ConfigureAwait(false);
 
-        // FLEET THREAD-SAFETY (#709 convergence item 2): pre-fetch live
-        // progress for every printer with an active job SEQUENTIALLY so we
-        // never make overlapping calls into shared scoped services
-        // (IPrintersService/AppDbContext are not safe for concurrent use).
-        // The compute phase below is pure and does not touch _db or
-        // _printersService, so it can safely run in a simple sequential loop.
-        Dictionary<Guid, double?> progressByPrinter = new(printers.Count);
-        foreach (Printer printer in printers)
-        {
-            bool hasActive = jobsByPrinter.TryGetValue(printer.Id, out List<PrintJob>? pjobs)
-                && pjobs.Any(j => j.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
-
-            progressByPrinter[printer.Id] = hasActive
-                ? await TryReadLiveProgressAsync(printer.Id, settings.LiveProgressTimeoutMs, ct).ConfigureAwait(false)
-                : null;
-        }
+        // Fleet progress comes from one thread-safe cache snapshot. All
+        // supported polling/subscription backends populate this cache, avoiding
+        // N live backend calls and any shared scoped-service concurrency risk.
+        IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _printerStatusCache.GetAllStatuses();
 
         // Pure compute — no concurrent shared-context access, no exception
         // swallowing that would mask EF issues as "Unknown". Real errors
@@ -173,7 +161,9 @@ public class FilamentCoverageService(
         {
             List<PrintJob> jobs = jobsByPrinter.TryGetValue(printer.Id, out List<PrintJob>? list) ? list : [];
             IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> scoped = fleetSpoolLookup[printer.Id];
-            _ = progressByPrinter.TryGetValue(printer.Id, out double? liveProgress);
+            double? liveProgress = cachedStatuses.TryGetValue(printer.Id, out PrinterStatusDto? cachedStatus)
+                ? cachedStatus.Progress
+                : null;
             ordered.Add(ComputeForPrinter(printer, jobs, scoped, liveProgress));
         }
 
@@ -774,6 +764,14 @@ public class FilamentCoverageService(
         bool queuedDemandExists = queuedRequired.HasValue && queuedRequired.Value > 0;
         bool anyDemand = activeDemandExists || queuedDemandExists || queuedUnknownForThisSlot;
 
+        // Active demand with unknown usage metadata is always Unknown, even
+        // when the slot has no bound spool and calculated demand is absent.
+        if (activeJob is not null && !activeHasKnownMetadata)
+        {
+            return (FilamentCoverageStatus.Unknown,
+                activeIsMultiToolMissing ? ReasonNoPerExtruderMetadata : ReasonNoGcodeMetadata);
+        }
+
         // Unknown data cases first — never turn into false positives.
         if (currentSpoolId is null)
         {
@@ -804,12 +802,6 @@ public class FilamentCoverageService(
         if (queuedUnknownForThisSlot)
         {
             return (FilamentCoverageStatus.Unknown, ReasonQueuedJobMetadataUnknown);
-        }
-
-        if (activeJob is not null && !activeHasKnownMetadata)
-        {
-            return (FilamentCoverageStatus.Unknown,
-                activeIsMultiToolMissing ? ReasonNoPerExtruderMetadata : ReasonNoGcodeMetadata);
         }
 
         if (!materialCompatible)

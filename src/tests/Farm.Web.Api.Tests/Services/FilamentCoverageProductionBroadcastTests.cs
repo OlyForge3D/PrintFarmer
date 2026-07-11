@@ -153,6 +153,159 @@ public class FilamentCoverageProductionBroadcastTests
     }
 
     [Fact]
+    public async Task CancelJobAsync_AssignedJob_BroadcastsQueueChangedAfterPersistence()
+    {
+        PrintJob job = Job(Guid.NewGuid());
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        MockSequence sequence = new();
+        repository.InSequence(sequence)
+            .Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        repository.InSequence(sequence)
+            .Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        broadcaster.InSequence(sequence)
+            .Setup(b => b.BroadcastPrinterChangedAsync(
+                job.AssignedPrinterId!.Value,
+                FilamentCoverageChangeReasons.QueueChanged,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+
+        await service.CancelJobAsync(job.Id.ToString(), "user");
+
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task CancelJobAsync_PersistenceFails_DoesNotBroadcast()
+    {
+        PrintJob job = Job(Guid.NewGuid());
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("save failed"));
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+
+        Func<Task> act = () => service.CancelJobAsync(job.Id.ToString(), "user");
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CancelJobAsync_UnassignedJob_DoesNotBroadcast()
+    {
+        PrintJob job = Job(Guid.NewGuid());
+        job.AssignedPrinterId = null;
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+
+        await service.CancelJobAsync(job.Id.ToString(), "user");
+
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AbortPrintAsync_AssignedActiveJob_BroadcastsQueueChangedAfterPersistence()
+    {
+        PrintJob job = Job(Guid.NewGuid());
+        job.Status = PrintJobStatus.Printing;
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        Mock<IPrintersService> printers = new(MockBehavior.Strict);
+        printers.Setup(p => p.CancelPrintAsync(job.AssignedPrinterId!.Value, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        broadcaster.Setup(b => b.BroadcastPrinterChangedAsync(
+                job.AssignedPrinterId!.Value,
+                FilamentCoverageChangeReasons.QueueChanged,
+                It.IsAny<CancellationToken>()))
+            .Callback(() => job.Status.Should().Be(PrintJobStatus.Queued))
+            .Returns(Task.CompletedTask);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object, printers.Object);
+
+        await service.AbortPrintAsync(job.Id.ToString(), "user");
+
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task RerunJobAsync_AssignedOriginal_BroadcastsJobAssignmentAfterAddSucceeds()
+    {
+        PrintJob original = Job(Guid.NewGuid());
+        original.Status = PrintJobStatus.Completed;
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        MockSequence sequence = new();
+        repository.InSequence(sequence)
+            .Setup(r => r.GetByIdAsync(original.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(original);
+        repository.InSequence(sequence)
+            .Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(4);
+        repository.InSequence(sequence)
+            .Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob job, CancellationToken _) => job);
+        broadcaster.InSequence(sequence)
+            .Setup(b => b.BroadcastPrinterChangedAsync(
+                original.AssignedPrinterId!.Value,
+                FilamentCoverageChangeReasons.JobAssignment,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+
+        _ = await service.RerunJobAsync(original.Id.ToString(), "user");
+
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task RerunJobAsync_UnassignedOriginal_DoesNotBroadcast()
+    {
+        PrintJob original = Job(Guid.NewGuid());
+        original.AssignedPrinterId = null;
+        original.Status = PrintJobStatus.Completed;
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(r => r.GetByIdAsync(original.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(original);
+        repository.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(4);
+        repository.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob job, CancellationToken _) => job);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+
+        _ = await service.RerunJobAsync(original.Id.ToString(), "user");
+
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task BulkReorderJobsAsync_ReorderOnly_DoesNotBroadcast()
+    {
+        PrintJob job = Job(Guid.NewGuid());
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+
+        QueueBulkOperationResultDto result = await service.BulkReorderJobsAsync(
+            [new QueueJobReorderMove { JobId = job.Id.ToString(), NewPosition = 9 }],
+            "user");
+
+        result.SuccessfulCount.Should().Be(1);
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task Completion_BroadcastsQueueAndConsumedSpoolWeightAfterPersistence()
     {
         string databaseName = Guid.NewGuid().ToString();
@@ -331,11 +484,12 @@ public class FilamentCoverageProductionBroadcastTests
 
     private static PrintJobManagementService QueueService(
         IPrintJobManagementRepository repository,
-        IFilamentCoverageBroadcaster broadcaster)
+        IFilamentCoverageBroadcaster broadcaster,
+        IPrintersService? printersService = null)
         => new(
             repository,
             NullLogger<PrintJobManagementService>.Instance,
-            Mock.Of<IPrintersService>(),
+            printersService ?? Mock.Of<IPrintersService>(),
             Mock.Of<IStoragePathService>(),
             Hub(),
             Mock.Of<IStoredFileOperationsService>(),

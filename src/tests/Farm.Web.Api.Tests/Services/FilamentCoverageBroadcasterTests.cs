@@ -6,6 +6,7 @@ using Farm.Infrastructure.Services.Spoolman;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -151,6 +152,131 @@ public class FilamentCoverageBroadcasterTests
         hub.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task BroadcastPrinterChangedAsync_BurstSendsLeadingAndOneLatestTrailingEvent()
+    {
+        Guid printerId = Guid.NewGuid();
+        DateTime first = new(2026, 7, 10, 1, 0, 0, DateTimeKind.Utc);
+        DateTime second = first.AddMilliseconds(10);
+        DateTime latest = first.AddMilliseconds(20);
+        Queue<DateTime> timestamps = new([first, second, latest]);
+        ControlledDelay delay = new();
+        List<FilamentCoverageChangedEvent> sent = [];
+        FilamentCoverageBroadcaster broadcaster = Broadcaster(
+            sent,
+            delay,
+            enabled: () => true,
+            utcNow: () => timestamps.Dequeue());
+
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.JobProgress, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.JobProgress, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.JobProgress, CancellationToken.None);
+
+        sent.Should().ContainSingle().Which.OccurredAt.Should().Be(first);
+        delay.CompletePending();
+        await WaitUntilAsync(() => sent.Count == 2);
+        sent[1].OccurredAt.Should().Be(latest);
+        sent[1].PrinterId.Should().Be(printerId);
+    }
+
+    [Fact]
+    public async Task BroadcastPrinterChangedAsync_NoSuppressedEvent_DoesNotSendTrailingEvent()
+    {
+        ControlledDelay delay = new();
+        List<FilamentCoverageChangedEvent> sent = [];
+        FilamentCoverageBroadcaster broadcaster = Broadcaster(sent, delay, enabled: () => true);
+
+        await broadcaster.BroadcastPrinterChangedAsync(
+            Guid.NewGuid(),
+            FilamentCoverageChangeReasons.QueueChanged,
+            CancellationToken.None);
+        delay.CompletePending();
+        await Task.Delay(10);
+
+        sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task BroadcastPrinterChangedAsync_GateDisabledBeforeTrailing_SuppressesTrailingEvent()
+    {
+        bool enabled = true;
+        ControlledDelay delay = new();
+        List<FilamentCoverageChangedEvent> sent = [];
+        FilamentCoverageBroadcaster broadcaster = Broadcaster(sent, delay, enabled: () => enabled);
+        Guid printerId = Guid.NewGuid();
+
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        enabled = false;
+        delay.CompletePending();
+        await Task.Delay(10);
+
+        sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task BroadcastPrinterChangedAsync_TrailingSendFailure_IsObservedAndLogged()
+    {
+        ControlledDelay delay = new();
+        Mock<IClientProxy> clientProxy = new(MockBehavior.Strict);
+        clientProxy
+            .SetupSequence(c => c.SendCoreAsync(
+                "filamentcoveragechanged",
+                It.IsAny<object[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .ThrowsAsync(new InvalidOperationException("send failed"));
+        Mock<IHubClients> clients = new();
+        clients.Setup(c => c.All).Returns(clientProxy.Object);
+        Mock<IHubContext<PrinterHub>> hub = new();
+        hub.Setup(h => h.Clients).Returns(clients.Object);
+        Mock<ILogger<FilamentCoverageBroadcaster>> logger = new();
+        FilamentCoverageBroadcaster broadcaster = new(
+            hub.Object,
+            ScopeFactory(() => true),
+            logger.Object,
+            delay.DelayAsync);
+        Guid printerId = Guid.NewGuid();
+
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.SpoolWeight, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.SpoolWeight, CancellationToken.None);
+        delay.CompletePending();
+
+        await WaitUntilAsync(() => clientProxy.Invocations.Count(i => i.Method.Name == nameof(IClientProxy.SendCoreAsync)) == 2);
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Failed to broadcast")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Broadcast_DifferentScopesAndReasons_CoalesceIndependently()
+    {
+        ControlledDelay delay = new();
+        List<FilamentCoverageChangedEvent> sent = [];
+        FilamentCoverageBroadcaster broadcaster = Broadcaster(sent, delay, enabled: () => true);
+        Guid firstPrinter = Guid.NewGuid();
+        Guid secondPrinter = Guid.NewGuid();
+
+        await broadcaster.BroadcastPrinterChangedAsync(firstPrinter, FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(firstPrinter, FilamentCoverageChangeReasons.SpoolWeight, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(secondPrinter, FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        await broadcaster.BroadcastFleetChangedAsync(FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(firstPrinter, FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(firstPrinter, FilamentCoverageChangeReasons.SpoolWeight, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(secondPrinter, FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+        await broadcaster.BroadcastFleetChangedAsync(FilamentCoverageChangeReasons.QueueChanged, CancellationToken.None);
+
+        sent.Should().HaveCount(4);
+        delay.CompletePending();
+        await WaitUntilAsync(() => sent.Count == 8);
+        sent.GroupBy(e => (e.PrinterId, e.Reason)).Should().OnlyContain(group => group.Count() == 2);
+    }
+
     [Theory]
     [InlineData(true, 1)]
     [InlineData(false, 0)]
@@ -183,12 +309,85 @@ public class FilamentCoverageBroadcasterTests
             Times.Exactly(expectedCalls));
     }
 
+    private static FilamentCoverageBroadcaster Broadcaster(
+        List<FilamentCoverageChangedEvent> sent,
+        ControlledDelay delay,
+        Func<bool> enabled,
+        Func<DateTime>? utcNow = null)
+    {
+        Mock<IClientProxy> clientProxy = new(MockBehavior.Strict);
+        clientProxy
+            .Setup(c => c.SendCoreAsync(
+                "filamentcoveragechanged",
+                It.IsAny<object[]>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, object[], CancellationToken>((_, args, _) =>
+                sent.Add((FilamentCoverageChangedEvent)args[0]))
+            .Returns(Task.CompletedTask);
+        Mock<IHubClients> clients = new();
+        clients.Setup(c => c.All).Returns(clientProxy.Object);
+        Mock<IHubContext<PrinterHub>> hub = new();
+        hub.Setup(h => h.Clients).Returns(clients.Object);
+        return new FilamentCoverageBroadcaster(
+            hub.Object,
+            ScopeFactory(enabled),
+            NullLogger<FilamentCoverageBroadcaster>.Instance,
+            delay.DelayAsync,
+            utcNow);
+    }
+
     private static IServiceScopeFactory ScopeFactory(bool enabled)
+        => ScopeFactory(() => enabled);
+
+    private static IServiceScopeFactory ScopeFactory(Func<bool> enabled)
     {
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(enabled);
         ServiceCollection services = new();
         services.AddScoped(_ => gate.Object);
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (int i = 0; i < 100 && !condition(); i++)
+        {
+            await Task.Delay(5);
+        }
+
+        condition().Should().BeTrue();
+    }
+
+    private sealed class ControlledDelay
+    {
+        private readonly Lock _sync = new();
+        private readonly List<TaskCompletionSource> _pending = [];
+
+        public Task DelayAsync(TimeSpan delay, CancellationToken token)
+        {
+            _ = delay;
+            TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _ = token.Register(() => completion.TrySetCanceled(token));
+            lock (_sync)
+            {
+                _pending.Add(completion);
+            }
+
+            return completion.Task;
+        }
+
+        public void CompletePending()
+        {
+            TaskCompletionSource[] pending;
+            lock (_sync)
+            {
+                pending = [.. _pending.Where(item => !item.Task.IsCompleted)];
+            }
+
+            foreach (TaskCompletionSource completion in pending)
+            {
+                _ = completion.TrySetResult();
+            }
+        }
     }
 }

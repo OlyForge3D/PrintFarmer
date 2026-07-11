@@ -33,7 +33,8 @@ public class FilamentCoverageServiceTests
             SpoolCoverageSettings? settings = null,
             double? liveProgress = null,
             bool coverageEnabled = true,
-            bool tracksLiveConsumption = false)
+            bool tracksLiveConsumption = false,
+            IReadOnlyDictionary<Guid, PrinterStatusDto>? cachedStatuses = null)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -48,6 +49,9 @@ public class FilamentCoverageServiceTests
             .ReturnsAsync(liveProgress.HasValue
                 ? new PrintJobStatusDto { Progress = liveProgress }
                 : null);
+        Mock<IPrinterStatusCacheReader> statusCacheMock = new(MockBehavior.Strict);
+        statusCacheMock.Setup(c => c.GetAllStatuses())
+            .Returns(cachedStatuses ?? new Dictionary<Guid, PrinterStatusDto>());
 
         Mock<ISettingsService> settingsMock = new(MockBehavior.Loose);
         settingsMock.Setup(s => s.Get<SpoolCoverageSettings>()).Returns(settings ?? new SpoolCoverageSettings());
@@ -86,6 +90,7 @@ public class FilamentCoverageServiceTests
             db,
             resolverMock.Object,
             printerMock.Object,
+            statusCacheMock.Object,
             settingsMock.Object,
             gateMock.Object,
             NullLogger<FilamentCoverageService>.Instance);
@@ -321,6 +326,23 @@ public class FilamentCoverageServiceTests
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
         cov!.Status.Should().Be(FilamentCoverageStatus.Unknown);
         cov.Toolheads.Single().StatusReason.Should().Be("no-gcode-metadata");
+    }
+
+    [Fact]
+    public async Task NoGcodeUsageMetadata_UnboundSingleToolActiveJob_ReturnsUnknownMetadataReason()
+    {
+        (FilamentCoverageService svc, AppDbContext db, _, _) = BuildService();
+        Printer p = SeedPrinter(db, "p", T(0, spoolId: null, primary: true));
+        GcodeFile g = Gcode();
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(30)));
+        _ = await db.SaveChangesAsync();
+
+        PrinterFilamentCoverageDto coverage = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!;
+
+        coverage.Status.Should().Be(FilamentCoverageStatus.Unknown);
+        coverage.Toolheads.Single().Status.Should().Be(FilamentCoverageStatus.Unknown);
+        coverage.Toolheads.Single().StatusReason.Should().Be("no-gcode-metadata");
     }
 
     [Fact]
@@ -809,11 +831,10 @@ public class FilamentCoverageServiceTests
     }
 
     // ------------------------------------------------------------------
-    // #709 CONVERGENCE ITEM 2: fleet must not concurrently touch the
-    // shared IPrintersService/AppDbContext.
+    // #709 R4: fleet must use one cache snapshot and never call live status.
     // ------------------------------------------------------------------
     [Fact]
-    public async Task FleetEndpoint_DoesNotConcurrentlyAccessSharedContextOrPrintersService()
+    public async Task FleetEndpoint_UsesSingleCacheSnapshot_AndNeverCallsLivePrinterStatus()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -821,41 +842,10 @@ public class FilamentCoverageServiceTests
         AppDbContext db = new(options);
         _ = db.Database.EnsureCreated();
 
-        // Overlap detector: throws when a second caller enters while the
-        // first is still inside GetPrintJobStatusAsync. The prior fanned-out
-        // implementation triggered this immediately with N>1 printers; the
-        // sequential prefetch loop must not.
-        int inFlight = 0;
-        int maxObserved = 0;
-        Mock<IPrintersService> printerMock = new(MockBehavior.Loose);
-        printerMock
-            .Setup(x => x.GetPrintJobStatusAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns(async (Guid _pid, CancellationToken _ct) =>
-            {
-                int now = Interlocked.Increment(ref inFlight);
-                int prevMax;
-                do
-                {
-                    prevMax = maxObserved;
-                    if (now <= prevMax)
-                    {
-                        break;
-                    }
-                }
-                while (Interlocked.CompareExchange(ref maxObserved, now, prevMax) != prevMax);
-
-                if (now > 1)
-                {
-                    throw new InvalidOperationException(
-                        "GetPrintJobStatusAsync called concurrently — shared IPrintersService/AppDbContext is not safe for concurrent use.");
-                }
-
-                // Simulate a small amount of I/O work so any concurrent
-                // caller would definitely overlap.
-                await Task.Delay(20).ConfigureAwait(false);
-                _ = Interlocked.Decrement(ref inFlight);
-                return new PrintJobStatusDto { Progress = 42.0 };
-            });
+        Mock<IPrintersService> printerMock = new(MockBehavior.Strict);
+        Mock<IPrinterStatusCacheReader> statusCacheMock = new(MockBehavior.Strict);
+        Dictionary<Guid, PrinterStatusDto> cachedStatuses = [];
+        statusCacheMock.Setup(c => c.GetAllStatuses()).Returns(cachedStatuses);
 
         Mock<ISpoolmanService> spoolMock = new(MockBehavior.Loose);
         Mock<ISettingsService> settingsMock = new(MockBehavior.Loose);
@@ -885,20 +875,13 @@ public class FilamentCoverageServiceTests
                 return result;
             });
 
-        FilamentCoverageService svc = new(
-            db,
-            resolverMock.Object,
-            printerMock.Object,
-            settingsMock.Object,
-            gateMock.Object,
-            NullLogger<FilamentCoverageService>.Instance);
-
-        // Seed several printers, each with an ACTIVE job so live-progress
-        // is fetched for each one.
+        List<Guid> printerIds = [];
         for (int i = 0; i < 6; i++)
         {
             int spoolId = 1000 + i;
             Printer p = SeedPrinter(db, $"p{i}", T(0, spoolId: spoolId, primary: true));
+            printerIds.Add(p.Id);
+            cachedStatuses[p.Id] = new PrinterStatusDto(p.Id, true, "Printing", Progress: i * 10);
             GcodeFile g = Gcode(estimatedTotalGrams: 10, printTimeMinutes: 30);
             db.GcodeFiles.Add(g);
             db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(30)));
@@ -907,11 +890,26 @@ public class FilamentCoverageServiceTests
         }
 
         _ = await db.SaveChangesAsync();
+        FilamentCoverageService svc = new(
+            db,
+            resolverMock.Object,
+            printerMock.Object,
+            statusCacheMock.Object,
+            settingsMock.Object,
+            gateMock.Object,
+            NullLogger<FilamentCoverageService>.Instance);
 
         FleetFilamentCoverageDto fleet = await svc.GetForFleetAsync(CancellationToken.None);
+
         fleet.Printers.Should().HaveCount(6);
-        maxObserved.Should().Be(1,
-            "the fleet path must prefetch live progress sequentially — no overlapping calls into the shared scoped IPrintersService");
+        fleet.Printers
+            .OrderBy(p => p.PrinterName)
+            .Select(p => p.Toolheads.Single().CurrentJobRemainingGrams)
+            .Should().Equal(10, 9, 8, 7, 6, 5);
+        statusCacheMock.Verify(c => c.GetAllStatuses(), Times.Once);
+        printerMock.Verify(
+            p => p.GetPrintJobStatusAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // ------------------------------------------------------------------

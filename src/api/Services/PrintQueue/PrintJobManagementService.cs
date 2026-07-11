@@ -1092,6 +1092,14 @@ public class PrintJobManagementService(
             job.ActualEndTime = DateTime.UtcNow;
 
             await _repository.SaveChangesAsync(cancellationToken);
+            if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);
 
             // Send notification
@@ -1145,6 +1153,14 @@ public class PrintJobManagementService(
         job.UpdatedAt = DateTime.UtcNow;
 
         await _repository.SaveChangesAsync(cancellationToken);
+        if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                job.AssignedPrinterId.Value,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         _logger.LogInformation("Print aborted for job {JobId} by user {UserId}, job returned to queue", jobId, userId);
     }
 
@@ -1326,6 +1342,13 @@ public class PrintJobManagementService(
             newJob.QueuePosition = maxPosition + 1;
 
             await _repository.AddAsync(newJob, cancellationToken);
+            if (_coverageBroadcaster is not null && newJob.AssignedPrinterId.HasValue)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    newJob.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             _logger.LogInformation(
                 "Job {JobId} rerun as {NewJobId} by user {UserId}",
