@@ -2533,18 +2533,27 @@ public class PrintersController(
     /// operator's "return to shelf" workflow can log inventory without extra client round-trips.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">
+    /// Optional zero-based toolhead / MMU-gate / U1-lane index whose spool is being unloaded.
+    /// When omitted, the outgoing spool defaults to <c>Printer.CurrentSpoolId</c> falling
+    /// back to the primary toolhead's <c>CurrentSpoolId</c> — the legacy single-tool path.
+    /// Guided swap flow supplies the target lane on multi-slot printers.
+    /// </param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Result including success/failure, message, spool ID, material, and residual weight (g).</returns>
     /// <response code="200">Filament unload command sent successfully.</response>
-    /// <response code="400">If the command failed (backend error, unsupported capability).</response>
+    /// <response code="400">If the command failed (backend error, unsupported capability, unknown toolhead index).</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpPost("{id:guid}/filament-unload")]
     [ProducesResponseType(typeof(FilamentUnloadResult), 200)]
     [ProducesResponseType(typeof(FilamentUnloadResult), 400)]
     [ProducesResponseType(typeof(FilamentUnloadResult), 404)]
-    public async Task<ActionResult<FilamentUnloadResult>> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<FilamentUnloadResult>> UnloadFilamentAsync(
+        Guid id,
+        [FromQuery] int? toolheadIndex,
+        CancellationToken ct)
     {
-        FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, ct);
+        FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, toolheadIndex, ct);
         _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
         return MapFilamentUnloadResult(result);
     }
@@ -2736,23 +2745,45 @@ public class PrintersController(
     /// <summary>
     /// Assigns a Spoolman spool to a specific toolhead (by index) on a printer.
     /// Fetches spool details from Spoolman to populate material and color information.
+    /// <para>
+    /// The server enforces the guided-swap material check here: if the scanned spool
+    /// does not match the expected material for this toolhead (per active/queued jobs)
+    /// and the request does not carry an explicit override, the assignment is rejected
+    /// with <c>409 Conflict</c> and a typed <see cref="Farm.Infrastructure.Services.Printers.SwapValidationResultDto"/>
+    /// body. This makes the hard-stop authoritative — thin clients cannot bypass it by
+    /// skipping the pre-flight validation endpoint.
+    /// </para>
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.).</param>
-    /// <param name="request">Request containing the spool ID to assign.</param>
+    /// <param name="request">Request containing the spool ID to assign and optional override flag.</param>
+    /// <param name="validator">Injected swap validator (server-enforced material check).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Result indicating success or failure with descriptive message.</returns>
     /// <response code="200">Spool was assigned successfully.</response>
     /// <response code="400">If the request failed (invalid spool ID, Spoolman not configured).</response>
     /// <response code="404">If the printer or toolhead was not found.</response>
+    /// <response code="409">Material mismatch and no override — body carries the SwapValidationResultDto.</response>
+    /// <remarks>
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725, delivered
+    /// separately): once <c>IOperatorFeatureGate</c> lands, this endpoint MUST wrap the
+    /// override / validation path with a check against <c>guidedSwapEnabled</c>. When
+    /// disabled, the pre-assignment validator call and the override log/telemetry must
+    /// be skipped entirely and behaviour must revert to the pre-#710 blind assignment
+    /// (so environments that disable the guided flow do not lose their ability to
+    /// assign spools). This method deliberately does not import that service so PR #710
+    /// can land without duplicating the gate contract.
+    /// </remarks>
     [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(typeof(Farm.Infrastructure.Services.Printers.SwapValidationResultDto), 409)]
     public async Task<ActionResult<CommandResult>> SetToolheadSpoolAsync(
         Guid id,
         int toolheadIndex,
         [FromBody] SetActiveSpoolRequest? request,
+        [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
         CancellationToken ct)
     {
         if (request?.SpoolId is not { } spoolId)
@@ -2760,11 +2791,30 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "SpoolId is required"));
         }
 
-        // Guided swap flow: record override intent when the operator deliberately loaded a
-        // spool despite the swap-validation card showing a mismatch. The assignment itself is
-        // unchanged — this is audit-only so the API contract supports the client flow without
-        // owning any client state.
-        if (request.OverrideMismatch)
+        // Server-enforced material check (guided swap flow, per issue #710).
+        // Without an override, a mismatch MUST reject with a typed 409 and perform
+        // no write, no log, no telemetry — thin clients cannot bypass by skipping
+        // the pre-flight GET .../swap-validation endpoint.
+        if (!request.OverrideMismatch)
+        {
+            Farm.Infrastructure.Services.Printers.SwapValidationResultDto? preAssignment =
+                await validator.ValidateAsync(id, toolheadIndex, spoolId, ct).ConfigureAwait(false);
+
+            // A null result means printer/toolhead not found — fall through to the
+            // downstream service so its own 404/400 mapping stays authoritative.
+            if (preAssignment is { Ok: false })
+            {
+                return Conflict(preAssignment);
+            }
+        }
+
+        CommandResult result = await _printersService.SetToolheadSpoolAsync(id, toolheadIndex, spoolId, ct);
+        _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
+
+        // Audit override intent ONLY after the assignment succeeded — a failed write
+        // must not leave a "user forced through" audit trail for an action that never
+        // happened. Match/no-expected paths never emit override telemetry.
+        if (request.OverrideMismatch && result.Success)
         {
             _logger.LogWarning(
                 "Toolhead spool override: user {User} loaded spool {SpoolId} on printer {PrinterId} toolhead T{ToolheadIndex} despite mismatch. Reason: {Reason}",
@@ -2776,8 +2826,6 @@ public class PrintersController(
             _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
         }
 
-        CommandResult result = await _printersService.SetToolheadSpoolAsync(id, toolheadIndex, spoolId, ct);
-        _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
         return MapCommandResult(result);
     }
 

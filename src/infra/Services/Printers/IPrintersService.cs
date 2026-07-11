@@ -440,13 +440,21 @@ public interface IPrintersService
 
     /// <summary>
     /// Unloads filament from the extruder via the backend's filament control capability.
-    /// Returns the residual weight of the primary toolhead's currently loaded spool so the
-    /// operator's "return to shelf" workflow can log inventory in one round-trip.
+    /// Returns the residual weight of the outgoing spool so the operator's
+    /// "return to shelf" workflow can log inventory in one round-trip.
     /// </summary>
     /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">
+    /// Optional zero-based toolhead / lane index whose spool should be treated as the
+    /// outgoing spool for residual-weight capture. When <c>null</c>, the source of truth
+    /// is <see cref="Printer.CurrentSpoolId"/> falling back to the primary toolhead's
+    /// <see cref="Toolhead.CurrentSpoolId"/> (legacy single-tool behaviour). Provided so
+    /// the guided swap flow can target a specific MMU gate / U1 lane without breaking
+    /// existing callers.
+    /// </param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>FilamentUnloadResult with success/failure, message, and residual spool weight.</returns>
-    Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, CancellationToken ct);
+    Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct);
 
     /// <summary>
     /// Initiates a filament change procedure via the backend's filament control capability.

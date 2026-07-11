@@ -69,6 +69,77 @@ public class PrinterToolheadSwapValidatorTests
         return printer;
     }
 
+    /// <summary>
+    /// Seeds an MMU-style printer: the physical hotend as T0 (Index=0, Physical) and
+    /// <paramref name="gateCount"/> virtual gates at Index=1..N (MmuGate). Mirrors
+    /// <c>PrintersService.CreateMmuVirtualToolheads</c> so the swap validator sees the
+    /// same layout as production.
+    /// </summary>
+    private static Printer SeedMmuPrinter(AppDbContext db, int gateCount = 4)
+    {
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "mmu-printer",
+            ServerUrl = "http://mmu.local",
+            HasMmu = true,
+        };
+        printer.Toolheads.Add(new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = 0,
+            Name = "Hotend",
+            IsPrimary = true,
+            ToolheadType = ToolheadType.Physical,
+        });
+        for (int i = 1; i <= gateCount; i++)
+        {
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Index = i,
+                Name = $"Gate {i}",
+                IsPrimary = false,
+                ToolheadType = ToolheadType.MmuGate,
+            });
+        }
+        db.Printers.Add(printer);
+        db.SaveChanges();
+        return printer;
+    }
+
+    /// <summary>
+    /// Seeds a Snapmaker U1-style printer with <paramref name="laneCount"/> physical
+    /// lanes stored at Index 0..N-1 (all <see cref="ToolheadType.Physical"/>) — matches
+    /// <c>MoonrakerSubscriptionService.PersistSnapmakerU1ToolheadStateAsync</c>.
+    /// </summary>
+    private static Printer SeedU1Printer(AppDbContext db, int laneCount = 4)
+    {
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "u1-printer",
+            ServerUrl = "http://u1.local",
+        };
+        for (int i = 0; i < laneCount; i++)
+        {
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Index = i,
+                Name = $"Lane {i}",
+                IsPrimary = i == 0,
+                ToolheadType = ToolheadType.Physical,
+            });
+        }
+        db.Printers.Add(printer);
+        db.SaveChanges();
+        return printer;
+    }
+
     [Fact]
     public async Task ValidateAsync_ReturnsNull_WhenPrinterMissing()
     {
@@ -304,6 +375,25 @@ public class PrinterToolheadSwapValidatorTests
     }
 
     [Fact]
+    public void ExtractExpectedMaterial_PerToolIsAuthoritative_NoLegacyFallback_WhenToolMissing()
+    {
+        // Authoritative per-tool contract (issue #710): if RequiredMaterialsPerTool is present
+        // and the specific tool has no entry, the answer is "no requirement" — the caller must
+        // NOT silently fall back to RequiredMaterialType for T0.
+        var job = new PrintJob
+        {
+            RequiredMaterialType = "PLA",
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(1, "PETG", null, null), // only T1 has a requirement
+            },
+        };
+
+        Assert.Null(PrinterToolheadSwapValidator.ExtractExpectedMaterial(job, 0));
+        Assert.Equal("PETG", PrinterToolheadSwapValidator.ExtractExpectedMaterial(job, 1));
+    }
+
+    [Fact]
     public void ExtractExpectedMaterial_FallsBackToLegacyForTool0_WhenNoPerToolData()
     {
         var job = new PrintJob { RequiredMaterialType = "PLA" };
@@ -311,5 +401,142 @@ public class PrinterToolheadSwapValidatorTests
         Assert.Equal("PLA", PrinterToolheadSwapValidator.ExtractExpectedMaterial(job, 0));
         // Legacy field is single-tool only — do not leak to higher-index toolheads.
         Assert.Null(PrinterToolheadSwapValidator.ExtractExpectedMaterial(job, 1));
+    }
+
+    // ── MMU / U1 index-translation regressions (issue #710) ──
+
+    [Fact]
+    public async Task ValidateAsync_MmuPrinter_TranslatesGateIndexToGcodeTool()
+    {
+        // MMU printers store T0 as the physical hotend (Index=0) and gates 1..N as
+        // MmuGate at Index=1..N. G-code arrays are 0-based, so gate Index=1 must map
+        // to gcode Tool=0. Regression for the reviewer-identified indexing bug.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedMmuPrinter(db, gateCount: 4);
+        Guid jobId = Guid.NewGuid();
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = jobId,
+            Name = "mmu-multi",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Queued,
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(0, "PLA", null, 10),   // tool 0 → gate 1
+                new(1, "PETG", null, 5),   // tool 1 → gate 2
+            },
+        });
+        await db.SaveChangesAsync();
+
+        // Scan a PLA spool onto GATE Index=1 — expected material is tool 0 (PLA) → OK.
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
+        SwapValidationResultDto? okResult = await validator.ValidateAsync(printer.Id, 1, 1, CancellationToken.None);
+        Assert.NotNull(okResult);
+        Assert.True(okResult!.Ok);
+        Assert.Equal("PLA", okResult.Expected);
+
+        // Scan a PLA spool onto GATE Index=2 — expected is tool 1 (PETG) → mismatch,
+        // and the affected-job report must carry the G-code tool index (1), NOT the
+        // gate Index (2).
+        PrinterToolheadSwapValidator validator2 = CreateValidator(db, Spool(1, "PLA"), out _);
+        SwapValidationResultDto? mismatch = await validator2.ValidateAsync(printer.Id, 2, 1, CancellationToken.None);
+        Assert.NotNull(mismatch);
+        Assert.False(mismatch!.Ok);
+        Assert.Equal("PETG", mismatch.Expected);
+        SwapValidationAffectedJobDto affected = Assert.Single(mismatch.AffectedJobs);
+        Assert.Equal(jobId, affected.JobId);
+        Assert.Equal(1, affected.Tool);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_MmuPrinter_GateIndex0IsUnmapped()
+    {
+        // MMU gate stored at Index=0 has no G-code tool mapping (the physical hotend
+        // shared by an MMU is not itself a filament source). Treat as 404 rather than
+        // silently accepting the scan.
+        await using AppDbContext db = CreateDb();
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "broken-mmu",
+            ServerUrl = "http://p.local",
+        };
+        // Deliberately synthesise the degenerate case: an MmuGate at Index=0.
+        printer.Toolheads.Add(new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = 0,
+            Name = "Bad Gate",
+            ToolheadType = ToolheadType.MmuGate,
+        });
+        db.Printers.Add(printer);
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
+        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 1, CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_SnapmakerU1_LaneIndexIsIdentityWithGcodeTool()
+    {
+        // Snapmaker U1 stores each lane as ToolheadType.Physical at Index=0..N-1
+        // (see MoonrakerSubscriptionService.PersistSnapmakerU1ToolheadStateAsync).
+        // Non-MMU printers keep 1:1 indexing so a scan for lane Index=2 must be
+        // validated against G-code tool 2.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedU1Printer(db, laneCount: 4);
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "u1-multi",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Queued,
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(0, "PLA", null, 10),
+                new(1, "PETG", null, 5),
+                new(2, "TPU", null, 2),
+                new(3, "ABS", null, 1),
+            },
+        });
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "TPU"), out _);
+        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 2, 1, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.True(result!.Ok);
+        Assert.Equal("TPU", result.Expected);
+    }
+
+    // ── ToolheadIndexMapper unit tests ──
+
+    [Fact]
+    public void ToolheadIndexMapper_Physical_ReturnsIdentity()
+    {
+        Assert.Equal(0, ToolheadIndexMapper.ToGcodeToolIndex(new Toolhead { Index = 0, ToolheadType = ToolheadType.Physical }));
+        Assert.Equal(3, ToolheadIndexMapper.ToGcodeToolIndex(new Toolhead { Index = 3, ToolheadType = ToolheadType.Physical }));
+    }
+
+    [Fact]
+    public void ToolheadIndexMapper_MmuGate_SubtractsOne()
+    {
+        Assert.Equal(0, ToolheadIndexMapper.ToGcodeToolIndex(new Toolhead { Index = 1, ToolheadType = ToolheadType.MmuGate }));
+        Assert.Equal(3, ToolheadIndexMapper.ToGcodeToolIndex(new Toolhead { Index = 4, ToolheadType = ToolheadType.MmuGate }));
+    }
+
+    [Fact]
+    public void ToolheadIndexMapper_MmuGateAtIndex0_ReturnsNull()
+    {
+        // Degenerate case: gate Index=0 has no meaningful G-code tool mapping — the
+        // physical hotend of an MMU printer is not a filament source.
+        Assert.Null(ToolheadIndexMapper.ToGcodeToolIndex(new Toolhead { Index = 0, ToolheadType = ToolheadType.MmuGate }));
     }
 }

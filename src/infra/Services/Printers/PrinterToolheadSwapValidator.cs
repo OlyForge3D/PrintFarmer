@@ -59,6 +59,23 @@ public class PrinterToolheadSwapValidator(
             }
         }
 
+        // Translate the caller-supplied toolhead.Index into the 0-based G-code tool index
+        // used by RequiredMaterialsPerTool. For virtual MMU gates (Index 1..N) this is
+        // Index-1; for physical toolheads (single-tool, U1 lanes, toolchangers) this is
+        // Index. When we synthesise a legacy T0 without a Toolhead row, the caller's
+        // toolheadIndex (0) is already the correct G-code index.
+        int? gcodeToolIndex = toolhead is null
+            ? toolheadIndex
+            : ToolheadIndexMapper.ToGcodeToolIndex(toolhead);
+
+        if (gcodeToolIndex is null)
+        {
+            // MmuGate stored at Index=0 has no G-code tool mapping (the physical hotend
+            // shared by an MMU is not itself a filament source). Treat as 404 so clients
+            // do not silently accept unmapped scans.
+            return null;
+        }
+
         SpoolmanSpoolDto? spool = null;
         try
         {
@@ -89,7 +106,7 @@ public class PrinterToolheadSwapValidator(
         string? expected = null;
         foreach (PrintJob job in candidateJobs)
         {
-            string? material = ExtractExpectedMaterial(job, toolheadIndex);
+            string? material = ExtractExpectedMaterial(job, gcodeToolIndex.Value);
             if (material is not null)
             {
                 expected = material;
@@ -133,7 +150,7 @@ public class PrinterToolheadSwapValidator(
         List<SwapValidationAffectedJobDto> affected = new(capacity: candidateJobs.Count);
         foreach (PrintJob job in candidateJobs)
         {
-            string? material = ExtractExpectedMaterial(job, toolheadIndex);
+            string? material = ExtractExpectedMaterial(job, gcodeToolIndex.Value);
             if (material is null)
             {
                 continue;
@@ -145,7 +162,7 @@ public class PrinterToolheadSwapValidator(
                     JobId: job.Id,
                     Name: job.Name,
                     Status: job.Status,
-                    Tool: toolheadIndex,
+                    Tool: gcodeToolIndex.Value,
                     ExpectedMaterial: material));
             }
         }
@@ -159,23 +176,28 @@ public class PrinterToolheadSwapValidator(
     }
 
     /// <summary>
-    /// Extracts the expected material for <paramref name="toolheadIndex"/> from a job. Prefers
-    /// the per-tool requirement list when present; falls back to the legacy
-    /// <see cref="PrintJob.RequiredMaterialType"/> for T0 to preserve single-tool behaviour.
+    /// Extracts the expected material for the 0-based G-code tool index
+    /// <paramref name="gcodeToolIndex"/> from a job.
+    /// <para>
+    /// Per-tool requirements are AUTHORITATIVE when present: if <paramref name="gcodeToolIndex"/>
+    /// has no entry in <see cref="PrintJob.RequiredMaterialsPerTool"/>, the answer is
+    /// "no requirement" — the caller must NOT fall back to the legacy scalar. The legacy
+    /// <see cref="PrintJob.RequiredMaterialType"/> is consulted only when per-tool data is
+    /// absent entirely (single-material / pre-#710 jobs), and even then only for T0.
+    /// </para>
     /// </summary>
-    internal static string? ExtractExpectedMaterial(PrintJob job, int toolheadIndex)
+    internal static string? ExtractExpectedMaterial(PrintJob job, int gcodeToolIndex)
     {
         IReadOnlyList<PrintJobToolMaterialRequirement>? perTool = job.RequiredMaterialsPerTool;
         if (perTool is not null)
         {
-            PrintJobToolMaterialRequirement? match = perTool.FirstOrDefault(r => r.Tool == toolheadIndex);
-            if (match is not null && !string.IsNullOrWhiteSpace(match.MaterialType))
-            {
-                return match.MaterialType;
-            }
+            PrintJobToolMaterialRequirement? match = perTool.FirstOrDefault(r => r.Tool == gcodeToolIndex);
+            return match is not null && !string.IsNullOrWhiteSpace(match.MaterialType)
+                ? match.MaterialType
+                : null;
         }
 
-        if (toolheadIndex == 0 && !string.IsNullOrWhiteSpace(job.RequiredMaterialType))
+        if (gcodeToolIndex == 0 && !string.IsNullOrWhiteSpace(job.RequiredMaterialType))
         {
             return job.RequiredMaterialType;
         }

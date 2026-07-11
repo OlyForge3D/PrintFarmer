@@ -2703,7 +2703,7 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    public async Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false);
         if (p == null)
@@ -2711,17 +2711,50 @@ public class PrintersService(
             return new FilamentUnloadResult(false, $"Printer {id} not found");
         }
 
-        // Capture outgoing spool details BEFORE unload so we can return residual weight even
-        // if the printer command later fails partway. The primary toolhead represents the
-        // spool the operator is physically removing on single-tool printers; MMU/multi-tool
-        // configurations still expose the currently active gate as primary.
-        Toolhead? primary = p.Toolheads?
-            .OrderByDescending(t => t.IsPrimary)
-            .ThenBy(t => t.Index)
-            .FirstOrDefault();
+        // Capture outgoing spool details BEFORE unload so we can return residual weight
+        // even if the printer command later fails partway.
+        //
+        // Source of truth for the outgoing spool (in order):
+        //   1. Explicit toolheadIndex → that lane's CurrentSpoolId (guided swap on
+        //      multi-slot / MMU printers targets a specific gate; do NOT infer from
+        //      the physical primary).
+        //   2. Otherwise: Printer.CurrentSpoolId (legacy single-tool source of truth),
+        //      falling back to primaryToolhead.CurrentSpoolId when the Printer scalar
+        //      is unset.
+        int? outgoingSpoolId;
+        string? outgoingMaterial;
 
-        int? outgoingSpoolId = primary?.CurrentSpoolId;
-        string? outgoingMaterial = primary?.CurrentMaterial;
+        if (toolheadIndex.HasValue)
+        {
+            Toolhead? targetLane = p.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex.Value);
+            if (targetLane is null)
+            {
+                return new FilamentUnloadResult(
+                    false,
+                    $"Toolhead index {toolheadIndex.Value} not found on printer {p.Name}",
+                    SpoolId: null,
+                    Material: null,
+                    ResidualWeightG: null);
+            }
+
+            outgoingSpoolId = targetLane.CurrentSpoolId;
+            outgoingMaterial = targetLane.CurrentMaterial;
+        }
+        else
+        {
+            outgoingSpoolId = p.CurrentSpoolId;
+            outgoingMaterial = null;
+            if (outgoingSpoolId is null)
+            {
+                Toolhead? primary = p.Toolheads?
+                    .OrderByDescending(t => t.IsPrimary)
+                    .ThenBy(t => t.Index)
+                    .FirstOrDefault();
+                outgoingSpoolId = primary?.CurrentSpoolId;
+                outgoingMaterial = primary?.CurrentMaterial;
+            }
+        }
+
         double? residualWeightG = null;
 
         if (outgoingSpoolId is int spoolId)

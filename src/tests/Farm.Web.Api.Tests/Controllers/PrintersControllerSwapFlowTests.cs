@@ -197,12 +197,12 @@ public class PrintersControllerSwapFlowTests
             ResidualWeightG: 234.5);
 
         var printersService = new Mock<IPrintersService>();
-        printersService.Setup(s => s.UnloadFilamentAsync(id, It.IsAny<CancellationToken>()))
+        printersService.Setup(s => s.UnloadFilamentAsync(id, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
 
         PrintersController controller = CreateController(out _, printersService, statusCache: null);
 
-        ActionResult<FilamentUnloadResult> result = await controller.UnloadFilamentAsync(id, CancellationToken.None);
+        ActionResult<FilamentUnloadResult> result = await controller.UnloadFilamentAsync(id, toolheadIndex: null, CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
         FilamentUnloadResult body = Assert.IsType<FilamentUnloadResult>(ok.Value);
@@ -217,14 +217,33 @@ public class PrintersControllerSwapFlowTests
     {
         Guid id = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
-        printersService.Setup(s => s.UnloadFilamentAsync(id, It.IsAny<CancellationToken>()))
+        printersService.Setup(s => s.UnloadFilamentAsync(id, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FilamentUnloadResult(false, $"Printer {id} not found"));
 
         PrintersController controller = CreateController(out _, printersService, statusCache: null);
 
-        ActionResult<FilamentUnloadResult> result = await controller.UnloadFilamentAsync(id, CancellationToken.None);
+        ActionResult<FilamentUnloadResult> result = await controller.UnloadFilamentAsync(id, toolheadIndex: null, CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UnloadFilamentAsync_ForwardsExplicitToolheadIndex_ToService()
+    {
+        Guid id = Guid.NewGuid();
+        var expected = new FilamentUnloadResult(true, "ok", SpoolId: 8, Material: "PETG", ResidualWeightG: 111);
+
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        printersService.Setup(s => s.UnloadFilamentAsync(id, 2, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected)
+            .Verifiable();
+
+        PrintersController controller = CreateController(out _, printersService, statusCache: null);
+
+        ActionResult<FilamentUnloadResult> result = await controller.UnloadFilamentAsync(id, toolheadIndex: 2, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        printersService.Verify();
     }
 
     [Fact]
@@ -267,8 +286,12 @@ public class PrintersControllerSwapFlowTests
             OverrideReason = "operator confirmed material substitution",
         };
 
+        // Override path skips the pre-flight validator entirely — the strict mock
+        // enforces that the controller never calls ValidateAsync when override=true.
+        var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
+
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 0, request, CancellationToken.None);
+            printerId, 0, request, validator.Object, CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.True(Assert.IsType<CommandResult>(ok.Value).Success);
@@ -284,14 +307,122 @@ public class PrintersControllerSwapFlowTests
         printersService.Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CommandResult(true, "ok"));
 
+        // Validator says the material matches — assignment proceeds normally and no
+        // override telemetry fires.
+        var validator = new Mock<IPrinterToolheadSwapValidator>();
+        validator.Setup(v => v.ValidateAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SwapValidationResultDto(
+                Ok: true,
+                Expected: "PLA",
+                Scanned: "PLA",
+                AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>()));
+
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
-            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, CancellationToken.None);
+            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_RejectsWithConflict_WhenValidatorReportsMismatchAndNoOverride()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        var mismatch = new SwapValidationResultDto(
+            Ok: false,
+            Expected: "PLA",
+            Scanned: "PETG",
+            AffectedJobs: new[]
+            {
+                new SwapValidationAffectedJobDto(jobId, "cube", PrintJobStatus.Queued, 0, "PLA"),
+            },
+            Reason: "Scanned material 'PETG' does not match expected 'PLA'.");
+
+        // The PrintersService is strict: the controller MUST NOT call SetToolheadSpoolAsync
+        // when a hard-stop mismatch fires without an override.
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+
+        var validator = new Mock<IPrinterToolheadSwapValidator>();
+        validator.Setup(v => v.ValidateAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mismatch);
+
+        PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
+            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        SwapValidationResultDto body = Assert.IsType<SwapValidationResultDto>(conflict.Value);
+        Assert.False(body.Ok);
+        Assert.Equal("PLA", body.Expected);
+        Assert.Equal("PETG", body.Scanned);
+
+        // Server-enforced hard stop: no assignment call, no set_toolhead_spool telemetry,
+        // and — critically — no override telemetry either.
+        printersService.VerifyNoOtherCalls();
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_OverrideMismatch_WriteFails_NoAuditEmitted()
+    {
+        Guid printerId = Guid.NewGuid();
+        // Assignment fails downstream — the audit warning + override telemetry must NOT
+        // fire because the write never landed. Also verify validator is not consulted
+        // when override=true.
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.SetToolheadSpoolAsync(printerId, 1, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(false, "Backend rejected assignment"));
+
+        var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
+
+        PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        var request = new SetActiveSpoolRequest
+        {
+            SpoolId = 42,
+            OverrideMismatch = true,
+            OverrideReason = "forcing PETG onto T1",
+        };
+
+        ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
+            printerId, 1, request, validator.Object, CancellationToken.None);
+
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.False(Assert.IsType<CommandResult>(bad.Value).Success);
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool", printerId.ToString(), false), Times.Once);
+        telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_ProceedsWhenValidatorReturnsNull_LetsDownstreamMap404()
+    {
+        Guid printerId = Guid.NewGuid();
+        // Validator returns null (printer/toolhead not found by the pre-flight lookup).
+        // The controller must not swallow this into a 200/409 — it must fall through so
+        // the downstream service's own 404 mapping stays authoritative.
+        var validator = new Mock<IPrinterToolheadSwapValidator>();
+        validator.Setup(v => v.ValidateAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SwapValidationResultDto?)null);
+
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(false, $"Printer {printerId} not found"));
+
+        PrintersController controller = CreateController(out _, printersService, statusCache: null);
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
+            printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
     }
 
     [Fact]

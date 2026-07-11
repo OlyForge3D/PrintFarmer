@@ -1,8 +1,26 @@
-﻿using System.Linq;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Cameras;
+using Farm.Infrastructure.Services.Cost;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.StorageManagement;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.PrintJobs;
@@ -115,5 +133,114 @@ public class PrintJobManagementServicePerToolPopulationTests
         Assert.NotNull(reqs);
         Assert.Equal(2, reqs!.Count);
         Assert.All(reqs, r => Assert.Null(r.EstimatedGrams));
+    }
+
+    // ── Rerun production-entry regressions (issue #710) ──
+
+    [Fact]
+    public async Task RerunJobAsync_CopiesPerToolRequirementsFromOriginalJob()
+    {
+        // Reviewer requirement (#710): rerun must copy the source job's per-tool
+        // requirement list verbatim so multi-material validation still works after
+        // a rerun without re-reading the G-code file.
+        var originalId = Guid.NewGuid();
+        var original = new PrintJob
+        {
+            Id = originalId,
+            Name = "orig",
+            GcodeFileId = null,
+            RequiredMaterialType = "PLA",
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(0, "PLA", "#111111", 12.0),
+                new(1, "PETG", "#222222", 4.5),
+            },
+        };
+
+        var repo = new Mock<IPrintJobManagementRepository>();
+        repo.Setup(r => r.GetByIdAsync(originalId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(original);
+        repo.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
+        PrintJob? added = null;
+        repo.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => added = j)
+            .ReturnsAsync((PrintJob j, CancellationToken _) => j);
+
+        PrintJobManagementService service = CreateService(repo);
+        _ = await service.RerunJobAsync(originalId.ToString(), "user-42");
+
+        Assert.NotNull(added);
+        Assert.NotSame(original, added);
+        Assert.Equal("PLA", added!.RequiredMaterialType);
+        Assert.NotNull(added.RequiredMaterialsPerTool);
+        Assert.Equal(2, added.RequiredMaterialsPerTool!.Count);
+        Assert.Equal(new[] { 0, 1 }, added.RequiredMaterialsPerTool.Select(r => r.Tool));
+        Assert.Equal(new[] { "PLA", "PETG" }, added.RequiredMaterialsPerTool.Select(r => r.MaterialType));
+        Assert.Equal(new double?[] { 12.0, 4.5 }, added.RequiredMaterialsPerTool.Select(r => r.EstimatedGrams));
+    }
+
+    [Fact]
+    public async Task RerunJobAsync_RederivesPerToolRequirementsFromGcode_WhenOriginalMissingProjection()
+    {
+        // Rerunning a pre-#710 job (no per-tool projection stored) must fall back
+        // to the linked G-code file so validation isn't silently downgraded on rerun.
+        var originalId = Guid.NewGuid();
+        var gcodeId = Guid.NewGuid();
+        var original = new PrintJob
+        {
+            Id = originalId,
+            Name = "legacy",
+            GcodeFileId = gcodeId,
+            RequiredMaterialType = "PLA",
+            RequiredMaterialsPerTool = null,
+        };
+        var gcode = new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "legacy.gcode",
+            FileName = "legacy.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA", "PETG" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 8.0, 3.2 }),
+        };
+
+        var repo = new Mock<IPrintJobManagementRepository>();
+        repo.Setup(r => r.GetByIdAsync(originalId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(original);
+        repo.Setup(r => r.GetGcodeFileAsync(gcodeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        repo.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        PrintJob? added = null;
+        repo.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => added = j)
+            .ReturnsAsync((PrintJob j, CancellationToken _) => j);
+
+        PrintJobManagementService service = CreateService(repo);
+        _ = await service.RerunJobAsync(originalId.ToString(), "user-42");
+
+        Assert.NotNull(added);
+        Assert.NotNull(added!.RequiredMaterialsPerTool);
+        Assert.Equal(new[] { 0, 1 }, added.RequiredMaterialsPerTool!.Select(r => r.Tool));
+        Assert.Equal(new[] { "PLA", "PETG" }, added.RequiredMaterialsPerTool.Select(r => r.MaterialType));
+    }
+
+    private static PrintJobManagementService CreateService(Mock<IPrintJobManagementRepository> repository)
+    {
+        return new PrintJobManagementService(
+            repository.Object,
+            NullLogger<PrintJobManagementService>.Instance,
+            Mock.Of<IPrintersService>(),
+            Mock.Of<IStoragePathService>(),
+            Mock.Of<IHubContext<PrinterHub>>(),
+            Mock.Of<IStoredFileOperationsService>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            notificationService: Mock.Of<INotificationService>(),
+            retryService: Mock.Of<IRetryService>(),
+            printerStatusRefreshService: Mock.Of<IPrinterStatusRefreshService>(),
+            jobCostCalculationService: Mock.Of<IJobCostCalculationService>(),
+            cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
+            serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
+            settingsService: null);
     }
 }

@@ -519,9 +519,11 @@ public class PrintJobManagementService(
             int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
             job.QueuePosition = maxPosition + 1;
 
-            // Project per-extruder G-code metadata into per-tool material requirements.
+            // Project per-extruder G-code metadata into per-tool material requirements
+            // via the shared PrintJobRequirementsMapper so every enqueue path (this
+            // service, JobQueueService, rerun) uses identical projection semantics.
             // Preserves RequiredMaterialType for legacy dispatch / reporting.
-            PopulatePerToolRequirementsFromGcode(job, gcodeFile);
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
 
             _ = await _repository.AddAsync(job, cancellationToken);
 
@@ -536,71 +538,17 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
-    /// Projects per-extruder G-code metadata into the job's per-tool material requirements.
-    /// Populates <see cref="PrintJob.RequiredMaterialsPerTool"/> when the source file has
-    /// per-extruder material types; falls back silently when no per-extruder data exists so
-    /// legacy single-material <see cref="PrintJob.RequiredMaterialType"/> behaviour is preserved.
+    /// Thin wrapper around
+    /// <see cref="Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode"/>
+    /// kept for backward-compatible unit tests. New callers should invoke the shared
+    /// mapper directly so every production entry point projects per-extruder metadata
+    /// identically.
     /// </summary>
     /// <param name="job">The newly constructed print job to mutate.</param>
     /// <param name="gcodeFile">The G-code file supplying slicer metadata.</param>
-    /// <remarks>
-    /// This mirrors the JSON storage pattern used on <see cref="GcodeFile.FilamentPerExtruderType"/>
-    /// (see <c>SnapshotSlicerEstimatesAsync</c>) rather than adding a parallel entity hierarchy.
-    /// </remarks>
     internal static void PopulatePerToolRequirementsFromGcode(PrintJob job, GcodeFile gcodeFile)
     {
-        ArgumentNullException.ThrowIfNull(job);
-        ArgumentNullException.ThrowIfNull(gcodeFile);
-
-        string[]? materials = TryParseJsonArray<string>(gcodeFile.FilamentPerExtruderType);
-        if (materials is null || materials.Length == 0)
-        {
-            return;
-        }
-
-        double[]? weights = TryParseJsonArray<double>(gcodeFile.FilamentPerExtruderWeightG);
-        string[]? colors = TryParseJsonArray<string>(gcodeFile.FilamentPerExtruderColorHex);
-
-        var reqs = new List<PrintJobToolMaterialRequirement>(materials.Length);
-        for (int tool = 0; tool < materials.Length; tool++)
-        {
-            string? material = materials[tool];
-            if (string.IsNullOrWhiteSpace(material))
-            {
-                continue;
-            }
-
-            double? grams = weights is not null && tool < weights.Length ? weights[tool] : (double?)null;
-            string? color = colors is not null && tool < colors.Length ? colors[tool] : null;
-            if (string.IsNullOrWhiteSpace(color))
-            {
-                color = null;
-            }
-
-            reqs.Add(new PrintJobToolMaterialRequirement(tool, material, color, grams));
-        }
-
-        if (reqs.Count > 0)
-        {
-            job.RequiredMaterialsPerTool = reqs;
-        }
-    }
-
-    private static T[]? TryParseJsonArray<T>(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return null;
-        }
-
-        try
-        {
-            return System.Text.Json.JsonSerializer.Deserialize<T[]>(json);
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return null;
-        }
+        Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
     }
 
     /// <summary>
@@ -1306,12 +1254,13 @@ public class PrintJobManagementService(
 
             // Prefer a user-friendly name (original filename) when the linked G-code file still exists.
             string newJobName = originalJob.Name;
+            GcodeFile? rerunGcodeFile = null;
             if (originalJob.GcodeFileId.HasValue)
             {
-                GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(originalJob.GcodeFileId.Value, cancellationToken);
-                if (gcodeFile != null)
+                rerunGcodeFile = await _repository.GetGcodeFileAsync(originalJob.GcodeFileId.Value, cancellationToken);
+                if (rerunGcodeFile != null)
                 {
-                    newJobName = gcodeFile.Name;
+                    newJobName = rerunGcodeFile.Name;
                 }
             }
 
@@ -1334,6 +1283,11 @@ public class PrintJobManagementService(
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow
             };
+
+            // Carry per-tool requirements across the rerun. Prefer verbatim copy of the
+            // original job's JSON (already normalised); rederive from the G-code file if
+            // the source lacks the projection (e.g., pre-#710 jobs).
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.CopyFrom(newJob, originalJob, rerunGcodeFile);
 
             // Calculate queue position
             int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
@@ -1945,7 +1899,11 @@ public class PrintJobManagementService(
         TimeSpan? estimatedPrintTime = ExtractEstimatedPrintTimeFromMetadata(historyJob.Metadata);
         double? estimatedFilamentUsage = ExtractEstimatedFilamentUsageFromMetadata(historyJob.Metadata);
 
-        return new PrintJob
+        // Try to find matching G-code file by filename so history-seeded jobs that map to an
+        // in-progress external print can still be swap-validated authoritatively.
+        Guid? gcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken);
+
+        var job = new PrintJob
         {
             Id = Guid.NewGuid(),
             Name = Path.GetFileNameWithoutExtension(historyJob.Filename) ?? "Unknown",
@@ -1974,9 +1932,19 @@ public class PrintJobManagementService(
             // Associate with printer
             AssignedPrinterId = printerId,
 
-            // Try to find matching G-code file by filename
-            GcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken)
+            // Matching G-code file resolved above (may be null when no library match exists)
+            GcodeFileId = gcodeFileId
         };
+
+        // Project per-extruder G-code metadata onto the seeded job through the same shared
+        // mapper every other creation path uses. No-op when the file has no per-extruder data.
+        if (gcodeFileId.HasValue)
+        {
+            GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(gcodeFileId.Value, cancellationToken);
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
+        }
+
+        return job;
     }
 
     /// <summary>
