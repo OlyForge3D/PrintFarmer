@@ -235,6 +235,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PartOutputMapping> PartOutputMappings => Set<PartOutputMapping>();
 
+    // Per-user snoozes for the unified attention feed (issue #707).
+    public DbSet<AttentionSnooze> AttentionSnoozes => Set<AttentionSnooze>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

@@ -55,7 +55,7 @@ struct JobListView: View {
                     }
                 }
             }
-            .navigationTitle("Jobs")
+            .navigationTitle("Tasks")
             .refreshable {
                 await viewModel.loadJobs()
             }

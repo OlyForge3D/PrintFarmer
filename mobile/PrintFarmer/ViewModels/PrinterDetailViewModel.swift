@@ -142,6 +142,7 @@ final class PrinterDetailViewModel {
             if let x = update.x { p.x = x }
             if let y = update.y { p.y = y }
             if let z = update.z { p.z = z }
+            if let homed = update.homedAxes { p.homedAxes = homed }
             if let spool = update.spoolInfo { p.spoolInfo = spool }
             printer = p
 

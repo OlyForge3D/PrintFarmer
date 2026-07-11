@@ -97,6 +97,41 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("ApiKeys");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.AttentionSnooze", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AttentionItemAnchorAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AttentionItemId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("SnoozedUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SnoozedUntilUtc")
+                        .HasDatabaseName("IX_AttentionSnoozes_SnoozedUntilUtc");
+
+                    b.HasIndex("UserId", "AttentionItemId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_AttentionSnoozes_UserId_AttentionItemId");
+
+                    b.ToTable("AttentionSnoozes");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -803,6 +838,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SnapshotUrl")
                         .HasMaxLength(1024)

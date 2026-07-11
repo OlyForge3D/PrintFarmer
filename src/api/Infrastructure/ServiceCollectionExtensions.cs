@@ -349,6 +349,15 @@ public static class ServiceCollectionExtensions
     {
         // Register SettingsService AFTER repositories - requires IAppSettingsRepository
         _ = services.AddScoped<ISettingsService, SettingsService>();
+
+        // Operator feature gate (#725) - scoped so it observes DB updates on the next request.
+        // Depends on IAppSettingsRepository (NOT ISettingsService) so that
+        // (a) OperatorFeatures configuration/env values are never bound as the base value
+        //     — only explicit-false can hard-disable — and
+        // (b) DI activation is DB-independent: capability lookups never fail because the
+        //     wider SettingsService constructor performs eager DB I/O.
+        _ = services.AddScoped<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate,
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeatureGate>();
     }
 
     #endregion

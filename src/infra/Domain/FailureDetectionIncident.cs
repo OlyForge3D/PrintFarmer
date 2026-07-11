@@ -54,4 +54,13 @@ public sealed class FailureDetectionIncident
     /// Gets or sets whether the active job was auto-paused.
     /// </summary>
     public bool AutoPaused { get; set; }
+
+    /// <summary>
+    /// Gets or sets the UTC instant at which this incident was resolved by a successful
+    /// operator attention action (Resume/Pause/Cancel). When set, the incident is treated
+    /// as handled and is suppressed from the unified attention feed even if the underlying
+    /// job remains active (issue #707, review R2). Failure history/audit meaning is
+    /// preserved — the incident row is not deleted.
+    /// </summary>
+    public DateTime? ResolvedAtUtc { get; set; }
 }

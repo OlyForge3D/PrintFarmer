@@ -40,6 +40,17 @@ final class AuthViewModel {
     // MARK: - Session Restoration
 
     func restoreSession() async {
+        // Idempotence guard: if this view model was pre-authenticated by
+        // `UITestBootstrap` (via `markAuthenticatedForUITesting(user:)`)
+        // there is no session to restore. Re-invoking the demo auth
+        // service here would send an unnecessary round-trip and — in
+        // future auth-service implementations — could reset session
+        // state we already established. Short-circuiting keeps this
+        // method safe to call multiple times.
+        if hasCheckedAuth && isAuthenticated {
+            return
+        }
+
         isLoading = true
         if let user = await services.authService.restoreSession() {
             currentUser = user
@@ -47,6 +58,21 @@ final class AuthViewModel {
         }
         isLoading = false
         hasCheckedAuth = true
+    }
+
+    // MARK: - UI Test Bootstrap
+
+    /// Marks the view model as authenticated without hitting the auth
+    /// service. Used exclusively by `UITestBootstrap` (guarded by the
+    /// `--uitesting` launch argument) to render `ContentView` on a fresh
+    /// simulator. Does not modify `DemoMode.shared`, so production auth
+    /// remains untouched on normal launches.
+    func markAuthenticatedForUITesting(user: UserDTO) {
+        currentUser = user
+        isAuthenticated = true
+        hasCheckedAuth = true
+        isLoading = false
+        errorMessage = nil
     }
 
     // MARK: - Login / Logout
