@@ -59,6 +59,13 @@ public class QueuedPrintJobDto
 
     public string? RequiredMaterialType { get; set; }
 
+    /// <summary>
+    /// Authoritative per-tool material requirements for multi-material / MMU jobs
+    /// (issue #710). Empty for single-material jobs; the legacy scalar
+    /// <see cref="RequiredMaterialType"/> is always preserved alongside this array.
+    /// </summary>
+    public List<PrintJobToolRequirementDto> ToolRequirements { get; set; } = [];
+
     public string[]? RequiredCapabilities { get; set; }
 
     public int? EstimatedPrintTimeSeconds { get; set; }

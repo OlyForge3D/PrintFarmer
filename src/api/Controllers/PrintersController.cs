@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -2793,9 +2794,8 @@ public class PrintersController(
 
         // An override is only honoured when the operator both set the flag AND supplied a
         // non-empty reason (issue #710 contract: mismatch overrides are recorded with a
-        // reason). A flag without a reason is NOT a valid override — validation still runs,
-        // so a genuine mismatch is rejected until the operator provides a reason.
-        bool hasValidOverride = request.OverrideMismatch
+        // reason). A flag without a reason is NOT a valid override.
+        bool hasOverrideIntent = request.OverrideMismatch
             && !string.IsNullOrWhiteSpace(request.OverrideReason);
 
         // Guided-swap gate (#725): the server-enforced material check and override audit
@@ -2804,39 +2804,77 @@ public class PrintersController(
         bool guidedSwapEnabled = featureGate.IsEnabled(
             Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap);
 
-        if (guidedSwapEnabled && !hasValidOverride)
+        // Audit context is built ONLY for an authorized mismatch override and passed to the
+        // service so the durable record commits atomically with the binding (B6). Null on
+        // every other path (ok / disabled / unknown / not-found).
+        Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext? overrideAudit = null;
+
+        if (guidedSwapEnabled)
         {
-            // Server-enforced material check (guided swap flow, per issue #710).
-            // Without a valid override, a mismatch MUST reject with a typed 409 and perform
-            // no write, no log, no telemetry — thin clients cannot bypass by skipping
-            // the pre-flight GET .../swap-validation endpoint.
-            Farm.Infrastructure.Services.Printers.SwapValidationResultDto? preAssignment =
+            // B1: ALWAYS validate before any binding — even when an override flag/reason is
+            // present. The override can only be honoured for a genuine mismatch (below).
+            Farm.Infrastructure.Services.Printers.SwapValidationResult validation =
                 await validator.ValidateAsync(id, toolheadIndex, spoolId, ct).ConfigureAwait(false);
 
-            // A null result means printer/toolhead not found — fall through to the
-            // downstream service so its own 404/400 mapping stays authoritative.
-            if (preAssignment is { Ok: false })
+            // B2: an invalid / unresolved lane must NEVER fall through to a blind bind.
+            switch (validation.Outcome)
             {
-                return Conflict(preAssignment);
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.PrinterNotFound:
+                    return NotFound(new CommandResult(false, $"Printer {id} not found"));
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadNotFound:
+                    return NotFound(new CommandResult(false, $"Toolhead index {toolheadIndex} not found on printer {id}"));
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadOutOfRange:
+                    return BadRequest(new CommandResult(false, $"Toolhead index {toolheadIndex} is out of range"));
+            }
+
+            Farm.Infrastructure.Services.Printers.SwapValidationResultDto body = validation.Result!;
+
+            switch (body.Status)
+            {
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok:
+                    // Normal write permitted; no override, no audit.
+                    break;
+
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Mismatch:
+                    // Override permitted ONLY for a real mismatch AND explicit flag AND reason.
+                    if (!hasOverrideIntent)
+                    {
+                        return Conflict(body);
+                    }
+
+                    overrideAudit = new Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext(
+                        UserId: User?.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                        UserName: User?.Identity?.Name,
+                        Reason: request.OverrideReason!.Trim(),
+                        ExpectedMaterial: body.Expected,
+                        ScannedMaterial: body.Scanned,
+                        AffectedJobIds: body.AffectedJobs.Select(j => j.JobId).ToList());
+                    break;
+
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Unknown:
+                default:
+                    // B7: never override unknown — no write, no audit.
+                    return Conflict(body);
             }
         }
 
-        CommandResult result = await _printersService.SetToolheadSpoolAsync(id, toolheadIndex, spoolId, ct);
+        CommandResult result = await _printersService
+            .SetToolheadSpoolAsync(id, toolheadIndex, spoolId, overrideAudit, ct)
+            .ConfigureAwait(false);
         _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
 
-        // Audit override intent ONLY after the assignment succeeded, and only while the
-        // guided flow is enabled — a failed write must not leave a "user forced through"
-        // audit trail, and a disabled feature must perform no audit writes. Match /
-        // no-expected paths never emit override telemetry.
-        if (guidedSwapEnabled && hasValidOverride && result.Success)
+        // Emit override telemetry ONLY after an authorized-override assignment succeeded. The
+        // durable audit row is written atomically inside the service; this is best-effort
+        // observability on top. A failed write leaves neither audit row nor telemetry.
+        if (overrideAudit is not null && result.Success)
         {
             _logger.LogWarning(
                 "Toolhead spool override: user {User} loaded spool {SpoolId} on printer {PrinterId} toolhead T{ToolheadIndex} despite mismatch. Reason: {Reason}",
-                User?.Identity?.Name ?? "(unknown)",
+                overrideAudit.UserName ?? overrideAudit.UserId ?? "(unknown)",
                 spoolId,
                 id,
                 toolheadIndex,
-                request.OverrideReason);
+                overrideAudit.Reason);
             _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
         }
 
@@ -2938,16 +2976,29 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "toolheadIndex must be zero or greater."));
         }
 
-        Farm.Infrastructure.Services.Printers.SwapValidationResultDto? result = await validator
+        Farm.Infrastructure.Services.Printers.SwapValidationResult validation = await validator
             .ValidateAsync(id, toolheadIndex, spoolId.Value, ct)
             .ConfigureAwait(false);
 
+        switch (validation.Outcome)
+        {
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.PrinterNotFound:
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadNotFound:
+                return NotFound();
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadOutOfRange:
+                return BadRequest(new CommandResult(false, $"Toolhead index {toolheadIndex} is out of range."));
+        }
+
+        Farm.Infrastructure.Services.Printers.SwapValidationResultDto? result = validation.Result;
         if (result is null)
         {
             return NotFound();
         }
 
-        _telemetryService.RecordPrinterOperation("swap_validation", id.ToString(), result.Ok);
+        _telemetryService.RecordPrinterOperation(
+            "swap_validation",
+            id.ToString(),
+            result.Status == Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok);
         return result;
     }
 
@@ -3784,7 +3835,10 @@ public class PrintersController(
     /// <summary>
     /// Maps a <see cref="FilamentUnloadResult"/> to the appropriate HTTP status code so callers
     /// still get consistent 404 semantics when the printer is missing, while success and other
-    /// failure paths preserve the residual-weight payload.
+    /// failure paths preserve the residual-weight payload. Uses the typed
+    /// <see cref="FilamentUnloadFailureKind"/> discriminator rather than brittle message
+    /// substring matching (issue #710 low-severity fix): a missing printer is 404, an invalid
+    /// toolhead index is 400, and any other failure is 400.
     /// </summary>
     private ActionResult<FilamentUnloadResult> MapFilamentUnloadResult(FilamentUnloadResult result)
     {
@@ -3793,11 +3847,11 @@ public class PrintersController(
             return Ok(result);
         }
 
-        if (result.Message?.Contains("not found", StringComparison.OrdinalIgnoreCase) == true)
+        return result.FailureKind switch
         {
-            return NotFound(result);
-        }
-
-        return BadRequest(result);
+            FilamentUnloadFailureKind.PrinterNotFound => NotFound(result),
+            FilamentUnloadFailureKind.InvalidToolhead => BadRequest(result),
+            _ => BadRequest(result),
+        };
     }
 }

@@ -228,6 +228,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Per-user snoozes for the unified attention feed (issue #707).
     public DbSet<AttentionSnooze> AttentionSnoozes => Set<AttentionSnooze>();
 
+    // Durable audit of guided filament-swap material-mismatch overrides (issue #710).
+    public DbSet<FilamentSwapOverride> FilamentSwapOverrides => Set<FilamentSwapOverride>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

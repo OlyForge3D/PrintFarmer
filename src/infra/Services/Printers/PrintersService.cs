@@ -2708,7 +2708,10 @@ public class PrintersService(
         Printer? p = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return new FilamentUnloadResult(false, $"Printer {id} not found");
+            return new FilamentUnloadResult(
+                false,
+                $"Printer {id} not found",
+                FailureKind: FilamentUnloadFailureKind.PrinterNotFound);
         }
 
         // Capture outgoing spool details BEFORE unload so we can return residual weight
@@ -2729,16 +2732,46 @@ public class PrintersService(
             Toolhead? targetLane = p.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex.Value);
             if (targetLane is null)
             {
-                return new FilamentUnloadResult(
-                    false,
-                    $"Toolhead index {toolheadIndex.Value} not found on printer {p.Name}",
-                    SpoolId: null,
-                    Material: null,
-                    ResidualWeightG: null);
+                // B3: legacy single-tool T0 with no materialized Toolhead row → resolve the
+                // outgoing spool from the Printer scalar, never from a fabricated gate.
+                if (toolheadIndex.Value == 0)
+                {
+                    outgoingSpoolId = p.CurrentSpoolId;
+                    outgoingMaterial = p.CurrentMaterial;
+                }
+                else
+                {
+                    // An explicit, non-zero lane that does not exist is an invalid toolhead
+                    // request → documented HTTP 400 (not a 404 "printer not found").
+                    return new FilamentUnloadResult(
+                        false,
+                        $"Toolhead index {toolheadIndex.Value} not found on printer {p.Name}",
+                        SpoolId: null,
+                        Material: null,
+                        ResidualWeightG: null,
+                        FailureKind: FilamentUnloadFailureKind.InvalidToolhead);
+                }
             }
-
-            outgoingSpoolId = targetLane.CurrentSpoolId;
-            outgoingMaterial = targetLane.CurrentMaterial;
+            else if (toolheadIndex.Value == 0)
+            {
+                // B3: when a physical row exists at T0, preserve the read precedence
+                // Printer.CurrentSpoolId ?? primaryToolhead.CurrentSpoolId.
+                if (p.CurrentSpoolId is not null)
+                {
+                    outgoingSpoolId = p.CurrentSpoolId;
+                    outgoingMaterial = p.CurrentMaterial;
+                }
+                else
+                {
+                    outgoingSpoolId = targetLane.CurrentSpoolId;
+                    outgoingMaterial = targetLane.CurrentMaterial;
+                }
+            }
+            else
+            {
+                outgoingSpoolId = targetLane.CurrentSpoolId;
+                outgoingMaterial = targetLane.CurrentMaterial;
+            }
         }
         else
         {
@@ -2954,7 +2987,16 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct)
+    public Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct) =>
+        SetToolheadSpoolAsync(id, toolheadIndex, spoolId, null, ct);
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        int spoolId,
+        FilamentSwapOverrideContext? overrideAudit,
+        CancellationToken ct)
     {
         // Load printer with toolheads collection
         Printer? p = await _unitOfWork.Printers
@@ -2977,6 +3019,35 @@ public class PrintersService(
 
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+
+        // B3: legacy single-tool T0 with no materialized Toolhead row → bind via the Printer
+        // scalar (Printer.CurrentSpoolId). Never fabricate a fake MMU gate at index 0.
+        if (toolhead is null && toolheadIndex == 0)
+        {
+            try
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+                p.CurrentSpoolId = spoolId;
+                p.CurrentMaterial = spool?.Material ?? null;
+
+                StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
+                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "SetToolheadSpoolAsync: Assigned spool {SpoolId} to legacy T0 (Printer scalar) on printer {PName} ({Id})",
+                    spoolId, p.Name, id);
+
+                return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T0");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to legacy T0 on printer {PName} ({Id})",
+                    spoolId, p.Name, id);
+                return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
+            }
+        }
 
         // Auto-create MMU gates when the toolhead doesn't exist.
         // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
@@ -3022,6 +3093,11 @@ public class PrintersService(
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
             toolhead.UpdatedAt = DateTime.UtcNow;
 
+            // Stage the override audit (if any) so it commits in the SAME SaveChanges as the
+            // binding — a failed bind therefore never leaves an orphaned audit and an audit is
+            // never missing for a committed override (B6 atomicity).
+            StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
+
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -3038,6 +3114,34 @@ public class PrintersService(
                 spoolId, toolheadIndex, p.Name, id);
             return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Stages a durable guided-swap override audit record on the shared unit of work so it
+    /// commits atomically with the pending spool binding. No-op when no override context is
+    /// supplied (issue #710, B6).
+    /// </summary>
+    private void StageOverrideAudit(FilamentSwapOverrideContext? ctx, Guid printerId, int toolheadIndex, int spoolId)
+    {
+        if (ctx is null)
+        {
+            return;
+        }
+
+        _unitOfWork.FilamentSwapOverrides.Add(new FilamentSwapOverride
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            ToolheadIndex = toolheadIndex,
+            SpoolId = spoolId,
+            UserId = ctx.UserId,
+            UserName = ctx.UserName,
+            Reason = ctx.Reason,
+            ExpectedMaterial = ctx.ExpectedMaterial,
+            ScannedMaterial = ctx.ScannedMaterial,
+            AffectedJobIdsJson = JsonSerializer.Serialize(ctx.AffectedJobIds ?? Array.Empty<Guid>()),
+            CreatedAtUtc = DateTime.UtcNow,
+        });
     }
 
     /// <inheritdoc/>

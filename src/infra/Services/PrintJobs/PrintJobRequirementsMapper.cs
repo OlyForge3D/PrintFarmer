@@ -110,6 +110,35 @@ public static class PrintJobRequirementsMapper
         PopulateFromGcode(newJob, gcodeFile);
     }
 
+    /// <summary>
+    /// Projects a print job's authoritative <see cref="PrintJob.RequiredMaterialsPerTool"/>
+    /// onto the public <c>toolRequirements[]</c> wire shape without mutating the source. Returns
+    /// an empty list (never null) when the job has no per-tool requirements, so response DTOs
+    /// always carry a stable array (GitHub issue OlyForge3D/PrintFarmer#710, B5).
+    /// </summary>
+    public static List<PrintJobToolRequirementDto> ToWireRequirements(PrintJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+
+        IReadOnlyList<PrintJobToolMaterialRequirement>? perTool = job.RequiredMaterialsPerTool;
+        if (perTool is null || perTool.Count == 0)
+        {
+            return new List<PrintJobToolRequirementDto>();
+        }
+
+        var wire = new List<PrintJobToolRequirementDto>(perTool.Count);
+        foreach (PrintJobToolMaterialRequirement req in perTool)
+        {
+            wire.Add(new PrintJobToolRequirementDto(
+                ToolIndex: req.Tool,
+                MaterialType: req.MaterialType,
+                ColorHint: req.ColorHint,
+                EstimatedGrams: req.EstimatedGrams));
+        }
+
+        return wire;
+    }
+
     private static T[]? TryParseJsonArray<T>(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))

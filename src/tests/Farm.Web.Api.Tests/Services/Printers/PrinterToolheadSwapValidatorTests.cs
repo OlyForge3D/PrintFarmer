@@ -44,6 +44,14 @@ public class PrinterToolheadSwapValidatorTests
     private static SpoolmanSpoolDto Spool(int id, string material) =>
         new(id, $"Spool {id}", material, RemainingWeightG: 500, ColorHex: "#FFFFFF", InUse: true);
 
+    /// <summary>Asserts the envelope carries a concrete validation body and returns it.</summary>
+    private static SwapValidationResultDto Body(SwapValidationResult envelope)
+    {
+        Assert.Equal(SwapValidationOutcome.Validated, envelope.Outcome);
+        Assert.NotNull(envelope.Result);
+        return envelope.Result!;
+    }
+
     private static Printer SeedPrinter(AppDbContext db, int toolheadCount = 1)
     {
         var printer = new Printer
@@ -141,26 +149,44 @@ public class PrinterToolheadSwapValidatorTests
     }
 
     [Fact]
-    public async Task ValidateAsync_ReturnsNull_WhenPrinterMissing()
+    public async Task ValidateAsync_ReturnsPrinterNotFound_WhenPrinterMissing()
     {
         await using AppDbContext db = CreateDb();
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(Guid.NewGuid(), 0, 1, CancellationToken.None);
+        SwapValidationResult result = await validator.ValidateAsync(Guid.NewGuid(), 0, 1, CancellationToken.None);
 
-        Assert.Null(result);
+        Assert.Equal(SwapValidationOutcome.PrinterNotFound, result.Outcome);
+        Assert.Null(result.Result);
     }
 
     [Fact]
-    public async Task ValidateAsync_ReturnsNull_WhenToolheadIndexOutOfRange()
+    public async Task ValidateAsync_ReturnsToolheadNotFound_WhenLaneNotAValidSourceOnNonMmuPrinter()
+    {
+        // A single-tool, non-MMU printer has no lane at index 5 and cannot host MMU gates, so
+        // the lane is not a valid filament source → ToolheadNotFound (404, no write), NOT a
+        // blind bind (B2).
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedPrinter(db, toolheadCount: 1);
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
+
+        SwapValidationResult result = await validator.ValidateAsync(printer.Id, 5, 1, CancellationToken.None);
+
+        Assert.Equal(SwapValidationOutcome.ToolheadNotFound, result.Outcome);
+        Assert.Null(result.Result);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ReturnsOutOfRange_WhenIndexBeyondMax()
     {
         await using AppDbContext db = CreateDb();
         Printer printer = SeedPrinter(db, toolheadCount: 1);
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 5, 1, CancellationToken.None);
+        SwapValidationResult result = await validator.ValidateAsync(printer.Id, 999, 1, CancellationToken.None);
 
-        Assert.Null(result);
+        Assert.Equal(SwapValidationOutcome.ToolheadOutOfRange, result.Outcome);
+        Assert.Null(result.Result);
     }
 
     [Fact]
@@ -170,10 +196,9 @@ public class PrinterToolheadSwapValidatorTests
         Printer printer = SeedPrinter(db);
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(42, "PLA"), out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 42, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 42, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.True(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Ok, result.Status);
         Assert.Null(result.Expected);
         Assert.Equal("PLA", result.Scanned);
         Assert.Empty(result.AffectedJobs);
@@ -198,10 +223,9 @@ public class PrinterToolheadSwapValidatorTests
 
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(7, "PETG"), out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 7, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 7, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.True(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Ok, result.Status);
         Assert.Equal("PETG", result.Expected);
         Assert.Equal("PETG", result.Scanned);
         Assert.Empty(result.AffectedJobs);
@@ -227,10 +251,9 @@ public class PrinterToolheadSwapValidatorTests
 
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(8, "PLA"), out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 8, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 8, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.False(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Mismatch, result.Status);
         Assert.Equal("PETG", result.Expected);
         Assert.Equal("PLA", result.Scanned);
         SwapValidationAffectedJobDto job = Assert.Single(result.AffectedJobs);
@@ -281,10 +304,9 @@ public class PrinterToolheadSwapValidatorTests
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(9, "PLA"), out _);
 
         // Scan a PLA spool onto T1 — jobMismatch requires PETG on T1; jobOnlyT0 has no T1 requirement.
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 1, 9, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 1, 9, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.False(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Mismatch, result.Status);
         Assert.Equal("PETG", result.Expected);
         SwapValidationAffectedJobDto affected = Assert.Single(result.AffectedJobs);
         Assert.Equal(jobMismatchId, affected.JobId);
@@ -322,16 +344,17 @@ public class PrinterToolheadSwapValidatorTests
 
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(11, "PLA"), out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 11, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 11, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.True(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Ok, result.Status);
         Assert.Equal("PLA", result.Expected);
     }
 
     [Fact]
-    public async Task ValidateAsync_ReturnsNotOk_WhenSpoolmanCannotResolveSpool()
+    public async Task ValidateAsync_ReturnsUnknown_WhenSpoolmanCannotResolveSpool()
     {
+        // B7: an unresolved/nonexistent Spoolman spool is UNKNOWN, not mismatch — the guided
+        // PUT must not write/override on unknown.
         await using AppDbContext db = CreateDb();
         Printer printer = SeedPrinter(db);
         db.PrintJobs.Add(new PrintJob
@@ -348,13 +371,41 @@ public class PrinterToolheadSwapValidatorTests
 
         PrinterToolheadSwapValidator validator = CreateValidator(db, spoolResult: null, out _);
 
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 999, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 999, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.False(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Unknown, result.Status);
         Assert.Equal("PLA", result.Expected);
         Assert.Null(result.Scanned);
         Assert.NotNull(result.Reason);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ReturnsUnknown_WhenScannedSpoolHasNoMaterialMetadata()
+    {
+        // B7: a requirement exists but the scanned spool carries no material metadata →
+        // UNKNOWN (cannot compare), never mismatch.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedPrinter(db);
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "expects-pla",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Queued,
+            RequiredMaterialType = "PLA",
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        // Spool resolves but has an empty material string.
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(5, string.Empty), out _);
+
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 5, CancellationToken.None));
+
+        Assert.Equal(SwapValidationStatus.Unknown, result.Status);
+        Assert.Equal("PLA", result.Expected);
+        Assert.Empty(result.AffectedJobs);
     }
 
     [Fact]
@@ -432,18 +483,16 @@ public class PrinterToolheadSwapValidatorTests
 
         // Scan a PLA spool onto GATE Index=1 — expected material is tool 0 (PLA) → OK.
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
-        SwapValidationResultDto? okResult = await validator.ValidateAsync(printer.Id, 1, 1, CancellationToken.None);
-        Assert.NotNull(okResult);
-        Assert.True(okResult!.Ok);
+        SwapValidationResultDto okResult = Body(await validator.ValidateAsync(printer.Id, 1, 1, CancellationToken.None));
+        Assert.Equal(SwapValidationStatus.Ok, okResult.Status);
         Assert.Equal("PLA", okResult.Expected);
 
         // Scan a PLA spool onto GATE Index=2 — expected is tool 1 (PETG) → mismatch,
         // and the affected-job report must carry the G-code tool index (1), NOT the
         // gate Index (2).
         PrinterToolheadSwapValidator validator2 = CreateValidator(db, Spool(1, "PLA"), out _);
-        SwapValidationResultDto? mismatch = await validator2.ValidateAsync(printer.Id, 2, 1, CancellationToken.None);
-        Assert.NotNull(mismatch);
-        Assert.False(mismatch!.Ok);
+        SwapValidationResultDto mismatch = Body(await validator2.ValidateAsync(printer.Id, 2, 1, CancellationToken.None));
+        Assert.Equal(SwapValidationStatus.Mismatch, mismatch.Status);
         Assert.Equal("PETG", mismatch.Expected);
         SwapValidationAffectedJobDto affected = Assert.Single(mismatch.AffectedJobs);
         Assert.Equal(jobId, affected.JobId);
@@ -454,8 +503,8 @@ public class PrinterToolheadSwapValidatorTests
     public async Task ValidateAsync_MmuPrinter_GateIndex0IsUnmapped()
     {
         // MMU gate stored at Index=0 has no G-code tool mapping (the physical hotend
-        // shared by an MMU is not itself a filament source). Treat as 404 rather than
-        // silently accepting the scan.
+        // shared by an MMU is not itself a filament source). Treat as ToolheadNotFound (404)
+        // rather than silently accepting the scan.
         await using AppDbContext db = CreateDb();
         var printer = new Printer
         {
@@ -476,9 +525,60 @@ public class PrinterToolheadSwapValidatorTests
         await db.SaveChangesAsync();
 
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 0, 1, CancellationToken.None);
+        SwapValidationResult result = await validator.ValidateAsync(printer.Id, 0, 1, CancellationToken.None);
 
-        Assert.Null(result);
+        Assert.Equal(SwapValidationOutcome.ToolheadNotFound, result.Outcome);
+        Assert.Null(result.Result);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_UnmaterializedMmuGate_IsValidatedNotBlindlyBound()
+    {
+        // B2: an MMU-capable printer with NO materialized gate rows must still validate a
+        // requested gate (index N → gcode tool N-1) rather than fall through to a blind
+        // auto-create bind. Here the printer only has the physical hotend row; gate index 2
+        // is synthesized and validated (tool 1 → PETG) → mismatch against a scanned PLA spool.
+        await using AppDbContext db = CreateDb();
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "capable-no-gates",
+            ServerUrl = "http://p.local",
+            MultiMaterial = true,
+        };
+        printer.Toolheads.Add(new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = 0,
+            Name = "Hotend",
+            IsPrimary = true,
+            ToolheadType = ToolheadType.Physical,
+        });
+        db.Printers.Add(printer);
+        Guid jobId = Guid.NewGuid();
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = jobId,
+            Name = "needs-petg-on-tool1",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Queued,
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(1, "PETG", null, 5),
+            },
+        });
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "PLA"), out _);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 2, 1, CancellationToken.None));
+
+        Assert.Equal(SwapValidationStatus.Mismatch, result.Status);
+        Assert.Equal("PETG", result.Expected);
+        SwapValidationAffectedJobDto affected = Assert.Single(result.AffectedJobs);
+        Assert.Equal(1, affected.Tool);
     }
 
     [Fact]
@@ -509,10 +609,9 @@ public class PrinterToolheadSwapValidatorTests
         await db.SaveChangesAsync();
 
         PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(1, "TPU"), out _);
-        SwapValidationResultDto? result = await validator.ValidateAsync(printer.Id, 2, 1, CancellationToken.None);
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 2, 1, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.True(result!.Ok);
+        Assert.Equal(SwapValidationStatus.Ok, result.Status);
         Assert.Equal("TPU", result.Expected);
     }
 

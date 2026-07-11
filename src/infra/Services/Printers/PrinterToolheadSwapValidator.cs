@@ -11,11 +11,25 @@ namespace Farm.Infrastructure.Services.Printers;
 /// assigned jobs from the print queue, resolves the requested toolhead's expected material,
 /// and compares against the scanned Spoolman spool's material.
 /// </summary>
+/// <remarks>
+/// This validator performs NO writes. When the requested lane has no materialized
+/// <see cref="Toolhead"/> row yet it synthesizes the lane's semantics from the printer's
+/// MMU capability + index mapping so a valid-but-unmaterialized gate is still validated
+/// (never blindly bound); genuinely invalid / out-of-range lanes are surfaced via
+/// <see cref="SwapValidationOutcome"/> so the controller returns 404/400 with no write
+/// (GitHub issue OlyForge3D/PrintFarmer#710, B2/B3).
+/// </remarks>
 public class PrinterToolheadSwapValidator(
     AppDbContext db,
     ISpoolmanService spoolman,
     ILogger<PrinterToolheadSwapValidator> logger) : IPrinterToolheadSwapValidator
 {
+    /// <summary>
+    /// Hard upper bound on a toolhead / MMU-gate index. Mirrors
+    /// <c>PrintersService.MaxToolheadIndex</c> so validation and binding agree on range.
+    /// </summary>
+    internal const int MaxToolheadIndex = 16;
+
     private static readonly PrintJobStatus[] ActiveOrPendingStatuses = new[]
     {
         PrintJobStatus.Starting,
@@ -26,7 +40,7 @@ public class PrinterToolheadSwapValidator(
     };
 
     /// <inheritdoc />
-    public async Task<SwapValidationResultDto?> ValidateAsync(
+    public async Task<SwapValidationResult> ValidateAsync(
         Guid printerId,
         int toolheadIndex,
         int spoolId,
@@ -40,40 +54,22 @@ public class PrinterToolheadSwapValidator(
 
         if (printer is null)
         {
-            return null;
+            return new SwapValidationResult(SwapValidationOutcome.PrinterNotFound, null);
         }
 
-        if (toolheadIndex < 0)
+        // Structural range check first: a negative or oversized index is never a valid lane.
+        if (toolheadIndex < 0 || toolheadIndex > MaxToolheadIndex)
         {
-            return null;
+            return new SwapValidationResult(SwapValidationOutcome.ToolheadOutOfRange, null);
         }
 
-        Toolhead? toolhead = printer.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex);
-        if (toolhead is null)
-        {
-            // Allow validation for T0 on legacy single-tool printers that have not seeded a
-            // Toolhead row yet — the guided swap flow should still work.
-            if (toolheadIndex != 0)
-            {
-                return null;
-            }
-        }
-
-        // Translate the caller-supplied toolhead.Index into the 0-based G-code tool index
-        // used by RequiredMaterialsPerTool. For virtual MMU gates (Index 1..N) this is
-        // Index-1; for physical toolheads (single-tool, U1 lanes, toolchangers) this is
-        // Index. When we synthesise a legacy T0 without a Toolhead row, the caller's
-        // toolheadIndex (0) is already the correct G-code index.
-        int? gcodeToolIndex = toolhead is null
-            ? toolheadIndex
-            : ToolheadIndexMapper.ToGcodeToolIndex(toolhead);
-
+        // Resolve the 0-based G-code tool index for the requested lane, synthesizing the
+        // descriptor when the Toolhead row is not materialized yet (B2/B3). A null result
+        // means the lane is not a valid filament source → 404, no write.
+        int? gcodeToolIndex = ResolveGcodeToolIndex(printer, toolheadIndex);
         if (gcodeToolIndex is null)
         {
-            // MmuGate stored at Index=0 has no G-code tool mapping (the physical hotend
-            // shared by an MMU is not itself a filament source). Treat as 404 so clients
-            // do not silently accept unmapped scans.
-            return null;
+            return new SwapValidationResult(SwapValidationOutcome.ToolheadNotFound, null);
         }
 
         SpoolmanSpoolDto? spool = null;
@@ -114,37 +110,50 @@ public class PrinterToolheadSwapValidator(
             }
         }
 
+        // Unresolved / nonexistent Spoolman spool → UNKNOWN, never mismatch. Guided binding
+        // must not proceed or override on an unknown result (B7).
         if (spool is null)
         {
-            return new SwapValidationResultDto(
-                Ok: false,
+            return Validated(new SwapValidationResultDto(
+                Status: SwapValidationStatus.Unknown,
                 Expected: expected,
                 Scanned: null,
                 AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
-                Reason: "Scanned spool not found in Spoolman.");
+                Reason: "Scanned spool could not be resolved in Spoolman."));
         }
 
+        // No requirement to satisfy for this lane → OK (safe to bind).
         if (expected is null)
         {
-            return new SwapValidationResultDto(
-                Ok: true,
+            return Validated(new SwapValidationResultDto(
+                Status: SwapValidationStatus.Ok,
                 Expected: null,
                 Scanned: scanned,
                 AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
-                Reason: null);
+                Reason: null));
         }
 
-        bool matches = !string.IsNullOrWhiteSpace(scanned)
-            && string.Equals(scanned.Trim(), expected.Trim(), StringComparison.OrdinalIgnoreCase);
-
-        if (matches)
+        // A requirement exists but the scanned spool carries no material metadata → UNKNOWN
+        // (cannot compare); not a mismatch (B7).
+        if (string.IsNullOrWhiteSpace(scanned))
         {
-            return new SwapValidationResultDto(
-                Ok: true,
+            return Validated(new SwapValidationResultDto(
+                Status: SwapValidationStatus.Unknown,
                 Expected: expected,
                 Scanned: scanned,
                 AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
-                Reason: null);
+                Reason: "Scanned spool has no material metadata to validate."));
+        }
+
+        bool matches = string.Equals(scanned.Trim(), expected.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (matches)
+        {
+            return Validated(new SwapValidationResultDto(
+                Status: SwapValidationStatus.Ok,
+                Expected: expected,
+                Scanned: scanned,
+                AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
+                Reason: null));
         }
 
         List<SwapValidationAffectedJobDto> affected = new(capacity: candidateJobs.Count);
@@ -156,7 +165,7 @@ public class PrinterToolheadSwapValidator(
                 continue;
             }
 
-            if (!string.Equals(scanned?.Trim(), material.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(scanned.Trim(), material.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 affected.Add(new SwapValidationAffectedJobDto(
                     JobId: job.Id,
@@ -167,13 +176,60 @@ public class PrinterToolheadSwapValidator(
             }
         }
 
-        return new SwapValidationResultDto(
-            Ok: false,
+        return Validated(new SwapValidationResultDto(
+            Status: SwapValidationStatus.Mismatch,
             Expected: expected,
             Scanned: scanned,
             AffectedJobs: affected,
-            Reason: $"Scanned material '{scanned ?? "(unknown)"}' does not match expected '{expected}'.");
+            Reason: $"Scanned material '{scanned}' does not match expected '{expected}'."));
     }
+
+    private static SwapValidationResult Validated(SwapValidationResultDto dto) =>
+        new(SwapValidationOutcome.Validated, dto);
+
+    /// <summary>
+    /// Resolves the 0-based G-code tool index for a caller-supplied toolhead index, using the
+    /// materialized <see cref="Toolhead"/> row when present and otherwise synthesizing the
+    /// lane semantics from the printer's MMU capability. Returns <c>null</c> when the lane is
+    /// not a valid filament source (the caller maps this to 404, no write).
+    /// </summary>
+    internal static int? ResolveGcodeToolIndex(Printer printer, int toolheadIndex)
+    {
+        Toolhead? toolhead = printer.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex);
+        if (toolhead is not null)
+        {
+            // Materialized row: MmuGate → Index-1 (null for the shared hotend at index 0),
+            // Physical → identity.
+            return ToolheadIndexMapper.ToGcodeToolIndex(toolhead);
+        }
+
+        // No materialized row. Synthesize a descriptor from the printer's capability so a
+        // valid-but-unmaterialized lane is still validated instead of blindly bound.
+        if (toolheadIndex == 0)
+        {
+            // Legacy single-tool physical hotend (T0): identity mapping to G-code tool 0.
+            return 0;
+        }
+
+        // A gate index (> 0) is only meaningful on an MMU / multi-material printer, where the
+        // gate at Index N maps to G-code tool N-1.
+        if (IsMmuCapable(printer))
+        {
+            return toolheadIndex - 1;
+        }
+
+        // Non-MMU printer requesting a non-existent lane → not a valid filament source.
+        return null;
+    }
+
+    /// <summary>
+    /// True when the printer can host virtual MMU gates (either flagged multi-material / MMU
+    /// or already carrying at least one materialized gate row).
+    /// </summary>
+    internal static bool IsMmuCapable(Printer printer) =>
+        printer.MultiMaterial
+        || printer.HasMmu == true
+        || (printer.Toolheads?.Any(t => t.ToolheadType == ToolheadType.MmuGate) ?? false);
 
     /// <summary>
     /// Extracts the expected material for the 0-based G-code tool index

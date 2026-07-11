@@ -504,7 +504,8 @@ public class PrintJobManagementService(
                 Status = assignedPrinterId.HasValue ? PrintJobStatus.Assigned : PrintJobStatus.Queued,
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-                RequiredMaterialType = request.RequiredMaterialType,
+                RequiredMaterialType = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper
+                    .ResolveEffectiveMaterial(request.RequiredMaterialType, gcodeFile),
                 DeadlineAtUtc = resolvedDeadlineAtUtc,
                 EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
@@ -2703,6 +2704,7 @@ public class PrintJobManagementService(
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             RequiredCapabilities = job.RequiredCapabilities,
             EstimatedPrintTimeSeconds = (int?)job.EstimatedPrintTime?.TotalSeconds,
             EstimatedFilamentUsageGrams = job.EstimatedFilamentUsage,

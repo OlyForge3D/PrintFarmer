@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Cameras;
@@ -223,6 +224,111 @@ public class PrintJobManagementServicePerToolPopulationTests
         Assert.NotNull(added!.RequiredMaterialsPerTool);
         Assert.Equal(new[] { 0, 1 }, added.RequiredMaterialsPerTool!.Select(r => r.Tool));
         Assert.Equal(new[] { "PLA", "PETG" }, added.RequiredMaterialsPerTool.Select(r => r.MaterialType));
+    }
+
+    [Fact]
+    public async Task EnqueueJobAsync_OmittedRequestMaterial_FallsBackToGcodeRequiredMaterial()
+    {
+        // B4: the production enqueue entry point (NOT a helper) must resolve the effective
+        // material from the linked G-code file when the request omits RequiredMaterialType,
+        // exactly like JobQueueService.AddJobToQueueAsync does.
+        var gcodeId = Guid.NewGuid();
+        var gcode = new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "single.gcode",
+            FileName = "single.gcode",
+            RequiredMaterial = "PETG", // authoritative fallback for a single-tool file
+        };
+
+        var repo = new Mock<IPrintJobManagementRepository>();
+        repo.Setup(r => r.GetGcodeFileAsync(gcodeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        repo.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        PrintJob? added = null;
+        repo.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => added = j)
+            .ReturnsAsync((PrintJob j, CancellationToken _) => j);
+
+        PrintJobManagementService service = CreateService(repo);
+
+        var request = new EnqueueQueueJobRequest
+        {
+            GcodeFileId = gcodeId.ToString(),
+            RequiredMaterialType = null, // omitted → must fall back to gcode
+        };
+
+        QueuedPrintJobDto dto = await service.EnqueueJobAsync(request, "user-1");
+
+        Assert.NotNull(added);
+        Assert.Equal("PETG", added!.RequiredMaterialType);
+        Assert.Equal("PETG", dto.RequiredMaterialType);
+    }
+
+    [Fact]
+    public async Task EnqueueJobAsync_ProjectsPerToolRequirements_OntoWireContract()
+    {
+        // B5: the QueuedPrintJobDto returned by the production enqueue path must carry the
+        // public toolRequirements[] wire array projected from the authoritative per-tool
+        // requirements, while preserving the legacy RequiredMaterialType.
+        var gcodeId = Guid.NewGuid();
+        var gcode = new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "multi.gcode",
+            FileName = "multi.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA", "PETG" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 12.0, 4.5 }),
+        };
+
+        var repo = new Mock<IPrintJobManagementRepository>();
+        repo.Setup(r => r.GetGcodeFileAsync(gcodeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        repo.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        repo.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob j, CancellationToken _) => j);
+
+        PrintJobManagementService service = CreateService(repo);
+
+        QueuedPrintJobDto dto = await service.EnqueueJobAsync(
+            new EnqueueQueueJobRequest { GcodeFileId = gcodeId.ToString() },
+            "user-1");
+
+        Assert.Equal(2, dto.ToolRequirements.Count);
+        Assert.Equal(new[] { 0, 1 }, dto.ToolRequirements.Select(r => r.ToolIndex));
+        Assert.Equal(new[] { "PLA", "PETG" }, dto.ToolRequirements.Select(r => r.MaterialType));
+        Assert.Equal(12.0, dto.ToolRequirements[0].EstimatedGrams);
+    }
+
+    [Fact]
+    public void QueuedPrintJobDto_SerializesToolRequirements_WithExactWireFieldNames()
+    {
+        // B5: the public toolRequirements[] contract must serialize with the exact Dallas
+        // field names/types (toolIndex, materialType, colorHint, estimatedGrams) in camelCase,
+        // while preserving the legacy requiredMaterialType scalar.
+        var dto = new QueuedPrintJobDto
+        {
+            RequiredMaterialType = "PLA",
+            ToolRequirements =
+            [
+                new PrintJobToolRequirementDto(ToolIndex: 0, MaterialType: "PLA", ColorHint: "#FF0000", EstimatedGrams: 12.5),
+                new PrintJobToolRequirementDto(ToolIndex: 1, MaterialType: "PETG", ColorHint: null, EstimatedGrams: null),
+            ],
+        };
+
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        string json = JsonSerializer.Serialize(dto, options);
+
+        Assert.Contains("\"requiredMaterialType\":\"PLA\"", json);
+        Assert.Contains("\"toolRequirements\":[", json);
+        Assert.Contains("\"toolIndex\":0", json);
+        Assert.Contains("\"materialType\":\"PLA\"", json);
+        Assert.Contains("\"colorHint\":\"#FF0000\"", json);
+        Assert.Contains("\"estimatedGrams\":12.5", json);
+        Assert.Contains("\"toolIndex\":1", json);
+        Assert.Contains("\"materialType\":\"PETG\"", json);
     }
 
     private static PrintJobManagementService CreateService(Mock<IPrintJobManagementRepository> repository)

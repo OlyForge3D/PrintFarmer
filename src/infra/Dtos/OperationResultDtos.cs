@@ -17,6 +17,23 @@ namespace Farm.Infrastructure;
 public record CommandResult(bool Success, string? Message = null);
 
 /// <summary>
+/// Discriminates why a filament-unload failed so the HTTP layer maps to the correct status
+/// code WITHOUT brittle message substring matching (GitHub issue OlyForge3D/PrintFarmer#710
+/// low-severity fix): a missing printer is 404, an invalid toolhead index is 400.
+/// </summary>
+public enum FilamentUnloadFailureKind
+{
+    /// <summary>No failure, or a generic backend failure that maps to 400.</summary>
+    None = 0,
+
+    /// <summary>The printer id did not resolve. Maps to HTTP 404.</summary>
+    PrinterNotFound = 1,
+
+    /// <summary>The requested toolhead / lane index is invalid. Maps to HTTP 400.</summary>
+    InvalidToolhead = 2,
+}
+
+/// <summary>
 /// Result of a filament-unload command. Extends the generic <see cref="CommandResult"/> shape
 /// with the residual weight of the spool that was just unloaded so the guided swap flow
 /// (and mobile "return to shelf" workflow) can record inventory without an extra Spoolman
@@ -27,12 +44,17 @@ public record CommandResult(bool Success, string? Message = null);
 /// <param name="SpoolId">Spoolman spool ID that was loaded on the primary toolhead prior to unload, if any.</param>
 /// <param name="Material">Material family (e.g., "PLA") captured from the outgoing spool, if any.</param>
 /// <param name="ResidualWeightG">Remaining filament weight in grams reported by Spoolman for the outgoing spool.</param>
+/// <param name="FailureKind">
+/// Non-serialized failure discriminator used by the controller to select 404 vs 400 without
+/// substring matching. Not part of the wire contract.
+/// </param>
 public record FilamentUnloadResult(
     bool Success,
     string? Message = null,
     int? SpoolId = null,
     string? Material = null,
-    double? ResidualWeightG = null);
+    double? ResidualWeightG = null,
+    [property: JsonIgnore] FilamentUnloadFailureKind FailureKind = FilamentUnloadFailureKind.None);
 
 /// <summary>
 /// Result of uploading a G-code file directly to a printer backend.

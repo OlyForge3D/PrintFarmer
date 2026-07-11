@@ -494,6 +494,28 @@ public interface IPrintersService
     Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct);
 
     /// <summary>
+    /// Assigns a Spoolman spool to a specific toolhead, optionally writing a durable
+    /// guided-swap override audit record in the SAME transaction as the binding so the two
+    /// commit atomically (GitHub issue OlyForge3D/PrintFarmer#710, B6).
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.)</param>
+    /// <param name="spoolId">The Spoolman spool ID to assign</param>
+    /// <param name="overrideAudit">
+    /// When non-null, an override audit record is staged and committed atomically with the
+    /// binding. Supplied only for an authorized mismatch override; never persisted on a failed
+    /// bind. Pass null for normal (non-override) assignments.
+    /// </param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        int spoolId,
+        FilamentSwapOverrideContext? overrideAudit,
+        CancellationToken ct);
+
+    /// <summary>
     /// Clears the spool assignment from a specific toolhead (by index) on a printer.
     /// Removes the spool ID, material, and color information.
     /// </summary>

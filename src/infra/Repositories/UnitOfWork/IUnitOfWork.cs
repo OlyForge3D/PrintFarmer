@@ -71,6 +71,12 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     IQueueRepository Queue { get; }
 
     /// <summary>
+    /// Repository for guided filament-swap override audit records (issue #710).
+    /// Shares the DbContext so an override audit commits atomically with the spool binding.
+    /// </summary>
+    IFilamentSwapOverrideRepository FilamentSwapOverrides { get; }
+
+    /// <summary>
     /// Repository for tag persistence and retrieval (generic tags).
     /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
     /// </summary>
