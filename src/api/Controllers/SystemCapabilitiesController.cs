@@ -1,6 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.FeatureFlags;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,10 +16,12 @@ namespace Farm.Web.Api.Controllers;
 [AllowAnonymous] // Frontend reads capabilities and feature flags before login to decide which UI to render.
 public class SystemCapabilitiesController(
     IConfiguration configuration,
-    IFeatureFlagService featureFlagService) : ControllerBase
+    IFeatureFlagService featureFlagService,
+    IOperatorFeatureGate operatorFeatureGate) : ControllerBase
 {
     private readonly IConfiguration _configuration = configuration;
     private readonly IFeatureFlagService _featureFlagService = featureFlagService;
+    private readonly IOperatorFeatureGate _operatorFeatureGate = operatorFeatureGate;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -62,6 +65,7 @@ public class SystemCapabilitiesController(
             ThumbnailGenerationEnabled = thumbnailEnabled,
             GcodeUploadEnabled = true,
             PlatformNote = platformNote,
+            OperatorFeatures = _operatorFeatureGate.GetEffectiveFlags(),
         };
 
         return Ok(dto);

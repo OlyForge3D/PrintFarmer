@@ -94,7 +94,12 @@ struct PreheatSubgroup: View {
 
     @ViewBuilder
     private func button(for preset: PreheatPreset) -> some View {
-        let isPending = viewModel.pendingCommand?.kind == .preheat(preset)
+        let isPending: Bool = {
+            if case let .preheat(pendingPreset, _, _) = viewModel.pendingCommand?.kind {
+                return pendingPreset == preset
+            }
+            return false
+        }()
         let canControl = viewModel.canControl
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
@@ -220,7 +225,7 @@ struct PreheatSubgroup: View {
 
     private func isErrored(preset: PreheatPreset) -> Bool {
         guard let last = viewModel.lastError else { return false }
-        if case let .preheat(errPreset) = last.command.kind, errPreset == preset { return true }
+        if case let .preheat(errPreset, _, _) = last.command.kind, errPreset == preset { return true }
         return false
     }
 }
