@@ -98,6 +98,26 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
+        // Attention Feed (issue #707) — unified operator feed composed from failure,
+        // maintenance, and offline sources. Harvest items join after the #714 ledger exists;
+        // runout items join via #709.
+        services.AddScoped<Farm.Infrastructure.Repositories.Attention.IAttentionSnoozeRepository,
+            Farm.Infrastructure.Repositories.Attention.EfAttentionSnoozeRepository>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.FailureAttentionSource>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.MaintenanceAttentionSource>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.OfflineAttentionSource>();
+
+        // Harvest attention items are deferred until the #714 harvest ledger exists; the
+        // HarvestAttentionSource is intentionally NOT registered so no harvest cards are
+        // composed and no Harvest action path is reachable from a feed item (review R4).
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionService,
+            Farm.Infrastructure.Services.Attention.AttentionService>();
+        services.AddSingleton<Farm.Infrastructure.Services.Attention.IAttentionBroadcaster,
+            Farm.Infrastructure.Services.Attention.AttentionBroadcaster>();
+
         // SPA services (only for monolithic deployments)
         bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
         if (isMonolithicDeployment)
