@@ -167,6 +167,57 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
             return XCTFail("A stale preheat response cleared the newer jog command")
         }
     }
+
+    func test_staleFailureResponse_doesNotClearNewerPendingCommand_norOverwriteError() async throws {
+        let gate = AsyncGate()
+        mockService.beforeSetTemperatures = { await gate.wait() }
+        let base = try idlePrinter()
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        // C1: a preheat blocked in-flight at the gate.
+        async let first: Void = vm.preheat(.pla)
+        while await !gate.hasWaiters { await Task.yield() }
+
+        // Live evidence confirms and clears C1 *before* its HTTP response lands.
+        var warmed = base
+        warmed.hotendTarget = 200
+        vm.handlePrinterUpdate(warmed)
+        XCTAssertFalse(vm.isExecuting, "Live evidence cleared C1")
+
+        // C2: a new jog begins and becomes the pending command (its move
+        // succeeds because no error is armed yet).
+        await vm.jog(axis: "X", distanceMm: 10)
+        guard case .jog = vm.pendingCommand?.kind else {
+            return XCTFail("Expected a pending jog (C2) after the preheat cleared")
+        }
+        XCTAssertNil(vm.lastError, "C2 started cleanly with no error")
+
+        // Arm the error so C1 fails *late* when it resumes past the gate.
+        mockService.errorToThrow = NetworkError.serverError(500)
+        await gate.open()
+        await first
+
+        // C1's stale failure must neither clear C2 nor surface its own error.
+        guard case .jog = vm.pendingCommand?.kind else {
+            return XCTFail("A stale preheat failure cleared the newer jog command")
+        }
+        XCTAssertTrue(vm.isExecuting, "C2 must remain pending")
+        XCTAssertNil(vm.lastError,
+                     "A stale failure from an already-confirmed C1 must not overwrite current error state")
+    }
+
+    func test_currentCommandFailure_recordsError_andClearsPending() async throws {
+        mockService.errorToThrow = NetworkError.serverError(500)
+        let vm = makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.pla)
+
+        XCTAssertNil(vm.pendingCommand, "The current command's failure clears pending for retry")
+        XCTAssertFalse(vm.isExecuting)
+        XCTAssertEqual(vm.lastError?.isRetryable, true, "The current command's error is surfaced")
+    }
 }
 
 // MARK: - Test gate helper

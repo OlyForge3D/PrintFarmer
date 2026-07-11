@@ -327,22 +327,30 @@ final class PrinterControlsViewModel: ObservableObject {
         return true
     }
 
-    /// On failure we clear the failed command so the user can retry. On success
-    /// we do *not* blanket-clear: pending normally persists until a live
-    /// snapshot confirms the effect (see `handlePrinterUpdate(_:)`). The one
-    /// exception is when the latest cached same-printer snapshot *already*
-    /// satisfies the command's confirmation domain — e.g. a same-preset preheat
-    /// on a printer already at the requested targets, an already-zero cool-down,
-    /// or a confirming snapshot that landed before the HTTP response. In that
-    /// case waiting for a further delta would hang forever, so we clear now.
-    /// Single-flight identity is enforced (`pendingCommand == command`) so an
-    /// old/stale response can never clear a newer pending command.
+    /// Completion handler for a dispatched command. Runs on the MainActor via
+    /// the `defer` in each command method.
+    ///
+    /// Identity gate (single-flight): a stale completion — success *or* failure
+    /// — whose command was already confirmed/cleared by live telemetry and
+    /// superseded by a newer command must never mutate `pendingCommand`. So we
+    /// bail unless this exact invocation still owns the pending slot.
+    ///
+    /// Once ownership is established:
+    ///   * Failure: this command's own error was recorded by `setError`; clear
+    ///     it so the user can retry.
+    ///   * Success: pending normally persists until a live snapshot confirms the
+    ///     effect (see `handlePrinterUpdate(_:)`). The one exception is when the
+    ///     latest cached same-printer snapshot *already* satisfies the command's
+    ///     confirmation domain — e.g. a same-preset preheat on a printer already
+    ///     at the requested targets, an already-zero cool-down, or a confirming
+    ///     snapshot that landed before the HTTP response — where waiting for a
+    ///     further delta would hang forever, so we clear now.
     private func endCommand(_ command: ControlCommand) {
+        guard pendingCommand == command else { return }
         if lastError?.command == command {
             pendingCommand = nil
             return
         }
-        guard pendingCommand == command else { return }
         if Self.transition(from: printer, to: printer, resolves: command) {
             pendingCommand = nil
         }
@@ -350,10 +358,15 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private func setError(command: ControlCommand, error: Error) {
         let mapped = Self.mapError(error)
-        lastError = ControlsError(command: command, message: mapped.message, isRetryable: mapped.isRetryable)
+        setError(command: command, message: mapped.message, isRetryable: mapped.isRetryable)
     }
 
     private func setError(command: ControlCommand, message: String, isRetryable: Bool) {
+        // Identity gate: a stale failure from a command that is no longer
+        // pending (already confirmed/cleared and possibly superseded) must not
+        // overwrite the current command's error banner. Only the owner of the
+        // pending slot may record an error here.
+        guard pendingCommand == command else { return }
         lastError = ControlsError(command: command, message: message, isRetryable: isRetryable)
     }
 
