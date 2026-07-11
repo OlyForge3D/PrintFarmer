@@ -1,11 +1,14 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Dtos.Attention;
 
 /// <summary>
-/// Kind of attention item. Serialized as a camelCase string via
-/// <see cref="System.Text.Json.Serialization.JsonStringEnumConverter"/>.
+/// Kind of attention item. Wire values are lowercase (issue #707); the enum has its own
+/// per-enum converter so we do not mutate the global <c>JsonStringEnumConverter</c>
+/// contract that existing PascalCase enums depend on.
 /// </summary>
 /// <remarks>
 /// Values are stable; new kinds are added without renaming existing ones so mobile
@@ -13,6 +16,7 @@ namespace Farm.Infrastructure.Dtos.Attention;
 /// for the F4 coverage source (#709) and defined here so clients can pattern-match
 /// on it before the backend emits it.
 /// </remarks>
+[JsonConverter(typeof(AttentionKindConverter))]
 public enum AttentionKind
 {
     /// <summary>Auto-paused or high-confidence print failure.</summary>
@@ -32,8 +36,10 @@ public enum AttentionKind
 }
 
 /// <summary>
-/// Severity of an attention item. Ordering: Critical &gt; Warning &gt; Info.
+/// Severity of an attention item. Wire values are camelCase (issue #707) with a per-enum
+/// converter; ordering: Critical &gt; Warning &gt; Info.
 /// </summary>
+[JsonConverter(typeof(AttentionSeverityConverter))]
 public enum AttentionSeverity
 {
     /// <summary>Informational; no operator action strictly required.</summary>
@@ -49,8 +55,9 @@ public enum AttentionSeverity
 /// <summary>
 /// Typed action kinds. Clients MUST NOT synthesize raw URLs — they POST to
 /// <c>POST /api/attention/{itemId}/actions/{actionKind}</c>, which the server
-/// dispatches to the appropriate existing endpoint.
+/// dispatches to the appropriate existing endpoint. Wire values are camelCase.
 /// </summary>
+[JsonConverter(typeof(AttentionActionKindConverter))]
 public enum AttentionActionKind
 {
     /// <summary>Pause the current print.</summary>
@@ -68,14 +75,44 @@ public enum AttentionActionKind
     /// <summary>Resolve (complete) a maintenance alert.</summary>
     Resolve = 4,
 
-    /// <summary>Dismiss (ignore) a maintenance alert or failure.</summary>
+    /// <summary>Dismiss (ignore) a maintenance alert.</summary>
     Dismiss = 5,
 
     /// <summary>Snooze the item for a duration; use the dedicated snooze endpoint.</summary>
     Snooze = 6,
 
-    /// <summary>Harvest a completed plate (basic; F9/#714 will extend).</summary>
+    /// <summary>Harvest a completed plate (reserved for F9/#714; currently not offered).</summary>
     Harvest = 7,
+}
+
+/// <summary>Per-enum converter emitting lowercase names for <see cref="AttentionKind"/>.</summary>
+public sealed class AttentionKindConverter : JsonStringEnumConverter<AttentionKind>
+{
+    /// <inheritdoc />
+    public AttentionKindConverter()
+        : base(JsonNamingPolicy.CamelCase)
+    {
+    }
+}
+
+/// <summary>Per-enum converter emitting camelCase names for <see cref="AttentionSeverity"/>.</summary>
+public sealed class AttentionSeverityConverter : JsonStringEnumConverter<AttentionSeverity>
+{
+    /// <inheritdoc />
+    public AttentionSeverityConverter()
+        : base(JsonNamingPolicy.CamelCase)
+    {
+    }
+}
+
+/// <summary>Per-enum converter emitting camelCase names for <see cref="AttentionActionKind"/>.</summary>
+public sealed class AttentionActionKindConverter : JsonStringEnumConverter<AttentionActionKind>
+{
+    /// <inheritdoc />
+    public AttentionActionKindConverter()
+        : base(JsonNamingPolicy.CamelCase)
+    {
+    }
 }
 
 /// <summary>
@@ -98,10 +135,26 @@ public sealed record AttentionActionDto(
 /// <param name="PrinterName">Printer display name for compact rendering.</param>
 /// <param name="Title">Short operator-facing title.</param>
 /// <param name="Detail">Longer description including the actionable next step.</param>
-/// <param name="OccurredAt">UTC timestamp used for tie-breaking within severity.</param>
-/// <param name="Actions">Typed actions available to the caller.</param>
+/// <param name="OccurredAt">
+/// UTC timestamp used for tie-breaking within severity. MUST be a stable, source-derived
+/// value; sources that lack a stable clock (for example continuously-offline printers)
+/// MUST set <paramref name="AllowFreshOccurrenceBypass"/> to <c>false</c> so a moving
+/// timestamp cannot silently defeat a user snooze.
+/// </param>
+/// <param name="Actions">Typed actions available to the caller. Only advertise actions the
+/// server can actually execute today; do not advertise stubs that return 501.</param>
 /// <param name="ToolheadIndex">Optional toolhead index for per-tool items.</param>
 /// <param name="DeadlineAt">Optional deadline used for time-to-impact ordering.</param>
+/// <param name="JobId">
+/// Optional print-job id for <see cref="AttentionKind.Failure"/> items. Used by the action
+/// dispatcher to verify the incident's job is still the printer's active job before
+/// mutating printer state.
+/// </param>
+/// <param name="AllowFreshOccurrenceBypass">
+/// When true (default), a snoozed item whose current <paramref name="OccurredAt"/> is
+/// strictly greater than the snooze anchor becomes visible again (fresh-occurrence
+/// bypass). Sources with non-stable timestamps must set this to false.
+/// </param>
 public sealed record AttentionItemDto(
     string Id,
     AttentionKind Kind,
@@ -113,7 +166,9 @@ public sealed record AttentionItemDto(
     DateTime OccurredAt,
     IReadOnlyList<AttentionActionDto> Actions,
     int? ToolheadIndex = null,
-    DateTime? DeadlineAt = null);
+    DateTime? DeadlineAt = null,
+    Guid? JobId = null,
+    bool AllowFreshOccurrenceBypass = true);
 
 /// <summary>
 /// Response payload for <c>GET /api/attention</c>.

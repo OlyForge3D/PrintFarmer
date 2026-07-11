@@ -59,13 +59,24 @@ public sealed class FailureAttentionSource(
                 continue;
             }
 
+            // Stale-incident safety: an incident without a JobId cannot be safely acted on
+            // (we can't verify the printer's active job still matches). Suppress it from the
+            // feed rather than surface an unactionable card.
+            if (incident.JobId is not Guid incidentJobId)
+            {
+                continue;
+            }
+
             int confidencePercent = (int)Math.Round(incident.Confidence * 100m);
             string title = incident.AutoPaused ? "Print failure — auto-paused" : "Possible print failure";
             string detail = incident.AutoPaused
                 ? $"AI detected a failure ({confidencePercent}% confidence) on {incident.PrinterName}. Action: verify the print and resume or cancel."
                 : $"AI flagged a possible failure ({confidencePercent}% confidence) on {incident.PrinterName}. Action: check the camera and pause if the print has failed.";
 
-            List<AttentionActionDto> actions = new(4);
+            // Only advertise actions that mutate real state end-to-end. Dismiss is intentionally
+            // omitted because the server has no per-user failure-dismissal store; Snooze is the
+            // supported client-side suppression.
+            List<AttentionActionDto> actions = new(3);
             if (incident.AutoPaused)
             {
                 actions.Add(new AttentionActionDto(AttentionActionKind.Resume, "Resume", RequiresConfirmation: true));
@@ -77,7 +88,6 @@ public sealed class FailureAttentionSource(
                 actions.Add(new AttentionActionDto(AttentionActionKind.Cancel, "Cancel", RequiresConfirmation: true));
             }
 
-            actions.Add(new AttentionActionDto(AttentionActionKind.Dismiss, "Dismiss", RequiresConfirmation: false));
             actions.Add(new AttentionActionDto(AttentionActionKind.Snooze, "Snooze", RequiresConfirmation: false));
 
             items.Add(new AttentionItemDto(
@@ -89,7 +99,8 @@ public sealed class FailureAttentionSource(
                 Title: title,
                 Detail: detail,
                 OccurredAt: DateTime.SpecifyKind(incident.DetectedAt, DateTimeKind.Utc),
-                Actions: actions));
+                Actions: actions,
+                JobId: incidentJobId));
         }
 
         return items;

@@ -6,6 +6,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Attention;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Attention;
@@ -21,8 +22,9 @@ namespace Farm.Infrastructure.Services.Attention;
 ///   <item><description>Every registered <see cref="IAttentionSource"/> is invoked and its items merged.</description></item>
 ///   <item><description>Per-source failures are logged and swallowed so a single misbehaving source cannot blank the feed.</description></item>
 ///   <item><description>Items are de-duplicated by <see cref="AttentionItemDto.Id"/> (last writer wins).</description></item>
+///   <item><description>Maintenance items are filtered <b>before</b> composition/pagination for callers who lack the <c>farm_admin</c> role, so non-admins never see or page over maintenance ids or details.</description></item>
 ///   <item><description>Sort order is severity DESC, then nearest deadline first (nulls last), then oldest <c>OccurredAt</c> first.</description></item>
-///   <item><description>Per-user snoozes with expiry in the future suppress matching items, unless the item's <c>OccurredAt</c> is strictly newer than the snooze's <see cref="AttentionSnooze.AttentionItemAnchorAtUtc"/> anchor (fresh-occurrence bypass).</description></item>
+///   <item><description>Per-user snoozes with expiry in the future suppress matching items, unless the item's <c>OccurredAt</c> is strictly newer than the snooze's <see cref="AttentionSnooze.AttentionItemAnchorAtUtc"/> anchor <b>and</b> the item opts into fresh-occurrence bypass (<see cref="AttentionItemDto.AllowFreshOccurrenceBypass"/>).</description></item>
 /// </list>
 /// </remarks>
 public sealed class AttentionService(
@@ -30,6 +32,7 @@ public sealed class AttentionService(
     IAttentionSnoozeRepository snoozes,
     IPrintersService printersService,
     IMaintenanceAlertService maintenanceAlerts,
+    IQueueDataService queueData,
     ILogger<AttentionService> logger,
     TimeProvider? timeProvider = null) : IAttentionService
 {
@@ -39,15 +42,24 @@ public sealed class AttentionService(
     /// <summary>Maximum page size the API will honour.</summary>
     public const int MaxPageSize = 200;
 
+    /// <summary>Role required to see or act on maintenance attention items.</summary>
+    public const string MaintenanceRoleName = "farm_admin";
+
     private readonly IReadOnlyList<IAttentionSource> _sources = (sources ?? throw new ArgumentNullException(nameof(sources))).ToList();
     private readonly IAttentionSnoozeRepository _snoozes = snoozes ?? throw new ArgumentNullException(nameof(snoozes));
     private readonly IPrintersService _printers = printersService ?? throw new ArgumentNullException(nameof(printersService));
     private readonly IMaintenanceAlertService _maintenanceAlerts = maintenanceAlerts ?? throw new ArgumentNullException(nameof(maintenanceAlerts));
+    private readonly IQueueDataService _queueData = queueData ?? throw new ArgumentNullException(nameof(queueData));
     private readonly ILogger<AttentionService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc />
-    public async Task<AttentionFeedDto> GetFeedAsync(Guid userId, int page = 1, int pageSize = DefaultPageSize, CancellationToken cancellationToken = default)
+    public async Task<AttentionFeedDto> GetFeedAsync(
+        Guid userId,
+        bool isFarmAdmin,
+        int page = 1,
+        int pageSize = DefaultPageSize,
+        CancellationToken cancellationToken = default)
     {
         int effectivePage = Math.Max(page, 1);
         int effectivePageSize = pageSize <= 0 ? DefaultPageSize : Math.Min(pageSize, MaxPageSize);
@@ -67,6 +79,14 @@ public sealed class AttentionService(
             {
                 _logger.LogWarning(ex, "[AttentionService] Source '{Source}' failed; skipping", source.SourceName);
             }
+        }
+
+        // Role-based filter: non-admin operators must not see maintenance items, ids, or
+        // detail. Filter BEFORE dedupe/pagination/totals so pagination totals match what
+        // the caller is actually authorized to see.
+        if (!isFarmAdmin)
+        {
+            merged.RemoveAll(i => i.Kind == AttentionKind.Maintenance);
         }
 
         // De-duplicate by computed id (last-writer wins).
@@ -93,8 +113,12 @@ public sealed class AttentionService(
                 continue;
             }
 
-            // Fresh-occurrence bypass: newer OccurredAt than the anchor supersedes the snooze.
-            if (snooze.AttentionItemAnchorAtUtc is DateTime anchor && item.OccurredAt > anchor)
+            // Fresh-occurrence bypass: newer OccurredAt than the anchor supersedes the
+            // snooze, but only for sources that opt in (stable OccurredAt). Sources with
+            // moving timestamps (for example continuous Offline) MUST opt out.
+            if (item.AllowFreshOccurrenceBypass
+                && snooze.AttentionItemAnchorAtUtc is DateTime anchor
+                && item.OccurredAt > anchor)
             {
                 visible.Add(item);
             }
@@ -145,6 +169,11 @@ public sealed class AttentionService(
         if (snooze is null)
         {
             return match;
+        }
+
+        if (!match.AllowFreshOccurrenceBypass)
+        {
+            return null;
         }
 
         return snooze.AttentionItemAnchorAtUtc is DateTime anchor && match.OccurredAt > anchor
@@ -199,6 +228,7 @@ public sealed class AttentionService(
     public async Task<AttentionActionResult> ExecuteActionAsync(
         Guid userId,
         string userName,
+        bool isFarmAdmin,
         string attentionItemId,
         AttentionActionKind actionKind,
         CancellationToken cancellationToken = default)
@@ -215,7 +245,15 @@ public sealed class AttentionService(
             return new AttentionActionResult(AttentionActionOutcome.NotFound, "Attention item was not found.");
         }
 
-        // Validate the action is offered by the item.
+        // Role gate: non-admins cannot even discover or address maintenance items.
+        if (item.Kind == AttentionKind.Maintenance && !isFarmAdmin)
+        {
+            return new AttentionActionResult(AttentionActionOutcome.NotFound, "Attention item was not found.");
+        }
+
+        // Validate the action is offered by the item. Sources are the source of truth for
+        // "advertised" actions — any action we can execute today must be present here, and
+        // any action here must correspond to a real downstream mutation (no no-op 200s).
         if (!item.Actions.Any(a => a.Kind == actionKind))
         {
             return new AttentionActionResult(AttentionActionOutcome.InvalidAction, $"Action '{actionKind}' is not available for this item.");
@@ -229,7 +267,7 @@ public sealed class AttentionService(
 
         return item.Kind switch
         {
-            AttentionKind.Failure => await DispatchFailureAsync(item, actionKind, userName, cancellationToken),
+            AttentionKind.Failure => await DispatchFailureAsync(item, actionKind, cancellationToken),
             AttentionKind.Maintenance => await DispatchMaintenanceAsync(item, actionKind, userName, cancellationToken),
             AttentionKind.Offline => new AttentionActionResult(AttentionActionOutcome.InvalidAction, "Offline items expose snooze only."),
             AttentionKind.Harvest => new AttentionActionResult(AttentionActionOutcome.NotImplemented, "Harvest execution lands with F9/#714."),
@@ -260,9 +298,39 @@ public sealed class AttentionService(
         return null;
     }
 
-    private async Task<AttentionActionResult> DispatchFailureAsync(AttentionItemDto item, AttentionActionKind actionKind, string userName, CancellationToken ct)
+    private async Task<AttentionActionResult> DispatchFailureAsync(AttentionItemDto item, AttentionActionKind actionKind, CancellationToken ct)
     {
-        _ = userName;
+        // Stale-incident + job-identity safety: never issue Pause/Resume/Cancel unless
+        // the printer's currently-attached job matches the incident's JobId. Name matches
+        // are unsafe — resliced or renamed jobs collide.
+        if (item.JobId is not Guid incidentJobId)
+        {
+            return new AttentionActionResult(
+                AttentionActionOutcome.Conflict,
+                "Incident is missing a job id; cannot verify the print is still active.");
+        }
+
+        PrintJob? job = await _queueData.GetPrintJobByIdAsync(incidentJobId, ct);
+        if (job is null || job.AssignedPrinterId != item.PrinterId)
+        {
+            return new AttentionActionResult(
+                AttentionActionOutcome.NotFound,
+                "The incident's print job is no longer on this printer.");
+        }
+
+        // The incident may have auto-paused the job, so accept Paused in addition to the
+        // in-flight states. Anything else (Completed/Cancelled/Failed/etc.) means a newer
+        // operator action has already resolved the plate — refuse to mutate.
+        bool jobIsActive = job.Status is PrintJobStatus.Starting
+            or PrintJobStatus.Printing
+            or PrintJobStatus.Paused;
+        if (!jobIsActive)
+        {
+            return new AttentionActionResult(
+                AttentionActionOutcome.Conflict,
+                $"Print job is no longer active (status: {job.Status}); refusing to mutate printer.");
+        }
+
         try
         {
             bool ok = actionKind switch
@@ -270,9 +338,6 @@ public sealed class AttentionService(
                 AttentionActionKind.Pause => await _printers.PauseAsync(item.PrinterId, ct),
                 AttentionActionKind.Resume => await _printers.ResumeAsync(item.PrinterId, ct),
                 AttentionActionKind.Cancel => await _printers.CancelPrintAsync(item.PrinterId, ct),
-
-                // Dismiss on a failure item is a no-op server-side; the user's snooze is the client-facing suppression.
-                AttentionActionKind.Dismiss => true,
                 _ => false,
             };
             return ok

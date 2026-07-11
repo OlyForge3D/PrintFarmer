@@ -22,19 +22,32 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// but rarely block the whole shift; the failure source escalates when a job was in
 /// progress.
 /// </para>
+/// <para>
+/// <b>OccurredAt is stable on purpose.</b> The offline condition is continuous — a
+/// moving <see cref="DateTime.UtcNow"/> would break the snooze contract because every
+/// composition pass would appear "newer" than the anchor, silently defeating the user's
+/// snooze. This source therefore emits <see cref="StableOfflineOccurredAt"/> and sets
+/// <see cref="AttentionItemDto.AllowFreshOccurrenceBypass"/> to <c>false</c>, so a
+/// continuously-offline printer stays snoozed until the operator clears the snooze.
+/// </para>
 /// </remarks>
 public sealed class OfflineAttentionSource(
     IPrintersService printersService,
-    IPrinterStatusCacheReader statusCache,
-    TimeProvider? timeProvider = null) : IAttentionSource
+    IPrinterStatusCacheReader statusCache) : IAttentionSource
 {
+    /// <summary>
+    /// Deterministic timestamp used for continuous Offline items. Value chosen to be
+    /// stable across composition passes and strictly less than any real
+    /// <c>PrinterStatus.LastSeenUtc</c>; the actual value is not part of the client
+    /// contract.
+    /// </summary>
+    public static readonly DateTime StableOfflineOccurredAt = DateTime.SpecifyKind(DateTime.UnixEpoch, DateTimeKind.Utc);
+
     private readonly IPrintersService _printers =
         printersService ?? throw new ArgumentNullException(nameof(printersService));
 
     private readonly IPrinterStatusCacheReader _statusCache =
         statusCache ?? throw new ArgumentNullException(nameof(statusCache));
-
-    private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc />
     public string SourceName => "offline";
@@ -43,7 +56,6 @@ public sealed class OfflineAttentionSource(
     public async Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
     {
         List<Printer> printers = await _printers.GetAllAsync(cancellationToken);
-        DateTime now = _clock.GetUtcNow().UtcDateTime;
         List<AttentionItemDto> items = new();
 
         foreach (Printer printer in printers)
@@ -73,8 +85,9 @@ public sealed class OfflineAttentionSource(
                 PrinterName: printer.Name,
                 Title: "Printer offline",
                 Detail: $"{printer.Name} is not responding. Action: check power, network, and firmware, then re-scan.",
-                OccurredAt: now,
-                Actions: actions));
+                OccurredAt: StableOfflineOccurredAt,
+                Actions: actions,
+                AllowFreshOccurrenceBypass: false));
         }
 
         return items;

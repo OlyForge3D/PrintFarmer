@@ -28,6 +28,13 @@ public sealed class EfAttentionSnoozeRepository(AppDbContext dbContext) : IAtten
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The <c>UX_AttentionSnooze_User_Item</c> unique index (see
+    /// <c>AttentionSnoozeConfiguration</c>) makes racing inserts by the same user for the
+    /// same item collide at commit time. We handle that by retrying once as an update:
+    /// on the retry pass the other transaction has already written the row, so
+    /// <c>FirstOrDefault</c> returns it and the second caller updates the winning row.
+    /// </remarks>
     public async Task<AttentionSnooze> UpsertAsync(
         Guid userId,
         string attentionItemId,
@@ -38,31 +45,55 @@ public sealed class EfAttentionSnoozeRepository(AppDbContext dbContext) : IAtten
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(attentionItemId);
 
-        AttentionSnooze? existing = await _db.AttentionSnoozes
-            .FirstOrDefaultAsync(
-                s => s.UserId == userId && s.AttentionItemId == attentionItemId,
-                cancellationToken);
-
-        if (existing is null)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            AttentionSnooze inserted = new()
+            AttentionSnooze? existing = await _db.AttentionSnoozes
+                .FirstOrDefaultAsync(
+                    s => s.UserId == userId && s.AttentionItemId == attentionItemId,
+                    cancellationToken);
+
+            if (existing is null)
             {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                AttentionItemId = attentionItemId,
-                SnoozedUntilUtc = snoozedUntilUtc,
-                CreatedAtUtc = nowUtc,
-                AttentionItemAnchorAtUtc = attentionItemAnchorAtUtc,
-            };
-            _ = _db.AttentionSnoozes.Add(inserted);
-            _ = await _db.SaveChangesAsync(cancellationToken);
-            return inserted;
+                AttentionSnooze inserted = new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    AttentionItemId = attentionItemId,
+                    SnoozedUntilUtc = snoozedUntilUtc,
+                    CreatedAtUtc = nowUtc,
+                    AttentionItemAnchorAtUtc = attentionItemAnchorAtUtc,
+                };
+                _ = _db.AttentionSnoozes.Add(inserted);
+                try
+                {
+                    _ = await _db.SaveChangesAsync(cancellationToken);
+                    return inserted;
+                }
+                catch (DbUpdateException) when (attempt == 0)
+                {
+                    // Racing insert from another request won. Detach our tentative entity
+                    // and re-fetch so the second pass sees the winning row and updates it.
+                    _db.ChangeTracker.Clear();
+                    continue;
+                }
+            }
+
+            existing.SnoozedUntilUtc = snoozedUntilUtc;
+            existing.AttentionItemAnchorAtUtc = attentionItemAnchorAtUtc;
+            try
+            {
+                _ = await _db.SaveChangesAsync(cancellationToken);
+                return existing;
+            }
+            catch (DbUpdateException) when (attempt == 0)
+            {
+                _db.ChangeTracker.Clear();
+                continue;
+            }
         }
 
-        existing.SnoozedUntilUtc = snoozedUntilUtc;
-        existing.AttentionItemAnchorAtUtc = attentionItemAnchorAtUtc;
-        _ = await _db.SaveChangesAsync(cancellationToken);
-        return existing;
+        // Unreachable: the loop either returns or throws on the second attempt.
+        throw new InvalidOperationException("AttentionSnooze upsert failed after retry.");
     }
 
     /// <inheritdoc />

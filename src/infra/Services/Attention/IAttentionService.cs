@@ -50,15 +50,27 @@ public interface IAttentionService
     /// <summary>
     /// Returns the composed feed for <paramref name="userId"/>. Items snoozed by this
     /// user are excluded (subject to fresh-occurrence bypass); snoozes are strictly per-user.
+    /// When <paramref name="isFarmAdmin"/> is <c>false</c>, maintenance items are filtered
+    /// out <b>before</b> composition/pagination/totals so non-admins never see or page
+    /// over maintenance ids, details, or counts.
     /// </summary>
     /// <param name="userId">Owning user.</param>
+    /// <param name="isFarmAdmin">
+    /// True when the caller holds the <c>farm_admin</c> role. Callers MUST pass the
+    /// authoritative claim; the service does not consult HttpContext.
+    /// </param>
     /// <param name="page">1-based page number; values &lt;= 0 are clamped to 1.</param>
     /// <param name="pageSize">
     /// Page size; values &lt;= 0 fall back to the default and values are capped by
     /// <c>AttentionService.MaxPageSize</c>.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<AttentionFeedDto> GetFeedAsync(Guid userId, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default);
+    Task<AttentionFeedDto> GetFeedAsync(
+        Guid userId,
+        bool isFarmAdmin,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves a single item by its computed id for the given user (honouring snoozes),
@@ -93,11 +105,14 @@ public interface IAttentionService
 
     /// <summary>
     /// Executes a typed action against the underlying source. Validates that
-    /// <paramref name="actionKind"/> is offered by the item before dispatching.
+    /// <paramref name="actionKind"/> is offered by the item before dispatching. Callers
+    /// MUST supply the authoritative role claim in <paramref name="isFarmAdmin"/>; the
+    /// service will refuse maintenance actions for non-admin callers.
     /// </summary>
     Task<AttentionActionResult> ExecuteActionAsync(
         Guid userId,
         string userName,
+        bool isFarmAdmin,
         string attentionItemId,
         AttentionActionKind actionKind,
         CancellationToken cancellationToken = default);

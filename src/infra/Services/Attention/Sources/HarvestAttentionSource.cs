@@ -14,15 +14,18 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Uses recent <see cref="PrintJobStatus.Completed"/> jobs on assigned printers as a
-/// proxy for "print done, plate not yet cleared". This is intentionally minimal: F9/#714
-/// adds an authoritative harvest ledger, at which point the source query can be
-/// tightened to jobs whose ledger entry is missing. The item id remains
+/// A completed job is only surfaced when it is the most recent job on its printer AND
+/// no subsequent activity (Starting/Printing/Paused, or any later ActualStartTime)
+/// indicates the operator has already cleared the plate to make room for a newer print.
+/// F9/#714 adds an authoritative harvest ledger, at which point the query can be
+/// tightened to jobs whose ledger entry is missing; the id shape remains
 /// <c>harvest:{jobId}</c> so persisted snoozes survive the upgrade.
 /// </para>
 /// <para>
-/// Only the most recent completed job per printer is surfaced; older jobs remain in the
-/// job history and are not operator-actionable from the attention feed.
+/// The <see cref="AttentionActionKind.Harvest"/> action is intentionally NOT advertised
+/// until F9/#714 wires the harvest ledger — advertising it would return 501 and violate
+/// the "no advertised action returns 501" contract from #707. Only Snooze is offered
+/// for now.
 /// </para>
 /// </remarks>
 public sealed class HarvestAttentionSource(
@@ -32,8 +35,8 @@ public sealed class HarvestAttentionSource(
     /// <summary>Only surface completions newer than this window.</summary>
     public static readonly TimeSpan HarvestWindow = TimeSpan.FromHours(48);
 
-    /// <summary>Cap on completions considered per composition pass.</summary>
-    private const int MaxCompletions = 100;
+    /// <summary>Cap on rows considered per composition pass.</summary>
+    private const int MaxRows = 400;
 
     private readonly AppDbContext _db = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
@@ -46,52 +49,73 @@ public sealed class HarvestAttentionSource(
     {
         DateTime cutoff = _clock.GetUtcNow().UtcDateTime - HarvestWindow;
 
-        List<PrintJob> completions = await _db.PrintJobs
+        // Load recent completions and any live/subsequent activity for the same printers
+        // in one round-trip; correlation happens in memory. The extra rows are bounded by
+        // MaxRows and by the completion window; a farm producing more churn than that in
+        // 48h will still get the freshest cards.
+        List<PrintJob> jobs = await _db.PrintJobs
             .AsNoTracking()
-            .Where(j => j.Status == PrintJobStatus.Completed
-                && j.AssignedPrinterId != null
-                && j.ActualEndTime != null
-                && j.ActualEndTime > cutoff)
+            .Where(j => j.AssignedPrinterId != null
+                && ((j.Status == PrintJobStatus.Completed && j.ActualEndTime != null && j.ActualEndTime > cutoff)
+                    || j.Status == PrintJobStatus.Starting
+                    || j.Status == PrintJobStatus.Printing
+                    || j.Status == PrintJobStatus.Paused
+                    || (j.ActualStartTime != null && j.ActualStartTime > cutoff)))
             .Include(j => j.AssignedPrinter)
-            .OrderByDescending(j => j.ActualEndTime)
-            .Take(MaxCompletions)
+            .OrderByDescending(j => j.ActualEndTime ?? j.ActualStartTime ?? j.QueuedAt)
+            .Take(MaxRows)
             .ToListAsync(cancellationToken);
 
         List<AttentionItemDto> items = new();
-        HashSet<Guid> printersSeen = new();
 
-        foreach (PrintJob job in completions)
+        IEnumerable<IGrouping<Guid, PrintJob>> byPrinter = jobs
+            .Where(j => j.AssignedPrinterId is not null)
+            .GroupBy(j => j.AssignedPrinterId!.Value);
+
+        foreach (IGrouping<Guid, PrintJob> group in byPrinter)
         {
-            if (job.AssignedPrinterId is not Guid printerId)
+            PrintJob? latestCompletion = group
+                .Where(j => j.Status == PrintJobStatus.Completed && j.ActualEndTime != null && j.ActualEndTime > cutoff)
+                .OrderByDescending(j => j.ActualEndTime)
+                .FirstOrDefault();
+            if (latestCompletion?.ActualEndTime is not DateTime completedAtUtc)
             {
                 continue;
             }
 
-            // Only surface the most recent completion per printer to keep the feed sparse.
-            if (!printersSeen.Add(printerId))
+            // Suppress when a newer print exists on this printer: either currently in
+            // flight, or a strictly-newer completed/finished job. That means the operator
+            // has already cleared the plate; the harvest card would be stale.
+            bool hasFresherActivity = group.Any(j =>
+                j.Id != latestCompletion.Id
+                && (j.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused
+                    || (j.ActualStartTime is DateTime started && started > completedAtUtc)
+                    || (j.ActualEndTime is DateTime otherEnd && otherEnd > completedAtUtc)));
+            if (hasFresherActivity)
             {
                 continue;
             }
 
-            string printerName = job.AssignedPrinter?.Name ?? "Unknown printer";
-            DateTime completedAt = DateTime.SpecifyKind(job.ActualEndTime!.Value, DateTimeKind.Utc);
+            Guid printerId = latestCompletion.AssignedPrinterId!.Value;
+            string printerName = latestCompletion.AssignedPrinter?.Name ?? "Unknown printer";
+            DateTime completedAt = DateTime.SpecifyKind(completedAtUtc, DateTimeKind.Utc);
 
-            List<AttentionActionDto> actions = new(2)
+            List<AttentionActionDto> actions = new(1)
             {
-                new AttentionActionDto(AttentionActionKind.Harvest, "Harvest", RequiresConfirmation: false),
                 new AttentionActionDto(AttentionActionKind.Snooze, "Snooze", RequiresConfirmation: false),
             };
 
             items.Add(new AttentionItemDto(
-                Id: AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, job.Id),
+                Id: AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, latestCompletion.Id),
                 Kind: AttentionKind.Harvest,
                 Severity: AttentionSeverity.Info,
                 PrinterId: printerId,
                 PrinterName: printerName,
                 Title: "Plate ready to harvest",
-                Detail: $"{job.Name} finished on {printerName}. Action: harvest the plate and confirm the count.",
+                Detail: $"{latestCompletion.Name} finished on {printerName}. Action: harvest the plate and confirm the count.",
                 OccurredAt: completedAt,
-                Actions: actions));
+                Actions: actions,
+                JobId: latestCompletion.Id));
         }
 
         return items;

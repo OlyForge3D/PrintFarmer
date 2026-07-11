@@ -19,8 +19,11 @@ namespace Farm.Web.Api.Controllers;
 /// </para>
 /// <para>
 /// Authorization uses <c>[Authorize]</c> — any authenticated user may read their feed.
-/// Downstream services enforce their own role checks (for example maintenance
-/// resolution requires <c>farm_admin</c> on <see cref="Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService"/>).
+/// The controller resolves <c>User.IsInRole("farm_admin")</c> once per request and
+/// passes it to <see cref="IAttentionService"/>, which applies the role filter <b>before</b>
+/// composition/pagination/totals so non-admin callers never see maintenance items, ids,
+/// details, or counts, and refuses maintenance action dispatch with a 404 that does not
+/// disclose existence.
 /// </para>
 /// <para>
 /// <b>Feature-gate integration handoff (#725):</b> when the shared
@@ -78,7 +81,8 @@ public sealed class AttentionController(
             return error!;
         }
 
-        AttentionFeedDto feed = await _service.GetFeedAsync(userId, page, pageSize, cancellationToken);
+        bool isFarmAdmin = User?.IsInRole(AttentionService.MaintenanceRoleName) ?? false;
+        AttentionFeedDto feed = await _service.GetFeedAsync(userId, isFarmAdmin, page, pageSize, cancellationToken);
         return Ok(feed);
     }
 
@@ -182,7 +186,8 @@ public sealed class AttentionController(
             ?? User?.FindFirst("preferred_username")?.Value
             ?? userId.ToString("D");
 
-        AttentionActionResult result = await _service.ExecuteActionAsync(userId, userName, attentionItemId, actionKind, cancellationToken);
+        bool isFarmAdmin = User?.IsInRole(AttentionService.MaintenanceRoleName) ?? false;
+        AttentionActionResult result = await _service.ExecuteActionAsync(userId, userName, isFarmAdmin, attentionItemId, actionKind, cancellationToken);
         IActionResult response = result.Outcome switch
         {
             AttentionActionOutcome.Ok => Ok(new { outcome = result.Outcome.ToString() }),

@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Attention;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -28,6 +30,7 @@ public class AttentionServiceTests
     private readonly Mock<IAttentionSnoozeRepository> _snoozeRepo = new(MockBehavior.Strict);
     private readonly Mock<IPrintersService> _printers = new(MockBehavior.Strict);
     private readonly Mock<IMaintenanceAlertService> _maintenance = new(MockBehavior.Strict);
+    private readonly Mock<IQueueDataService> _queueData = new(MockBehavior.Loose);
     private readonly FakeTimeProvider _clock = new(Now);
 
     private AttentionService CreateService(IEnumerable<IAttentionSource> sources)
@@ -37,6 +40,7 @@ public class AttentionServiceTests
             _snoozeRepo.Object,
             _printers.Object,
             _maintenance.Object,
+            _queueData.Object,
             NullLogger<AttentionService>.Instance,
             _clock);
     }
@@ -63,7 +67,9 @@ public class AttentionServiceTests
         Guid printerId,
         DateTime occurredAt,
         DateTime? deadlineAt = null,
-        IReadOnlyList<AttentionActionDto>? actions = null)
+        IReadOnlyList<AttentionActionDto>? actions = null,
+        Guid? jobId = null,
+        bool allowFreshOccurrenceBypass = true)
     {
         return new AttentionItemDto(
             id,
@@ -76,7 +82,24 @@ public class AttentionServiceTests
             occurredAt,
             actions ?? Array.Empty<AttentionActionDto>(),
             ToolheadIndex: null,
-            DeadlineAt: deadlineAt);
+            DeadlineAt: deadlineAt,
+            JobId: jobId,
+            AllowFreshOccurrenceBypass: allowFreshOccurrenceBypass);
+    }
+
+    private static PrintJob NewActiveJob(Guid jobId, Guid printerId, PrintJobStatus status = PrintJobStatus.Printing)
+        => new()
+        {
+            Id = jobId,
+            AssignedPrinterId = printerId,
+            Status = status,
+            Name = "job",
+        };
+
+    private void SetupJobLookup(Guid jobId, PrintJob? job)
+    {
+        _queueData.Setup(q => q.GetPrintJobByIdAsync(jobId, It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(job);
     }
 
     [Fact]
@@ -99,7 +122,7 @@ public class AttentionServiceTests
             new StubSource("dup", new[] { duplicate }),
         });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { "failure:1", "maintenance:1" });
     }
@@ -122,7 +145,7 @@ public class AttentionServiceTests
             new StubSource("s", new[] { oldest, newerWarning, critical, infoWithDeadline }),
         });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         // Severity is the primary sort key ("severity × time-to-impact" from #707 with
         // severity primary). Within the same severity, nearest deadline wins, then oldest
@@ -153,7 +176,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { snoozed, other }) });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userA, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userA, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { "failure:2" });
     }
@@ -182,8 +205,8 @@ public class AttentionServiceTests
         AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now);
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionFeedDto feedA = await svc.GetFeedAsync(userA, cancellationToken: CancellationToken.None);
-        AttentionFeedDto feedB = await svc.GetFeedAsync(userB, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feedA = await svc.GetFeedAsync(userA, isFarmAdmin: true, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feedB = await svc.GetFeedAsync(userB, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feedA.Items.Should().BeEmpty();
         feedB.Items.Should().HaveCount(1).And.ContainSingle(i => i.Id == "failure:1");
@@ -205,7 +228,7 @@ public class AttentionServiceTests
         AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, pWithItem, Now);
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.HealthyPrinterIds.Should().BeEquivalentTo(new[] { pHealthy });
     }
@@ -225,7 +248,7 @@ public class AttentionServiceTests
             new StubSource("ok", new[] { ok }),
         });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { "failure:1" });
     }
@@ -281,7 +304,7 @@ public class AttentionServiceTests
         Guid userId = Guid.NewGuid();
         AttentionService svc = CreateService(new[] { new StubSource("s", Array.Empty<AttentionItemDto>()) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", "failure:missing", AttentionActionKind.Pause, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:missing", AttentionActionKind.Pause, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.NotFound);
     }
@@ -296,7 +319,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", "failure:1", AttentionActionKind.Cancel, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Cancel, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
     }
@@ -306,14 +329,16 @@ public class AttentionServiceTests
     {
         Guid userId = Guid.NewGuid();
         Guid printer = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
         AttentionActionDto pause = new(AttentionActionKind.Pause, "Pause", true);
-        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause });
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause }, jobId: jobId);
 
+        SetupJobLookup(jobId, NewActiveJob(jobId, printer, PrintJobStatus.Printing));
         _printers.Setup(p => p.PauseAsync(printer, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", "failure:1", AttentionActionKind.Pause, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Pause, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.Ok);
         _printers.Verify(p => p.PauseAsync(printer, It.IsAny<CancellationToken>()), Times.Once);
@@ -324,15 +349,17 @@ public class AttentionServiceTests
     {
         Guid userId = Guid.NewGuid();
         Guid printer = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
         AttentionActionDto pause = new(AttentionActionKind.Pause, "Pause", true);
-        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause });
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause }, jobId: jobId);
 
+        SetupJobLookup(jobId, NewActiveJob(jobId, printer, PrintJobStatus.Printing));
         _printers.Setup(p => p.PauseAsync(printer, It.IsAny<CancellationToken>()))
                  .ThrowsAsync(new PrinterBackendBusyException("backend busy"));
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", "failure:1", AttentionActionKind.Pause, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Pause, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.Conflict);
     }
@@ -352,7 +379,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", itemId, AttentionActionKind.Resolve, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, itemId, AttentionActionKind.Resolve, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.Ok);
         _maintenance.Verify(m => m.ResolveAlertAsync(alertId, "user", It.IsAny<CancellationToken>()), Times.Once);
@@ -368,7 +395,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", "harvest:1", AttentionActionKind.Harvest, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "harvest:1", AttentionActionKind.Harvest, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.NotImplemented);
     }
@@ -383,7 +410,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", "failure:1", AttentionActionKind.Snooze, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Snooze, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
         result.Reason.Should().Contain("snooze");
@@ -399,7 +426,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", item.Id, AttentionActionKind.Pause, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, item.Id, AttentionActionKind.Pause, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
     }
@@ -427,7 +454,7 @@ public class AttentionServiceTests
         AttentionItemDto fresh = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now.AddMinutes(-5));
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { fresh }) });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { "failure:1" });
     }
@@ -456,7 +483,7 @@ public class AttentionServiceTests
         AttentionItemDto stale = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, anchor);
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { stale }) });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.Items.Should().BeEmpty();
     }
@@ -485,7 +512,7 @@ public class AttentionServiceTests
         AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now.AddHours(5));
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
 
         feed.Items.Should().BeEmpty();
     }
@@ -505,7 +532,7 @@ public class AttentionServiceTests
         }
         AttentionService svc = CreateService(new[] { new StubSource("s", items) });
 
-        AttentionFeedDto page = await svc.GetFeedAsync(userId, page: -3, pageSize: 2, cancellationToken: CancellationToken.None);
+        AttentionFeedDto page = await svc.GetFeedAsync(userId, isFarmAdmin: true, page: -3, pageSize: 2, cancellationToken: CancellationToken.None);
 
         // page <= 0 clamps to 1; pageSize honoured (2).
         page.Page.Should().Be(1);
@@ -525,7 +552,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", Array.Empty<AttentionItemDto>()) });
 
-        AttentionFeedDto feed = await svc.GetFeedAsync(userId, page: 1, pageSize: 5_000, cancellationToken: CancellationToken.None);
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, page: 1, pageSize: 5_000, cancellationToken: CancellationToken.None);
 
         feed.PageSize.Should().Be(AttentionService.MaxPageSize);
     }
@@ -615,7 +642,7 @@ public class AttentionServiceTests
 
         AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", item.Id, AttentionActionKind.Resolve, CancellationToken.None);
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, item.Id, AttentionActionKind.Resolve, CancellationToken.None);
 
         result.Outcome.Should().Be(AttentionActionOutcome.Failed);
     }
@@ -643,6 +670,179 @@ public class AttentionServiceTests
 
         AttentionItemDto? hidden = await svc.FindItemAsync(userId, "failure:1", CancellationToken.None);
         hidden.Should().BeNull();
+    }
+
+    // ---------- Fix-now: role gating (item 1) ----------
+
+    [Fact]
+    public async Task GetFeedAsync_NonAdmin_MaintenanceItemsExcludedBeforePaginationAndTotals()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        SetupNoSnoozes(userId);
+        SetupPrinters(NewPrinter(printer, "P"));
+
+        AttentionItemDto maint = BuildItem("maintenance:" + Guid.NewGuid().ToString("D"), AttentionKind.Maintenance, AttentionSeverity.Critical, printer, Now.AddMinutes(-30));
+        AttentionItemDto failure = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Warning, printer, Now);
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { maint, failure }) });
+
+        AttentionFeedDto nonAdmin = await svc.GetFeedAsync(userId, isFarmAdmin: false, cancellationToken: CancellationToken.None);
+        AttentionFeedDto admin = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
+
+        nonAdmin.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { "failure:1" });
+        nonAdmin.TotalCount.Should().Be(1);
+        admin.Items.Select(i => i.Id).Should().Contain(new[] { maint.Id, "failure:1" });
+        admin.TotalCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_NonAdminOnMaintenanceItem_ReturnsNotFound_WithoutLeaking()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        Guid alertId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Maintenance, alertId);
+        AttentionActionDto resolve = new(AttentionActionKind.Resolve, "Resolve", true);
+        AttentionItemDto item = BuildItem(itemId, AttentionKind.Maintenance, AttentionSeverity.Warning, printer, Now, actions: new[] { resolve });
+
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: false, itemId, AttentionActionKind.Resolve, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.NotFound);
+        // No maintenance service call was made; if it had been, MockBehavior.Strict would throw.
+    }
+
+    // ---------- Fix-now: stale failure safety (item 2) ----------
+
+    [Fact]
+    public async Task ExecuteActionAsync_FailurePause_NoJobId_ReturnsConflict_NoPrinterMutation()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        AttentionActionDto pause = new(AttentionActionKind.Pause, "Pause", true);
+        // Item lacks JobId — cannot verify identity. Dispatch must refuse.
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause }, jobId: null);
+
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Pause, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Conflict);
+        _printers.Verify(p => p.PauseAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_FailurePause_JobMovedToDifferentPrinter_ReturnsConflict()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid originalPrinter = Guid.NewGuid();
+        Guid otherPrinter = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        AttentionActionDto pause = new(AttentionActionKind.Pause, "Pause", true);
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, originalPrinter, Now, actions: new[] { pause }, jobId: jobId);
+
+        SetupJobLookup(jobId, NewActiveJob(jobId, otherPrinter, PrintJobStatus.Printing));
+
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Pause, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Conflict);
+        _printers.Verify(p => p.PauseAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_FailurePause_JobCompleted_ReturnsConflict()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        AttentionActionDto pause = new(AttentionActionKind.Pause, "Pause", true);
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause }, jobId: jobId);
+
+        SetupJobLookup(jobId, NewActiveJob(jobId, printer, PrintJobStatus.Completed));
+
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Pause, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Conflict);
+        _printers.Verify(p => p.PauseAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_FailurePause_JobUnknown_ReturnsNotFound()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        AttentionActionDto pause = new(AttentionActionKind.Pause, "Pause", true);
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Critical, printer, Now, actions: new[] { pause }, jobId: jobId);
+
+        SetupJobLookup(jobId, null);
+
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Pause, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.NotFound);
+        _printers.Verify(p => p.PauseAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ---------- Fix-now: offline stable anchor (item 3) ----------
+
+    [Fact]
+    public async Task GetFeedAsync_OfflineItem_WithBypassDisabled_StaysSnoozedEvenWhenAnchorPredates()
+    {
+        // Simulates a continuously-offline printer: source emits stable OccurredAt and
+        // AllowFreshOccurrenceBypass=false so the snooze is never accidentally bypassed.
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        SetupPrinters(NewPrinter(printer, "P"));
+
+        AttentionSnooze snooze = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            AttentionItemId = "offline:" + printer.ToString("D"),
+            SnoozedUntilUtc = Now.AddHours(4),
+            CreatedAtUtc = Now.AddMinutes(-5),
+            AttentionItemAnchorAtUtc = DateTime.UnixEpoch,
+        };
+        _snoozeRepo.Setup(r => r.GetActiveForUserAsync(userId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new[] { snooze });
+
+        AttentionItemDto offline = BuildItem(
+            "offline:" + printer.ToString("D"),
+            AttentionKind.Offline,
+            AttentionSeverity.Warning,
+            printer,
+            occurredAt: DateTime.UnixEpoch,
+            allowFreshOccurrenceBypass: false);
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { offline }) });
+
+        AttentionFeedDto feed = await svc.GetFeedAsync(userId, isFarmAdmin: true, cancellationToken: CancellationToken.None);
+
+        feed.Items.Should().BeEmpty();
+    }
+
+    // ---------- Fix-now: truthful actions (item 6) ----------
+
+    [Fact]
+    public async Task ExecuteActionAsync_FailureItem_NeverAdvertisesDismiss_AndReturnsInvalidActionIfCalled()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        // Source-truthful item: no Dismiss action offered.
+        AttentionActionDto snoozeAction = new(AttentionActionKind.Snooze, "Snooze", false);
+        AttentionItemDto item = BuildItem("failure:1", AttentionKind.Failure, AttentionSeverity.Warning, printer, Now, actions: new[] { snoozeAction });
+
+        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "failure:1", AttentionActionKind.Dismiss, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
     }
 
     private sealed class StubSource : IAttentionSource
