@@ -139,9 +139,9 @@ public record FleetFilamentCoverageDto(
     DateTime EvaluatedAtUtc);
 
 /// <summary>
-/// Minimal payload consumed by the attention feed (#707). Deliberately does
-/// not import attention DTOs so this backend does not couple to an unmerged
-/// attention type surface — #707 wraps this into its own attention record.
+/// Minimal payload consumed by the attention feed adapter (#707). Deliberately
+/// does not import attention DTOs so coverage computation remains independent
+/// of the feed's presentation contract.
 /// </summary>
 /// <param name="PrinterId">Printer whose spool is projected to run out.</param>
 /// <param name="PrinterName">Denormalized printer name for display.</param>
