@@ -5,10 +5,37 @@ import XCTest
 /// These tests verify the login screen appears, accepts input, and transitions
 /// to the dashboard on successful authentication.
 ///
-/// ## Mock Mode
-/// With `--uitesting` launch argument, the app should bypass real network calls.
-/// When Lambert's mock server is ready, add the mock server URL argument in setUp().
+/// ## Launch mode
+/// Unlike the operator-shell UI tests, these run in the **unauthenticated**
+/// bootstrap (`--uitesting-unauthenticated`) so `RootView` renders
+/// `LoginView` deterministically. The onboarding / local-network-permission
+/// gates are cleared via the volatile `NSArgumentDomain` overrides below —
+/// they apply only to this launched process and are never written to the
+/// persistent `UserDefaults.standard` plist. The demo `ServiceContainer`
+/// keeps the sign-in path off the real network.
 final class LoginFlowUITests: PrintFarmerUITestCase {
+
+    override var additionalLaunchArguments: [String] {
+        [
+            // Literal must match UITestBootstrap.unauthenticatedLaunchArgument
+            // (pinned by UITestBootstrapTests). UI test targets run
+            // out-of-process and cannot import the app module.
+            "--uitesting-unauthenticated",
+            // Argument-domain overrides for the two @AppStorage gates in
+            // RootView so the unauthenticated app lands on LoginView instead
+            // of Onboarding / LocalNetworkPermission. These are ephemeral and
+            // do not persist to UserDefaults.standard.
+            "-hasSeenOnboarding", "YES",
+            "-hasCompletedNetworkPermission", "YES",
+            // Force demo mode off deterministically: DemoMode.shared reads
+            // this key from UserDefaults.standard at init, and if a prior
+            // simulator run left it true, DemoAuthService.restoreSession would
+            // silently re-authenticate and hide LoginView. Argument-domain
+            // overrides are volatile (init reads it but its didSet does not
+            // fire during initialization, so nothing is written back).
+            "-isDemoModeActive", "NO"
+        ]
+    }
 
     // MARK: - Login Screen Presence
 
