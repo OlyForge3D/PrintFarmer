@@ -40,7 +40,8 @@ public class PrintJobManagementService(
     IJobCostCalculationService? jobCostCalculationService = null,
     ICameraSnapshotService? cameraSnapshotService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    ISettingsService? settingsService = null) : IPrintJobManagementService
+    ISettingsService? settingsService = null,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -56,6 +57,7 @@ public class PrintJobManagementService(
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly ISettingsService? _settingsService = settingsService;
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private const int QueuePlanningMaxJobs = 5000;
     private const int DefaultEstimatedPrintMinutes = 90;
     private const int MinimumRemainingPrintMinutes = 5;
@@ -522,6 +524,19 @@ public class PrintJobManagementService(
             _ = await _repository.AddAsync(job, cancellationToken);
 
             _logger.LogInformation("Print job {JobId} enqueued by user {UserId}", job.Id.ToString(), userId);
+
+            // #709 item 5: queue mutation may change coverage (new assigned
+            // demand added). Broadcast per-printer if the job is bound,
+            // otherwise fleet-wide (unassigned queue affects nobody's
+            // coverage yet, but downstream assignment will re-broadcast).
+            if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
@@ -551,6 +566,11 @@ public class PrintJobManagementService(
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
             }
+
+            // Capture prior assignment/status so we can decide whether coverage
+            // needs a rebroadcast after the update (#709 item 5).
+            Guid? priorAssignedPrinterId = job.AssignedPrinterId;
+            PrintJobStatus priorStatus = job.Status;
 
             // Update fields if provided
             if (request.Priority.HasValue)
@@ -585,6 +605,35 @@ public class PrintJobManagementService(
 
             _ = await _repository.UpdateAsync(job, cancellationToken);
             _logger.LogInformation("Print job {JobId} updated by user {UserId}", jobId, userId);
+
+            // #709 item 5: coverage changes when assignment moves or the
+            // job's contribution to queued demand changes (status transitions
+            // Queued/Assigned ↔ Printing/Completed/Cancelled). Broadcast on
+            // any of these changes; the coalescer swallows repeated bursts.
+            if (_coverageBroadcaster is not null)
+            {
+                bool assignmentChanged = job.AssignedPrinterId != priorAssignedPrinterId;
+                bool statusChanged = job.Status != priorStatus;
+
+                if (assignmentChanged || statusChanged)
+                {
+                    string reason = assignmentChanged
+                        ? Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment
+                        : Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged;
+
+                    if (priorAssignedPrinterId.HasValue && priorAssignedPrinterId != job.AssignedPrinterId)
+                    {
+                        await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                            priorAssignedPrinterId.Value, reason, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (job.AssignedPrinterId.HasValue)
+                    {
+                        await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                            job.AssignedPrinterId.Value, reason, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
 
             return MapToQueuedPrintJobDto(job);
         }

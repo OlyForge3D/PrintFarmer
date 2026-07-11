@@ -36,6 +36,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IAutoTagService? _autoTagService;
     private readonly ICameraSnapshotService? _cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory;
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -99,7 +100,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IJobCostCalculationService? jobCostCalculationService = null,
         IAutoTagService? autoTagService = null,
         ICameraSnapshotService? cameraSnapshotService = null,
-        IServiceScopeFactory? serviceScopeFactory = null)
+        IServiceScopeFactory? serviceScopeFactory = null,
+        Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -115,6 +117,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _autoTagService = autoTagService;
         _cameraSnapshotService = cameraSnapshotService;
         _serviceScopeFactory = serviceScopeFactory;
+        _coverageBroadcaster = coverageBroadcaster;
     }
 
     /// <summary>
@@ -246,6 +249,18 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
+        // #709 item 5: job completion changes coverage — the completed job
+        // no longer contributes to active/queued demand, and spool weight was
+        // reconciled by RecordFilamentUsageAsync above. Broadcast per-printer;
+        // the coalescer swallows the case where multiple reasons stack up.
+        if (_coverageBroadcaster is not null)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                ct).ConfigureAwait(false);
+        }
+
         // Capture camera snapshots (true fire-and-forget — never blocks completion)
         if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
         {
@@ -365,6 +380,15 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
+        // #709 item 5: job failure removes the job from active/queued demand.
+        if (_coverageBroadcaster is not null)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                ct).ConfigureAwait(false);
+        }
+
         // Capture camera snapshots on failure (true fire-and-forget)
         if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
         {
@@ -481,6 +505,17 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     _logger.LogInformation(
                         "[PrintJobCompletionService] Batch-consumed filament from {SuccessCount}/{TotalCount} spools for multi-toolhead job {JobId}",
                         successCount, consumptions.Count, job.Id);
+
+                    // #709 item 5: spool remaining weight was mutated by
+                    // consumption — coverage projections for the affected
+                    // printer are now stale.
+                    if (_coverageBroadcaster is not null && successCount > 0)
+                    {
+                        await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                            printerId,
+                            Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
+                            ct).ConfigureAwait(false);
+                    }
                 }
             }
             else
@@ -542,6 +577,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                         _logger.LogInformation(
                             "[PrintJobCompletionService] Recorded {UsedGrams:F1}g filament consumption on spool {SpoolId} for job {JobId}",
                             usageGrams.Value, printer.CurrentSpoolId.Value, job.Id);
+
+                        // #709 item 5: spool remaining weight reconciled;
+                        // coverage projections must be re-evaluated.
+                        if (_coverageBroadcaster is not null)
+                        {
+                            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                                printerId,
+                                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
+                                ct).ConfigureAwait(false);
+                        }
                     }
                 }
             }
