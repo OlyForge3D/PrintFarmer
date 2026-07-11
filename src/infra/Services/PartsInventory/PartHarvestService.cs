@@ -4,22 +4,46 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.PartsInventory;
 
 /// <summary>
 /// EF Core implementation of <see cref="IPartHarvestService"/>.
-/// The full harvest — job stamping, ledger writes, on-hand updates, and
-/// tracking that harvest cannot re-run — is performed inside a single
-/// serializable transaction. The <c>HarvestOperationKey</c> column on
-/// <see cref="PrintJob"/> plus the unique <c>OperationKey</c> on the
-/// ledger enforce duplicate-safe behavior even under racing callers.
+/// <para>
+/// The full harvest — job stamping, ledger writes, and on-hand updates — is
+/// performed inside a single serializable transaction (on relational
+/// providers). The composite unique index on
+/// <c>(PartInventoryId, OperationKey)</c> plus the <c>HarvestedAt</c> stamp on
+/// <see cref="PrintJob"/> together enforce duplicate-safe behaviour even under
+/// racing callers.
+/// </para>
+/// <para>
+/// Concurrency contract:
+/// <list type="bullet">
+///   <item>If the job was harvested before we started, return
+///     <see cref="PartInventoryOutcome.IdempotentReplay"/> with the prior
+///     adjustments — no writes, no double increment.</item>
+///   <item>If a concurrent writer commits before us and we hit a unique
+///     conflict, rollback (never commit a PostgreSQL-poisoned transaction),
+///     reload the job in a fresh context, and if it is now harvested return
+///     an idempotent replay with the committed prior ledger rather than a
+///     spurious 409.</item>
+///   <item>If a <see cref="DbUpdateConcurrencyException"/> fires on the
+///     <see cref="PartInventory"/> row we tried to increment (a different job
+///     harvested the same SKU at the same time) we retry a bounded number of
+///     times against fresh state before returning a retryable conflict.</item>
+/// </list>
+/// </para>
 /// </summary>
 public class PartHarvestService(
     IDbContextFactory<AppDbContext> dbFactory,
     ILogger<PartHarvestService> logger) : IPartHarvestService
 {
+    /// <summary>Maximum retries for a benign RowVersion collision on a different job / same SKU.</summary>
+    private const int MaxConcurrencyRetries = 3;
+
     public async Task<HarvestResult> HarvestJobAsync(
         Guid jobId,
         HarvestJobRequest request,
@@ -28,10 +52,43 @@ public class PartHarvestService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Pre-check idempotent replay against committed state.
+        HarvestResult? preReplay = await TryLoadHarvestedReplayAsync(jobId, ct);
+        if (preReplay is not null)
+        {
+            return preReplay;
+        }
+
+        for (int attempt = 0; attempt < MaxConcurrencyRetries; attempt++)
+        {
+            HarvestResult result = await TryHarvestOnceAsync(jobId, request, userId, ct);
+            if (result.Outcome == PartInventoryOutcome.Conflict && attempt < MaxConcurrencyRetries - 1)
+            {
+                logger.LogDebug(
+                    "Retrying HarvestJobAsync for job {JobId} after benign concurrency collision (attempt {Attempt}).",
+                    jobId,
+                    attempt + 1);
+                continue;
+            }
+
+            return result;
+        }
+
+        return new HarvestResult(
+            PartInventoryOutcome.Conflict,
+            null,
+            "Persistent concurrency conflict; please retry.");
+    }
+
+    private async Task<HarvestResult> TryHarvestOnceAsync(
+        Guid jobId,
+        HarvestJobRequest request,
+        string? userId,
+        CancellationToken ct)
+    {
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
 
-        PrintJob? job = await db.PrintJobs
-            .FirstOrDefaultAsync(j => j.Id == jobId, ct);
+        PrintJob? job = await db.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null)
         {
             return new HarvestResult(PartInventoryOutcome.JobNotFound, null, $"Print job '{jobId}' not found.");
@@ -45,36 +102,9 @@ public class PartHarvestService(
                 $"Print job '{jobId}' is in status {job.Status}; only Completed jobs can be harvested.");
         }
 
-        // Duplicate-safe replay: if the job has already been harvested,
-        // return the prior adjustments instead of applying the delta twice.
         if (job.HarvestedAt is not null)
         {
-            List<PartInventoryAdjustment> prior = await db.PartInventoryAdjustments
-                .AsNoTracking()
-                .Include(a => a.Bin)
-                .Include(a => a.PartInventory)
-                .Where(a => a.PrintJobId == jobId)
-                .OrderBy(a => a.CreatedAt)
-                .ToListAsync(ct);
-
-            Bin? existingBin = job.HarvestedIntoBinId.HasValue
-                ? await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Id == job.HarvestedIntoBinId, ct)
-                : null;
-
-            IReadOnlyList<PartAdjustmentResponse> priorDtos = prior
-                .Select(a => PartInventoryService.ToDto(a, a.PartInventory?.Sku ?? string.Empty))
-                .ToList();
-
-            return new HarvestResult(
-                PartInventoryOutcome.IdempotentReplay,
-                new HarvestJobResponse(
-                    job.Id,
-                    job.HarvestedAt.Value,
-                    job.HarvestedIntoBinId,
-                    existingBin?.Code,
-                    AlreadyHarvested: true,
-                    priorDtos),
-                "Job already harvested; existing adjustments returned.");
+            return await LoadPriorHarvestAsync(db, job, ct);
         }
 
         Bin? bin = null;
@@ -91,10 +121,137 @@ public class PartHarvestService(
             }
         }
 
-        // Resolve outputs. Priority order:
-        //   1. Explicit outputs list on the request (manual override).
-        //   2. Mapping keyed on the job's ProjectFile.
-        //   3. Mapping keyed on the job's GcodeFile.
+        (HarvestResult? failure, List<(PartInventory Part, int Quantity)> resolved) =
+            await ResolveOutputsAsync(db, job, request, ct);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        string opKey = string.IsNullOrWhiteSpace(request.OperationKey)
+            ? $"harvest:{jobId:N}"
+            : request.OperationKey.Trim();
+
+        bool relational = db.Database.IsRelational();
+        IDbContextTransaction? transaction = relational
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct)
+            : null;
+
+        try
+        {
+            HarvestResult result = await CommitHarvestAsync(db, job, bin, resolved, opKey, userId, ct);
+            if (result.Outcome == PartInventoryOutcome.Ok && transaction is not null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+            else if (transaction is not null)
+            {
+                await transaction.RollbackAsync(ct);
+            }
+
+            return result;
+        }
+        catch (DbUpdateException ex) when (PartInventoryService.IsUniqueViolation(ex))
+        {
+            if (transaction is not null)
+            {
+                try
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+                catch
+                {
+                    // swallow — the outer catch will observe the transaction as rolled back either way.
+                }
+            }
+
+            logger.LogInformation(
+                ex,
+                "Unique-constraint conflict harvesting job {JobId}; checking for concurrent commit.",
+                jobId);
+
+            // A concurrent writer may have committed just before us. Reload
+            // from a fresh context to see the true committed state.
+            HarvestResult? replay = await TryLoadHarvestedReplayAsync(jobId, ct);
+            if (replay is not null)
+            {
+                return replay;
+            }
+
+            // Different-job / same-SKU collision on the composite unique index
+            // will not fire (opKey embeds jobId), so this is genuinely retryable.
+            return new HarvestResult(
+                PartInventoryOutcome.Conflict,
+                null,
+                "Concurrent harvest collision; please retry.");
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            if (transaction is not null)
+            {
+                try
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+                catch
+                {
+                    // swallow — the outer catch will observe the transaction as rolled back either way.
+                }
+            }
+
+            logger.LogInformation(
+                ex,
+                "Concurrency (RowVersion) conflict on PartInventory during harvest of job {JobId}; caller will retry.",
+                jobId);
+
+            // Might be the same job racing (unlikely — HarvestedAt guard) or
+            // a *different* job racing on the same SKU. Either way we bounce
+            // to the outer retry loop with fresh state.
+            HarvestResult? replay = await TryLoadHarvestedReplayAsync(jobId, ct);
+            if (replay is not null)
+            {
+                return replay;
+            }
+
+            return new HarvestResult(
+                PartInventoryOutcome.Conflict,
+                null,
+                "Concurrent stock update collision; please retry.");
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                try
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+                catch
+                {
+                    // swallow — the outer catch will observe the transaction as rolled back either way.
+                }
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Deterministic mapping-resolution precedence for a harvest:
+    ///   1. Request.Outputs (manual/override).
+    ///   2. Project-file mapping (<see cref="PrintJob.ProjectFileId"/>).
+    ///   3. G-code file mapping (<see cref="PrintJob.GcodeFileId"/>).
+    /// </summary>
+    private static async Task<(HarvestResult? Failure, List<(PartInventory Part, int Quantity)> Resolved)>
+        ResolveOutputsAsync(AppDbContext db, PrintJob job, HarvestJobRequest request, CancellationToken ct)
+    {
         var resolved = new List<(PartInventory Part, int Quantity)>();
 
         if (request.Outputs is not null && request.Outputs.Count > 0)
@@ -103,101 +260,78 @@ public class PartHarvestService(
             {
                 if (item.Quantity <= 0)
                 {
-                    return new HarvestResult(PartInventoryOutcome.InvalidRequest, null,
-                        $"Output quantity for SKU '{item.Sku}' must be positive.");
+                    return (new HarvestResult(PartInventoryOutcome.InvalidRequest, null,
+                        $"Output quantity for SKU '{item.Sku}' must be positive."), resolved);
                 }
 
                 string sku = item.Sku.Trim();
-                PartInventory? part = await db.PartInventories
-                    .FirstOrDefaultAsync(p => p.Sku == sku, ct);
+                PartInventory? part = await db.PartInventories.FirstOrDefaultAsync(p => p.Sku == sku, ct);
                 if (part is null)
                 {
-                    return new HarvestResult(PartInventoryOutcome.PartNotFound, null,
-                        $"SKU '{sku}' not found.");
+                    return (new HarvestResult(PartInventoryOutcome.PartNotFound, null,
+                        $"SKU '{sku}' not found."), resolved);
                 }
 
                 if (!part.IsActive)
                 {
-                    return new HarvestResult(PartInventoryOutcome.InvalidRequest, null,
-                        $"SKU '{sku}' is inactive.");
+                    return (new HarvestResult(PartInventoryOutcome.InvalidRequest, null,
+                        $"SKU '{sku}' is inactive."), resolved);
                 }
 
                 resolved.Add((part, item.Quantity));
             }
+
+            return (null, resolved);
         }
-        else
+
+        List<PartOutputMapping> mappings = [];
+        if (job.ProjectFileId is Guid pfid)
         {
-            List<PartOutputMapping> mappings = [];
-            if (job.ProjectFileId is Guid pfid)
-            {
-                mappings = await db.PartOutputMappings
-                    .Include(m => m.PartInventory)
-                    .Where(m => m.PrintProjectFileId == pfid)
-                    .ToListAsync(ct);
-            }
-
-            if (mappings.Count == 0 && job.GcodeFileId is Guid gfid)
-            {
-                mappings = await db.PartOutputMappings
-                    .Include(m => m.PartInventory)
-                    .Where(m => m.GcodeFileId == gfid)
-                    .ToListAsync(ct);
-            }
-
-            if (mappings.Count == 0)
-            {
-                return new HarvestResult(
-                    PartInventoryOutcome.NoMappings,
-                    null,
-                    "No output mappings configured for this job. Supply an 'outputs' array in the request.");
-            }
-
-            int copies = request.QuantityOverride ?? Math.Max(1, job.Copies);
-            foreach (PartOutputMapping mapping in mappings)
-            {
-                if (mapping.PartInventory is null || !mapping.PartInventory.IsActive)
-                {
-                    continue;
-                }
-
-                resolved.Add((mapping.PartInventory, mapping.Quantity * copies));
-            }
-
-            if (resolved.Count == 0)
-            {
-                return new HarvestResult(
-                    PartInventoryOutcome.NoMappings,
-                    null,
-                    "Job has mappings, but every mapped SKU is inactive.");
-            }
+            mappings = await db.PartOutputMappings
+                .Include(m => m.PartInventory)
+                .Where(m => m.PrintProjectFileId == pfid)
+                .ToListAsync(ct);
         }
 
-        string opKey = string.IsNullOrWhiteSpace(request.OperationKey)
-            ? $"harvest:{jobId:N}"
-            : request.OperationKey.Trim();
-
-        // Enter a serializable transaction so a concurrent harvest either
-        // sees this job's HarvestedAt update or fails its own commit.
-        if (db.Database.IsRelational())
+        if (mappings.Count == 0 && job.GcodeFileId is Guid gfid)
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-            HarvestResult result = await CommitHarvestAsync(db, job, bin, resolved, opKey, userId, ct);
-            if (result.Outcome is PartInventoryOutcome.Ok)
-            {
-                await transaction.CommitAsync(ct);
-            }
-            else
-            {
-                await transaction.RollbackAsync(ct);
-            }
-
-            return result;
+            mappings = await db.PartOutputMappings
+                .Include(m => m.PartInventory)
+                .Where(m => m.GcodeFileId == gfid)
+                .ToListAsync(ct);
         }
 
-        return await CommitHarvestAsync(db, job, bin, resolved, opKey, userId, ct);
+        if (mappings.Count == 0)
+        {
+            return (new HarvestResult(
+                PartInventoryOutcome.NoMappings,
+                null,
+                "No output mappings configured for this job. Supply an 'outputs' array in the request."), resolved);
+        }
+
+        int copies = request.QuantityOverride ?? Math.Max(1, job.Copies);
+        foreach (PartOutputMapping mapping in mappings)
+        {
+            if (mapping.PartInventory is null || !mapping.PartInventory.IsActive)
+            {
+                continue;
+            }
+
+            resolved.Add((mapping.PartInventory, mapping.Quantity * copies));
+        }
+
+        if (resolved.Count == 0)
+        {
+            return (new HarvestResult(
+                PartInventoryOutcome.NoMappings,
+                null,
+                "Job has mappings, but every mapped SKU is inactive."), resolved);
+        }
+
+        return (null, resolved);
     }
 
-    private async Task<HarvestResult> CommitHarvestAsync(
+    private static async Task<HarvestResult> CommitHarvestAsync(
         AppDbContext db,
         PrintJob job,
         Bin? bin,
@@ -218,7 +352,6 @@ public class PartHarvestService(
                     $"Non-positive output quantity for SKU '{part.Sku}'.");
             }
 
-            // Attach if fetched via AsNoTracking or a prior include.
             if (db.Entry(part).State == EntityState.Detached)
             {
                 _ = db.PartInventories.Attach(part);
@@ -254,26 +387,7 @@ public class PartHarvestService(
         job.HarvestedByUserId = userId;
         job.HarvestedIntoBinId = bin?.Id;
 
-        try
-        {
-            _ = await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex) when (PartInventoryService.IsUniqueViolation(ex))
-        {
-            logger.LogWarning(ex, "Concurrent harvest detected for job {JobId}; returning conflict.", job.Id);
-            return new HarvestResult(
-                PartInventoryOutcome.Conflict,
-                null,
-                "Concurrent harvest already recorded for this job.");
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            logger.LogWarning(ex, "Concurrent harvest concurrency for job {JobId}; returning conflict.", job.Id);
-            return new HarvestResult(
-                PartInventoryOutcome.Conflict,
-                null,
-                "Concurrent harvest already recorded for this job.");
-        }
+        _ = await db.SaveChangesAsync(ct);
 
         return new HarvestResult(
             PartInventoryOutcome.Ok,
@@ -285,6 +399,52 @@ public class PartHarvestService(
                 AlreadyHarvested: false,
                 responses),
             null);
+    }
+
+    /// <summary>
+    /// Loads the prior harvest for <paramref name="jobId"/> from a fresh
+    /// context; returns <c>null</c> when the job is not yet harvested.
+    /// </summary>
+    private async Task<HarvestResult?> TryLoadHarvestedReplayAsync(Guid jobId, CancellationToken ct)
+    {
+        await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
+        PrintJob? job = await db.PrintJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId, ct);
+        if (job is null || job.HarvestedAt is null)
+        {
+            return null;
+        }
+
+        return await LoadPriorHarvestAsync(db, job, ct);
+    }
+
+    private static async Task<HarvestResult> LoadPriorHarvestAsync(AppDbContext db, PrintJob job, CancellationToken ct)
+    {
+        List<PartInventoryAdjustment> prior = await db.PartInventoryAdjustments
+            .AsNoTracking()
+            .Include(a => a.Bin)
+            .Include(a => a.PartInventory)
+            .Where(a => a.PrintJobId == job.Id)
+            .OrderBy(a => a.CreatedAt)
+            .ToListAsync(ct);
+
+        Bin? existingBin = job.HarvestedIntoBinId.HasValue
+            ? await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Id == job.HarvestedIntoBinId, ct)
+            : null;
+
+        IReadOnlyList<PartAdjustmentResponse> priorDtos = prior
+            .Select(a => PartInventoryService.ToDto(a, a.PartInventory?.Sku ?? string.Empty))
+            .ToList();
+
+        return new HarvestResult(
+            PartInventoryOutcome.IdempotentReplay,
+            new HarvestJobResponse(
+                job.Id,
+                job.HarvestedAt!.Value,
+                job.HarvestedIntoBinId,
+                existingBin?.Code,
+                AlreadyHarvested: true,
+                priorDtos),
+            "Job already harvested; existing adjustments returned.");
     }
 }
 

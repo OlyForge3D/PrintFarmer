@@ -3,6 +3,8 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Web.Api.Tests.TestInfrastructure;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -11,22 +13,32 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Services.PartsInventory;
 
 /// <summary>
-/// Tests for <see cref="PartHarvestService"/>. Verifies the atomic
-/// harvest workflow, the deterministic mapping precedence
-/// (request outputs → project-file mapping → gcode-file mapping),
-/// idempotent replay via the job's HarvestedAt stamp, and status
-/// gating (only PrintJobStatus.Completed jobs may be harvested).
+/// Relational-provider tests for <see cref="PartHarvestService"/>. Uses SQLite
+/// in-memory (shared connection) so that the composite unique index on
+/// <c>PartInventoryAdjustments (PartInventoryId, OperationKey)</c>, real
+/// transactions, and PRAGMA foreign keys are all exercised — the prior
+/// InMemory-provider variant could not reproduce the concurrent-harvest bugs
+/// surfaced by the #714 review.
 /// </summary>
 public class PartHarvestServiceTests : IDisposable
 {
+    private readonly SqliteConnection _connection;
     private readonly DbContextOptions<AppDbContext> _options;
     private readonly IDbContextFactory<AppDbContext> _factory;
 
     public PartHarvestServiceTests()
     {
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+        TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled(_connection);
+
         _options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseSqlite(_connection)
             .Options;
+
+        using var db = new AppDbContext(_options);
+        _ = db.Database.EnsureCreated();
+
         var factoryMock = new Mock<IDbContextFactory<AppDbContext>>();
         _ = factoryMock
             .Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
@@ -36,8 +48,7 @@ public class PartHarvestServiceTests : IDisposable
 
     public void Dispose()
     {
-        using var db = new AppDbContext(_options);
-        _ = db.Database.EnsureDeleted();
+        _connection.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -49,6 +60,52 @@ public class PartHarvestServiceTests : IDisposable
         bool useProjectFile = false)
     {
         await using var db = new AppDbContext(_options);
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/tests",
+            FolderType = "gcode",
+        };
+        _ = db.Set<FolderNode>().Add(folder);
+
+        var gcode = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "part.gcode",
+            FileName = "part.gcode",
+            FolderId = folder.Id,
+            FilePath = "/tmp",
+            FileHash = "hash",
+            FileSizeBytes = 1,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _ = db.Set<GcodeFile>().Add(gcode);
+
+        PrintProject? project = null;
+        PrintProjectFile? projectFile = null;
+        if (useProjectFile)
+        {
+            project = new PrintProject
+            {
+                Id = Guid.NewGuid(),
+                Name = "proj",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            _ = db.Set<PrintProject>().Add(project);
+            projectFile = new PrintProjectFile
+            {
+                Id = Guid.NewGuid(),
+                PrintProjectId = project.Id,
+                GcodeFileId = gcode.Id,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            _ = db.Set<PrintProjectFile>().Add(projectFile);
+        }
+
         var part = new PartInventory
         {
             Id = Guid.NewGuid(),
@@ -60,23 +117,12 @@ public class PartHarvestServiceTests : IDisposable
         };
         _ = db.PartInventories.Add(part);
 
-        Guid? gcodeId = null;
-        Guid? projectId = null;
-        if (useProjectFile)
-        {
-            projectId = Guid.NewGuid();
-        }
-        else
-        {
-            gcodeId = Guid.NewGuid();
-        }
-
         var mapping = new PartOutputMapping
         {
             Id = Guid.NewGuid(),
             PartInventoryId = part.Id,
-            GcodeFileId = gcodeId,
-            PrintProjectFileId = projectId,
+            GcodeFileId = useProjectFile ? null : gcode.Id,
+            PrintProjectFileId = useProjectFile ? projectFile!.Id : null,
             Quantity = mappingQuantity,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -89,8 +135,8 @@ public class PartHarvestServiceTests : IDisposable
             Name = "part.gcode",
             Status = PrintJobStatus.Completed,
             Copies = copies,
-            GcodeFileId = gcodeId,
-            ProjectFileId = projectId,
+            GcodeFileId = gcode.Id,
+            ProjectFileId = useProjectFile ? projectFile!.Id : null,
         };
         _ = db.PrintJobs.Add(job);
         _ = await db.SaveChangesAsync();
@@ -108,6 +154,7 @@ public class PartHarvestServiceTests : IDisposable
     [Fact]
     public async Task HarvestJobAsync_NonCompletedJob_ReturnsJobNotCompleted()
     {
+        Guid jobId;
         await using (var db = new AppDbContext(_options))
         {
             var job = new PrintJob
@@ -119,11 +166,12 @@ public class PartHarvestServiceTests : IDisposable
             };
             _ = db.PrintJobs.Add(job);
             _ = await db.SaveChangesAsync();
-
-            PartHarvestService sut = CreateSut();
-            HarvestResult result = await sut.HarvestJobAsync(job.Id, new HarvestJobRequest(), null);
-            Assert.Equal(PartInventoryOutcome.JobNotCompleted, result.Outcome);
+            jobId = job.Id;
         }
+
+        PartHarvestService sut = CreateSut();
+        HarvestResult result = await sut.HarvestJobAsync(jobId, new HarvestJobRequest(), null);
+        Assert.Equal(PartInventoryOutcome.JobNotCompleted, result.Outcome);
     }
 
     [Fact]
@@ -141,7 +189,7 @@ public class PartHarvestServiceTests : IDisposable
 
         await using var db = new AppDbContext(_options);
         PartInventory refreshed = await db.PartInventories.SingleAsync(p => p.Id == part.Id);
-        Assert.Equal(6, refreshed.OnHand); // 2 copies * 3 mappingQuantity
+        Assert.Equal(6, refreshed.OnHand);
 
         PrintJob refreshedJob = await db.PrintJobs.SingleAsync(j => j.Id == job.Id);
         Assert.NotNull(refreshedJob.HarvestedAt);
@@ -180,8 +228,7 @@ public class PartHarvestServiceTests : IDisposable
         PartHarvestService sut = CreateSut();
         HarvestResult result = await sut.HarvestJobAsync(
             job.Id,
-            new HarvestJobRequest(
-                Outputs: new[] { new HarvestOutputRequestItem("PF-CLIP-99", 4) }),
+            new HarvestJobRequest(Outputs: new[] { new HarvestOutputRequestItem("PF-CLIP-99", 4) }),
             null);
 
         Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
@@ -193,16 +240,46 @@ public class PartHarvestServiceTests : IDisposable
     [Fact]
     public async Task HarvestJobAsync_ProjectFileMapping_TakesPrecedenceOverGcodeMapping()
     {
-        // Seed a job that has BOTH a project file and a gcode file, plus a mapping for each
-        // pointing to different SKUs. Precedence: project file wins.
-        Guid projectId = Guid.NewGuid();
-        Guid gcodeId = Guid.NewGuid();
         Guid projectSkuId;
         Guid gcodeSkuId;
         Guid jobId;
 
         await using (var db = new AppDbContext(_options))
         {
+            var folder = new FolderNode { Id = Guid.NewGuid(), Path = "/tests", FolderType = "gcode" };
+            _ = db.Set<FolderNode>().Add(folder);
+            var gcode = new GcodeFile
+            {
+                Id = Guid.NewGuid(),
+                Name = "combo.gcode",
+                FileName = "combo.gcode",
+                FolderId = folder.Id,
+                FilePath = "/tmp",
+                FileHash = "hash",
+                FileSizeBytes = 1,
+                UploadedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            _ = db.Set<GcodeFile>().Add(gcode);
+            var project = new PrintProject
+            {
+                Id = Guid.NewGuid(),
+                Name = "combo-proj",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            _ = db.Set<PrintProject>().Add(project);
+            var projectFile = new PrintProjectFile
+            {
+                Id = Guid.NewGuid(),
+                PrintProjectId = project.Id,
+                GcodeFileId = gcode.Id,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            _ = db.Set<PrintProjectFile>().Add(projectFile);
+
             var projectSku = new PartInventory
             {
                 Id = Guid.NewGuid(),
@@ -227,7 +304,7 @@ public class PartHarvestServiceTests : IDisposable
             {
                 Id = Guid.NewGuid(),
                 PartInventoryId = projectSku.Id,
-                PrintProjectFileId = projectId,
+                PrintProjectFileId = projectFile.Id,
                 Quantity = 1,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -236,7 +313,7 @@ public class PartHarvestServiceTests : IDisposable
             {
                 Id = Guid.NewGuid(),
                 PartInventoryId = gcodeSku.Id,
-                GcodeFileId = gcodeId,
+                GcodeFileId = gcode.Id,
                 Quantity = 1,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -248,8 +325,8 @@ public class PartHarvestServiceTests : IDisposable
                 Name = "combo.gcode",
                 Status = PrintJobStatus.Completed,
                 Copies = 1,
-                ProjectFileId = projectId,
-                GcodeFileId = gcodeId,
+                ProjectFileId = projectFile.Id,
+                GcodeFileId = gcode.Id,
             };
             _ = db.PrintJobs.Add(job);
             _ = await db.SaveChangesAsync();
@@ -283,7 +360,40 @@ public class PartHarvestServiceTests : IDisposable
 
         await using var db = new AppDbContext(_options);
         Assert.Equal(2, (await db.PartInventories.SingleAsync(p => p.Id == part.Id)).OnHand);
-        Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+        _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_ConcurrentDuplicates_ProduceExactlyOneCommit_NoConflict()
+    {
+        (PrintJob job, PartInventory part) = await SeedCompletedJobWithMappingAsync(copies: 1, mappingQuantity: 4);
+        PartHarvestService sut = CreateSut();
+        const int callers = 5;
+
+        HarvestResult[] results = await Task.WhenAll(Enumerable.Range(0, callers)
+            .Select(_ => sut.HarvestJobAsync(job.Id, new HarvestJobRequest(), "u1")));
+
+        // No caller may receive a Conflict — a same-job race must fold into an
+        // IdempotentReplay against committed state, never a bare 409.
+        Assert.All(results, r => Assert.True(
+            r.Outcome == PartInventoryOutcome.Ok || r.Outcome == PartInventoryOutcome.IdempotentReplay,
+            $"Unexpected outcome {r.Outcome}: {r.Message}"));
+
+        int oks = results.Count(r => r.Outcome == PartInventoryOutcome.Ok);
+        Assert.Equal(1, oks);
+
+        await using var db = new AppDbContext(_options);
+        Assert.Equal(4, (await db.PartInventories.SingleAsync(p => p.Id == part.Id)).OnHand);
+        _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+
+        // Every replay must expose the prior harvest metadata rather than a null response.
+        IEnumerable<HarvestResult> replays = results.Where(r => r.Outcome == PartInventoryOutcome.IdempotentReplay);
+        Assert.All(replays, r =>
+        {
+            Assert.NotNull(r.Response);
+            Assert.True(r.Response!.AlreadyHarvested);
+            _ = Assert.Single(r.Response.Adjustments);
+        });
     }
 
     [Fact]

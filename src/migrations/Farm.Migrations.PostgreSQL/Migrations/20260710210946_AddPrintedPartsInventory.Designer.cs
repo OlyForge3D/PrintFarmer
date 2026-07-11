@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260710194745_AddPrintedPartsInventory")]
+    [Migration("20260710210946_AddPrintedPartsInventory")]
     partial class AddPrintedPartsInventory
     {
         /// <inheritdoc />
@@ -2819,10 +2819,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("BinId");
 
-                    b.HasIndex("OperationKey")
-                        .IsUnique()
-                        .HasFilter("\"OperationKey\" IS NOT NULL");
-
                     b.HasIndex("PartInventoryId");
 
                     b.HasIndex("PrintJobId");
@@ -2830,6 +2826,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("Reason");
 
                     b.HasIndex("PartInventoryId", "CreatedAt");
+
+                    b.HasIndex("PartInventoryId", "OperationKey")
+                        .IsUnique()
+                        .HasFilter("\"OperationKey\" IS NOT NULL");
 
                     b.ToTable("PartInventoryAdjustments");
                 });

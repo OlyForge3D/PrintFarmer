@@ -212,13 +212,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "BinId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_PartInventoryAdjustments_OperationKey",
-                table: "PartInventoryAdjustments",
-                column: "OperationKey",
-                unique: true,
-                filter: "\"OperationKey\" IS NOT NULL");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_PartInventoryAdjustments_PartInventoryId",
                 table: "PartInventoryAdjustments",
                 column: "PartInventoryId");
@@ -227,6 +220,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "IX_PartInventoryAdjustments_PartInventoryId_CreatedAt",
                 table: "PartInventoryAdjustments",
                 columns: new[] { "PartInventoryId", "CreatedAt" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PartInventoryAdjustments_PartInventoryId_OperationKey",
+                table: "PartInventoryAdjustments",
+                columns: new[] { "PartInventoryId", "OperationKey" },
+                unique: true,
+                filter: "\"OperationKey\" IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_PartInventoryAdjustments_PrintJobId",

@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Web.Api.Tests.TestInfrastructure;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -9,21 +11,34 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Services.PartsInventory;
 
 /// <summary>
-/// Unit tests for <see cref="PartInventoryService"/>. Uses an EF Core
-/// in-memory provider so tests exercise the same DbContext code paths as
-/// production (aggregate update + ledger insert), with idempotency behavior
-/// asserted at the service layer.
+/// Relational-provider tests for <see cref="PartInventoryService"/>.
+/// <para>
+/// Uses SQLite in-memory (with a persistent shared connection) so that the
+/// composite unique index <c>(PartInventoryId, OperationKey)</c>, real
+/// transactions, and PRAGMA foreign keys are all exercised. The prior
+/// InMemory-provider variant of these tests could not reproduce the
+/// idempotency / atomic-create bugs surfaced by the #714 convergence review.
+/// </para>
 /// </summary>
 public class PartInventoryServiceTests : IDisposable
 {
+    private readonly SqliteConnection _connection;
     private readonly DbContextOptions<AppDbContext> _options;
     private readonly IDbContextFactory<AppDbContext> _factory;
 
     public PartInventoryServiceTests()
     {
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+        TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled(_connection);
+
         _options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseSqlite(_connection)
             .Options;
+
+        using var db = new AppDbContext(_options);
+        _ = db.Database.EnsureCreated();
+
         var factoryMock = new Mock<IDbContextFactory<AppDbContext>>();
         _ = factoryMock
             .Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
@@ -33,8 +48,7 @@ public class PartInventoryServiceTests : IDisposable
 
     public void Dispose()
     {
-        using var db = new AppDbContext(_options);
-        _ = db.Database.EnsureDeleted();
+        _connection.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -84,7 +98,7 @@ public class PartInventoryServiceTests : IDisposable
 
         AdjustResult result = await sut.AdjustAsync(
             "PF-TEST-01",
-            new AdjustCommand(3, PartAdjustmentReason.Manual, null, null, "topped up", null, "op1"));
+            new AdjustCommand(3, PartAdjustmentReason.Manual, null, null, "topped up", "op1", null));
 
         Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
         Assert.Equal(7, result.NewOnHand);
@@ -142,7 +156,7 @@ public class PartInventoryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task AdjustAsync_DuplicateOperationKey_ReturnsIdempotentReplay_NoNewLedgerEntry()
+    public async Task AdjustAsync_DuplicateOperationKey_ReturnsIdempotentReplay_WithCommittedOnHand()
     {
         _ = await SeedSkuAsync(onHand: 0);
         PartInventoryService sut = CreateSut();
@@ -156,11 +170,70 @@ public class PartInventoryServiceTests : IDisposable
 
         Assert.Equal(PartInventoryOutcome.Ok, first.Outcome);
         Assert.Equal(PartInventoryOutcome.IdempotentReplay, second.Outcome);
+
+        // The prior bug returned the mutated in-memory OnHand from a rolled-back
+        // transaction (10). Correct behaviour: return the committed value (5).
         Assert.Equal(5, second.NewOnHand);
+        Assert.NotNull(second.Adjustment);
+        Assert.Equal("op-dup", second.Adjustment!.OperationKey);
 
         await using var db = new AppDbContext(_options);
-        Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+        _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
         Assert.Equal(5, (await db.PartInventories.SingleAsync()).OnHand);
+    }
+
+    [Fact]
+    public async Task AdjustAsync_DifferentSkus_ShareOperationKey()
+    {
+        // Composite unique constraint must be (PartInventoryId, OperationKey),
+        // not OperationKey alone. Two independent SKUs performing their own
+        // retries with the same client-generated key must both succeed.
+        _ = await SeedSkuAsync("PF-A", onHand: 0);
+        _ = await SeedSkuAsync("PF-B", onHand: 0);
+        PartInventoryService sut = CreateSut();
+
+        AdjustResult a = await sut.AdjustAsync(
+            "PF-A",
+            new AdjustCommand(2, PartAdjustmentReason.Manual, null, null, null, "shared-key", null));
+        AdjustResult b = await sut.AdjustAsync(
+            "PF-B",
+            new AdjustCommand(3, PartAdjustmentReason.Manual, null, null, null, "shared-key", null));
+
+        Assert.Equal(PartInventoryOutcome.Ok, a.Outcome);
+        Assert.Equal(PartInventoryOutcome.Ok, b.Outcome);
+
+        await using var db = new AppDbContext(_options);
+        Assert.Equal(2, (await db.PartInventories.SingleAsync(p => p.Sku == "PF-A")).OnHand);
+        Assert.Equal(3, (await db.PartInventories.SingleAsync(p => p.Sku == "PF-B")).OnHand);
+    }
+
+    [Fact]
+    public async Task AdjustAsync_ConcurrentSameOperationKey_CommitsExactlyOneRow()
+    {
+        _ = await SeedSkuAsync(onHand: 0);
+        PartInventoryService sut = CreateSut();
+        const int callers = 10;
+
+        AdjustResult[] results = await Task.WhenAll(Enumerable.Range(0, callers)
+            .Select(_ => sut.AdjustAsync(
+                "PF-TEST-01",
+                new AdjustCommand(7, PartAdjustmentReason.Manual, null, null, null, "race-key", "u1"))));
+
+        // Every caller returns success or idempotent replay — never a 500 /
+        // Conflict / stale value from a poisoned transaction.
+        Assert.All(results, r => Assert.True(
+            r.Outcome == PartInventoryOutcome.Ok || r.Outcome == PartInventoryOutcome.IdempotentReplay,
+            $"Unexpected outcome {r.Outcome}: {r.Message}"));
+
+        int oks = results.Count(r => r.Outcome == PartInventoryOutcome.Ok);
+        Assert.Equal(1, oks);
+
+        await using var db = new AppDbContext(_options);
+        _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+        Assert.Equal(7, (await db.PartInventories.SingleAsync()).OnHand);
+
+        // Every replay must expose the committed OnHand, never a locally-computed value.
+        Assert.All(results, r => Assert.Equal(7, r.NewOnHand));
     }
 
     [Fact]
@@ -178,5 +251,100 @@ public class PartInventoryServiceTests : IDisposable
         Assert.NotNull(result.Adjustment);
         Assert.Equal(bin.Id, result.Adjustment!.BinId);
         Assert.Equal("BIN-Q", result.Adjustment.BinCode);
+    }
+
+    [Fact]
+    public async Task CreatePartAsync_WithInitialOnHand_CommitsPartAndLedgerAtomically()
+    {
+        _ = await SeedBinAsync("BIN-C");
+        PartInventoryService sut = CreateSut();
+
+        CreatePartResult result = await sut.CreatePartAsync(new CreatePartCommand(
+            Sku: "PF-NEW-01",
+            Name: "New Bracket",
+            Description: null,
+            ModelFileRef: null,
+            DefaultBinCode: "BIN-C",
+            InitialOnHand: 5,
+            ReorderPoint: 2,
+            UserId: "creator"));
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        Assert.NotNull(result.Part);
+        Assert.Equal(5, result.Part!.OnHand);
+
+        await using var db = new AppDbContext(_options);
+        PartInventory refreshed = await db.PartInventories.SingleAsync(p => p.Sku == "PF-NEW-01");
+        Assert.Equal(5, refreshed.OnHand);
+
+        PartInventoryAdjustment ledger = await db.PartInventoryAdjustments
+            .SingleAsync(a => a.PartInventoryId == refreshed.Id);
+        Assert.Equal(5, ledger.Delta);
+        Assert.Equal(PartAdjustmentReason.InitialStock, ledger.Reason);
+        Assert.Null(ledger.OperationKey);
+    }
+
+    [Fact]
+    public async Task CreatePartAsync_ZeroInitialOnHand_CommitsSkuOnly()
+    {
+        PartInventoryService sut = CreateSut();
+
+        CreatePartResult result = await sut.CreatePartAsync(new CreatePartCommand(
+            Sku: "PF-EMPTY-01",
+            Name: "Empty",
+            Description: null,
+            ModelFileRef: null,
+            DefaultBinCode: null,
+            InitialOnHand: 0,
+            ReorderPoint: 0,
+            UserId: null));
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        await using var db = new AppDbContext(_options);
+        _ = Assert.Single(await db.PartInventories.ToListAsync());
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreatePartAsync_UnknownDefaultBin_ReturnsBinNotFound_AndCommitsNothing()
+    {
+        PartInventoryService sut = CreateSut();
+
+        CreatePartResult result = await sut.CreatePartAsync(new CreatePartCommand(
+            Sku: "PF-NOBIN-01",
+            Name: "No Bin",
+            Description: null,
+            ModelFileRef: null,
+            DefaultBinCode: "GHOST",
+            InitialOnHand: 3,
+            ReorderPoint: 0,
+            UserId: null));
+
+        Assert.Equal(PartInventoryOutcome.BinNotFound, result.Outcome);
+        await using var db = new AppDbContext(_options);
+        Assert.Empty(await db.PartInventories.ToListAsync());
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreatePartAsync_DuplicateSku_ReturnsSkuAlreadyExists()
+    {
+        _ = await SeedSkuAsync("PF-DUP-01", onHand: 1);
+        PartInventoryService sut = CreateSut();
+
+        CreatePartResult result = await sut.CreatePartAsync(new CreatePartCommand(
+            Sku: "PF-DUP-01",
+            Name: "Dup",
+            Description: null,
+            ModelFileRef: null,
+            DefaultBinCode: null,
+            InitialOnHand: 0,
+            ReorderPoint: 0,
+            UserId: null));
+
+        Assert.Equal(PartInventoryOutcome.SkuAlreadyExists, result.Outcome);
+        await using var db = new AppDbContext(_options);
+        // Only the seeded row exists.
+        _ = Assert.Single(await db.PartInventories.ToListAsync());
     }
 }

@@ -2817,10 +2817,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("BinId");
 
-                    b.HasIndex("OperationKey")
-                        .IsUnique()
-                        .HasFilter("\"OperationKey\" IS NOT NULL");
-
                     b.HasIndex("PartInventoryId");
 
                     b.HasIndex("PrintJobId");
@@ -2828,6 +2824,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Reason");
 
                     b.HasIndex("PartInventoryId", "CreatedAt");
+
+                    b.HasIndex("PartInventoryId", "OperationKey")
+                        .IsUnique()
+                        .HasFilter("\"OperationKey\" IS NOT NULL");
 
                     b.ToTable("PartInventoryAdjustments");
                 });

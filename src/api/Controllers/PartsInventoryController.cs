@@ -79,67 +79,31 @@ public class PartsInventoryController(
             return BadRequest(new { message = "Request body is required." });
         }
 
-        string sku = request.Sku.Trim();
-        PartInventory? existing = await partRepository.GetBySkuAsync(sku, ct);
-        if (existing is not null)
+        CreatePartResult result = await partInventoryService.CreatePartAsync(
+            new CreatePartCommand(
+                request.Sku,
+                request.Name,
+                request.Description,
+                request.ModelFileRef,
+                request.DefaultBinCode,
+                request.InitialOnHand,
+                request.ReorderPoint,
+                User.Identity?.Name),
+            ct);
+
+        switch (result.Outcome)
         {
-            return Conflict(new { message = $"SKU '{sku}' already exists." });
+            case PartInventoryOutcome.Ok when result.Part is not null:
+                return Created($"/api/parts-inventory/{result.Part.Sku}", ToDto(result.Part));
+            case PartInventoryOutcome.SkuAlreadyExists:
+                return Conflict(new { message = result.Message ?? "SKU already exists." });
+            case PartInventoryOutcome.BinNotFound:
+            case PartInventoryOutcome.InvalidRequest:
+                return BadRequest(new { message = result.Message ?? "Invalid request." });
+            default:
+                logger.LogError("Unexpected outcome {Outcome} creating SKU {Sku}: {Msg}", result.Outcome, request.Sku, result.Message);
+                return StatusCode(500, new { message = result.Message ?? "Unexpected error." });
         }
-
-        Guid? defaultBinId = null;
-        if (!string.IsNullOrWhiteSpace(request.DefaultBinCode))
-        {
-            Bin? bin = await binRepository.GetByCodeAsync(request.DefaultBinCode, ct);
-            if (bin is null)
-            {
-                return BadRequest(new { message = $"Default bin '{request.DefaultBinCode}' not found." });
-            }
-
-            defaultBinId = bin.Id;
-        }
-
-        var entity = new PartInventory
-        {
-            Id = Guid.NewGuid(),
-            Sku = sku,
-            Name = request.Name.Trim(),
-            Description = request.Description,
-            ModelFileRef = request.ModelFileRef,
-            DefaultBinId = defaultBinId,
-            OnHand = 0,
-            ReorderPoint = request.ReorderPoint,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
-        await partRepository.AddAsync(entity, ct);
-        _ = await partRepository.SaveChangesAsync(ct);
-
-        if (request.InitialOnHand > 0)
-        {
-            AdjustResult seed = await partInventoryService.AdjustAsync(
-                sku,
-                new AdjustCommand(
-                    request.InitialOnHand,
-                    PartAdjustmentReason.InitialStock,
-                    PrintJobId: null,
-                    BinCode: request.DefaultBinCode,
-                    Notes: "Initial stock seeded on create.",
-                    OperationKey: null,
-                    UserId: User.Identity?.Name),
-                ct);
-            if (seed.Outcome != PartInventoryOutcome.Ok && seed.Outcome != PartInventoryOutcome.IdempotentReplay)
-            {
-                logger.LogWarning(
-                    "Failed to seed initial stock for {Sku}: {Outcome} — {Msg}",
-                    sku,
-                    seed.Outcome,
-                    seed.Message);
-            }
-        }
-
-        PartInventory? refreshed = await partRepository.GetBySkuAsync(sku, ct);
-        return Created($"/api/parts-inventory/{sku}", ToDto(refreshed ?? entity));
     }
 
     /// <summary>Updates a printed-part SKU's metadata and reorder threshold. Does not alter on-hand.</summary>
