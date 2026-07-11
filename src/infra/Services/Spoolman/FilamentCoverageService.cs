@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -20,15 +21,15 @@ namespace Farm.Infrastructure.Services.Spoolman;
 /// </summary>
 public class FilamentCoverageService(
     AppDbContext db,
-    ISpoolmanService spoolmanService,
+    IFilamentCoverageSpoolResolver spoolResolver,
     IPrintersService printersService,
     ISettingsService settingsService,
+    IOperatorFeatureGate featureGate,
     ILogger<FilamentCoverageService> logger)
     : IFilamentCoverageService, IFilamentCoverageAttentionSource
 {
     // Machine-readable reason codes. Clients should NEVER localize these; they
     // are stable identifiers callers can key off of.
-    private const string ReasonSpoolmanUnconfigured = "spoolman-unconfigured";
     private const string ReasonNoSpoolAssigned = "no-spool-assigned";
     private const string ReasonSpoolRemainingUnknown = "spool-remaining-unknown";
     private const string ReasonNoGcodeMetadata = "no-gcode-metadata";
@@ -36,11 +37,15 @@ public class FilamentCoverageService(
     private const string ReasonQueuedJobMetadataUnknown = "queued-job-metadata-unknown";
     private const string ReasonInsufficientRemaining = "insufficient-remaining";
     private const string ReasonNoActiveJob = "no-active-job";
+    private const string ReasonMaterialMismatch = "material-mismatch";
+    private const string ReasonSpoolMaterialUnknown = "spool-material-unknown";
+    private const string ReasonToolheadUnavailable = "toolhead-unavailable";
 
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
-    private readonly ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
+    private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
     private readonly ISettingsService _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+    private readonly IOperatorFeatureGate _featureGate = featureGate ?? throw new ArgumentNullException(nameof(featureGate));
     private readonly ILogger<FilamentCoverageService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     private SpoolCoverageSettings GetSettings()
@@ -83,7 +88,9 @@ public class FilamentCoverageService(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        Dictionary<int, SpoolmanSpoolDto?> spoolLookup = await ResolveSpoolsAsync(printer, ct).ConfigureAwait(false);
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> resolved =
+            await _spoolResolver.ResolveAsync([printer], ct).ConfigureAwait(false);
+        IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> spoolLookup = resolved[printer.Id];
 
         SpoolCoverageSettings settings = GetSettings();
 
@@ -137,20 +144,8 @@ public class FilamentCoverageService(
             .GroupBy(j => j.AssignedPrinterId!.Value)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        // Batch-resolve every referenced spool once.
-        HashSet<int> spoolIds = [];
-        foreach (Printer p in printers)
-        {
-            foreach (Toolhead t in p.Toolheads ?? [])
-            {
-                if (t.CurrentSpoolId is int id)
-                {
-                    spoolIds.Add(id);
-                }
-            }
-        }
-
-        Dictionary<int, SpoolmanSpoolDto?> fleetSpoolLookup = await FetchSpoolsAsync(spoolIds, ct).ConfigureAwait(false);
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> fleetSpoolLookup =
+            await _spoolResolver.ResolveAsync(printers, ct).ConfigureAwait(false);
 
         // FLEET THREAD-SAFETY (#709 convergence item 2): pre-fetch live
         // progress for every printer with an active job SEQUENTIALLY so we
@@ -177,7 +172,7 @@ public class FilamentCoverageService(
         foreach (Printer printer in printers)
         {
             List<PrintJob> jobs = jobsByPrinter.TryGetValue(printer.Id, out List<PrintJob>? list) ? list : [];
-            Dictionary<int, SpoolmanSpoolDto?> scoped = ScopeSpoolLookup(printer, fleetSpoolLookup);
+            IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> scoped = fleetSpoolLookup[printer.Id];
             _ = progressByPrinter.TryGetValue(printer.Id, out double? liveProgress);
             ordered.Add(ComputeForPrinter(printer, jobs, scoped, liveProgress));
         }
@@ -190,11 +185,7 @@ public class FilamentCoverageService(
     {
         SpoolCoverageSettings settings = GetSettings();
 
-        // Rebase-note (#725): once IOperatorFeatureGate.FilamentCoverageEnabled
-        // exists, replace this local Enabled check with the operator gate. The
-        // gate is authoritative: a disabled feature must emit no warnings at
-        // all so the attention feed's suppression contract stays clean.
-        if (!settings.Enabled)
+        if (!_featureGate.IsEnabled(OperatorFeature.FilamentCoverage))
         {
             return [];
         }
@@ -221,7 +212,7 @@ public class FilamentCoverageService(
                 bool hasEta = th.PredictedRunoutAt.HasValue;
                 bool runoutSoon = hasEta && th.PredictedRunoutAt!.Value - now <= lead;
                 bool etaLessInsufficient = !hasEta
-                    && th.Status == FilamentCoverageStatus.Insufficient
+                    && th.Status == FilamentCoverageStatus.Runout
                     && settings.QueuedShortageWarningsEnabled;
 
                 if (!runoutSoon && !etaLessInsufficient)
@@ -259,7 +250,7 @@ public class FilamentCoverageService(
     internal PrinterFilamentCoverageDto ComputeForPrinter(
         Printer printer,
         List<PrintJob> jobs,
-        Dictionary<int, SpoolmanSpoolDto?> spoolLookup,
+        IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> spoolLookup,
         double? liveProgress)
     {
         SpoolCoverageSettings settings = GetSettings();
@@ -278,19 +269,17 @@ public class FilamentCoverageService(
         // Per-toolhead PER-COPY grams for the active job.
         (Dictionary<int, double> activePerCopy, bool activeHasKnownMetadata, bool activeIsMultiToolMissing) =
             ComputePerCopyToolheadDemand(activeJob, toolheads);
+        Dictionary<int, string> activeMaterials = ComputeToolheadMaterialRequirements(activeJob, activePerCopy.Keys);
 
-        // COPIES (#709 convergence item 3): the classification basis is
-        // remaining copies of the active job (current copy in full, plus every
-        // subsequent copy) NOT prorated by progress. Progress only affects the
-        // display "how much of the CURRENT copy remains" value, never the
-        // classification. This keeps status stable as progress ticks.
         int activeRemainingCopies = activeJob is null ? 0 : Math.Max(0, activeJob.RemainingCopies);
 
         // Per-toolhead demand for each assigned queued job (aggregated).
         // Multi-copy queued jobs multiply per-copy grams by RemainingCopies.
         Dictionary<int, double> queuedDemand = new();
+        Dictionary<int, HashSet<string>> queuedMaterials = new();
         HashSet<int> queuedUnknownIndices = [];
         HashSet<int> queuedTouchedIndices = [];
+        bool queuedHasUnknownMetadata = false;
         foreach (PrintJob qj in assignedQueuedJobs)
         {
             (Dictionary<int, double> jobPerCopy, bool known, bool _) =
@@ -298,6 +287,8 @@ public class FilamentCoverageService(
 
             if (!known)
             {
+                queuedHasUnknownMetadata = true;
+
                 // Unknown-metadata queued job. Without per-extruder or
                 // fallback grams we cannot allocate demand to any slot; taint
                 // every slot on this printer so the client sees Unknown for
@@ -321,6 +312,17 @@ public class FilamentCoverageService(
                 _ = queuedTouchedIndices.Add(idx);
                 queuedDemand[idx] = (queuedDemand.TryGetValue(idx, out double existing) ? existing : 0) + (grams * qRemaining);
             }
+
+            foreach ((int idx, string material) in ComputeToolheadMaterialRequirements(qj, jobPerCopy.Keys))
+            {
+                if (!queuedMaterials.TryGetValue(idx, out HashSet<string>? materials))
+                {
+                    materials = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    queuedMaterials[idx] = materials;
+                }
+
+                _ = materials.Add(material);
+            }
         }
 
         List<ToolheadCoverageDto> slots = new(toolheads.Count);
@@ -328,41 +330,52 @@ public class FilamentCoverageService(
 
         foreach (Toolhead th in toolheads)
         {
-            SpoolmanSpoolDto? spool = null;
-            if (th.CurrentSpoolId is int sid)
+            FilamentCoverageSpoolSnapshot? spoolSnapshot = null;
+            int? effectiveSpoolId = th.CurrentSpoolId ?? (th.IsPrimary ? printer.CurrentSpoolId : null);
+            if (effectiveSpoolId is int sid)
             {
-                _ = spoolLookup.TryGetValue(sid, out spool);
+                _ = spoolLookup.TryGetValue(sid, out spoolSnapshot);
             }
 
-            double? remainingGrams = spool?.RemainingWeightG;
+            SpoolmanSpoolDto? spool = spoolSnapshot?.Spool;
+            double? rawRemainingGrams = spool?.RemainingWeightG;
+            string? loadedMaterial = spool?.Material
+                ?? th.CurrentMaterial
+                ?? (th.IsPrimary ? printer.CurrentMaterial : null);
 
             // Per-slot active demand.
             bool activeHasThisSlot = activePerCopy.ContainsKey(th.Index);
             double perCopyGrams = activeHasThisSlot ? activePerCopy[th.Index] : 0.0;
 
-            // STABLE-BASIS classification (#709 convergence item 1):
-            // CurrentJobRequiredGrams reports the FULL demand across every
-            // remaining copy (per-copy × RemainingCopies). This value is
-            // stable while a print is running — it does NOT shrink with
-            // progress, so an initially-insufficient job cannot silently flip
-            // to Covers. This is also what feeds the classifier below.
             double? currentJobRequired = activeHasThisSlot
                 ? perCopyGrams * activeRemainingCopies
                 : (double?)null;
 
-            // Display-only prorated remaining grams. Kept for the UI so it
-            // can show "you'll consume ~X g more before the print ends".
-            // Progress applies to the CURRENT copy; whole future copies are
-            // added at full weight.
-            double? currentJobRemainingDisplay = null;
+            double consumedCurrentCopy = 0;
+            double currentCopyRemaining = 0;
+            double? currentJobRemaining = null;
             if (activeHasThisSlot && activeRemainingCopies > 0)
             {
                 double currentCopyFrac = liveProgress.HasValue
                     ? Math.Clamp(1.0 - (liveProgress.Value / 100.0), 0.0, 1.0)
                     : 1.0;
-                double currentCopyRemaining = perCopyGrams * currentCopyFrac;
+                consumedCurrentCopy = perCopyGrams * (1.0 - currentCopyFrac);
+                currentCopyRemaining = perCopyGrams * currentCopyFrac;
                 double futureCopyRemaining = perCopyGrams * Math.Max(0, activeRemainingCopies - 1);
-                currentJobRemainingDisplay = currentCopyRemaining + futureCopyRemaining;
+                currentJobRemaining = currentCopyRemaining + futureCopyRemaining;
+            }
+
+            // Managed sources are only decremented by PrintJobCompletionService
+            // after a copy completes. During an active print, reconcile that
+            // static snapshot by subtracting estimated consumption exactly
+            // once. Native Moonraker Spoolman already tracks live consumption,
+            // so its remaining weight is used directly.
+            double? remainingGrams = rawRemainingGrams;
+            if (remainingGrams.HasValue
+                && activeHasThisSlot
+                && spoolSnapshot?.TracksLiveConsumption == false)
+            {
+                remainingGrams = Math.Max(0, remainingGrams.Value - consumedCurrentCopy);
             }
 
             // Per-slot queued demand.
@@ -373,11 +386,10 @@ public class FilamentCoverageService(
                     ? (queuedDemand.TryGetValue(th.Index, out double q) ? q : 0.0)
                     : 0.0);
 
-            // Total demand for CLASSIFICATION (#709 item 1): stable basis.
             double? totalDemand = null;
-            if (currentJobRequired.HasValue && queuedRequired.HasValue)
+            if (currentJobRemaining.HasValue && queuedRequired.HasValue)
             {
-                totalDemand = currentJobRequired.Value + queuedRequired.Value;
+                totalDemand = currentJobRemaining.Value + queuedRequired.Value;
             }
             else if (!activeHasThisSlot && queuedRequired.HasValue)
             {
@@ -386,60 +398,74 @@ public class FilamentCoverageService(
                 totalDemand = queuedRequired.Value;
             }
 
+            string? requiredActiveMaterial = currentJobRemaining is > 0
+                && activeMaterials.TryGetValue(th.Index, out string? activeMaterial)
+                    ? activeMaterial
+                    : null;
+            HashSet<string>? requiredQueuedMaterials = queuedRequired is > 0
+                && queuedMaterials.TryGetValue(th.Index, out HashSet<string>? queuedMaterialSet)
+                    ? queuedMaterialSet
+                    : null;
+            (bool materialCompatible, string? materialReason) = CheckMaterialCompatibility(
+                loadedMaterial,
+                requiredActiveMaterial,
+                requiredQueuedMaterials);
+
             // Determine status + reason.
             FilamentCoverageStatus status;
             string? reason;
             (status, reason) = ClassifySlot(
                 spool,
-                th.CurrentSpoolId,
+                spoolSnapshot?.ErrorReason,
+                effectiveSpoolId,
                 activeJob,
                 activeHasKnownMetadata,
                 activeIsMultiToolMissing,
-                currentJobRequired,
+                currentJobRemaining,
                 queuedUnknownForThisSlot,
                 queuedRequired,
                 totalDemand,
                 remainingGrams,
-                settings.ReserveGrams);
+                settings.ReserveGrams,
+                materialCompatible,
+                materialReason);
 
-            // Predicted runout for the ACTIVE job only. Anchored to the job's
-            // ActualStartTime + estimated duration so ETA does NOT drift as
-            // progress ticks (#709 convergence item 1). Falls back to
-            // "now + usable/reqFull × dur" when start time is unavailable.
             DateTime? runoutAt = null;
             int? runoutLayer = null;
-            if (status == FilamentCoverageStatus.Insufficient
-                && spool?.RemainingWeightG is double rem
-                && rem > 0
-                && currentJobRequired is double reqFull
-                && reqFull > 0
+            if (status == FilamentCoverageStatus.Runout
+                && remainingGrams is double rem
+                && currentJobRemaining is double activeRemaining
+                && activeRemaining > 0
+                && perCopyGrams > 0
                 && activeJob is not null
                 && activeJob.EstimatedPrintTime is TimeSpan dur
                 && dur.TotalSeconds > 0
-                && rem < reqFull - settings.ReserveGrams)
+                && rem < currentCopyRemaining - settings.ReserveGrams)
             {
-                double usableRemaining = Math.Max(0.0, rem - settings.ReserveGrams);
-                double runoutFraction = usableRemaining / reqFull;
+                // Managed snapshots are completion-updated, so their raw value
+                // is already the current-copy start weight. Native snapshots
+                // are live and need estimated consumption added back.
+                double startRemainingGrams = spoolSnapshot?.TracksLiveConsumption == true
+                    ? rem + consumedCurrentCopy
+                    : rawRemainingGrams!.Value;
+                double availableAtCopyStart = Math.Max(0.0, startRemainingGrams - settings.ReserveGrams);
+                double runoutFraction = Math.Clamp(availableAtCopyStart / perCopyGrams, 0.0, 1.0);
 
                 if (activeJob.ActualStartTime is DateTime startedAt)
                 {
-                    // Stable anchor: run-out is at start + fraction * duration.
-                    // Independent of DateTime.UtcNow so successive polls give
-                    // the same answer.
                     runoutAt = startedAt.AddSeconds(runoutFraction * dur.TotalSeconds);
                 }
                 else
                 {
-                    // Fallback: no known start time; approximate from wall-clock.
-                    double secondsToRunout = usableRemaining * dur.TotalSeconds / reqFull;
-                    runoutAt = evaluatedAt.AddSeconds(secondsToRunout);
+                    double currentProgressFraction = liveProgress.HasValue
+                        ? Math.Clamp(liveProgress.Value / 100.0, 0.0, 1.0)
+                        : 0.0;
+                    double remainingFraction = Math.Max(0.0, runoutFraction - currentProgressFraction);
+                    runoutAt = evaluatedAt.AddSeconds(remainingFraction * dur.TotalSeconds);
                 }
 
                 if (activeJob.GcodeFile?.TotalLayers is int totalLayers && totalLayers > 0)
                 {
-                    // Stable layer projection: does NOT include a
-                    // progress-derived "consumed" term. Layer at runout is
-                    // purely the usable fraction of the print.
                     double runoutLayerRaw = totalLayers * runoutFraction;
                     runoutLayer = (int)Math.Round(Math.Clamp(runoutLayerRaw, 1, totalLayers));
                 }
@@ -453,12 +479,12 @@ public class FilamentCoverageService(
             slots.Add(new ToolheadCoverageDto(
                 th.Index,
                 string.IsNullOrWhiteSpace(th.Name) ? $"Extruder {th.Index + 1}" : th.Name,
-                th.CurrentSpoolId,
-                th.CurrentMaterial ?? spool?.Material,
-                th.CurrentFilamentColor ?? spool?.ColorHex,
+                effectiveSpoolId,
+                loadedMaterial,
+                spool?.ColorHex ?? th.CurrentFilamentColor,
                 remainingGrams,
                 currentJobRequired,
-                currentJobRemainingDisplay,
+                currentJobRemaining,
                 queuedRequired,
                 totalDemand,
                 status,
@@ -467,6 +493,84 @@ public class FilamentCoverageService(
                 runoutLayer));
         }
 
+        HashSet<int> physicalIndices = toolheads.Select(t => t.Index).ToHashSet();
+        IEnumerable<int> missingRequiredIndices = activePerCopy.Keys
+            .Concat(queuedDemand.Keys)
+            .Where(index => !physicalIndices.Contains(index))
+            .Where(index =>
+            {
+                double perCopy = activePerCopy.TryGetValue(index, out double activeGrams) ? activeGrams : 0;
+                double currentFraction = liveProgress.HasValue
+                    ? Math.Clamp(1.0 - (liveProgress.Value / 100.0), 0.0, 1.0)
+                    : 1.0;
+                double activeRemaining = (perCopy * currentFraction)
+                    + (perCopy * Math.Max(0, activeRemainingCopies - 1));
+                double queuedRemaining = queuedDemand.TryGetValue(index, out double queuedGrams) ? queuedGrams : 0;
+                return activeRemaining > 0 || queuedRemaining > 0;
+            })
+            .Distinct()
+            .OrderBy(index => index);
+        foreach (int index in missingRequiredIndices)
+        {
+            double perCopyGrams = activePerCopy.TryGetValue(index, out double activeGrams) ? activeGrams : 0;
+            double? currentJobRequired = perCopyGrams > 0 ? perCopyGrams * activeRemainingCopies : null;
+            double? currentJobRemaining = null;
+            if (currentJobRequired.HasValue)
+            {
+                double currentCopyFraction = liveProgress.HasValue
+                    ? Math.Clamp(1.0 - (liveProgress.Value / 100.0), 0.0, 1.0)
+                    : 1.0;
+                currentJobRemaining = (perCopyGrams * currentCopyFraction)
+                    + (perCopyGrams * Math.Max(0, activeRemainingCopies - 1));
+            }
+
+            double queuedRequired = queuedDemand.TryGetValue(index, out double queuedGrams) ? queuedGrams : 0;
+            double totalDemand = (currentJobRemaining ?? 0) + queuedRequired;
+            string? requiredMaterial = activeMaterials.TryGetValue(index, out string? activeMaterial)
+                ? activeMaterial
+                : queuedMaterials.TryGetValue(index, out HashSet<string>? materials)
+                    ? materials.FirstOrDefault()
+                    : null;
+            slots.Add(new ToolheadCoverageDto(
+                index,
+                $"Extruder {index + 1}",
+                null,
+                requiredMaterial,
+                null,
+                null,
+                currentJobRequired,
+                currentJobRemaining,
+                queuedRequired,
+                totalDemand,
+                FilamentCoverageStatus.Unknown,
+                ReasonToolheadUnavailable,
+                null,
+                null));
+        }
+
+        if (slots.Count == 0 && (activeJob is not null || assignedQueuedJobs.Count > 0))
+        {
+            string reason = activeJob is not null && !activeHasKnownMetadata
+                ? activeIsMultiToolMissing ? ReasonNoPerExtruderMetadata : ReasonNoGcodeMetadata
+                : queuedHasUnknownMetadata ? ReasonQueuedJobMetadataUnknown : ReasonToolheadUnavailable;
+            slots.Add(new ToolheadCoverageDto(
+                0,
+                "Extruder 1",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                queuedHasUnknownMetadata ? null : 0,
+                null,
+                FilamentCoverageStatus.Unknown,
+                reason,
+                null,
+                null));
+        }
+
+        slots.Sort((left, right) => left.ToolheadIndex.CompareTo(right.ToolheadIndex));
         FilamentCoverageStatus aggregate = AggregateStatus(slots);
 
         return new PrinterFilamentCoverageDto(
@@ -566,23 +670,107 @@ public class FilamentCoverageService(
         }
     }
 
+    private static Dictionary<int, string> ComputeToolheadMaterialRequirements(
+        PrintJob? job,
+        IEnumerable<int> demandedIndices)
+    {
+        Dictionary<int, string> materials = [];
+        if (job?.GcodeFile is null)
+        {
+            return materials;
+        }
+
+        string[]? perExtruder = ParseStringArray(job.GcodeFile.FilamentPerExtruderType);
+        string? fallback = !string.IsNullOrWhiteSpace(job.RequiredMaterialType)
+            ? job.RequiredMaterialType
+            : job.GcodeFile.RequiredMaterial;
+        foreach (int index in demandedIndices)
+        {
+            string? material = perExtruder is not null && index < perExtruder.Length
+                ? perExtruder[index]
+                : fallback;
+            if (string.IsNullOrWhiteSpace(material))
+            {
+                material = fallback;
+            }
+
+            if (!string.IsNullOrWhiteSpace(material))
+            {
+                materials[index] = material.Trim();
+            }
+        }
+
+        return materials;
+    }
+
+    private static string[]? ParseStringArray(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static (bool compatible, string? reason) CheckMaterialCompatibility(
+        string? loadedMaterial,
+        string? activeMaterial,
+        IReadOnlySet<string>? queuedMaterials)
+    {
+        List<string> required = [];
+        if (!string.IsNullOrWhiteSpace(activeMaterial))
+        {
+            required.Add(activeMaterial);
+        }
+
+        if (queuedMaterials is not null)
+        {
+            required.AddRange(queuedMaterials);
+        }
+
+        if (required.Count == 0)
+        {
+            return (true, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(loadedMaterial))
+        {
+            return (false, ReasonSpoolMaterialUnknown);
+        }
+
+        return required.All(material => string.Equals(material, loadedMaterial, StringComparison.OrdinalIgnoreCase))
+            ? (true, null)
+            : (false, ReasonMaterialMismatch);
+    }
+
     private static (FilamentCoverageStatus status, string? reason) ClassifySlot(
         SpoolmanSpoolDto? spool,
+        string? spoolErrorReason,
         int? currentSpoolId,
         PrintJob? activeJob,
         bool activeHasKnownMetadata,
         bool activeIsMultiToolMissing,
-        double? currentJobRequired,
+        double? currentJobRemaining,
         bool queuedUnknownForThisSlot,
         double? queuedRequired,
         double? totalDemand,
         double? remainingGrams,
-        double reserveGrams)
+        double reserveGrams,
+        bool materialCompatible,
+        string? materialReason)
     {
         // Determine whether any real demand exists on this slot (needed for
         // the no-spool branch below and for the "no active job, empty queue"
         // Covers shortcut).
-        bool activeDemandExists = currentJobRequired.HasValue && currentJobRequired.Value > 0;
+        bool activeDemandExists = currentJobRemaining.HasValue && currentJobRemaining.Value > 0;
         bool queuedDemandExists = queuedRequired.HasValue && queuedRequired.Value > 0;
         bool anyDemand = activeDemandExists || queuedDemandExists || queuedUnknownForThisSlot;
 
@@ -605,7 +793,7 @@ public class FilamentCoverageService(
 
         if (spool is null)
         {
-            return (FilamentCoverageStatus.Unknown, ReasonSpoolmanUnconfigured);
+            return (FilamentCoverageStatus.Unknown, spoolErrorReason ?? FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
         }
 
         if (remainingGrams is null)
@@ -624,6 +812,11 @@ public class FilamentCoverageService(
                 activeIsMultiToolMissing ? ReasonNoPerExtruderMetadata : ReasonNoGcodeMetadata);
         }
 
+        if (!materialCompatible)
+        {
+            return (FilamentCoverageStatus.Unknown, materialReason);
+        }
+
         if (activeJob is null && !queuedDemandExists)
         {
             return (FilamentCoverageStatus.Covers, ReasonNoActiveJob);
@@ -637,7 +830,7 @@ public class FilamentCoverageService(
             return (FilamentCoverageStatus.Covers, null);
         }
 
-        return (FilamentCoverageStatus.Insufficient, ReasonInsufficientRemaining);
+        return (FilamentCoverageStatus.Runout, ReasonInsufficientRemaining);
     }
 
     private static FilamentCoverageStatus AggregateStatus(List<ToolheadCoverageDto> slots)
@@ -647,13 +840,13 @@ public class FilamentCoverageService(
             return FilamentCoverageStatus.Covers;
         }
 
-        bool anyInsufficient = false;
+        bool anyRunout = false;
         bool anyUnknown = false;
         foreach (ToolheadCoverageDto s in slots)
         {
-            if (s.Status == FilamentCoverageStatus.Insufficient)
+            if (s.Status == FilamentCoverageStatus.Runout)
             {
-                anyInsufficient = true;
+                anyRunout = true;
             }
             else if (s.Status == FilamentCoverageStatus.Unknown)
             {
@@ -661,9 +854,9 @@ public class FilamentCoverageService(
             }
         }
 
-        if (anyInsufficient)
+        if (anyRunout)
         {
-            return FilamentCoverageStatus.Insufficient;
+            return FilamentCoverageStatus.Runout;
         }
 
         return anyUnknown ? FilamentCoverageStatus.Unknown : FilamentCoverageStatus.Covers;
@@ -678,7 +871,7 @@ public class FilamentCoverageService(
             PrintJobStatusDto? status = await _printersService.GetPrintJobStatusAsync(printerId, linked.Token).ConfigureAwait(false);
             return status?.Progress;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger.LogDebug("[FilamentCoverage] Live progress timed out for printer {PrinterId}", printerId);
             return null;
@@ -688,55 +881,5 @@ public class FilamentCoverageService(
             _logger.LogDebug(ex, "[FilamentCoverage] Live progress unavailable for printer {PrinterId}", printerId);
             return null;
         }
-    }
-
-    private async Task<Dictionary<int, SpoolmanSpoolDto?>> ResolveSpoolsAsync(Printer printer, CancellationToken ct)
-    {
-        HashSet<int> ids = [];
-        foreach (Toolhead th in printer.Toolheads ?? [])
-        {
-            if (th.CurrentSpoolId is int sid)
-            {
-                _ = ids.Add(sid);
-            }
-        }
-
-        return await FetchSpoolsAsync(ids, ct).ConfigureAwait(false);
-    }
-
-    private async Task<Dictionary<int, SpoolmanSpoolDto?>> FetchSpoolsAsync(HashSet<int> ids, CancellationToken ct)
-    {
-        Dictionary<int, SpoolmanSpoolDto?> result = new();
-        foreach (int id in ids)
-        {
-            try
-            {
-                result[id] = await _spoolmanService.GetSpoolByIdAsync(id, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(
-                    ex,
-                    "[FilamentCoverage] Spool {SpoolId} could not be resolved from Spoolman — treating as unknown",
-                    id);
-                result[id] = null;
-            }
-        }
-
-        return result;
-    }
-
-    private static Dictionary<int, SpoolmanSpoolDto?> ScopeSpoolLookup(Printer printer, Dictionary<int, SpoolmanSpoolDto?> shared)
-    {
-        Dictionary<int, SpoolmanSpoolDto?> scoped = new();
-        foreach (Toolhead th in printer.Toolheads ?? [])
-        {
-            if (th.CurrentSpoolId is int sid && shared.TryGetValue(sid, out SpoolmanSpoolDto? spool))
-            {
-                scoped[sid] = spool;
-            }
-        }
-
-        return scoped;
     }
 }

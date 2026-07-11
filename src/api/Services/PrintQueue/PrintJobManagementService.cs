@@ -526,9 +526,8 @@ public class PrintJobManagementService(
             _logger.LogInformation("Print job {JobId} enqueued by user {UserId}", job.Id.ToString(), userId);
 
             // #709 item 5: queue mutation may change coverage (new assigned
-            // demand added). Broadcast per-printer if the job is bound,
-            // otherwise fleet-wide (unassigned queue affects nobody's
-            // coverage yet, but downstream assignment will re-broadcast).
+            // demand added). Broadcast per-printer only when the job is bound;
+            // unassigned shared-queue jobs affect no printer until assignment.
             if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
             {
                 await _coverageBroadcaster.BroadcastPrinterChangedAsync(
@@ -981,6 +980,16 @@ public class PrintJobManagementService(
 
             job.UpdatedAt = DateTime.UtcNow;
             await _repository.SaveChangesAsync(cancellationToken);
+
+            if (job.Status == PrintJobStatus.Printing
+                && job.AssignedPrinterId.HasValue
+                && _coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             // Send notification for job start
             if (job.Status == PrintJobStatus.Printing)
@@ -2845,6 +2854,9 @@ public class PrintJobManagementService(
                 return null;
             }
 
+            int priorCopies = job.Copies;
+            string? priorRequiredMaterialType = job.RequiredMaterialType;
+
             // Validate and update fields
             if (!string.IsNullOrEmpty(updates.Name))
             {
@@ -2941,6 +2953,22 @@ public class PrintJobManagementService(
             _logger.LogInformation(
                 "Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
                 jobId, job.Name, job.Priority, job.Notes?.Length ?? 0);
+
+            if (_coverageBroadcaster is not null
+                && (priorCopies != job.Copies
+                    || !string.Equals(priorRequiredMaterialType, job.RequiredMaterialType, StringComparison.OrdinalIgnoreCase))
+                && job.AssignedPrinterId.HasValue
+                && job.Status is PrintJobStatus.Queued
+                    or PrintJobStatus.Assigned
+                    or PrintJobStatus.Starting
+                    or PrintJobStatus.Printing
+                    or PrintJobStatus.Paused)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             return MapToQueuedPrintJobDto(job);
         }

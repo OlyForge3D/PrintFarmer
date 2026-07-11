@@ -1,9 +1,11 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -44,7 +46,10 @@ public class FilamentCoverageBroadcasterTests
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
-        FilamentCoverageBroadcaster broadcaster = new(hub.Object, NullLogger<FilamentCoverageBroadcaster>.Instance);
+        FilamentCoverageBroadcaster broadcaster = new(
+            hub.Object,
+            ScopeFactory(enabled: true),
+            NullLogger<FilamentCoverageBroadcaster>.Instance);
 
         await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.SpoolBinding, CancellationToken.None);
 
@@ -73,7 +78,10 @@ public class FilamentCoverageBroadcasterTests
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
-        FilamentCoverageBroadcaster broadcaster = new(hub.Object, NullLogger<FilamentCoverageBroadcaster>.Instance);
+        FilamentCoverageBroadcaster broadcaster = new(
+            hub.Object,
+            ScopeFactory(enabled: true),
+            NullLogger<FilamentCoverageBroadcaster>.Instance);
 
         await broadcaster.BroadcastFleetChangedAsync(FilamentCoverageChangeReasons.ThresholdChanged, CancellationToken.None);
 
@@ -103,7 +111,10 @@ public class FilamentCoverageBroadcasterTests
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
-        FilamentCoverageBroadcaster broadcaster = new(hub.Object, NullLogger<FilamentCoverageBroadcaster>.Instance);
+        FilamentCoverageBroadcaster broadcaster = new(
+            hub.Object,
+            ScopeFactory(enabled: true),
+            NullLogger<FilamentCoverageBroadcaster>.Instance);
 
         await broadcaster.BroadcastPrinterChangedAsync(Guid.NewGuid(), string.Empty, CancellationToken.None);
 
@@ -121,5 +132,63 @@ public class FilamentCoverageBroadcasterTests
         FilamentCoverageChangeReasons.SpoolBinding.Should().Be("spoolBinding");
         FilamentCoverageChangeReasons.SpoolWeight.Should().Be("spoolWeight");
         FilamentCoverageChangeReasons.ThresholdChanged.Should().Be("thresholdChanged");
+    }
+
+    [Fact]
+    public async Task BroadcastPrinterChangedAsync_FeatureDisabled_DoesNotSend()
+    {
+        Mock<IHubContext<PrinterHub>> hub = new(MockBehavior.Strict);
+        FilamentCoverageBroadcaster broadcaster = new(
+            hub.Object,
+            ScopeFactory(enabled: false),
+            NullLogger<FilamentCoverageBroadcaster>.Instance);
+
+        await broadcaster.BroadcastPrinterChangedAsync(
+            Guid.NewGuid(),
+            FilamentCoverageChangeReasons.JobProgress,
+            CancellationToken.None);
+
+        hub.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public async Task BroadcastJobProgressIfChangedAsync_EmitsOnlyForRealProgressChanges(
+        bool progressChanged,
+        int expectedCalls)
+    {
+        Guid printerId = Guid.NewGuid();
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        if (expectedCalls > 0)
+        {
+            broadcaster
+                .Setup(b => b.BroadcastPrinterChangedAsync(
+                    printerId,
+                    FilamentCoverageChangeReasons.JobProgress,
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+
+        await broadcaster.Object.BroadcastJobProgressIfChangedAsync(
+            printerId,
+            progressChanged,
+            CancellationToken.None);
+
+        broadcaster.Verify(
+            b => b.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.JobProgress,
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(expectedCalls));
+    }
+
+    private static IServiceScopeFactory ScopeFactory(bool enabled)
+    {
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(enabled);
+        ServiceCollection services = new();
+        services.AddScoped(_ => gate.Object);
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 }

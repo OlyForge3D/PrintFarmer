@@ -706,6 +706,7 @@ public static class ServiceCollectionExtensions
         // (spool binding changes, job progress ticks) can inject it without
         // a scope hop.
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver, Farm.Infrastructure.Services.Spoolman.FilamentCoverageSpoolResolver>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageService>(sp =>
             sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>

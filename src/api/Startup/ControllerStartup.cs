@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Json;
 using Farm.Web.Api.Infrastructure.Filters;
 
@@ -29,6 +30,7 @@ public static class ControllerStartup
                 options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
                 options.JsonSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
                 options.JsonSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
+                options.JsonSerializerOptions.Converters.Add(new FilamentCoverageStatusJsonConverter());
 
                 // Default string enum converter for all other enums
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());

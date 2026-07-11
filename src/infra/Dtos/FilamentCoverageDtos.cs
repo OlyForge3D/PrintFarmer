@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure;
 #pragma warning disable SA1649 // File name should match first type name
@@ -7,9 +8,10 @@ namespace Farm.Infrastructure;
 /// <summary>
 /// Coverage status for a toolhead slot or an entire printer, considering the
 /// currently active print job and any print jobs explicitly assigned to the
-/// same printer. Serialized as string via <see cref="JsonStringEnumConverter"/>.
+/// same printer. This feature uses a local lowercase wire contract rather than
+/// the repository-wide enum converter.
 /// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(FilamentCoverageStatusJsonConverter))]
 public enum FilamentCoverageStatus
 {
     /// <summary>
@@ -24,7 +26,7 @@ public enum FilamentCoverageStatus
     /// include predicted runout data when the active job supplies enough
     /// telemetry to compute it.
     /// </summary>
-    Insufficient = 1,
+    Runout = 1,
 
     /// <summary>
     /// Coverage cannot be safely determined because critical data is missing
@@ -33,6 +35,40 @@ public enum FilamentCoverageStatus
     /// runout claim in this state.
     /// </summary>
     Unknown = 2
+}
+
+/// <summary>
+/// Feature-local JSON converter for Dallas's canonical
+/// <c>unknown|covers|runout</c> status vocabulary.
+/// </summary>
+public sealed class FilamentCoverageStatusJsonConverter : JsonConverter<FilamentCoverageStatus>
+{
+    public override FilamentCoverageStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException("Filament coverage status must be a string.");
+        }
+
+        return reader.GetString() switch
+        {
+            "covers" or "Covers" => FilamentCoverageStatus.Covers,
+            "runout" or "Runout" or "Insufficient" => FilamentCoverageStatus.Runout,
+            "unknown" or "Unknown" => FilamentCoverageStatus.Unknown,
+            _ => throw new JsonException("Unknown filament coverage status."),
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, FilamentCoverageStatus value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value switch
+        {
+            FilamentCoverageStatus.Covers => "covers",
+            FilamentCoverageStatus.Runout => "runout",
+            FilamentCoverageStatus.Unknown => "unknown",
+            _ => throw new JsonException("Unknown filament coverage status."),
+        });
+    }
 }
 
 /// <summary>
@@ -49,7 +85,7 @@ public enum FilamentCoverageStatus
 /// <param name="QueuedRequiredGrams">Grams required across all assigned queued jobs for this toolhead. Zero when there are no assigned queued jobs. Null when at least one assigned queued job has unknown demand.</param>
 /// <param name="TotalDemandGrams">Sum of <see cref="CurrentJobRemainingGrams"/> and <see cref="QueuedRequiredGrams"/>. Null when either component is unknown.</param>
 /// <param name="Status">Per-slot coverage verdict.</param>
-/// <param name="StatusReason">Machine-readable reason code when <see cref="Status"/> is Unknown or Insufficient. Never localized. Examples: "spoolman-unconfigured", "no-spool-assigned", "spool-remaining-unknown", "no-gcode-metadata", "no-per-extruder-metadata", "queued-job-metadata-unknown", "insufficient-remaining".</param>
+/// <param name="StatusReason">Machine-readable reason code when <see cref="Status"/> is Unknown or Runout. Never localized. Examples: "spoolman-unconfigured", "spool-source-unavailable", "spool-not-found", "no-spool-assigned", "spool-remaining-unknown", "no-gcode-metadata", "no-per-extruder-metadata", "queued-job-metadata-unknown", "material-mismatch", "spool-material-unknown", "toolhead-unavailable", "insufficient-remaining".</param>
 /// <param name="PredictedRunoutAt">UTC timestamp at which the active print is projected to exhaust this spool, if the active job is printing, has a known duration, and the spool holds less filament than the remainder of the active job on this toolhead. Null otherwise.</param>
 /// <param name="PredictedRunoutLayer">Layer number at which the runout is projected, if the active job's total layer count is known. Null otherwise.</param>
 public record ToolheadCoverageDto(
@@ -73,7 +109,7 @@ public record ToolheadCoverageDto(
 /// </summary>
 /// <param name="PrinterId">Printer identifier.</param>
 /// <param name="PrinterName">Denormalized printer name for display.</param>
-/// <param name="Status">Aggregate coverage verdict across all toolheads. Insufficient if any slot is Insufficient; otherwise Unknown if any slot is Unknown; otherwise Covers.</param>
+/// <param name="Status">Aggregate coverage verdict across all toolheads. Runout if any slot is Runout; otherwise Unknown if any slot is Unknown; otherwise Covers.</param>
 /// <param name="Toolheads">Per-toolhead coverage rows, ordered by <see cref="ToolheadCoverageDto.ToolheadIndex"/>.</param>
 /// <param name="ActiveJobId">Identifier of the print job currently active on this printer, if any.</param>
 /// <param name="ActiveJobName">Display name of the active job, if any.</param>

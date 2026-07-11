@@ -8,10 +8,15 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers;
@@ -124,7 +129,7 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
 
         // Enum serialized as string, not integer
         status.ValueKind.Should().Be(JsonValueKind.String, "FilamentCoverageStatus must serialize as a string");
-        status.GetString().Should().BeOneOf("Covers", "Insufficient", "Unknown");
+        status.GetString().Should().BeOneOf("covers", "runout", "unknown");
 
         // camelCase nested toolhead properties
         JsonElement slot = toolheads.EnumerateArray().First();
@@ -132,6 +137,81 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
         slot.TryGetProperty("toolheadName", out _).Should().BeTrue();
         slot.TryGetProperty("status", out JsonElement slotStatus).Should().BeTrue();
         slotStatus.ValueKind.Should().Be(JsonValueKind.String);
+        slotStatus.GetString().Should().BeOneOf("covers", "runout", "unknown");
+    }
+
+    [Theory]
+    [InlineData(FilamentCoverageStatus.Unknown, "\"unknown\"")]
+    [InlineData(FilamentCoverageStatus.Covers, "\"covers\"")]
+    [InlineData(FilamentCoverageStatus.Runout, "\"runout\"")]
+    public void FilamentCoverageStatus_SerializesCanonicalLowercase(
+        FilamentCoverageStatus status,
+        string expectedJson)
+    {
+        JsonSerializer.Serialize(status).Should().Be(expectedJson);
+    }
+
+    [Fact]
+    public void FilamentCoverageStatus_IntegerJson_IsRejected()
+    {
+        Action deserialize = () => JsonSerializer.Deserialize<FilamentCoverageStatus>("1");
+        deserialize.Should().Throw<JsonException>();
+    }
+
+    [Fact]
+    public async Task GetFleet_FeatureDisabled_Returns404ProblemDetails_WithoutCoverageWork()
+    {
+        await using CustomWebApplicationFactory disabledFactory = new(
+            new Dictionary<string, string?>
+            {
+                ["OperatorFeatures:FilamentCoverageEnabled"] = "false",
+            });
+        Mock<IFilamentCoverageService> coverage = new(MockBehavior.Strict);
+        await using WebApplicationFactory<Program> host = disabledFactory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IFilamentCoverageService>();
+                services.AddSingleton(coverage.Object);
+            });
+        });
+        using HttpClient client = host.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync(FleetRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("code").GetString().Should().Be("featureDisabled");
+        doc.RootElement.GetProperty("feature").GetString().Should().Be("filamentCoverageEnabled");
+        coverage.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetForPrinter_FeatureDisabled_Returns404ProblemDetails_WithoutCoverageWork()
+    {
+        await using CustomWebApplicationFactory disabledFactory = new(
+            new Dictionary<string, string?>
+            {
+                ["OperatorFeatures:FilamentCoverageEnabled"] = "false",
+            });
+        Mock<IFilamentCoverageService> coverage = new(MockBehavior.Strict);
+        await using WebApplicationFactory<Program> host = disabledFactory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IFilamentCoverageService>();
+                services.AddSingleton(coverage.Object);
+            });
+        });
+        using HttpClient client = host.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync(string.Format(PerPrinterRoute, Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("code").GetString().Should().Be("featureDisabled");
+        doc.RootElement.GetProperty("feature").GetString().Should().Be("filamentCoverageEnabled");
+        coverage.VerifyNoOtherCalls();
     }
 
     [Fact]

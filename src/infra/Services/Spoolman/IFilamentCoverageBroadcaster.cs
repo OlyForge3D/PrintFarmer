@@ -42,6 +42,24 @@ public interface IFilamentCoverageBroadcaster
 }
 
 /// <summary>
+/// Shared production trigger helpers for filament coverage invalidations.
+/// </summary>
+public static class FilamentCoverageBroadcastExtensions
+{
+    /// <summary>
+    /// Broadcasts active-job progress only when the backend observed a real change.
+    /// </summary>
+    public static Task BroadcastJobProgressIfChangedAsync(
+        this IFilamentCoverageBroadcaster? broadcaster,
+        Guid printerId,
+        bool progressChanged,
+        CancellationToken ct)
+        => progressChanged && broadcaster is not null
+            ? broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.JobProgress, ct)
+            : Task.CompletedTask;
+}
+
+/// <summary>
 /// Canonical machine-readable reason codes emitted by
 /// <see cref="IFilamentCoverageBroadcaster"/>. These string values are the
 /// wire contract with the React and iOS clients — do not change without

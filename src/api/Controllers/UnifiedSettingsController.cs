@@ -77,7 +77,7 @@ public class UnifiedSettingsController(
     /// <returns>Result of save operation, including validation errors if any.</returns>
     [Authorize(Roles = "farm_admin")]
     [HttpPost]
-    public async Task<ActionResult> Update([FromBody] Dictionary<string, object> settingsSections)
+    public async Task<ActionResult> UpdateAsync([FromBody] Dictionary<string, object> settingsSections)
     {
         // Track whether SpoolCoverage settings changed so we can broadcast a
         // coverage-invalidation event after all sections persist (#709 item 5).

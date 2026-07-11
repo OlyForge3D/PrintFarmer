@@ -69,6 +69,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
 /// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
+/// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,

@@ -14,41 +14,15 @@ namespace Farm.Infrastructure.Settings;
 /// coordinated frontend/mobile update — the settings surface is metadata-driven
 /// via <see cref="SettingDisplayAttribute"/>.
 /// </para>
-///
-/// <para>
-/// <b>Rollback note (#725 integration):</b> the runtime enable/disable knob
-/// for the whole coverage feature belongs to <c>IOperatorFeatureGate</c> and
-/// the <c>filamentCoverageEnabled</c> flag defined in #725, not to a private
-/// per-feature boolean. Until #725 lands, <see cref="Enabled"/> here serves as
-/// a placeholder that later readers must swap for the shared gate. After
-/// rebasing #725, delete <see cref="Enabled"/> and consult
-/// <c>IOperatorFeatureGate</c> in <c>FilamentCoverageService</c> and
-/// <c>FilamentCoverageController</c> instead.
-/// </para>
 /// </summary>
 [AppSetting(SectionName)]
 [SettingGroup("Operations", DisplayName = "Operations", Description = "Operational settings and cost tracking", Icon = "pf-icon-operations", Order = 3)]
-[SettingDisplay(Name = "Spool Coverage", Description = "Prediction thresholds and fleet fetch behavior for filament coverage.", Icon = "pf-icon-spool", Group = "Operations", Order = 6)]
+[SettingDisplay(Name = "Spool Coverage", Description = "Prediction thresholds and live progress behavior for filament coverage.", Icon = "pf-icon-spool", Group = "Operations", Order = 6)]
 public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
 {
     public const string SectionName = "SpoolCoverage";
 
     public static string SectionKey => SectionName;
-
-    /// <summary>
-    /// Master switch. When false, endpoints still respond but never emit runout
-    /// warnings to the attention feed.
-    ///
-    /// <para>
-    /// Rebase-note (#725): after <c>IOperatorFeatureGate.FilamentCoverageEnabled</c>
-    /// lands, this flag becomes redundant. Remove and route callers through the
-    /// gate so the endpoint returns 404 + <c>featureDisabled</c> ProblemDetails
-    /// when disabled, per #725's contract.
-    /// </para>
-    /// </summary>
-    [JsonPropertyName("enabled")]
-    [SettingDisplay(Name = "Enable Coverage Prediction", Description = "When disabled, coverage endpoints still respond but no attention runout warnings are emitted. (Superseded by IOperatorFeatureGate.filamentCoverageEnabled once #725 lands.)", InputType = SettingInputType.Boolean, Order = 1)]
-    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Lead time in minutes before a predicted active-job runout at which the
@@ -81,19 +55,11 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
     public double ReserveGrams { get; set; }
 
     /// <summary>
-    /// Maximum number of printers evaluated concurrently by the fleet endpoint.
-    /// Bounds outbound Spoolman / backend load.
-    /// </summary>
-    [JsonPropertyName("fleetMaxParallelism")]
-    [SettingDisplay(Name = "Fleet Max Parallelism", Description = "How many printers the fleet endpoint may probe concurrently.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 64, Order = 5)]
-    public int FleetMaxParallelism { get; set; } = 8;
-
-    /// <summary>
     /// Per-printer timeout in milliseconds for the live progress backend call.
     /// The endpoint degrades gracefully to "unknown progress" when exceeded.
     /// </summary>
     [JsonPropertyName("liveProgressTimeoutMs")]
-    [SettingDisplay(Name = "Live Progress Timeout (ms)", Description = "How long the coverage endpoint waits for a live progress reading from each printer.", InputType = SettingInputType.Number, MinValue = 100, MaxValue = 30000, Order = 6)]
+    [SettingDisplay(Name = "Live Progress Timeout (ms)", Description = "How long the coverage endpoint waits for a live progress reading from each printer.", InputType = SettingInputType.Number, MinValue = 100, MaxValue = 30000, Order = 5)]
     public int LiveProgressTimeoutMs { get; set; } = 2000;
 
     public void Validate()
@@ -106,11 +72,6 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
         if (ReserveGrams is < 0 or > 1000)
         {
             throw new ValidationException("Reserve grams must be between 0 and 1000.");
-        }
-
-        if (FleetMaxParallelism is < 1 or > 64)
-        {
-            throw new ValidationException("Fleet max parallelism must be between 1 and 64.");
         }
 
         if (LiveProgressTimeoutMs is < 100 or > 30000)

@@ -8,6 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
@@ -30,7 +31,9 @@ public class FilamentCoverageServiceTests
     private static (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, Mock<IPrintersService> printers)
         BuildService(
             SpoolCoverageSettings? settings = null,
-            double? liveProgress = null)
+            double? liveProgress = null,
+            bool coverageEnabled = true,
+            bool tracksLiveConsumption = false)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -49,11 +52,42 @@ public class FilamentCoverageServiceTests
         Mock<ISettingsService> settingsMock = new(MockBehavior.Loose);
         settingsMock.Setup(s => s.Get<SpoolCoverageSettings>()).Returns(settings ?? new SpoolCoverageSettings());
 
+        Mock<IOperatorFeatureGate> gateMock = new(MockBehavior.Strict);
+        gateMock.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(coverageEnabled);
+
+        Mock<IFilamentCoverageSpoolResolver> resolverMock = new(MockBehavior.Strict);
+        resolverMock
+            .Setup(r => r.ResolveAsync(It.IsAny<IReadOnlyList<Printer>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyList<Printer> printers, CancellationToken ct) =>
+            {
+                Dictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result = [];
+                foreach (Printer printer in printers)
+                {
+                    Dictionary<int, FilamentCoverageSpoolSnapshot> spools = [];
+                    foreach (int spoolId in printer.Toolheads
+                        .Where(t => t.CurrentSpoolId.HasValue)
+                        .Select(t => t.CurrentSpoolId!.Value)
+                        .Concat(printer.CurrentSpoolId.HasValue ? [printer.CurrentSpoolId.Value] : [])
+                        .Distinct())
+                    {
+                        SpoolmanSpoolDto? spool = await spoolMock.Object.GetSpoolByIdAsync(spoolId, ct);
+                        spools[spoolId] = spool is null
+                            ? new(null, tracksLiveConsumption, FilamentCoverageSpoolResolver.ReasonSourceUnavailable)
+                            : new(spool, tracksLiveConsumption, null);
+                    }
+
+                    result[printer.Id] = spools;
+                }
+
+                return result;
+            });
+
         FilamentCoverageService svc = new(
             db,
-            spoolMock.Object,
+            resolverMock.Object,
             printerMock.Object,
             settingsMock.Object,
+            gateMock.Object,
             NullLogger<FilamentCoverageService>.Instance);
 
         return (svc, db, spoolMock, printerMock);
@@ -95,15 +129,19 @@ public class FilamentCoverageServiceTests
         double[]? perExtruder = null,
         int? extruderCount = null,
         int? totalLayers = null,
-        double? printTimeMinutes = null) => new()
+        double? printTimeMinutes = null,
+        string[]? perExtruderMaterials = null,
+        string? requiredMaterial = null) => new()
         {
             Id = Guid.NewGuid(),
             FileName = "part.gcode",
             EstimatedFilamentWeightG = estimatedTotalGrams,
             FilamentPerExtruderWeightG = perExtruder is not null ? JsonSerializer.Serialize(perExtruder) : null,
+            FilamentPerExtruderType = perExtruderMaterials is not null ? JsonSerializer.Serialize(perExtruderMaterials) : null,
             ExtruderCount = extruderCount,
             TotalLayers = totalLayers,
-            EstimatedPrintTimeMinutes = printTimeMinutes
+            EstimatedPrintTimeMinutes = printTimeMinutes,
+            RequiredMaterial = requiredMaterial,
         };
 
     private static PrintJob Job(
@@ -160,15 +198,13 @@ public class FilamentCoverageServiceTests
         cov.EarliestPredictedRunoutAt.Should().BeNull();
 
         ToolheadCoverageDto slot = cov.Toolheads.Single();
-        slot.RemainingGrams.Should().Be(500);
-        // Stable-basis: CurrentJobRequiredGrams is full per-copy × RemainingCopies.
+        slot.RemainingGrams.Should().BeApproximately(475, 0.01,
+            "managed Spoolman is completion-updated, so 25g estimated consumption is reconciled once");
         slot.CurrentJobRequiredGrams.Should().Be(100);
-        // Display-only: prorated by progress on the current copy only.
         slot.CurrentJobRemainingGrams.Should().BeApproximately(75, 0.01,
-            "display value: 25% progress → 75g left on current copy");
+            "25% progress leaves 75g on the current copy");
         slot.QueuedRequiredGrams.Should().Be(40);
-        // TotalDemandGrams is the classification basis: full active + queued.
-        slot.TotalDemandGrams.Should().BeApproximately(140, 0.01);
+        slot.TotalDemandGrams.Should().BeApproximately(115, 0.01);
         slot.PredictedRunoutAt.Should().BeNull();
         slot.StatusReason.Should().BeNull();
     }
@@ -182,24 +218,25 @@ public class FilamentCoverageServiceTests
         Printer p = SeedPrinter(db, "p1", T(0, spoolId: 42, primary: true, material: "PLA"));
         GcodeFile g = Gcode(estimatedTotalGrams: 200, totalLayers: 400, printTimeMinutes: 120);
         db.GcodeFiles.Add(g);
-        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(120)));
+        PrintJob activeJob = Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(120));
+        activeJob.ActualStartTime = DateTime.UtcNow.AddMinutes(-60);
+        db.PrintJobs.Add(activeJob);
         _ = await db.SaveChangesAsync();
 
         // Stable basis: spool 40g vs full 200g demand → insufficient.
         spool.Setup(s => s.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
              .ReturnsAsync(Spool(42, remainingG: 40));
 
-        DateTime before = DateTime.UtcNow;
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
 
-        cov!.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        cov!.Status.Should().Be(FilamentCoverageStatus.Runout);
         ToolheadCoverageDto slot = cov.Toolheads.Single();
-        slot.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        slot.Status.Should().Be(FilamentCoverageStatus.Runout);
         slot.StatusReason.Should().Be("insufficient-remaining");
         slot.PredictedRunoutAt.Should().NotBeNull();
-        // Fallback anchor (ActualStartTime null): now + 40/200 × 120min = now + 24min.
-        slot.PredictedRunoutAt!.Value.Should().BeCloseTo(before.AddMinutes(24), TimeSpan.FromSeconds(30));
-        // Stable layer projection: (40/200) × 400 = layer 80.
+        slot.PredictedRunoutAt!.Value.Should().BeCloseTo(
+            activeJob.ActualStartTime.Value.AddMinutes(24),
+            TimeSpan.FromSeconds(2));
         slot.PredictedRunoutLayer.Should().Be(80);
         cov.EarliestPredictedRunoutAt.Should().Be(slot.PredictedRunoutAt);
     }
@@ -229,7 +266,7 @@ public class FilamentCoverageServiceTests
         spool.Setup(s => s.GetSpoolByIdAsync(200, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(200, remainingG: 10));
 
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
-        cov!.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        cov!.Status.Should().Be(FilamentCoverageStatus.Runout);
         cov.Toolheads.Should().HaveCount(2);
 
         ToolheadCoverageDto t0 = cov.Toolheads.Single(s => s.ToolheadIndex == 0);
@@ -239,7 +276,7 @@ public class FilamentCoverageServiceTests
         ToolheadCoverageDto t1 = cov.Toolheads.Single(s => s.ToolheadIndex == 1);
         t1.CurrentJobRequiredGrams.Should().Be(30);
         t1.RemainingGrams.Should().Be(10);
-        t1.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        t1.Status.Should().Be(FilamentCoverageStatus.Runout);
         t1.PredictedRunoutAt.Should().NotBeNull();
     }
 
@@ -377,13 +414,82 @@ public class FilamentCoverageServiceTests
 
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
         ToolheadCoverageDto slot = cov!.Toolheads.Single();
-        // Stable basis: classification uses full 200g demand, remaining 55g → Insufficient
-        // regardless of progress (would have been "covers" under the old shrinking basis).
         slot.CurrentJobRequiredGrams.Should().Be(200);
-        // Display only: 25% of current copy remains × 200g = 50g.
         slot.CurrentJobRemainingGrams.Should().BeApproximately(50, 0.01);
-        slot.Status.Should().Be(FilamentCoverageStatus.Insufficient,
-            "classification is on stable full-demand basis; static spool remaining < full demand");
+        slot.RemainingGrams.Should().Be(0,
+            "managed-source snapshot 55g minus estimated 150g consumed is clamped at zero");
+        slot.Status.Should().Be(FilamentCoverageStatus.Runout,
+            "availability and active demand are both reconciled at the same progress point");
+    }
+
+    [Theory]
+    [InlineData(0.0, 500.0, 200.0)]
+    [InlineData(50.0, 400.0, 100.0)]
+    [InlineData(99.0, 302.0, 2.0)]
+    [InlineData(100.0, 300.0, 0.0)]
+    public async Task ActiveJobProgress_ManagedSource_ReconcilesStaticWeightOnce(
+        double progress,
+        double expectedAvailable,
+        double expectedDemand)
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: progress);
+
+        Printer p = SeedPrinter(db, "managed", T(0, spoolId: 1, primary: true));
+        GcodeFile g = Gcode(estimatedTotalGrams: 200, printTimeMinutes: 60);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(60)));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 500));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.RemainingGrams.Should().BeApproximately(expectedAvailable, 0.01);
+        slot.CurrentJobRemainingGrams.Should().BeApproximately(expectedDemand, 0.01);
+        slot.Status.Should().Be(FilamentCoverageStatus.Covers);
+    }
+
+    [Fact]
+    public async Task ActiveJobProgress_NativeSource_DoesNotSubtractConsumptionTwice()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 50, tracksLiveConsumption: true);
+
+        Printer p = SeedPrinter(db, "native", T(0, spoolId: 1, primary: true));
+        GcodeFile g = Gcode(estimatedTotalGrams: 200, printTimeMinutes: 60);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(60)));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 400));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.RemainingGrams.Should().Be(400, "native Spoolman already reports live consumption");
+        slot.CurrentJobRemainingGrams.Should().Be(100);
+        slot.Status.Should().Be(FilamentCoverageStatus.Covers);
+    }
+
+    [Fact]
+    public async Task CompletedTransition_UsesCompletionUpdatedWeightWithoutActiveEstimate()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) = BuildService();
+
+        Printer p = SeedPrinter(db, "completed", T(0, spoolId: 1, primary: true));
+        GcodeFile g = Gcode(estimatedTotalGrams: 200, printTimeMinutes: 60);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Completed, g, TimeSpan.FromMinutes(60)));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 300));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.RemainingGrams.Should().Be(300);
+        slot.CurrentJobRequiredGrams.Should().BeNull();
+        slot.CurrentJobRemainingGrams.Should().BeNull();
+        slot.Status.Should().Be(FilamentCoverageStatus.Covers);
     }
 
     [Fact]
@@ -404,7 +510,7 @@ public class FilamentCoverageServiceTests
         cov!.ActiveJobProgress.Should().BeNull();
         ToolheadCoverageDto slot = cov.Toolheads.Single();
         slot.CurrentJobRemainingGrams.Should().Be(100, "with progress unknown, we conservatively assume the full job remains");
-        slot.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        slot.Status.Should().Be(FilamentCoverageStatus.Runout);
     }
 
     // ------------------------------------------------------------------
@@ -428,13 +534,13 @@ public class FilamentCoverageServiceTests
         spool.Setup(x => x.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(1, remainingG: 110));
 
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
-        cov!.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        cov!.Status.Should().Be(FilamentCoverageStatus.Runout);
     }
 
     [Fact]
     public async Task RunoutWarningLeadMinutes_ControlsAttentionEmission()
     {
-        SpoolCoverageSettings tight = new() { RunoutWarningLeadMinutes = 5, Enabled = true };
+        SpoolCoverageSettings tight = new() { RunoutWarningLeadMinutes = 5 };
         (FilamentCoverageService svc1, AppDbContext db1, Mock<ISpoolmanService> spool1, _) =
             BuildService(settings: tight, liveProgress: 0.0);
         Printer p1 = SeedPrinter(db1, "p", T(0, spoolId: 1, primary: true));
@@ -449,7 +555,7 @@ public class FilamentCoverageServiceTests
         tightWarnings.Where(w => w.Reason == "runout-during-active-job").Should().BeEmpty(
             "predicted runout is 24 min out but lead is 5 min");
 
-        SpoolCoverageSettings wide = new() { RunoutWarningLeadMinutes = 60, Enabled = true };
+        SpoolCoverageSettings wide = new() { RunoutWarningLeadMinutes = 60 };
         (FilamentCoverageService svc2, AppDbContext db2, Mock<ISpoolmanService> spool2, _) =
             BuildService(settings: wide, liveProgress: 0.0);
         Printer p2 = SeedPrinter(db2, "p", T(0, spoolId: 1, primary: true));
@@ -470,7 +576,6 @@ public class FilamentCoverageServiceTests
         // to active-job ETA warnings.
         SpoolCoverageSettings disabled = new()
         {
-            Enabled = true,
             QueuedShortageWarningsEnabled = false,
             RunoutWarningLeadMinutes = 60
         };
@@ -522,12 +627,8 @@ public class FilamentCoverageServiceTests
     [Fact]
     public async Task FeatureDisabled_SuppressesAllWarnings()
     {
-        // Rebase-note (#725): this is the local Enabled toggle. Once
-        // IOperatorFeatureGate.FilamentCoverageEnabled lands, this test moves
-        // into a controller-level test that asserts 404 + featureDisabled.
-        SpoolCoverageSettings off = new() { Enabled = false, QueuedShortageWarningsEnabled = true };
         (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
-            BuildService(settings: off, liveProgress: 0.0);
+            BuildService(liveProgress: 0.0, coverageEnabled: false);
 
         Printer p = SeedPrinter(db, "p", T(0, spoolId: 1, primary: true));
         GcodeFile g = Gcode(estimatedTotalGrams: 200, printTimeMinutes: 120);
@@ -538,6 +639,10 @@ public class FilamentCoverageServiceTests
 
         IReadOnlyList<FilamentRunoutWarningDto> warnings = await svc.GetRunoutWarningsAsync(CancellationToken.None);
         warnings.Should().BeEmpty("disabled coverage feature must emit no warnings");
+        spool.Verify(
+            x => x.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the shared gate must short-circuit before coverage source access");
     }
 
     // ------------------------------------------------------------------
@@ -640,14 +745,12 @@ public class FilamentCoverageServiceTests
     }
 
     // ------------------------------------------------------------------
-    // #709 CONVERGENCE ITEM 1: stable-basis classification and stable
+    // #709 CONVERGENCE ITEM 1: progress-reconciled availability and stable
     // runout ETA/layer as progress ticks.
     // ------------------------------------------------------------------
     [Fact]
     public async Task ActiveJob_InitiallyInsufficient_NeverFlipsToCovers_AsProgressAdvances()
     {
-        // A print that is insufficient at the START must remain insufficient
-        // at every progress tick — the fixed spool remaining does not grow.
         Printer? seedPrinter = null;
         DateTime start = DateTime.UtcNow.AddMinutes(-30);
 
@@ -677,10 +780,12 @@ public class FilamentCoverageServiceTests
             cov.Should().NotBeNull($"progress={progress}");
             ToolheadCoverageDto slot = cov!.Toolheads.Single();
 
-            slot.Status.Should().Be(FilamentCoverageStatus.Insufficient,
-                $"progress={progress}: static spool remaining (40g) is < full stable demand (200g); classification must not flip to Covers");
+            slot.Status.Should().Be(FilamentCoverageStatus.Runout,
+                $"progress={progress}: managed availability and remaining demand are reconciled at the same point");
             slot.CurrentJobRequiredGrams.Should().Be(200,
-                $"progress={progress}: required grams reports the stable full-demand basis");
+                $"progress={progress}: full required grams remain informational");
+            slot.CurrentJobRemainingGrams.Should().BeApproximately(200 * (1 - (progress / 100.0)), 0.01);
+            slot.RemainingGrams.Should().BeApproximately(Math.Max(0, 40 - (200 * progress / 100.0)), 0.01);
             slot.PredictedRunoutAt.Should().NotBeNull($"progress={progress}");
             slot.PredictedRunoutLayer.Should().NotBeNull($"progress={progress}");
 
@@ -755,12 +860,37 @@ public class FilamentCoverageServiceTests
         Mock<ISpoolmanService> spoolMock = new(MockBehavior.Loose);
         Mock<ISettingsService> settingsMock = new(MockBehavior.Loose);
         settingsMock.Setup(s => s.Get<SpoolCoverageSettings>()).Returns(new SpoolCoverageSettings());
+        Mock<IOperatorFeatureGate> gateMock = new(MockBehavior.Strict);
+        gateMock.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(true);
+        Mock<IFilamentCoverageSpoolResolver> resolverMock = new(MockBehavior.Strict);
+        resolverMock
+            .Setup(r => r.ResolveAsync(It.IsAny<IReadOnlyList<Printer>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyList<Printer> printers, CancellationToken ct) =>
+            {
+                Dictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result = [];
+                foreach (Printer printer in printers)
+                {
+                    Dictionary<int, FilamentCoverageSpoolSnapshot> spools = [];
+                    foreach (int spoolId in printer.Toolheads.Select(t => t.CurrentSpoolId).OfType<int>())
+                    {
+                        spools[spoolId] = new(
+                            await spoolMock.Object.GetSpoolByIdAsync(spoolId, ct),
+                            false,
+                            null);
+                    }
+
+                    result[printer.Id] = spools;
+                }
+
+                return result;
+            });
 
         FilamentCoverageService svc = new(
             db,
-            spoolMock.Object,
+            resolverMock.Object,
             printerMock.Object,
             settingsMock.Object,
+            gateMock.Object,
             NullLogger<FilamentCoverageService>.Instance);
 
         // Seed several printers, each with an ACTIVE job so live-progress
@@ -810,7 +940,7 @@ public class FilamentCoverageServiceTests
         slot.CurrentJobRequiredGrams.Should().Be(120, "per-copy 60g × 2 remaining copies");
         slot.CurrentJobRemainingGrams.Should().BeApproximately(120, 0.01,
             "progress=0 → current copy full (60g) + 1 future full copy (60g) = 120g");
-        slot.Status.Should().Be(FilamentCoverageStatus.Insufficient);
+        slot.Status.Should().Be(FilamentCoverageStatus.Runout);
     }
 
     [Fact]
@@ -917,5 +1047,181 @@ public class FilamentCoverageServiceTests
             "T1 has queued demand but no spool bound — must be Unknown even though the active job does not use it");
         t1.StatusReason.Should().Be("no-spool-assigned");
         cov.Status.Should().Be(FilamentCoverageStatus.Unknown);
+    }
+
+    [Fact]
+    public async Task PrimaryToolhead_UsesLegacyPrinterSpoolBinding_WhenToolheadBindingIsEmpty()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(db, "legacy", T(0, spoolId: null, primary: true));
+        p.CurrentSpoolId = 42;
+        p.CurrentMaterial = "PLA";
+        GcodeFile g = Gcode(estimatedTotalGrams: 50, requiredMaterial: "PLA");
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(42, remainingG: 100));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.SpoolId.Should().Be(42);
+        slot.Material.Should().Be("PLA");
+        slot.Status.Should().Be(FilamentCoverageStatus.Covers);
+    }
+
+    [Fact]
+    public async Task ActiveJob_PerToolMaterialMismatch_ReturnsUnknown()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(db, "material", T(0, spoolId: 1, primary: true, material: "PETG"));
+        GcodeFile g = Gcode(
+            perExtruder: [50],
+            extruderCount: 1,
+            perExtruderMaterials: ["PLA"]);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 500, material: "PETG"));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.Status.Should().Be(FilamentCoverageStatus.Unknown);
+        slot.StatusReason.Should().Be("material-mismatch");
+    }
+
+    [Fact]
+    public async Task OwningSourceMaterial_OverridesStaleDenormalizedToolheadMaterial()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(db, "source-material", T(0, spoolId: 1, primary: true, material: "PLA"));
+        GcodeFile g = Gcode(estimatedTotalGrams: 50, requiredMaterial: "PLA");
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 500, material: "PETG"));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.Material.Should().Be("PETG");
+        slot.Status.Should().Be(FilamentCoverageStatus.Unknown);
+        slot.StatusReason.Should().Be("material-mismatch");
+    }
+
+    [Fact]
+    public async Task AssignedQueue_DifferentRequiredMaterial_ReturnsUnknown()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(db, "queue-material", T(0, spoolId: 1, primary: true, material: "PLA"));
+        GcodeFile active = Gcode(estimatedTotalGrams: 20, requiredMaterial: "PLA");
+        GcodeFile queued = Gcode(estimatedTotalGrams: 30, requiredMaterial: "PETG");
+        db.GcodeFiles.AddRange(active, queued);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, active));
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Assigned, queued));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 500));
+
+        ToolheadCoverageDto slot = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!.Toolheads.Single();
+
+        slot.TotalDemandGrams.Should().Be(50);
+        slot.Status.Should().Be(FilamentCoverageStatus.Unknown);
+        slot.StatusReason.Should().Be("material-mismatch");
+    }
+
+    [Fact]
+    public async Task ActiveJob_RequiresMissingPrinterToolhead_ReturnsSyntheticUnknownSlot()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(db, "single", T(0, spoolId: 1, primary: true, material: "PLA"));
+        GcodeFile g = Gcode(
+            perExtruder: [20, 30],
+            extruderCount: 2,
+            perExtruderMaterials: ["PLA", "PETG"]);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 500));
+
+        PrinterFilamentCoverageDto coverage = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!;
+        ToolheadCoverageDto missing = coverage.Toolheads.Single(slot => slot.ToolheadIndex == 1);
+
+        missing.CurrentJobRequiredGrams.Should().Be(30);
+        missing.Status.Should().Be(FilamentCoverageStatus.Unknown);
+        missing.StatusReason.Should().Be("toolhead-unavailable");
+        coverage.Status.Should().Be(FilamentCoverageStatus.Unknown);
+    }
+
+    [Fact]
+    public async Task ActiveJob_AtHundredPercent_WithNoFutureCopies_IgnoresExhaustedCompatibilityDemand()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 100);
+        Printer p = SeedPrinter(db, "transition", T(0, spoolId: 1, primary: true, material: "ABS"));
+        GcodeFile g = Gcode(
+            perExtruder: [20, 30],
+            extruderCount: 2,
+            perExtruderMaterials: ["PLA", "PETG"]);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(1, remainingG: 480, material: "ABS"));
+
+        PrinterFilamentCoverageDto coverage = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!;
+
+        coverage.Toolheads.Should().ContainSingle();
+        coverage.Toolheads.Single().CurrentJobRemainingGrams.Should().Be(0);
+        coverage.Status.Should().Be(FilamentCoverageStatus.Covers);
+    }
+
+    [Fact]
+    public async Task ActiveJob_OnPrinterWithoutToolheads_ReturnsUnknownInsteadOfCovers()
+    {
+        (FilamentCoverageService svc, AppDbContext db, _, _) = BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(db, "no-tools");
+        GcodeFile g = Gcode();
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+
+        PrinterFilamentCoverageDto coverage = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!;
+
+        coverage.Status.Should().Be(FilamentCoverageStatus.Unknown);
+        coverage.Toolheads.Should().ContainSingle();
+        coverage.Toolheads.Single().StatusReason.Should().Be("no-gcode-metadata");
+    }
+
+    [Fact]
+    public async Task MissingRequiredToolhead_IsInsertedInDeterministicIndexOrder()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0);
+        Printer p = SeedPrinter(
+            db,
+            "sparse",
+            T(0, spoolId: 10, primary: true),
+            T(2, spoolId: 12));
+        GcodeFile g = Gcode(perExtruder: [10, 20, 30], extruderCount: 3);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(10, remainingG: 100));
+        spool.Setup(s => s.GetSpoolByIdAsync(12, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(12, remainingG: 100));
+
+        PrinterFilamentCoverageDto coverage = (await svc.GetForPrinterAsync(p.Id, CancellationToken.None))!;
+
+        coverage.Toolheads.Select(slot => slot.ToolheadIndex).Should().Equal(0, 1, 2);
+        coverage.Toolheads[1].StatusReason.Should().Be("toolhead-unavailable");
     }
 }

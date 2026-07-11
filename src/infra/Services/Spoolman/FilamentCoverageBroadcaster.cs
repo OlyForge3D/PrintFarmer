@@ -1,6 +1,8 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Spoolman;
@@ -21,6 +23,7 @@ namespace Farm.Infrastructure.Services.Spoolman;
 /// </summary>
 public class FilamentCoverageBroadcaster(
     IHubContext<PrinterHub> hub,
+    IServiceScopeFactory scopeFactory,
     ILogger<FilamentCoverageBroadcaster> logger)
     : IFilamentCoverageBroadcaster
 {
@@ -35,6 +38,7 @@ public class FilamentCoverageBroadcaster(
     internal static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(250);
 
     private readonly IHubContext<PrinterHub> _hub = hub ?? throw new ArgumentNullException(nameof(hub));
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
     private readonly ILogger<FilamentCoverageBroadcaster> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Last emit time per (printerId, reason) key. Uses Guid.Empty for fleet.
@@ -42,6 +46,11 @@ public class FilamentCoverageBroadcaster(
 
     public async Task BroadcastPrinterChangedAsync(Guid printerId, string reason, CancellationToken ct)
     {
+        if (!IsEnabled())
+        {
+            return;
+        }
+
         string safeReason = NormalizeReason(reason);
         if (!ShouldEmit(printerId, safeReason))
         {
@@ -70,6 +79,11 @@ public class FilamentCoverageBroadcaster(
 
     public async Task BroadcastFleetChangedAsync(string reason, CancellationToken ct)
     {
+        if (!IsEnabled())
+        {
+            return;
+        }
+
         string safeReason = NormalizeReason(reason);
         if (!ShouldEmit(Guid.Empty, safeReason))
         {
@@ -122,6 +136,21 @@ public class FilamentCoverageBroadcaster(
             {
                 return true;
             }
+        }
+    }
+
+    private bool IsEnabled()
+    {
+        try
+        {
+            using IServiceScope scope = _scopeFactory.CreateScope();
+            IOperatorFeatureGate gate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
+            return gate.IsEnabled(OperatorFeature.FilamentCoverage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[FilamentCoverage] Feature gate unavailable; suppressing broadcast");
+            return false;
         }
     }
 

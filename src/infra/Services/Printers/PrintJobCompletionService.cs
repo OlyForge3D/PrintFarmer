@@ -220,7 +220,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         }
 
         // Fetch actual filament usage from backend and record consumption in Spoolman
-        await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+        bool spoolWeightChanged = await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
 
         // Auto-tag the completed job with material, color, and nozzle info
         if (_autoTagService is not null && primaryJob.Status == PrintJobStatus.Completed)
@@ -259,6 +259,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 printerId,
                 Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
                 ct).ConfigureAwait(false);
+            if (spoolWeightChanged)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    printerId,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
         }
 
         // Capture camera snapshots (true fire-and-forget — never blocks completion)
@@ -367,7 +374,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         PrintJob primaryJob = activeJobs[0];
 
         // Record partial filament consumption for failed/cancelled prints
-        await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+        bool spoolWeightChanged = await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -387,6 +394,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 printerId,
                 Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
                 ct).ConfigureAwait(false);
+            if (spoolWeightChanged)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    printerId,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
         }
 
         // Capture camera snapshots on failure (true fire-and-forget)
@@ -416,11 +430,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     /// Fetches actual filament usage from the backend and records consumption in Spoolman.
     /// Fire-and-forget — never fails the job completion if Spoolman is unavailable.
     /// </summary>
-    private async Task FetchAndRecordFilamentUsageAsync(PrintJob job, Guid printerId, CancellationToken ct)
+    private async Task<bool> FetchAndRecordFilamentUsageAsync(PrintJob job, Guid printerId, CancellationToken ct)
     {
         if (_backendFactory is null || _spoolmanService is null)
         {
-            return;
+            return false;
         }
 
         try
@@ -428,7 +442,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             Printer? printer = job.AssignedPrinter ?? await _db.Printers.FindAsync([printerId], ct);
             if (printer is null)
             {
-                return;
+                return false;
             }
 
             // Try to get actual filament usage from the backend
@@ -506,16 +520,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                         "[PrintJobCompletionService] Batch-consumed filament from {SuccessCount}/{TotalCount} spools for multi-toolhead job {JobId}",
                         successCount, consumptions.Count, job.Id);
 
-                    // #709 item 5: spool remaining weight was mutated by
-                    // consumption — coverage projections for the affected
-                    // printer are now stale.
-                    if (_coverageBroadcaster is not null && successCount > 0)
-                    {
-                        await _coverageBroadcaster.BroadcastPrinterChangedAsync(
-                            printerId,
-                            Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
-                            ct).ConfigureAwait(false);
-                    }
+                    return successCount > 0;
                 }
             }
             else
@@ -578,18 +583,12 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                             "[PrintJobCompletionService] Recorded {UsedGrams:F1}g filament consumption on spool {SpoolId} for job {JobId}",
                             usageGrams.Value, printer.CurrentSpoolId.Value, job.Id);
 
-                        // #709 item 5: spool remaining weight reconciled;
-                        // coverage projections must be re-evaluated.
-                        if (_coverageBroadcaster is not null)
-                        {
-                            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
-                                printerId,
-                                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
-                                ct).ConfigureAwait(false);
-                        }
+                        return true;
                     }
                 }
             }
+
+            return false;
         }
         catch (Exception ex)
         {
@@ -597,6 +596,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 ex,
                 "[PrintJobCompletionService] Failed to fetch/record filament usage for job {JobId} — continuing completion",
                 job.Id);
+            return false;
         }
     }
 

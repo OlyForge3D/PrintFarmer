@@ -1,7 +1,9 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Spoolman;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,13 +18,6 @@ namespace Farm.Web.Api.Controllers;
 /// upstream data is missing — the client sees <see cref="FilamentCoverageStatus.Unknown"/>
 /// with a machine-readable reason instead.
 ///
-/// <para>
-/// <b>Rebase-note (#725):</b> once <c>IOperatorFeatureGate.FilamentCoverageEnabled</c>
-/// exists, gate both endpoints at the top with the shared operator feature
-/// gate. When the flag is off, return <c>404</c> with a ProblemDetails payload
-/// carrying <c>extensions["code"] = "featureDisabled"</c> per the #725
-/// contract, and skip both the coverage computation and any broadcast.
-/// </para>
 /// </summary>
 [ApiController]
 [Route("api/printers")]
@@ -30,9 +25,11 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Filament Coverage")]
 public class FilamentCoverageController(
     IFilamentCoverageService coverageService,
+    IOperatorFeatureGate featureGate,
     ILogger<FilamentCoverageController> logger) : ControllerBase
 {
     private readonly IFilamentCoverageService _coverageService = coverageService;
+    private readonly IOperatorFeatureGate _featureGate = featureGate;
     private readonly ILogger<FilamentCoverageController> _logger = logger;
 
     /// <summary>
@@ -47,6 +44,11 @@ public class FilamentCoverageController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrinterFilamentCoverageDto>> GetForPrinterAsync(System.Guid id, CancellationToken ct)
     {
+        if (!_featureGate.IsEnabled(OperatorFeature.FilamentCoverage))
+        {
+            return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.FilamentCoverage);
+        }
+
         PrinterFilamentCoverageDto? coverage = await _coverageService.GetForPrinterAsync(id, ct);
         if (coverage is null)
         {
@@ -67,6 +69,11 @@ public class FilamentCoverageController(
     [ProducesResponseType(typeof(FleetFilamentCoverageDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<FleetFilamentCoverageDto>> GetForFleetAsync(CancellationToken ct)
     {
+        if (!_featureGate.IsEnabled(OperatorFeature.FilamentCoverage))
+        {
+            return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.FilamentCoverage);
+        }
+
         FleetFilamentCoverageDto fleet = await _coverageService.GetForFleetAsync(ct);
         return Ok(fleet);
     }
