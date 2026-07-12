@@ -6,9 +6,12 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.Attention;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
@@ -491,19 +494,54 @@ public class AttentionServiceTests
     }
 
     [Fact]
-    public async Task ExecuteActionAsync_HarvestKind_IsRejectedAsDeferred()
+    public async Task ExecuteActionAsync_HarvestKind_DispatchesProductionHarvestService()
     {
         Guid userId = Guid.NewGuid();
         Guid printer = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, jobId);
         AttentionActionDto harvest = new(AttentionActionKind.Harvest, "Harvest", false);
-        AttentionItemDto item = BuildItem("harvest:1", AttentionKind.Harvest, AttentionSeverity.Info, printer, Now, actions: new[] { harvest });
+        AttentionItemDto item = BuildItem(
+            itemId,
+            AttentionKind.Harvest,
+            AttentionSeverity.Info,
+            printer,
+            Now,
+            actions: new[] { harvest },
+            jobId: jobId);
+        var partHarvest = new Mock<IPartHarvestService>(MockBehavior.Strict);
+        partHarvest.Setup(service => service.HarvestJobAsync(
+                jobId,
+                It.IsAny<HarvestJobRequest>(),
+                userId.ToString("D"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HarvestResult(
+                PartInventoryOutcome.Ok,
+                new HarvestJobResponse(jobId, Now, null, null, false, []),
+                null));
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
+        gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        var svc = new AttentionService(
+            [new StubSource("s", [item])],
+            _snoozeRepo.Object,
+            _printers.Object,
+            _maintenance.Object,
+            _queueData.Object,
+            NullLogger<AttentionService>.Instance,
+            _clock,
+            partHarvestService: partHarvest.Object,
+            featureGate: gate.Object);
 
-        AttentionService svc = CreateService(new[] { new StubSource("s", new[] { item }) });
+        AttentionActionResult result = await svc.ExecuteActionAsync(
+            userId,
+            "user",
+            isFarmAdmin: true,
+            itemId,
+            AttentionActionKind.Harvest,
+            CancellationToken.None);
 
-        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, "harvest:1", AttentionActionKind.Harvest, CancellationToken.None);
-
-        // Harvest is deferred until #714; no advertised action executes and no 501 is reachable.
-        result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
+        result.Outcome.Should().Be(AttentionActionOutcome.Ok);
+        partHarvest.VerifyAll();
     }
 
     [Fact]

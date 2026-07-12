@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.PartsInventory;
@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -17,16 +18,6 @@ namespace Farm.Web.Api.Controllers;
 /// <c>MaintenanceComponentController</c>, which manages replacement parts
 /// used to service printers rather than parts produced by prints.
 /// </summary>
-/// <remarks>
-/// <para>
-/// <b>#725 rebase seam</b>: when <c>IOperatorFeatureGate</c> lands (see epic #705 /
-/// issue #725), every endpoint in this controller must consult
-/// <c>printedPartsInventoryEnabled</c> at request time and return HTTP 404 with
-/// ProblemDetails <c>extensions.code = "featureDisabled"</c> when the flag is off.
-/// No writes or SignalR broadcasts may fire from a disabled controller. Prefer a
-/// single guard in a filter or shared helper over per-method conditionals.
-/// </para>
-/// </remarks>
 [ApiController]
 [Route("api/parts-inventory")]
 [Authorize]
@@ -110,7 +101,7 @@ public class PartsInventoryController(
             : Ok(ToDto(part));
     }
 
-    /// <summary>Creates a new printed-part SKU. Records an InitialStock ledger entry when InitialOnHand > 0.</summary>
+    /// <summary>Creates a new printed-part SKU. Records a manual ledger entry when InitialOnHand > 0.</summary>
     [HttpPost]
     [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(PartInventoryResponse), 201)]
@@ -253,6 +244,7 @@ public class PartsInventoryController(
             PartInventoryOutcome.Ok => Ok(result.Adjustment),
             PartInventoryOutcome.IdempotentReplay => Ok(result.Adjustment),
             PartInventoryOutcome.PartNotFound => NotFound(new { message = result.Message }),
+            PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
@@ -398,7 +390,14 @@ public class PartsInventoryController(
             UpdatedAt = DateTime.UtcNow,
         };
         await mappingRepository.AddAsync(entity, ct);
-        _ = await mappingRepository.SaveChangesAsync(ct);
+        try
+        {
+            _ = await mappingRepository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (PartInventoryService.IsUniqueViolation(ex))
+        {
+            return Conflict(new { message = "This output is already mapped to the requested SKU." });
+        }
 
         return Created($"/api/parts-inventory/mappings/{entity.Id}", ToMappingDto(entity, part));
     }

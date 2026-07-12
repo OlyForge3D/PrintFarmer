@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -50,6 +51,7 @@ public class PartsInventoryControllerTests
                     "SKU-1",
                     null,
                     null,
+                    1,
                     1,
                     PartAdjustmentReason.Manual,
                     null,
@@ -102,6 +104,56 @@ public class PartsInventoryControllerTests
         _ = Assert.IsType<NotFoundObjectResult>(result.Result);
         bins.VerifyNoOtherCalls();
         logs.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RegisterBarcodeAsync_ConcurrentRegistration_ReturnsCommittedBin()
+    {
+        var committed = new Bin
+        {
+            Id = Guid.NewGuid(),
+            Code = "BIN-RACE",
+            Name = "Committed",
+            IsActive = true,
+        };
+        var bins = new Mock<IBinRepository>(MockBehavior.Strict);
+        bins.SetupSequence(value => value.GetByCodeAsync("BIN-RACE", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Bin?)null)
+            .ReturnsAsync(committed);
+        bins.Setup(value => value.AddAsync(It.IsAny<Bin>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        bins.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("duplicate", new InvalidOperationException("UNIQUE constraint")));
+        var logs = new Mock<IBarcodeScanLogService>(MockBehavior.Strict);
+        logs.Setup(value => value.LogAsync(
+                It.Is<BarcodeScanLog>(log =>
+                    log.Action == BarcodeScanAction.BinRegister
+                    && log.Outcome == BarcodeScanOutcome.Resolved
+                    && log.BinId == committed.Id),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var controller = new BinsController(
+            NullLogger<BinsController>.Instance,
+            bins.Object,
+            logs.Object,
+            CreateGate(enabled: true).Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity()),
+            },
+        };
+
+        ActionResult<BinResponse> result = await controller.RegisterBarcodeAsync(
+            new RegisterBinBarcodeRequest("bin-race"),
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        BinResponse response = Assert.IsType<BinResponse>(ok.Value);
+        Assert.Equal(committed.Id, response.Id);
+        bins.VerifyAll();
+        logs.VerifyAll();
     }
 
     private static Mock<IOperatorFeatureGate> CreateGate(bool enabled)

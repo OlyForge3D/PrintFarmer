@@ -11,10 +11,10 @@ public class PartOutputMappingConfiguration : IEntityTypeConfiguration<PartOutpu
     {
         _ = builder.ToTable(table =>
         {
-            _ = table.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "Quantity > 0");
+            _ = table.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "\"Quantity\" > 0");
             _ = table.HasCheckConstraint(
                 "CK_PartOutputMappings_ExactlyOneSource",
-                "(GcodeFileId IS NULL AND PrintProjectFileId IS NOT NULL) OR (GcodeFileId IS NOT NULL AND PrintProjectFileId IS NULL)");
+                "(\"GcodeFileId\" IS NULL AND \"PrintProjectFileId\" IS NOT NULL) OR (\"GcodeFileId\" IS NOT NULL AND \"PrintProjectFileId\" IS NULL)");
         });
         _ = builder.HasKey(m => m.Id);
         _ = builder.Property(m => m.Quantity).IsRequired();

@@ -67,6 +67,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 {
                     table.PrimaryKey("PK_Bins", x => x.Id);
                 });
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_Bins_Code_Normalized",
+                table: "Bins",
+                sql: "\"Code\" = UPPER(\"Code\")");
 
             migrationBuilder.CreateTable(
                 name: "PartInventories",
@@ -95,6 +99,18 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
                 });
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartInventories_OnHand_NonNegative",
+                table: "PartInventories",
+                sql: "\"OnHand\" >= 0");
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartInventories_ReorderPoint_NonNegative",
+                table: "PartInventories",
+                sql: "\"ReorderPoint\" >= 0");
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartInventories_Sku_Normalized",
+                table: "PartInventories",
+                sql: "\"Sku\" = UPPER(\"Sku\")");
 
             migrationBuilder.CreateTable(
                 name: "PartInventoryAdjustments",
@@ -104,6 +120,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     PartInventoryId = table.Column<Guid>(type: "uuid", nullable: false),
                     BinId = table.Column<Guid>(type: "uuid", nullable: true),
                     Delta = table.Column<int>(type: "integer", nullable: false),
+                    ResultingBalance = table.Column<int>(type: "integer", nullable: false),
                     Reason = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                     PrintJobId = table.Column<Guid>(type: "uuid", nullable: true),
                     OperationKey = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
@@ -119,20 +136,28 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         column: x => x.BinId,
                         principalTable: "Bins",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_PartInventoryAdjustments_PartInventories_PartInventoryId",
                         column: x => x.PartInventoryId,
                         principalTable: "PartInventories",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_PartInventoryAdjustments_PrintJobs_PrintJobId",
                         column: x => x.PrintJobId,
                         principalTable: "PrintJobs",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.Restrict);
                 });
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartInventoryAdjustments_Delta_NonZero",
+                table: "PartInventoryAdjustments",
+                sql: "\"Delta\" <> 0");
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartInventoryAdjustments_ResultingBalance_NonNegative",
+                table: "PartInventoryAdjustments",
+                sql: "\"ResultingBalance\" >= 0");
 
             migrationBuilder.CreateTable(
                 name: "PartOutputMappings",
@@ -168,6 +193,14 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartOutputMappings_ExactlyOneSource",
+                table: "PartOutputMappings",
+                sql: "(\"GcodeFileId\" IS NULL AND \"PrintProjectFileId\" IS NOT NULL) OR (\"GcodeFileId\" IS NOT NULL AND \"PrintProjectFileId\" IS NULL)");
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_PartOutputMappings_Quantity_Positive",
+                table: "PartOutputMappings",
+                sql: "\"Quantity\" > 0");
 
             migrationBuilder.CreateIndex(
                 name: "IX_BarcodeScanLogs_BinId",
@@ -178,6 +211,22 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 name: "IX_BarcodeScanLogs_PartInventoryId",
                 table: "BarcodeScanLogs",
                 column: "PartInventoryId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintJobs_HarvestedAt",
+                table: "PrintJobs",
+                column: "HarvestedAt");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintJobs_HarvestedIntoBinId",
+                table: "PrintJobs",
+                column: "HarvestedIntoBinId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintJobs_HarvestOperationKey",
+                table: "PrintJobs",
+                column: "HarvestOperationKey",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_Bins_Code",
@@ -225,8 +274,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 name: "IX_PartInventoryAdjustments_PartInventoryId_OperationKey",
                 table: "PartInventoryAdjustments",
                 columns: new[] { "PartInventoryId", "OperationKey" },
-                unique: true,
-                filter: "\"OperationKey\" IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_PartInventoryAdjustments_PrintJobId",
@@ -247,8 +295,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 name: "IX_PartOutputMappings_GcodeFileId_PartInventoryId",
                 table: "PartOutputMappings",
                 columns: new[] { "GcodeFileId", "PartInventoryId" },
-                unique: true,
-                filter: "\"GcodeFileId\" IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_PartOutputMappings_PartInventoryId",
@@ -264,13 +311,24 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 name: "IX_PartOutputMappings_PrintProjectFileId_PartInventoryId",
                 table: "PartOutputMappings",
                 columns: new[] { "PrintProjectFileId", "PartInventoryId" },
-                unique: true,
-                filter: "\"PrintProjectFileId\" IS NOT NULL");
+                unique: true);
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_PrintJobs_Bins_HarvestedIntoBinId",
+                table: "PrintJobs",
+                column: "HarvestedIntoBinId",
+                principalTable: "Bins",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.SetNull);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropForeignKey(
+                name: "FK_PrintJobs_Bins_HarvestedIntoBinId",
+                table: "PrintJobs");
+
             migrationBuilder.DropTable(
                 name: "PartInventoryAdjustments");
 
@@ -290,6 +348,18 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             migrationBuilder.DropIndex(
                 name: "IX_BarcodeScanLogs_PartInventoryId",
                 table: "BarcodeScanLogs");
+
+            migrationBuilder.DropIndex(
+                name: "IX_PrintJobs_HarvestedAt",
+                table: "PrintJobs");
+
+            migrationBuilder.DropIndex(
+                name: "IX_PrintJobs_HarvestedIntoBinId",
+                table: "PrintJobs");
+
+            migrationBuilder.DropIndex(
+                name: "IX_PrintJobs_HarvestOperationKey",
+                table: "PrintJobs");
 
             migrationBuilder.DropColumn(
                 name: "HarvestOperationKey",

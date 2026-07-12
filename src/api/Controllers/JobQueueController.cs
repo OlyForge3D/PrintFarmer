@@ -324,15 +324,6 @@ public class JobQueueController(
     /// and records ledger entries. Idempotent: replaying against an already
     /// harvested job returns the original result without applying deltas twice.
     /// </summary>
-    /// <remarks>
-    /// <b>#725 rebase seam</b>: gate this endpoint on
-    /// <c>printedPartsInventoryEnabled</c> via <c>IOperatorFeatureGate</c> when
-    /// the service lands (see epic #705 / issue #725). When disabled the
-    /// endpoint must return HTTP 404 ProblemDetails with
-    /// <c>extensions.code = "featureDisabled"</c> and must not stamp the job or
-    /// write ledger entries. Normal job completion (delete, requeue, etc.) must
-    /// remain functional when the flag is off.
-    /// </remarks>
     /// <param name="id">Completed print job to harvest.</param>
     /// <param name="request">Optional bin code, quantity override, or manual SKU mapping fallback.</param>
     /// <param name="ct">Cancellation token.</param>

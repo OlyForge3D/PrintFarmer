@@ -206,6 +206,7 @@ public class PartInventoryService(
                     PartInventoryId = part.Id,
                     BinId = defaultBinId,
                     Delta = command.InitialOnHand,
+                    ResultingBalance = command.InitialOnHand,
                     Reason = PartAdjustmentReason.Manual,
                     OperationKey = null,
                     Notes = "Initial stock seeded on create.",
@@ -330,6 +331,21 @@ public class PartInventoryService(
                 binId = bin.Id;
             }
 
+            if (command.PrintJobId is Guid printJobId
+                && !await db.PrintJobs.AsNoTracking().AnyAsync(job => job.Id == printJobId, ct))
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+
+                return new AdjustResult(
+                    PartInventoryOutcome.JobNotFound,
+                    null,
+                    part.OnHand,
+                    $"Print job '{printJobId}' not found.");
+            }
+
             long proposedOnHand = (long)part.OnHand + command.Delta;
             if (proposedOnHand is < 0 or > int.MaxValue)
             {
@@ -354,6 +370,7 @@ public class PartInventoryService(
                 PartInventoryId = part.Id,
                 BinId = binId,
                 Delta = command.Delta,
+                ResultingBalance = (int)proposedOnHand,
                 Reason = command.Reason,
                 PrintJobId = command.PrintJobId,
                 OperationKey = operationKey,
@@ -483,7 +500,7 @@ public class PartInventoryService(
         return new AdjustResult(
             PartInventoryOutcome.IdempotentReplay,
             ToDto(prior, part.Sku),
-            part.OnHand,
+            prior.ResultingBalance,
             "Duplicate operation key; existing adjustment returned.");
     }
 
@@ -492,7 +509,7 @@ public class PartInventoryService(
     /// the supported providers (PostgreSQL <c>23505</c>, SQL Server <c>2601/2627</c>,
     /// SQLite <c>SQLITE_CONSTRAINT_UNIQUE</c>).
     /// </summary>
-    internal static bool IsUniqueViolation(DbUpdateException ex)
+    public static bool IsUniqueViolation(DbUpdateException ex)
     {
         ArgumentNullException.ThrowIfNull(ex);
         Exception? inner = ex.InnerException;
@@ -528,6 +545,7 @@ public class PartInventoryService(
             a.BinId,
             a.Bin?.Code,
             a.Delta,
+            a.ResultingBalance,
             a.Reason,
             a.PrintJobId,
             a.OperationKey,

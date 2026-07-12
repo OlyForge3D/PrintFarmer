@@ -372,7 +372,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("IsActive");
 
-                    b.ToTable("Bins");
+                    b.ToTable("Bins", t =>
+                        {
+                            t.HasCheckConstraint("CK_Bins_Code_Normalized", "\"Code\" = UPPER(\"Code\")");
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
@@ -2861,7 +2864,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Sku")
                         .IsUnique();
 
-                    b.ToTable("PartInventories");
+                    b.ToTable("PartInventories", t =>
+                        {
+                            t.HasCheckConstraint("CK_PartInventories_OnHand_NonNegative", "\"OnHand\" >= 0");
+
+                            t.HasCheckConstraint("CK_PartInventories_ReorderPoint_NonNegative", "\"ReorderPoint\" >= 0");
+
+                            t.HasCheckConstraint("CK_PartInventories_Sku_Normalized", "\"Sku\" = UPPER(\"Sku\")");
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventoryAdjustment", b =>
@@ -2898,6 +2908,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<int>("ResultingBalance")
+                        .HasColumnType("int");
+
                     b.Property<string>("UserId")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
@@ -2916,9 +2929,14 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PartInventoryId", "OperationKey")
                         .IsUnique()
-                        .HasFilter("\"OperationKey\" IS NOT NULL");
+                        .HasFilter("[OperationKey] IS NOT NULL");
 
-                    b.ToTable("PartInventoryAdjustments");
+                    b.ToTable("PartInventoryAdjustments", t =>
+                        {
+                            t.HasCheckConstraint("CK_PartInventoryAdjustments_Delta_NonZero", "\"Delta\" <> 0");
+
+                            t.HasCheckConstraint("CK_PartInventoryAdjustments_ResultingBalance_NonNegative", "\"ResultingBalance\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PartOutputMapping", b =>
@@ -2955,13 +2973,18 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("GcodeFileId", "PartInventoryId")
                         .IsUnique()
-                        .HasFilter("\"GcodeFileId\" IS NOT NULL");
+                        .HasFilter("[GcodeFileId] IS NOT NULL");
 
                     b.HasIndex("PrintProjectFileId", "PartInventoryId")
                         .IsUnique()
-                        .HasFilter("\"PrintProjectFileId\" IS NOT NULL");
+                        .HasFilter("[PrintProjectFileId] IS NOT NULL");
 
-                    b.ToTable("PartOutputMappings");
+                    b.ToTable("PartOutputMappings", t =>
+                        {
+                            t.HasCheckConstraint("CK_PartOutputMappings_ExactlyOneSource", "(\"GcodeFileId\" IS NULL AND \"PrintProjectFileId\" IS NOT NULL) OR (\"GcodeFileId\" IS NOT NULL AND \"PrintProjectFileId\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "\"Quantity\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordPolicyEntity", b =>
@@ -3381,6 +3404,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("DeadlineAtUtc");
 
                     b.HasIndex("GcodeFileId");
+
+                    b.HasIndex("HarvestOperationKey")
+                        .IsUnique()
+                        .HasFilter("[HarvestOperationKey] IS NOT NULL");
+
+                    b.HasIndex("HarvestedAt");
+
+                    b.HasIndex("HarvestedIntoBinId");
 
                     b.HasIndex("Priority");
 
@@ -5998,18 +6029,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Bin", "Bin")
                         .WithMany()
                         .HasForeignKey("BinId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
                         .WithMany("Adjustments")
                         .HasForeignKey("PartInventoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
                         .WithMany()
                         .HasForeignKey("PrintJobId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Bin");
 
@@ -6115,6 +6146,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .WithMany()
                         .HasForeignKey("GcodeFileId")
                         .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Bin", null)
+                        .WithMany()
+                        .HasForeignKey("HarvestedIntoBinId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("AssignedPrinter");
 

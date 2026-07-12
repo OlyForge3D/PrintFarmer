@@ -53,7 +53,7 @@ public class PartInventory
     public int OnHand { get; set; }
 
     /// <summary>
-    /// Minimum on-hand threshold. When <see cref="OnHand"/> drops below this value,
+    /// Minimum on-hand threshold. When <see cref="OnHand"/> is at or below this value,
     /// the reorder evaluation surfaces the SKU for the F8 shift compiler.
     /// </summary>
     public int ReorderPoint { get; set; }

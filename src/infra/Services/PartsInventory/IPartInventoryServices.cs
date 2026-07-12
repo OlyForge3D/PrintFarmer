@@ -83,7 +83,7 @@ public interface IPartInventoryService
 
     /// <summary>
     /// Atomically inserts a SKU row and (when <c>InitialOnHand &gt; 0</c>) an
-    /// InitialStock ledger entry inside a single transaction, so either both
+    /// manual initial-stock ledger entry inside a single transaction, so either both
     /// rows commit or neither does. Returns the committed SKU.
     /// </summary>
     Task<CreatePartResult> CreatePartAsync(CreatePartCommand command, CancellationToken ct = default);

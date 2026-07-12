@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.PartsInventory;
@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -16,12 +17,6 @@ namespace Farm.Web.Api.Controllers;
 /// the shared barcode-scan diagnostic infrastructure via <see cref="IBarcodeScanLogService"/>
 /// rather than duplicating spool-only barcode plumbing.
 /// </summary>
-/// <remarks>
-/// <b>#725 rebase seam</b>: gate every endpoint on <c>printedPartsInventoryEnabled</c>
-/// via <c>IOperatorFeatureGate</c> when that service lands (see #705 / #725).
-/// Disabled responses must be HTTP 404 with ProblemDetails
-/// <c>extensions.code = "featureDisabled"</c> and must not persist scan logs.
-/// </remarks>
 [ApiController]
 [Route("api/bins")]
 [Authorize]
@@ -135,7 +130,14 @@ public class BinsController(
             UpdatedAt = DateTime.UtcNow,
         };
         await binRepository.AddAsync(entity, ct);
-        _ = await binRepository.SaveChangesAsync(ct);
+        try
+        {
+            _ = await binRepository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (PartInventoryService.IsUniqueViolation(ex))
+        {
+            return Conflict(new { message = $"Bin '{code}' already exists." });
+        }
 
         return Created($"/api/bins/{code}", ToDto(entity));
     }
@@ -229,7 +231,32 @@ public class BinsController(
             UpdatedAt = DateTime.UtcNow,
         };
         await binRepository.AddAsync(entity, ct);
-        _ = await binRepository.SaveChangesAsync(ct);
+        try
+        {
+            _ = await binRepository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (PartInventoryService.IsUniqueViolation(ex))
+        {
+            Bin? concurrentlyRegistered = await binRepository.GetByCodeAsync(code, ct);
+            if (concurrentlyRegistered is null)
+            {
+                throw;
+            }
+
+            await barcodeScanLogService.LogAsync(
+                new BarcodeScanLog
+                {
+                    Barcode = code,
+                    Action = BarcodeScanAction.BinRegister,
+                    Outcome = BarcodeScanOutcome.Resolved,
+                    HttpStatus = StatusCodes.Status200OK,
+                    BinId = concurrentlyRegistered.Id,
+                    UserId = GetActorId(),
+                    Message = "Bin concurrently registered.",
+                },
+                ct);
+            return Ok(ToDto(concurrentlyRegistered));
+        }
 
         await barcodeScanLogService.LogAsync(
             new BarcodeScanLog

@@ -42,12 +42,12 @@ public class PartHarvestService(
         }
 
         string? operationKey = PartInventoryIdentity.NormalizeOperationKey(request.OperationKey);
-        if (operationKey?.Length > 64)
+        if (operationKey?.Length > 128)
         {
             return new HarvestResult(
                 PartInventoryOutcome.InvalidRequest,
                 null,
-                "Operation key must be 64 characters or fewer.");
+                "Operation key must be 128 characters or fewer.");
         }
 
         HarvestResult? replay = await TryLoadHarvestedReplayAsync(jobId, ct);
@@ -219,6 +219,17 @@ public class PartHarvestService(
                         ct);
                 }
 
+                int resultingBalance = relational
+                    ? await db.PartInventories
+                        .AsNoTracking()
+                        .Where(part => part.Id == output.Part.Id)
+                        .Select(part => part.OnHand)
+                        .SingleAsync(ct)
+                    : await db.PartInventories
+                        .Where(part => part.Id == output.Part.Id)
+                        .Select(part => part.OnHand)
+                        .SingleAsync(ct);
+
                 string ledgerOperationKey = $"{operationKey}:{output.Part.Id:N}";
                 var adjustment = new PartInventoryAdjustment
                 {
@@ -226,6 +237,7 @@ public class PartHarvestService(
                     PartInventoryId = output.Part.Id,
                     BinId = bin?.Id,
                     Delta = output.Quantity,
+                    ResultingBalance = resultingBalance,
                     Reason = PartAdjustmentReason.Harvest,
                     PrintJobId = jobId,
                     OperationKey = ledgerOperationKey,
@@ -240,12 +252,29 @@ public class PartHarvestService(
                     adjustment.BinId,
                     bin?.Code,
                     adjustment.Delta,
+                    adjustment.ResultingBalance,
                     adjustment.Reason,
                     adjustment.PrintJobId,
                     adjustment.OperationKey,
                     adjustment.Notes,
                     adjustment.UserId,
                     adjustment.CreatedAt));
+            }
+
+            if (bin is not null && !string.IsNullOrWhiteSpace(request.BinCode))
+            {
+                _ = db.BarcodeScanLogs.Add(new BarcodeScanLog
+                {
+                    Timestamp = now,
+                    Barcode = bin.Code,
+                    Action = BarcodeScanAction.Harvest,
+                    Outcome = BarcodeScanOutcome.Resolved,
+                    HttpStatus = 200,
+                    BinId = bin.Id,
+                    PartInventoryId = outputs.Count == 1 ? outputs[0].Part.Id : null,
+                    UserId = userId,
+                    Message = $"Harvested print job {jobId:D}.",
+                });
             }
 
             _ = await db.SaveChangesAsync(ct);
@@ -456,6 +485,14 @@ public class PartHarvestService(
         else if (expectedBins.Count == 1)
         {
             actualBin = expectedBins[0];
+        }
+
+        if (actualBin is null && expectedBins.Count == 0)
+        {
+            return (new HarvestResult(
+                PartInventoryOutcome.BinNotFound,
+                null,
+                "No active bin was supplied and the mapped SKU(s) have no common default bin."), null);
         }
 
         bool wrongBin = expectedBins.Count > 1

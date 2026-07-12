@@ -10,7 +10,7 @@ public class BinConfiguration : IEntityTypeConfiguration<Bin>
     public void Configure(EntityTypeBuilder<Bin> builder)
     {
         _ = builder.ToTable(table =>
-            table.HasCheckConstraint("CK_Bins_Code_Normalized", "Code = UPPER(Code)"));
+            table.HasCheckConstraint("CK_Bins_Code_Normalized", "\"Code\" = UPPER(\"Code\")"));
         _ = builder.HasKey(b => b.Id);
         _ = builder.Property(b => b.Code).IsRequired().HasMaxLength(128);
         _ = builder.Property(b => b.Name).IsRequired().HasMaxLength(200);

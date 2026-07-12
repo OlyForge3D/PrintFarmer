@@ -76,6 +76,9 @@ public class PartInventoryAdjustment
     /// </summary>
     public int Delta { get; set; }
 
+    /// <summary>The on-hand balance immediately after this adjustment committed.</summary>
+    public int ResultingBalance { get; set; }
+
     public PartAdjustmentReason Reason { get; set; }
 
     /// <summary>Optional link back to the print job that produced this delta.</summary>

@@ -116,8 +116,7 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.PartsInventory.ReorderEvaluationService>();
 
         // Attention Feed (issue #707) — unified operator feed composed from failure,
-        // maintenance, and offline sources. Harvest items join after the #714 ledger exists;
-        // runout items join via #709.
+        // maintenance, offline, harvest, and runout sources.
         services.AddScoped<Farm.Infrastructure.Repositories.Attention.IAttentionSnoozeRepository,
             Farm.Infrastructure.Repositories.Attention.EfAttentionSnoozeRepository>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,

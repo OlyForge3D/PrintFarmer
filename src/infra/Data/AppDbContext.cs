@@ -284,6 +284,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        EnsurePartInventoryLedgerIsAppendOnly();
+        EnsureInventoryIdentitiesAreImmutable();
         PopulateCaseInsensitiveShadowColumns();
         StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -291,9 +293,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        EnsurePartInventoryLedgerIsAppendOnly();
+        EnsureInventoryIdentitiesAreImmutable();
         PopulateCaseInsensitiveShadowColumns();
         StampRowVersions();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnsurePartInventoryLedgerIsAppendOnly()
+    {
+        bool mutationRequested = ChangeTracker.Entries<PartInventoryAdjustment>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted);
+        if (mutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part inventory adjustments are immutable; append a correcting adjustment instead.");
+        }
+    }
+
+    private void EnsureInventoryIdentitiesAreImmutable()
+    {
+        bool skuMutationRequested = ChangeTracker.Entries<PartInventory>()
+            .Any(entry => entry.State == EntityState.Modified
+                && entry.Property(part => part.Sku).IsModified);
+        bool binCodeMutationRequested = ChangeTracker.Entries<Bin>()
+            .Any(entry => entry.State == EntityState.Modified
+                && entry.Property(bin => bin.Code).IsModified);
+        if (skuMutationRequested || binCodeMutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part SKU and bin-code identities are immutable; create a new identity instead.");
+        }
     }
 
     private void PopulateCaseInsensitiveShadowColumns()

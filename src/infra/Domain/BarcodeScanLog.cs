@@ -11,6 +11,7 @@ public enum BarcodeScanAction
     BinRegister = 3,
     BinScan = 4,
     PartScan = 5,
+    Harvest = 6,
 }
 
 /// <summary>

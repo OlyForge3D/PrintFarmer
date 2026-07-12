@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
@@ -91,6 +92,18 @@ public class PartInventoryServiceTests : IDisposable
         return bin;
     }
 
+    [Theory]
+    [InlineData(PartAdjustmentReason.Harvest, "\"harvest\"")]
+    [InlineData(PartAdjustmentReason.QcReject, "\"qc-reject\"")]
+    [InlineData(PartAdjustmentReason.Manual, "\"manual\"")]
+    public void PartAdjustmentReason_SerializesWithExactWireValue(
+        PartAdjustmentReason reason,
+        string expectedJson)
+    {
+        Assert.Equal(expectedJson, JsonSerializer.Serialize(reason));
+        Assert.Equal(reason, JsonSerializer.Deserialize<PartAdjustmentReason>(expectedJson));
+    }
+
     [Fact]
     public async Task AdjustAsync_AppendsLedgerEntryAndUpdatesOnHand()
     {
@@ -110,6 +123,7 @@ public class PartInventoryServiceTests : IDisposable
         List<PartInventoryAdjustment> ledger = await db.PartInventoryAdjustments.ToListAsync();
         _ = Assert.Single(ledger);
         Assert.Equal(3, ledger[0].Delta);
+        Assert.Equal(7, ledger[0].ResultingBalance);
         Assert.Equal(PartAdjustmentReason.Manual, ledger[0].Reason);
     }
 
@@ -181,6 +195,29 @@ public class PartInventoryServiceTests : IDisposable
         await using var db = new AppDbContext(_options);
         _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
         Assert.Equal(5, (await db.PartInventories.SingleAsync()).OnHand);
+    }
+
+    [Fact]
+    public async Task AdjustAsync_ReplayAfterLaterAdjustment_ReturnsOriginalResultingBalance()
+    {
+        _ = await SeedSkuAsync(onHand: 0);
+        PartInventoryService sut = CreateSut();
+
+        _ = await sut.AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(5, PartAdjustmentReason.Manual, null, null, null, "original", "u1"));
+        _ = await sut.AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(2, PartAdjustmentReason.Manual, null, null, null, "later", "u1"));
+        AdjustResult replay = await sut.AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(5, PartAdjustmentReason.Manual, null, null, null, "original", "u1"));
+
+        Assert.Equal(PartInventoryOutcome.IdempotentReplay, replay.Outcome);
+        Assert.Equal(5, replay.NewOnHand);
+        Assert.Equal(5, replay.Adjustment!.ResultingBalance);
+        await using var db = new AppDbContext(_options);
+        Assert.Equal(7, (await db.PartInventories.SingleAsync()).OnHand);
     }
 
     [Fact]
@@ -281,6 +318,7 @@ public class PartInventoryServiceTests : IDisposable
         PartInventoryAdjustment ledger = await db.PartInventoryAdjustments
             .SingleAsync(a => a.PartInventoryId == refreshed.Id);
         Assert.Equal(5, ledger.Delta);
+        Assert.Equal(5, ledger.ResultingBalance);
         Assert.Equal(PartAdjustmentReason.Manual, ledger.Reason);
         Assert.Null(ledger.OperationKey);
         Assert.Equal("creator", ledger.UserId);
@@ -378,6 +416,75 @@ public class PartInventoryServiceTests : IDisposable
         await using var db = new AppDbContext(_options);
         Assert.Equal(int.MaxValue, (await db.PartInventories.SingleAsync()).OnHand);
         Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task AdjustAsync_UnknownPrintJob_ReturnsJobNotFoundWithoutMutation()
+    {
+        _ = await SeedSkuAsync(onHand: 2);
+
+        AdjustResult result = await CreateSut().AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(
+                1,
+                PartAdjustmentReason.Manual,
+                Guid.NewGuid(),
+                null,
+                null,
+                null,
+                "actor"));
+
+        Assert.Equal(PartInventoryOutcome.JobNotFound, result.Outcome);
+        await using var db = new AppDbContext(_options);
+        Assert.Equal(2, (await db.PartInventories.SingleAsync()).OnHand);
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task SaveChangesAsync_ModifyingOrDeletingLedgerEntry_IsRejected()
+    {
+        _ = await SeedSkuAsync(onHand: 0);
+        _ = await CreateSut().AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(1, PartAdjustmentReason.Manual, null, null, null, null, "actor"));
+
+        await using var db = new AppDbContext(_options);
+        PartInventoryAdjustment adjustment = await db.PartInventoryAdjustments.SingleAsync();
+        adjustment.Notes = "tampered";
+        InvalidOperationException updateError = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.SaveChangesAsync());
+        Assert.Contains("immutable", updateError.Message, StringComparison.OrdinalIgnoreCase);
+
+        db.Entry(adjustment).State = EntityState.Unchanged;
+        _ = db.PartInventoryAdjustments.Remove(adjustment);
+        InvalidOperationException deleteError = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.SaveChangesAsync());
+        Assert.Contains("immutable", deleteError.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SaveChangesAsync_ChangingSkuOrBinCodeIdentity_IsRejected()
+    {
+        PartInventory part = await SeedSkuAsync();
+        Bin bin = await SeedBinAsync();
+
+        await using (var db = new AppDbContext(_options))
+        {
+            PartInventory trackedPart = await db.PartInventories.SingleAsync(value => value.Id == part.Id);
+            trackedPart.Sku = "PF-RENAMED";
+            InvalidOperationException skuError = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => db.SaveChangesAsync());
+            Assert.Contains("immutable", skuError.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        await using (var db = new AppDbContext(_options))
+        {
+            Bin trackedBin = await db.Bins.SingleAsync(value => value.Id == bin.Id);
+            trackedBin.Code = "BIN-RENAMED";
+            InvalidOperationException binError = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => db.SaveChangesAsync());
+            Assert.Contains("immutable", binError.Message, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]

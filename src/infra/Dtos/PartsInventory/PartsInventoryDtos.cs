@@ -39,6 +39,7 @@ public record PartAdjustmentResponse(
     Guid? BinId,
     string? BinCode,
     int Delta,
+    int ResultingBalance,
     PartAdjustmentReason Reason,
     Guid? PrintJobId,
     string? OperationKey,
