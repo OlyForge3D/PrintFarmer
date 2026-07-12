@@ -3,8 +3,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.Attention;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Microsoft.Extensions.Logging;
@@ -36,7 +39,9 @@ public sealed class AttentionService(
     ILogger<AttentionService> logger,
     TimeProvider? timeProvider = null,
     IAttentionBroadcaster? broadcaster = null,
-    Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? failureHistory = null) : IAttentionService
+    Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? failureHistory = null,
+    IPartHarvestService? partHarvestService = null,
+    IOperatorFeatureGate? featureGate = null) : IAttentionService
 {
     /// <summary>Default number of items returned when the caller does not specify a limit.</summary>
     public const int DefaultLimit = 100;
@@ -56,6 +61,8 @@ public sealed class AttentionService(
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
     private readonly IAttentionBroadcaster? _broadcaster = broadcaster;
     private readonly Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? _failureHistory = failureHistory;
+    private readonly IPartHarvestService? _partHarvestService = partHarvestService;
+    private readonly IOperatorFeatureGate? _featureGate = featureGate;
 
     /// <inheritdoc />
     public async Task<AttentionFeedResult> GetFeedAsync(
@@ -321,7 +328,7 @@ public sealed class AttentionService(
             AttentionKind.Failure => await DispatchFailureAsync(item, actionKind, cancellationToken),
             AttentionKind.Maintenance => await DispatchMaintenanceAsync(item, actionKind, userName, cancellationToken),
             AttentionKind.Offline => new AttentionActionResult(AttentionActionOutcome.InvalidAction, "Offline items expose snooze only."),
-            AttentionKind.Harvest => new AttentionActionResult(AttentionActionOutcome.InvalidAction, "Harvest items are deferred until #714; no action is offered."),
+            AttentionKind.Harvest => await DispatchHarvestAsync(userId, item, actionKind, cancellationToken),
             AttentionKind.Runout => new AttentionActionResult(AttentionActionOutcome.NotImplemented, "Runout execution lands with F4/#709."),
             _ => new AttentionActionResult(AttentionActionOutcome.Failed, "Unknown attention kind."),
         };
@@ -470,6 +477,63 @@ public sealed class AttentionService(
             _logger.LogError(ex, "[AttentionService] Maintenance dispatch for '{Action}' on alert {AlertId} failed", actionKind, alertId);
             return new AttentionActionResult(AttentionActionOutcome.Failed, ex.Message);
         }
+    }
+
+    private async Task<AttentionActionResult> DispatchHarvestAsync(
+        Guid userId,
+        AttentionItemDto item,
+        AttentionActionKind actionKind,
+        CancellationToken ct)
+    {
+        if (actionKind != AttentionActionKind.Harvest)
+        {
+            return new AttentionActionResult(AttentionActionOutcome.InvalidAction, $"Action '{actionKind}' is not valid for harvest items.");
+        }
+
+        if (_featureGate is not null && !_featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return new AttentionActionResult(AttentionActionOutcome.NotFound, "Printed-parts inventory is disabled.");
+        }
+
+        if (_partHarvestService is null || item.JobId is not Guid jobId)
+        {
+            return new AttentionActionResult(AttentionActionOutcome.Failed, "Harvest service or job identity is unavailable.");
+        }
+
+        HarvestResult result = await _partHarvestService.HarvestJobAsync(
+            jobId,
+            new HarvestJobRequest(),
+            userId.ToString("D"),
+            ct);
+
+        return result.Outcome switch
+        {
+            PartInventoryOutcome.Ok or PartInventoryOutcome.IdempotentReplay
+                => new AttentionActionResult(AttentionActionOutcome.Ok, null),
+            PartInventoryOutcome.JobNotFound
+                => new AttentionActionResult(AttentionActionOutcome.NotFound, result.Message),
+            PartInventoryOutcome.FeatureDisabled
+                => new AttentionActionResult(AttentionActionOutcome.NotFound, result.Message),
+            PartInventoryOutcome.NoMappings when result.MappingRequired is not null
+                => new AttentionActionResult(
+                    AttentionActionOutcome.Conflict,
+                    result.Message,
+                    new AttentionPartMappingRequiredProblem(result.MappingRequired)),
+            PartInventoryOutcome.WrongBin when result.WrongBin is not null
+                => new AttentionActionResult(
+                    AttentionActionOutcome.Conflict,
+                    result.Message,
+                    new AttentionWrongBinProblem(result.WrongBin)),
+            PartInventoryOutcome.JobNotCompleted
+                or PartInventoryOutcome.WrongBin
+                or PartInventoryOutcome.BinNotFound
+                or PartInventoryOutcome.NoMappings
+                or PartInventoryOutcome.PartNotFound
+                or PartInventoryOutcome.InvalidRequest
+                or PartInventoryOutcome.Conflict
+                => new AttentionActionResult(AttentionActionOutcome.Conflict, result.Message),
+            _ => new AttentionActionResult(AttentionActionOutcome.Failed, result.Message),
+        };
     }
 
     private static bool TryParseSuffixGuid(string attentionId, string expectedPrefix, out Guid value)

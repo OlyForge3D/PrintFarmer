@@ -1303,6 +1303,8 @@ public class SpoolmanController(
             log.HttpStatus,
             log.MatchedFilamentId,
             log.CreatedSpoolId,
+            log.BinId,
+            log.PartInventoryId,
             log.UserId,
             log.Message);
 

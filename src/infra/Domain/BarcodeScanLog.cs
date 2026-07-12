@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Barcode action recorded for backend-side scan diagnostics.
@@ -8,6 +8,10 @@ public enum BarcodeScanAction
     Resolve = 0,
     Import = 1,
     Mapping = 2,
+    BinRegister = 3,
+    BinScan = 4,
+    PartScan = 5,
+    Harvest = 6,
 }
 
 /// <summary>
@@ -20,6 +24,8 @@ public enum BarcodeScanOutcome
     Imported = 2,
     Mapped = 3,
     Error = 4,
+    Registered = 5,
+    WrongBin = 6,
 }
 
 /// <summary>
@@ -42,6 +48,12 @@ public class BarcodeScanLog
     public int? MatchedFilamentId { get; set; }
 
     public int? CreatedSpoolId { get; set; }
+
+    /// <summary>Optional bin id when the scan resolves or registers a printed-part bin.</summary>
+    public Guid? BinId { get; set; }
+
+    /// <summary>Optional printed-part SKU id resolved by the scan.</summary>
+    public Guid? PartInventoryId { get; set; }
 
     public string? UserId { get; set; }
 
