@@ -69,6 +69,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
 /// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
+/// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -86,7 +87,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
     Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
     Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
-    IStoragePathService storagePathService) : IPrintersService
+    IStoragePathService storagePathService,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -104,6 +106,10 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
     private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
     private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+
+    // Optional: #709 filament coverage broadcaster. Nullable so unit tests
+    // that build PrintersService directly do not need to supply a mock.
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -2947,6 +2953,16 @@ public class PrintersService(
                 : null;
             await _broadcaster.BroadcastSpoolChangeAsync(id, spoolInfo, ct).ConfigureAwait(false);
 
+            // #709 item 5: coverage may have changed (bound spool differs, so
+            // remaining / classification changes).
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
+
             return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");
         }
         catch (Exception ex)
@@ -3138,6 +3154,16 @@ public class PrintersService(
                 "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
                 spoolId, toolheadIndex, p.Name, id);
 
+            // #709 item 5: per-toolhead spool binding affects that slot's
+            // coverage classification.
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
+
             return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
         }
         catch (Exception ex)
@@ -3247,6 +3273,16 @@ public class PrintersService(
             _logger.LogInformation(
                 "ClearToolheadSpoolAsync: Cleared spool from toolhead T{Index} on printer {PName} ({Id})",
                 toolheadIndex, p.Name, id);
+
+            // #709 item 5: clearing a toolhead spool changes coverage
+            // (previously covered slot may now be Unknown/no-spool-assigned).
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
 
             return new CommandResult(true, $"Spool cleared from toolhead T{toolheadIndex}");
         }

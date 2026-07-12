@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -165,7 +166,8 @@ public class AutoDispatchService(
     ISpoolmanService? spoolmanService = null,
     IWebhookService? webhookService = null,
     Queue.Dispatch.IAutoDispatchTrigger? dispatchTrigger = null,
-    IDispatchScorer? dispatchScorer = null) : IAutoDispatchService
+    IDispatchScorer? dispatchScorer = null,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IAutoDispatchService
 {
     private const string ReadyGateLogPrefix = "[AutoDispatchReadyGate]";
     private const string AutoDispatchStateChangedEventName = "autodispatchstatechanged";
@@ -364,20 +366,29 @@ public class AutoDispatchService(
         {
             nextJob.Status = PrintJobStatus.Cancelled;
             nextJob.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(ct);
             logger.LogInformation(
                 ReadyGateLogPrefix + " Skipped (cancelled) job {JobId} ({JobName}) for printer {PrinterId}",
                 nextJob.Id, nextJob.Name, printerId);
         }
 
-        // Check if there are more queued jobs (cancelled job already persisted above)
+        // Exclude the tracked job being cancelled so the job and dispatch
+        // state can be persisted atomically below.
+        Guid? skippedJobId = nextJob?.Id;
         bool hasMoreJobs = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                        && j.Status == PrintJobStatus.Queued, ct);
+                        && j.Status == PrintJobStatus.Queued
+                        && (!skippedJobId.HasValue || j.Id != skippedJobId.Value), ct);
 
         EnsureDispatchState(printer).AutoDispatchState = hasMoreJobs ? AutoDispatchState.PendingReady : AutoDispatchState.None;
         await db.SaveChangesAsync(ct);
+        if (nextJob is not null && coverageBroadcaster is not null)
+        {
+            await coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.QueueChanged,
+                ct).ConfigureAwait(false);
+        }
 
         var status = await BuildStatusDtoAsync(printer, ct);
         await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, status, ct);
