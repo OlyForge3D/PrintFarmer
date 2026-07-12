@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710193256_AddPrintJobRequiredMaterialsPerTool")]
+    partial class AddPrintJobRequiredMaterialsPerTool
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -95,41 +98,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("UserId", "IsActive");
 
                     b.ToTable("ApiKeys");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.AttentionSnooze", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("AttentionItemAnchorAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("AttentionItemId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("SnoozedUntilUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SnoozedUntilUtc")
-                        .HasDatabaseName("IX_AttentionSnoozes_SnoozedUntilUtc");
-
-                    b.HasIndex("UserId", "AttentionItemId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_AttentionSnoozes_UserId_AttentionItemId");
-
-                    b.ToTable("AttentionSnoozes");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
@@ -781,9 +749,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTime?>("ResolvedAtUtc")
-                        .HasColumnType("datetime2");
-
                     b.Property<string>("SnapshotUrl")
                         .HasMaxLength(1024)
                         .HasColumnType("nvarchar(1024)");
@@ -795,57 +760,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId", "DetectedAt");
 
                     b.ToTable("FailureDetectionIncidents");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentSwapOverride", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AffectedJobIdsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ExpectedMaterial")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("ScannedMaterial")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<int>("SpoolId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ToolheadIndex")
-                        .HasColumnType("int");
-
-                    b.Property<string>("UserId")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("UserName")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId", "CreatedAtUtc")
-                        .HasDatabaseName("IX_FilamentSwapOverrides_PrinterId_CreatedAtUtc");
-
-                    b.ToTable("FilamentSwapOverrides");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentType", b =>
@@ -4661,10 +4575,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("ToolheadModelDefId");
-
-                    b.HasIndex("PrinterId", "Index")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Toolheads_PrinterId_Index");
 
                     b.ToTable("Toolheads");
                 });

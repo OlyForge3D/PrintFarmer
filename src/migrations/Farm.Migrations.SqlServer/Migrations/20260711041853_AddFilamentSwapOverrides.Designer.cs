@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260711041853_AddFilamentSwapOverrides")]
+    partial class AddFilamentSwapOverrides
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4661,10 +4664,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("ToolheadModelDefId");
-
-                    b.HasIndex("PrinterId", "Index")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Toolheads_PrinterId_Index");
 
                     b.ToTable("Toolheads");
                 });

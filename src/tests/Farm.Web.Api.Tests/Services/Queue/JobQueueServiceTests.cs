@@ -1680,4 +1680,96 @@ public class JobQueueServiceTests
             coverageBroadcaster: broadcaster);
 
     #endregion
+
+    #region Per-Tool Requirement Population (issue #710)
+
+    [Fact]
+    public async Task AddJobToQueueAsync_PopulatesPerToolRequirementsFromGcode()
+    {
+        // Regression for issue #710: enqueue through the real production entry
+        // service (JobQueueService, used by JobQueueController /
+        // OctoPrintCompatController / SlicePrintBridge / PrintProjectService /
+        // PrintApprovalService) must project per-tool material metadata onto the
+        // created PrintJob so guided-swap validation has ground truth.
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "multi.gcode",
+            FileName = "multi.gcode",
+            FilamentPerExtruderType = System.Text.Json.JsonSerializer.Serialize(new[] { "PLA", "PETG", "TPU" }),
+            FilamentPerExtruderWeightG = System.Text.Json.JsonSerializer.Serialize(new[] { 10.0, 5.5, 1.25 }),
+            FilamentPerExtruderColorHex = System.Text.Json.JsonSerializer.Serialize(new[] { "#000000", "#FFFFFF", "#FF0000" }),
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+        };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        PrintJob? captured = null;
+        _mockRepo.Setup(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => captured = j)
+            .Returns(Task.CompletedTask);
+
+        _ = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.RequiredMaterialsPerTool.Should().NotBeNull();
+        captured.RequiredMaterialsPerTool!.Select(r => r.Tool).Should().Equal(0, 1, 2);
+        captured.RequiredMaterialsPerTool!.Select(r => r.MaterialType).Should().Equal("PLA", "PETG", "TPU");
+        captured.RequiredMaterialsPerTool!.Select(r => r.EstimatedGrams).Should().Equal(10.0, 5.5, 1.25);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_FallsBackToGcodeMaterial_WhenRequestOmitsRequiredMaterialType()
+    {
+        // Regression for issue #710: the persisted RequiredMaterialType must be the
+        // *effective* scalar (i.e. the value that guided validation and downstream
+        // legacy consumers actually see), not the raw pre-fallback request value.
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "petg.gcode",
+            FileName = "petg.gcode",
+            RequiredMaterial = "PETG",
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+            RequiredMaterialType = null,
+        };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        PrintJob? captured = null;
+        _mockRepo.Setup(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => captured = j)
+            .Returns(Task.CompletedTask);
+
+        _ = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.RequiredMaterialType.Should().Be("PETG");
+    }
+
+    #endregion
 }

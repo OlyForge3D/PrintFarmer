@@ -44,6 +44,7 @@ public class AppUnitOfWork : IUnitOfWork
     private ILocationRepository? _locationRepository;
     private IQueueRepository? _queueRepository;
     private ITagRepository? _tagRepository;
+    private IFilamentSwapOverrideRepository? _filamentSwapOverrideRepository;
 
     /// <summary>
     /// Lazy-initializes the Camera repository, reusing the same DbContext.
@@ -87,6 +88,13 @@ public class AppUnitOfWork : IUnitOfWork
     /// Coordinated with printer and gcode operations for job queue management.
     /// </summary>
     public IQueueRepository Queue => _queueRepository ??= new EfQueueRepository(_db);
+
+    /// <summary>
+    /// Lazy-initializes the filament-swap override audit repository, reusing the same
+    /// DbContext so audit inserts commit atomically with the spool binding (issue #710).
+    /// </summary>
+    public IFilamentSwapOverrideRepository FilamentSwapOverrides =>
+        _filamentSwapOverrideRepository ??= new EfFilamentSwapOverrideRepository(_db);
 
     /// <summary>
     /// Lazy-initializes the Tag repository, reusing the same DbContext.

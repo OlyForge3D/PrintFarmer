@@ -209,6 +209,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = 0,
             RequiredNozzleDiameter = j.RequiredNozzleDiameter,
             RequiredMaterialType = j.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(j),
             EstimatedPrintTime = j.EstimatedPrintTime,
             EstimatedFilamentUsage = j.EstimatedFilamentUsage,
             ActualStartTime = j.ActualStartTime,
@@ -320,7 +321,13 @@ public class JobQueueService : IJobQueueService
             Priority = (int)request.Priority,
             QueuePosition = await _dataService.GetNextQueuePositionAsync(assignedPrinterId.Value, ct),
             RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-            RequiredMaterialType = request.RequiredMaterialType,
+
+            // Persist the effective scalar (request value falling back to G-code metadata),
+            // matching what dispatch/matching already computes above in effectiveRequest.
+            // Fixes the pre-#710 gap where the pre-fallback request value was persisted
+            // even though dispatch and validation compare against the fallback-aware value.
+            RequiredMaterialType = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper
+                .ResolveEffectiveMaterial(request.RequiredMaterialType, gcode),
             EstimatedPrintTime = gcode.EstimatedPrintTimeMinutes.HasValue ? TimeSpan.FromMinutes(gcode.EstimatedPrintTimeMinutes.Value) : null,
             EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
             ProjectId = request.ProjectId,
@@ -338,6 +345,13 @@ public class JobQueueService : IJobQueueService
             QueuedAt = DateTime.UtcNow,
             DeadlineAtUtc = resolvedDeadline
         };
+
+        // Project per-extruder G-code metadata onto the newly built job so that
+        // JobQueueService, PrintJobManagementService, and rerun all produce identical
+        // per-tool requirements — mandatory for authoritative multi-material swap
+        // validation on the guided flow endpoint. No-op when the source lacks
+        // per-extruder metadata.
+        Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcode);
 
         // Calculate estimated cost if cost calculator is available
         if (_costCalculator != null && job.SpoolmanFilamentId.HasValue)
@@ -403,6 +417,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             SpoolmanFilamentId = job.SpoolmanFilamentId,
@@ -452,6 +467,7 @@ public class JobQueueService : IJobQueueService
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
                 RequiredMaterialType = job.RequiredMaterialType,
+                ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
                 EstimatedPrintTime = job.EstimatedPrintTime,
                 EstimatedFilamentUsage = job.EstimatedFilamentUsage,
                 ActualStartTime = job.ActualStartTime,
@@ -549,6 +565,7 @@ public class JobQueueService : IJobQueueService
             Status = (PrintJobStatus?)job.Status,
             Priority = job.Priority,
             QueuePosition = job.QueuePosition,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             EstimatedCost = job.EstimatedCost,
@@ -701,6 +718,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             ActualStartTime = job.ActualStartTime,

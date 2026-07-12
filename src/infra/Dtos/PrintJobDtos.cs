@@ -58,7 +58,8 @@ public record PrintJobDto(
     Guid[]? PreferredPrinterIds = null,
     Guid[]? ExcludedPrinterIds = null,
     int? PlateIndex = null,
-    string? PlateName = null);
+    string? PlateName = null,
+    IReadOnlyList<PrintJobToolRequirementDto>? ToolRequirements = null);
 
 /// <summary>
 /// Request payload for creating and queueing a new print job.

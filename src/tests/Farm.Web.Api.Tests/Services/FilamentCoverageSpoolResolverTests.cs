@@ -15,6 +15,66 @@ namespace Farm.Web.Api.Tests.Services;
 public class FilamentCoverageSpoolResolverTests
 {
     [Fact]
+    public async Task ResolveSpoolAsync_DuplicateNativeAndCentralId_UsesPrinterOwningSource()
+    {
+        Mock<IBackendClient> native = NativeClient(
+            JsonSerializer.Serialize(new[] { new { id = 7, remaining_weight = 222, material = "PETG" } }));
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central.Setup(s => s.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+                [new SpoolmanSpoolDto(7, "central", "PLA", 111, "#FFFFFF", true)],
+                1));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        Printer nativePrinter = PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 7);
+        Printer managedPrinter = PrinterWithSpool("http://octo.local", PrinterBackend.OctoPrint, 7);
+
+        FilamentCoverageSpoolSnapshot nativeResult = await resolver.ResolveSpoolAsync(
+            nativePrinter,
+            7,
+            CancellationToken.None);
+        FilamentCoverageSpoolSnapshot managedResult = await resolver.ResolveSpoolAsync(
+            managedPrinter,
+            7,
+            CancellationToken.None);
+
+        nativeResult.Spool!.Material.Should().Be("PETG");
+        nativeResult.TracksLiveConsumption.Should().BeTrue();
+        managedResult.Spool!.Material.Should().Be("PLA");
+        managedResult.TracksLiveConsumption.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ResolveSpoolAsync_MissingNativeSpool_DoesNotUseCollidingCentralId()
+    {
+        Mock<IBackendClient> native = NativeClient("[]");
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        Printer printer = PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 7);
+
+        FilamentCoverageSpoolSnapshot result = await resolver.ResolveSpoolAsync(
+            printer,
+            7,
+            CancellationToken.None);
+
+        result.Spool.Should().BeNull();
+        result.ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSpoolNotFound);
+        central.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task ResolveAsync_DuplicateIdsAcrossNativeSources_RemainIsolatedAndBatched()
     {
         Mock<IBackendClient> nativeA = NativeClient(

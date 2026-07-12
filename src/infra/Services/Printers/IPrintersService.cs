@@ -9,6 +9,30 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
+/// Determines how <see cref="IPrintersService"/> spool binding treats a commit-time Spoolman
+/// re-resolution that returns <c>null</c> (the spool the validator approved has since become
+/// unresolvable). Introduced for GitHub issue OlyForge3D/PrintFarmer#710, C1.
+/// </summary>
+public enum SpoolBindPolicy
+{
+    /// <summary>
+    /// Legacy direct binding: the spool id is assigned even if the commit-time Spoolman lookup
+    /// returns null (denormalized material simply stays unset). Resolution continues to use the
+    /// centrally configured <c>ISpoolmanService</c>. Used whenever the guided-swap feature is
+    /// disabled, preserving the established direct-control semantics.
+    /// </summary>
+    Direct,
+
+    /// <summary>
+    /// Guided binding: fail closed if the commit-time Spoolman re-resolution returns null — no
+    /// spool id, material, gate row, MultiMaterial promotion, or override audit is persisted.
+    /// Resolution uses the printer-owned source selected by the shared #709 coverage resolver,
+    /// so native Moonraker ids never collide with central Spoolman ids.
+    /// </summary>
+    Guided,
+}
+
+/// <summary>
 /// Service interface for printer management and operations.
 /// Provides CRUD operations, status retrieval, file management, printer control operations,
 /// and integration with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
@@ -440,11 +464,21 @@ public interface IPrintersService
 
     /// <summary>
     /// Unloads filament from the extruder via the backend's filament control capability.
+    /// Returns the residual weight of the outgoing spool so the operator's
+    /// "return to shelf" workflow can log inventory in one round-trip.
     /// </summary>
     /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">
+    /// Optional zero-based toolhead / lane index whose spool should be treated as the
+    /// outgoing spool for residual-weight capture. When <c>null</c>, the source of truth
+    /// is <see cref="Printer.CurrentSpoolId"/> falling back to the primary toolhead's
+    /// <see cref="Toolhead.CurrentSpoolId"/> (legacy single-tool behaviour). Provided so
+    /// the guided swap flow can target a specific MMU gate / U1 lane without breaking
+    /// existing callers.
+    /// </param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>CommandResult with success/failure and descriptive message</returns>
-    Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct);
+    /// <returns>FilamentUnloadResult with success/failure, message, and residual spool weight.</returns>
+    Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct);
 
     /// <summary>
     /// Initiates a filament change procedure via the backend's filament control capability.
@@ -482,6 +516,35 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>CommandResult with success/failure and descriptive message</returns>
     Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Assigns a Spoolman spool to a specific toolhead, optionally writing a durable
+    /// guided-swap override audit record in the SAME transaction as the binding so the two
+    /// commit atomically (GitHub issue OlyForge3D/PrintFarmer#710, B6).
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.)</param>
+    /// <param name="spoolId">The Spoolman spool ID to assign</param>
+    /// <param name="overrideAudit">
+    /// When non-null, an override audit record is staged and committed atomically with the
+    /// binding. Supplied only for an authorized mismatch override; never persisted on a failed
+    /// bind. Pass null for normal (non-override) assignments.
+    /// </param>
+    /// <param name="policy">
+    /// Governs how a null commit-time Spoolman re-resolution is handled.
+    /// <see cref="SpoolBindPolicy.Guided"/> fails closed (persists nothing);
+    /// <see cref="SpoolBindPolicy.Direct"/> preserves the legacy assign-anyway behavior for
+    /// the generic direct control and the disabled-gate path (issue #710, C1).
+    /// </param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        int spoolId,
+        FilamentSwapOverrideContext? overrideAudit,
+        SpoolBindPolicy policy,
+        CancellationToken ct);
 
     /// <summary>
     /// Clears the spool assignment from a specific toolhead (by index) on a printer.

@@ -506,7 +506,8 @@ public class PrintJobManagementService(
                 Status = assignedPrinterId.HasValue ? PrintJobStatus.Assigned : PrintJobStatus.Queued,
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-                RequiredMaterialType = request.RequiredMaterialType,
+                RequiredMaterialType = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper
+                    .ResolveEffectiveMaterial(request.RequiredMaterialType, gcodeFile),
                 DeadlineAtUtc = resolvedDeadlineAtUtc,
                 EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
@@ -520,6 +521,12 @@ public class PrintJobManagementService(
             // Calculate queue position
             int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
             job.QueuePosition = maxPosition + 1;
+
+            // Project per-extruder G-code metadata into per-tool material requirements
+            // via the shared PrintJobRequirementsMapper so every enqueue path (this
+            // service, JobQueueService, rerun) uses identical projection semantics.
+            // Preserves RequiredMaterialType for legacy dispatch / reporting.
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
 
             _ = await _repository.AddAsync(job, cancellationToken);
 
@@ -543,6 +550,20 @@ public class PrintJobManagementService(
             _logger.LogError(ex, "Error enqueueing print job from gcode file {GcodeFileId}", request.GcodeFileId);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Thin wrapper around
+    /// <see cref="Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode"/>
+    /// kept for backward-compatible unit tests. New callers should invoke the shared
+    /// mapper directly so every production entry point projects per-extruder metadata
+    /// identically.
+    /// </summary>
+    /// <param name="job">The newly constructed print job to mutate.</param>
+    /// <param name="gcodeFile">The G-code file supplying slicer metadata.</param>
+    internal static void PopulatePerToolRequirementsFromGcode(PrintJob job, GcodeFile gcodeFile)
+    {
+        Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
     }
 
     /// <summary>
@@ -1308,12 +1329,13 @@ public class PrintJobManagementService(
 
             // Prefer a user-friendly name (original filename) when the linked G-code file still exists.
             string newJobName = originalJob.Name;
+            GcodeFile? rerunGcodeFile = null;
             if (originalJob.GcodeFileId.HasValue)
             {
-                GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(originalJob.GcodeFileId.Value, cancellationToken);
-                if (gcodeFile != null)
+                rerunGcodeFile = await _repository.GetGcodeFileAsync(originalJob.GcodeFileId.Value, cancellationToken);
+                if (rerunGcodeFile != null)
                 {
-                    newJobName = gcodeFile.Name;
+                    newJobName = rerunGcodeFile.Name;
                 }
             }
 
@@ -1336,6 +1358,11 @@ public class PrintJobManagementService(
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow
             };
+
+            // Carry per-tool requirements across the rerun. Prefer verbatim copy of the
+            // original job's JSON (already normalised); rederive from the G-code file if
+            // the source lacks the projection (e.g., pre-#710 jobs).
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.CopyFrom(newJob, originalJob, rerunGcodeFile);
 
             // Calculate queue position
             int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
@@ -1954,7 +1981,11 @@ public class PrintJobManagementService(
         TimeSpan? estimatedPrintTime = ExtractEstimatedPrintTimeFromMetadata(historyJob.Metadata);
         double? estimatedFilamentUsage = ExtractEstimatedFilamentUsageFromMetadata(historyJob.Metadata);
 
-        return new PrintJob
+        // Try to find matching G-code file by filename so history-seeded jobs that map to an
+        // in-progress external print can still be swap-validated authoritatively.
+        Guid? gcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken);
+
+        var job = new PrintJob
         {
             Id = Guid.NewGuid(),
             Name = Path.GetFileNameWithoutExtension(historyJob.Filename) ?? "Unknown",
@@ -1983,9 +2014,19 @@ public class PrintJobManagementService(
             // Associate with printer
             AssignedPrinterId = printerId,
 
-            // Try to find matching G-code file by filename
-            GcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken)
+            // Matching G-code file resolved above (may be null when no library match exists)
+            GcodeFileId = gcodeFileId
         };
+
+        // Project per-extruder G-code metadata onto the seeded job through the same shared
+        // mapper every other creation path uses. No-op when the file has no per-extruder data.
+        if (gcodeFileId.HasValue)
+        {
+            GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(gcodeFileId.Value, cancellationToken);
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
+        }
+
+        return job;
     }
 
     /// <summary>
@@ -2744,6 +2785,7 @@ public class PrintJobManagementService(
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             RequiredCapabilities = job.RequiredCapabilities,
             EstimatedPrintTimeSeconds = (int?)job.EstimatedPrintTime?.TotalSeconds,
             EstimatedFilamentUsageGrams = job.EstimatedFilamentUsage,
