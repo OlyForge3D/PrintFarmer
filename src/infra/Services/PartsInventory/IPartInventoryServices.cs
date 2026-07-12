@@ -20,6 +20,8 @@ public enum PartInventoryOutcome
     Conflict = 7,
     IdempotentReplay = 8,
     SkuAlreadyExists = 9,
+    WrongBin = 10,
+    FeatureDisabled = 11,
 }
 
 /// <summary>Result of a printed-part stock adjustment.</summary>
@@ -33,7 +35,8 @@ public record AdjustResult(
 public record HarvestResult(
     PartInventoryOutcome Outcome,
     HarvestJobResponse? Response,
-    string? Message);
+    string? Message,
+    WrongBinResponse? WrongBin = null);
 
 /// <summary>Result of a printed-part SKU creation attempt.</summary>
 public record CreatePartResult(

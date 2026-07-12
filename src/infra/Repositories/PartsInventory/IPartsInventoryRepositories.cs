@@ -45,6 +45,8 @@ public interface IPartInventoryAdjustmentRepository
 /// <summary>Repository for job-output → SKU mappings.</summary>
 public interface IPartOutputMappingRepository
 {
+    Task<List<PartOutputMapping>> GetAllAsync(CancellationToken ct = default);
+
     Task<List<PartOutputMapping>> GetForPartAsync(Guid partInventoryId, CancellationToken ct = default);
 
     Task<List<PartOutputMapping>> GetForGcodeFileAsync(Guid gcodeFileId, CancellationToken ct = default);
@@ -52,6 +54,10 @@ public interface IPartOutputMappingRepository
     Task<List<PartOutputMapping>> GetForProjectFileAsync(Guid projectFileId, CancellationToken ct = default);
 
     Task<PartOutputMapping?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    Task<bool> SourceExistsAsync(Guid? gcodeFileId, Guid? projectFileId, CancellationToken ct = default);
+
+    Task<bool> MappingExistsAsync(Guid partInventoryId, Guid? gcodeFileId, Guid? projectFileId, CancellationToken ct = default);
 
     Task AddAsync(PartOutputMapping entity, CancellationToken ct = default);
 

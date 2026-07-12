@@ -223,6 +223,12 @@ public sealed class AttentionController(
             return disabled;
         }
 
+        if (actionKind == AttentionActionKind.Harvest
+            && !_featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.PrintedPartsInventory);
+        }
+
         if (!TryGetUserId(out Guid userId, out ActionResult? error))
         {
             return error!;

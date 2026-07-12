@@ -66,6 +66,12 @@ public record HarvestJobResponse(
     bool AlreadyHarvested,
     IReadOnlyList<PartAdjustmentResponse> Adjustments);
 
+/// <summary>Typed wrong-bin response returned before any harvest mutation.</summary>
+public record WrongBinResponse(
+    string? ActualBinCode,
+    IReadOnlyList<string> ExpectedBinCodes,
+    string Message);
+
 /// <summary>Item in a caller-supplied harvest override / mapping fallback.</summary>
 public record HarvestOutputRequestItem(
     [Required, MinLength(1), MaxLength(64)] string Sku,

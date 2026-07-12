@@ -9,6 +9,13 @@ public class PartOutputMappingConfiguration : IEntityTypeConfiguration<PartOutpu
 {
     public void Configure(EntityTypeBuilder<PartOutputMapping> builder)
     {
+        _ = builder.ToTable(table =>
+        {
+            _ = table.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "Quantity > 0");
+            _ = table.HasCheckConstraint(
+                "CK_PartOutputMappings_ExactlyOneSource",
+                "(GcodeFileId IS NULL AND PrintProjectFileId IS NOT NULL) OR (GcodeFileId IS NOT NULL AND PrintProjectFileId IS NULL)");
+        });
         _ = builder.HasKey(m => m.Id);
         _ = builder.Property(m => m.Quantity).IsRequired();
         _ = builder.Property(m => m.CreatedAt).IsRequired();
@@ -20,11 +27,9 @@ public class PartOutputMappingConfiguration : IEntityTypeConfiguration<PartOutpu
 
         // Prevent duplicate mappings for the same output → SKU pair.
         _ = builder.HasIndex(m => new { m.GcodeFileId, m.PartInventoryId })
-            .IsUnique()
-            .HasFilter("\"GcodeFileId\" IS NOT NULL");
+            .IsUnique();
         _ = builder.HasIndex(m => new { m.PrintProjectFileId, m.PartInventoryId })
-            .IsUnique()
-            .HasFilter("\"PrintProjectFileId\" IS NOT NULL");
+            .IsUnique();
 
         _ = builder.HasOne(m => m.PartInventory)
             .WithMany(p => p.Mappings)

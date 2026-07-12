@@ -1,4 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -6,6 +8,7 @@ namespace Farm.Infrastructure.Domain;
 /// Reason a printed-part stock adjustment was recorded.
 /// Serialized as string in API and DB to keep enum evolution safe.
 /// </summary>
+[JsonConverter(typeof(PartAdjustmentReasonConverter))]
 public enum PartAdjustmentReason
 {
     /// <summary>Positive delta from a plate being harvested off a printer.</summary>
@@ -16,12 +19,36 @@ public enum PartAdjustmentReason
 
     /// <summary>Manual correction (miscount, adjustment, cycle count).</summary>
     Manual = 2,
+}
 
-    /// <summary>Initial seed count for a newly registered SKU.</summary>
-    InitialStock = 3,
+/// <summary>Wire converter for the feature-local adjustment reason contract.</summary>
+public sealed class PartAdjustmentReasonConverter : JsonConverter<PartAdjustmentReason>
+{
+    /// <inheritdoc />
+    public override PartAdjustmentReason Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        string? value = reader.GetString();
+        return value switch
+        {
+            "harvest" => PartAdjustmentReason.Harvest,
+            "qc-reject" => PartAdjustmentReason.QcReject,
+            "manual" => PartAdjustmentReason.Manual,
+            _ => throw new JsonException($"Unknown printed-part adjustment reason '{value}'."),
+        };
+    }
 
-    /// <summary>Positive delta representing outbound shipment or use elsewhere.</summary>
-    Consumption = 4,
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, PartAdjustmentReason value, JsonSerializerOptions options)
+    {
+        string wireValue = value switch
+        {
+            PartAdjustmentReason.Harvest => "harvest",
+            PartAdjustmentReason.QcReject => "qc-reject",
+            PartAdjustmentReason.Manual => "manual",
+            _ => throw new JsonException($"Unknown printed-part adjustment reason '{value}'."),
+        };
+        writer.WriteStringValue(wireValue);
+    }
 }
 
 /// <summary>

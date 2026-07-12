@@ -126,10 +126,8 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.Attention.Sources.MaintenanceAttentionSource>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
             Farm.Infrastructure.Services.Attention.Sources.OfflineAttentionSource>();
-
-        // Harvest attention items are deferred until the #714 harvest ledger exists; the
-        // HarvestAttentionSource is intentionally NOT registered so no harvest cards are
-        // composed and no Harvest action path is reachable from a feed item (review R4).
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.HarvestAttentionSource>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionService,
             Farm.Infrastructure.Services.Attention.AttentionService>();
         services.AddSingleton<Farm.Infrastructure.Services.Attention.IAttentionBroadcaster,

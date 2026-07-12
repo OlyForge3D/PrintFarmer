@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
@@ -36,7 +37,8 @@ namespace Farm.Infrastructure.Services.PartsInventory;
 /// </summary>
 public class PartInventoryService(
     IDbContextFactory<AppDbContext> dbFactory,
-    ILogger<PartInventoryService> logger) : IPartInventoryService
+    ILogger<PartInventoryService> logger,
+    IOperatorFeatureGate? featureGate = null) : IPartInventoryService
 {
     /// <summary>Maximum retries for a benign RowVersion collision on <see cref="PartInventory"/>.</summary>
     private const int MaxConcurrencyRetries = 3;
@@ -46,13 +48,32 @@ public class PartInventoryService(
         ArgumentException.ThrowIfNullOrWhiteSpace(sku);
         ArgumentNullException.ThrowIfNull(command);
 
+        if (featureGate is not null && !featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return new AdjustResult(PartInventoryOutcome.FeatureDisabled, null, 0, "Printed-parts inventory is disabled.");
+        }
+
         if (command.Delta == 0)
         {
             return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, 0, "Delta must be non-zero.");
         }
 
-        string trimmedSku = sku.Trim();
-        string? operationKey = string.IsNullOrWhiteSpace(command.OperationKey) ? null : command.OperationKey.Trim();
+        if (command.Reason == PartAdjustmentReason.Harvest && command.Delta < 0)
+        {
+            return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, 0, "Harvest adjustments must be positive.");
+        }
+
+        if (command.Reason == PartAdjustmentReason.QcReject && command.Delta > 0)
+        {
+            return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, 0, "QC-reject adjustments must be negative.");
+        }
+
+        string trimmedSku = PartInventoryIdentity.NormalizeSku(sku);
+        string? operationKey = PartInventoryIdentity.NormalizeOperationKey(command.OperationKey);
+        if (operationKey?.Length > 128)
+        {
+            return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, 0, "Operation key must be 128 characters or fewer.");
+        }
 
         // Pre-check idempotent replay against committed state, so happy-path
         // retries do not open a transaction at all.
@@ -93,6 +114,11 @@ public class PartInventoryService(
     public async Task<CreatePartResult> CreatePartAsync(CreatePartCommand command, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(command);
+        if (featureGate is not null && !featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return new CreatePartResult(PartInventoryOutcome.FeatureDisabled, null, "Printed-parts inventory is disabled.");
+        }
+
         if (string.IsNullOrWhiteSpace(command.Sku))
         {
             return new CreatePartResult(PartInventoryOutcome.InvalidRequest, null, "Sku is required.");
@@ -108,19 +134,29 @@ public class PartInventoryService(
             return new CreatePartResult(PartInventoryOutcome.InvalidRequest, null, "InitialOnHand and ReorderPoint must be non-negative.");
         }
 
-        string trimmedSku = command.Sku.Trim();
+        string trimmedSku = PartInventoryIdentity.NormalizeSku(command.Sku);
+        if (trimmedSku.Length > 64)
+        {
+            return new CreatePartResult(PartInventoryOutcome.InvalidRequest, null, "Sku must be 64 characters or fewer.");
+        }
+
+        string trimmedName = command.Name.Trim();
+        if (trimmedName.Length > 200)
+        {
+            return new CreatePartResult(PartInventoryOutcome.InvalidRequest, null, "Name must be 200 characters or fewer.");
+        }
 
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
 
         Guid? defaultBinId = null;
         if (!string.IsNullOrWhiteSpace(command.DefaultBinCode))
         {
-            string binCode = command.DefaultBinCode.Trim();
+            string binCode = PartInventoryIdentity.NormalizeBinCode(command.DefaultBinCode);
             Bin? bin = await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Code == binCode, ct);
-            if (bin is null)
+            if (bin is null || !bin.IsActive)
             {
                 return new CreatePartResult(PartInventoryOutcome.BinNotFound, null,
-                    $"Default bin '{binCode}' not found.");
+                    $"Default bin '{binCode}' not found or inactive.");
             }
 
             defaultBinId = bin.Id;
@@ -150,7 +186,7 @@ public class PartInventoryService(
             {
                 Id = Guid.NewGuid(),
                 Sku = trimmedSku,
-                Name = command.Name.Trim(),
+                Name = trimmedName,
                 Description = command.Description,
                 ModelFileRef = command.ModelFileRef,
                 DefaultBinId = defaultBinId,
@@ -170,7 +206,7 @@ public class PartInventoryService(
                     PartInventoryId = part.Id,
                     BinId = defaultBinId,
                     Delta = command.InitialOnHand,
-                    Reason = PartAdjustmentReason.InitialStock,
+                    Reason = PartAdjustmentReason.Manual,
                     OperationKey = null,
                     Notes = "Initial stock seeded on create.",
                     UserId = command.UserId,
@@ -265,10 +301,20 @@ public class PartInventoryService(
                 return new AdjustResult(PartInventoryOutcome.PartNotFound, null, 0, $"SKU '{trimmedSku}' not found.");
             }
 
+            if (!part.IsActive)
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+
+                return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, part.OnHand, $"SKU '{trimmedSku}' is inactive.");
+            }
+
             Guid? binId = null;
             if (!string.IsNullOrWhiteSpace(command.BinCode))
             {
-                string trimmedCode = command.BinCode.Trim();
+                string trimmedCode = PartInventoryIdentity.NormalizeBinCode(command.BinCode);
                 Bin? bin = await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Code == trimmedCode, ct);
                 if (bin is null || !bin.IsActive)
                 {
@@ -282,6 +328,24 @@ public class PartInventoryService(
                 }
 
                 binId = bin.Id;
+            }
+
+            long proposedOnHand = (long)part.OnHand + command.Delta;
+            if (proposedOnHand is < 0 or > int.MaxValue)
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+
+                string message = proposedOnHand < 0
+                    ? "Adjustment would make on-hand stock negative."
+                    : "Adjustment would overflow on-hand stock.";
+                return new AdjustResult(
+                    PartInventoryOutcome.InvalidRequest,
+                    null,
+                    part.OnHand,
+                    message);
             }
 
             var adjustment = new PartInventoryAdjustment
@@ -299,7 +363,7 @@ public class PartInventoryService(
             };
             _ = db.PartInventoryAdjustments.Add(adjustment);
 
-            part.OnHand += command.Delta;
+            part.OnHand = (int)proposedOnHand;
             part.UpdatedAt = DateTime.UtcNow;
 
             _ = await db.SaveChangesAsync(ct);

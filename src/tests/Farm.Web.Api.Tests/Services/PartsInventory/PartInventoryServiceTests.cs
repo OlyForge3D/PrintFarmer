@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.Data.Sqlite;
@@ -280,8 +281,9 @@ public class PartInventoryServiceTests : IDisposable
         PartInventoryAdjustment ledger = await db.PartInventoryAdjustments
             .SingleAsync(a => a.PartInventoryId == refreshed.Id);
         Assert.Equal(5, ledger.Delta);
-        Assert.Equal(PartAdjustmentReason.InitialStock, ledger.Reason);
+        Assert.Equal(PartAdjustmentReason.Manual, ledger.Reason);
         Assert.Null(ledger.OperationKey);
+        Assert.Equal("creator", ledger.UserId);
     }
 
     [Fact]
@@ -346,5 +348,97 @@ public class PartInventoryServiceTests : IDisposable
         await using var db = new AppDbContext(_options);
         // Only the seeded row exists.
         _ = Assert.Single(await db.PartInventories.ToListAsync());
+    }
+
+    [Fact]
+    public async Task AdjustAsync_WouldMakeStockNegative_ReturnsInvalidAndPreservesLedger()
+    {
+        _ = await SeedSkuAsync(onHand: 2);
+
+        AdjustResult result = await CreateSut().AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(-3, PartAdjustmentReason.Manual, null, null, null, null, "actor"));
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+        await using var db = new AppDbContext(_options);
+        Assert.Equal(2, (await db.PartInventories.SingleAsync()).OnHand);
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task AdjustAsync_WouldOverflowStock_ReturnsInvalidAndPreservesLedger()
+    {
+        _ = await SeedSkuAsync(onHand: int.MaxValue);
+
+        AdjustResult result = await CreateSut().AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(1, PartAdjustmentReason.Manual, null, null, null, null, "actor"));
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+        await using var db = new AppDbContext(_options);
+        Assert.Equal(int.MaxValue, (await db.PartInventories.SingleAsync()).OnHand);
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task AdjustAsync_QcRejectPositiveDelta_ReturnsInvalid()
+    {
+        _ = await SeedSkuAsync(onHand: 2);
+
+        AdjustResult result = await CreateSut().AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(1, PartAdjustmentReason.QcReject, null, null, null, null, null));
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+    }
+
+    [Fact]
+    public async Task CreatePartAsync_NormalizesSkuAndBinCode()
+    {
+        _ = await SeedBinAsync("BIN-N");
+
+        CreatePartResult result = await CreateSut().CreatePartAsync(new CreatePartCommand(
+            Sku: "  pf-normalized  ",
+            Name: "Normalized",
+            Description: null,
+            ModelFileRef: null,
+            DefaultBinCode: " bin-n ",
+            InitialOnHand: 0,
+            ReorderPoint: 1,
+            UserId: null));
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        Assert.Equal("PF-NORMALIZED", result.Part!.Sku);
+        Assert.Equal("BIN-N", result.Part.DefaultBin!.Code);
+    }
+
+    [Fact]
+    public async Task AdjustAsync_FeatureDisabled_DoesNotOpenDatabase()
+    {
+        var factory = new Mock<IDbContextFactory<AppDbContext>>(MockBehavior.Strict);
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
+        gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(false);
+        var sut = new PartInventoryService(factory.Object, NullLogger<PartInventoryService>.Instance, gate.Object);
+
+        AdjustResult result = await sut.AdjustAsync(
+            "PF-TEST",
+            new AdjustCommand(1, PartAdjustmentReason.Manual, null, null, null, null, null));
+
+        Assert.Equal(PartInventoryOutcome.FeatureDisabled, result.Outcome);
+        factory.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetReorderCandidatesAsync_OnHandEqualsThreshold_IncludesSku()
+    {
+        _ = await SeedSkuAsync(onHand: 5, reorder: 5);
+        var sut = new ReorderEvaluationService(_factory);
+
+        IReadOnlyList<Farm.Infrastructure.Dtos.PartsInventory.ReorderCandidateResponse> candidates =
+            await sut.GetReorderCandidatesAsync();
+
+        Farm.Infrastructure.Dtos.PartsInventory.ReorderCandidateResponse candidate = Assert.Single(candidates);
+        Assert.Equal("PF-TEST-01", candidate.Sku);
+        Assert.Equal(0, candidate.Deficit);
     }
 }

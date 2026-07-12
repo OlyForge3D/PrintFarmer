@@ -1,8 +1,11 @@
-﻿using Farm.Infrastructure.Domain;
+using System.Security.Claims;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -35,7 +38,9 @@ public class PartsInventoryController(
     IPartInventoryAdjustmentRepository adjustmentRepository,
     IPartOutputMappingRepository mappingRepository,
     IPartInventoryService partInventoryService,
-    IReorderEvaluationService reorderService) : ControllerBase
+    IReorderEvaluationService reorderService,
+    IBarcodeScanLogService barcodeScanLogService,
+    IOperatorFeatureGate featureGate) : ControllerBase
 {
     /// <summary>Lists all printed-part SKUs.</summary>
     [HttpGet]
@@ -44,6 +49,11 @@ public class PartsInventoryController(
         [FromQuery] bool includeInactive = false,
         CancellationToken ct = default)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         List<PartInventory> parts = await partRepository.GetAllAsync(includeInactive, ct);
         List<PartInventoryResponse> dtos = parts.Select(ToDto).ToList();
         return Ok(dtos);
@@ -55,6 +65,11 @@ public class PartsInventoryController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<PartInventoryResponse>> GetBySkuAsync(string sku, CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         PartInventory? part = await partRepository.GetBySkuAsync(sku, ct);
         if (part is null)
         {
@@ -62,6 +77,37 @@ public class PartsInventoryController(
         }
 
         return Ok(ToDto(part));
+    }
+
+    /// <summary>Resolves a printed-part SKU from its normalized barcode and records scan history.</summary>
+    [HttpGet("by-barcode/{sku}")]
+    [ProducesResponseType(typeof(PartInventoryResponse), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<PartInventoryResponse>> ResolveByBarcodeAsync(string sku, CancellationToken ct)
+    {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
+        string normalizedSku = PartInventoryIdentity.NormalizeSku(sku);
+        PartInventory? part = await partRepository.GetBySkuAsync(normalizedSku, ct);
+        await barcodeScanLogService.LogAsync(
+            new BarcodeScanLog
+            {
+                Barcode = normalizedSku,
+                Action = BarcodeScanAction.PartScan,
+                Outcome = part is null ? BarcodeScanOutcome.NotFound : BarcodeScanOutcome.Resolved,
+                HttpStatus = part is null ? StatusCodes.Status404NotFound : StatusCodes.Status200OK,
+                PartInventoryId = part?.Id,
+                UserId = GetActorId(),
+                Message = part is null ? "Printed-part SKU not found." : "Printed-part SKU resolved.",
+            },
+            ct);
+
+        return part is null
+            ? NotFound(new { message = $"SKU '{normalizedSku}' not found." })
+            : Ok(ToDto(part));
     }
 
     /// <summary>Creates a new printed-part SKU. Records an InitialStock ledger entry when InitialOnHand > 0.</summary>
@@ -74,6 +120,11 @@ public class PartsInventoryController(
         [FromBody] CreatePartInventoryRequest request,
         CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (request is null)
         {
             return BadRequest(new { message = "Request body is required." });
@@ -88,7 +139,7 @@ public class PartsInventoryController(
                 request.DefaultBinCode,
                 request.InitialOnHand,
                 request.ReorderPoint,
-                User.Identity?.Name),
+                GetActorId()),
             ct);
 
         switch (result.Outcome)
@@ -100,6 +151,8 @@ public class PartsInventoryController(
             case PartInventoryOutcome.BinNotFound:
             case PartInventoryOutcome.InvalidRequest:
                 return BadRequest(new { message = result.Message ?? "Invalid request." });
+            case PartInventoryOutcome.FeatureDisabled:
+                return OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.PrintedPartsInventory);
             default:
                 logger.LogError("Unexpected outcome {Outcome} creating SKU {Sku}: {Msg}", result.Outcome, request.Sku, result.Message);
                 return StatusCode(500, new { message = result.Message ?? "Unexpected error." });
@@ -117,6 +170,11 @@ public class PartsInventoryController(
         [FromBody] UpdatePartInventoryRequest request,
         CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (request is null)
         {
             return BadRequest(new { message = "Request body is required." });
@@ -132,7 +190,7 @@ public class PartsInventoryController(
         if (!string.IsNullOrWhiteSpace(request.DefaultBinCode))
         {
             Bin? bin = await binRepository.GetByCodeAsync(request.DefaultBinCode, ct);
-            if (bin is null)
+            if (bin is null || !bin.IsActive)
             {
                 return BadRequest(new { message = $"Default bin '{request.DefaultBinCode}' not found." });
             }
@@ -155,7 +213,7 @@ public class PartsInventoryController(
 
     /// <summary>
     /// Applies a signed adjustment to a SKU's stock. Reasons are one of
-    /// Harvest, QcReject, Manual, InitialStock, Consumption. An idempotency
+    /// harvest, qc-reject, or manual. An idempotency
     /// key on the request avoids double-application under client retries.
     /// </summary>
     [HttpPost("{sku}/adjust")]
@@ -168,6 +226,11 @@ public class PartsInventoryController(
         [FromBody] AdjustPartInventoryRequest request,
         CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (request is null)
         {
             return BadRequest(new { message = "Request body is required." });
@@ -182,7 +245,7 @@ public class PartsInventoryController(
                 request.BinCode,
                 request.Notes,
                 request.OperationKey,
-                User.Identity?.Name),
+                GetActorId()),
             ct);
 
         return result.Outcome switch
@@ -193,6 +256,7 @@ public class PartsInventoryController(
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.FeatureDisabled => OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.PrintedPartsInventory),
             _ => Problem(result.Message, statusCode: 500),
         };
     }
@@ -206,6 +270,11 @@ public class PartsInventoryController(
         [FromQuery] int limit = 100,
         CancellationToken ct = default)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         PartInventory? part = await partRepository.GetBySkuAsync(sku, ct);
         if (part is null)
         {
@@ -225,6 +294,11 @@ public class PartsInventoryController(
     public async Task<ActionResult<IReadOnlyList<ReorderCandidateResponse>>> GetReorderCandidatesAsync(
         CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         IReadOnlyList<ReorderCandidateResponse> candidates = await reorderService.GetReorderCandidatesAsync(ct);
         return Ok(candidates);
     }
@@ -236,6 +310,11 @@ public class PartsInventoryController(
         [FromQuery] string? sku = null,
         CancellationToken ct = default)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (!string.IsNullOrWhiteSpace(sku))
         {
             PartInventory? part = await partRepository.GetBySkuAsync(sku, ct);
@@ -248,8 +327,8 @@ public class PartsInventoryController(
             return Ok(mappings.Select(m => ToMappingDto(m, part)).ToList());
         }
 
-        // No filter: not paged here; delegate to per-part or per-output views.
-        return Ok(Array.Empty<PartOutputMappingResponse>());
+        List<PartOutputMapping> allMappings = await mappingRepository.GetAllAsync(ct);
+        return Ok(allMappings.Select(mapping => ToMappingDto(mapping)).ToList());
     }
 
     /// <summary>Creates a job-output → SKU mapping.</summary>
@@ -262,6 +341,11 @@ public class PartsInventoryController(
         [FromBody] CreatePartOutputMappingRequest request,
         CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         if (request is null)
         {
             return BadRequest(new { message = "Request body is required." });
@@ -277,10 +361,30 @@ public class PartsInventoryController(
             return BadRequest(new { message = "Only one of gcodeFileId or printProjectFileId may be set." });
         }
 
-        PartInventory? part = await partRepository.GetBySkuAsync(request.Sku, ct);
+        string normalizedSku = PartInventoryIdentity.NormalizeSku(request.Sku);
+        PartInventory? part = await partRepository.GetBySkuAsync(normalizedSku, ct);
         if (part is null)
         {
-            return NotFound(new { message = $"SKU '{request.Sku}' not found." });
+            return NotFound(new { message = $"SKU '{normalizedSku}' not found." });
+        }
+
+        if (!part.IsActive)
+        {
+            return BadRequest(new { message = $"SKU '{normalizedSku}' is inactive." });
+        }
+
+        if (!await mappingRepository.SourceExistsAsync(request.GcodeFileId, request.PrintProjectFileId, ct))
+        {
+            return NotFound(new { message = "The referenced G-code or project file does not exist." });
+        }
+
+        if (await mappingRepository.MappingExistsAsync(
+            part.Id,
+            request.GcodeFileId,
+            request.PrintProjectFileId,
+            ct))
+        {
+            return Conflict(new { message = "This output is already mapped to the requested SKU." });
         }
 
         var entity = new PartOutputMapping
@@ -306,6 +410,11 @@ public class PartsInventoryController(
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteMappingAsync(Guid id, CancellationToken ct)
     {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
         PartOutputMapping? entity = await mappingRepository.GetByIdAsync(id, ct);
         if (entity is null)
         {
@@ -314,6 +423,30 @@ public class PartsInventoryController(
 
         await mappingRepository.RemoveAsync(entity, ct);
         _ = await mappingRepository.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Soft-deactivates a printed-part SKU while retaining its immutable ledger.</summary>
+    [HttpDelete("{sku}")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> DeleteAsync(string sku, CancellationToken ct)
+    {
+        if (FeatureDisabledResult() is NotFoundObjectResult disabled)
+        {
+            return disabled;
+        }
+
+        PartInventory? part = await partRepository.GetBySkuAsync(sku, ct);
+        if (part is null)
+        {
+            return NotFound(new { message = $"SKU '{sku}' not found." });
+        }
+
+        part.IsActive = false;
+        part.UpdatedAt = DateTime.UtcNow;
+        _ = await partRepository.SaveChangesAsync(ct);
         return NoContent();
     }
 
@@ -330,7 +463,7 @@ public class PartsInventoryController(
             p.DefaultBin?.Name,
             p.OnHand,
             p.ReorderPoint,
-            NeedsReorder: p.IsActive && p.OnHand < p.ReorderPoint,
+            NeedsReorder: p.IsActive && p.OnHand <= p.ReorderPoint,
             p.IsActive,
             p.CreatedAt,
             p.UpdatedAt);
@@ -349,4 +482,14 @@ public class PartsInventoryController(
             m.CreatedAt,
             m.UpdatedAt);
     }
+
+    private NotFoundObjectResult? FeatureDisabledResult()
+        => featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory)
+            ? null
+            : OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.PrintedPartsInventory);
+
+    private string? GetActorId()
+        => User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("oid");
 }

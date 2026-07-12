@@ -9,6 +9,8 @@ public class PartInventoryAdjustmentConfiguration : IEntityTypeConfiguration<Par
 {
     public void Configure(EntityTypeBuilder<PartInventoryAdjustment> builder)
     {
+        _ = builder.ToTable(table =>
+            table.HasCheckConstraint("CK_PartInventoryAdjustments_Delta_NonZero", "Delta <> 0"));
         _ = builder.HasKey(a => a.Id);
         _ = builder.Property(a => a.Delta).IsRequired();
         _ = builder.Property(a => a.Reason).HasConversion<string>().HasMaxLength(32).IsRequired();
@@ -23,13 +25,10 @@ public class PartInventoryAdjustmentConfiguration : IEntityTypeConfiguration<Par
         _ = builder.HasIndex(a => a.BinId);
         _ = builder.HasIndex(a => a.Reason);
 
-        // Composite idempotency guard. Two adjustments for the SAME SKU can never
-        // share an OperationKey, but different SKUs may reuse the same key
-        // (e.g. two independent client-side retries against different SKUs).
-        // Filtered so that null OperationKey values are always allowed to repeat.
+        // Provider conventions generate the correct nullable-index filter for SQL Server,
+        // while PostgreSQL naturally permits repeated nulls.
         _ = builder.HasIndex(a => new { a.PartInventoryId, a.OperationKey })
-            .IsUnique()
-            .HasFilter("\"OperationKey\" IS NOT NULL");
+            .IsUnique();
 
         _ = builder.HasOne(a => a.PartInventory)
             .WithMany(p => p.Adjustments)

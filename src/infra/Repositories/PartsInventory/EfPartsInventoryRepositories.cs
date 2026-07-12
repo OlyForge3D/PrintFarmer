@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.PartsInventory;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.PartsInventory;
@@ -39,7 +40,7 @@ public class EfPartInventoryRepository(AppDbContext context) : IPartInventoryRep
             return null;
         }
 
-        string trimmed = sku.Trim();
+        string trimmed = PartInventoryIdentity.NormalizeSku(sku);
         return await _context.PartInventories
             .Include(p => p.DefaultBin)
             .FirstOrDefaultAsync(p => p.Sku == trimmed, ct);
@@ -49,7 +50,7 @@ public class EfPartInventoryRepository(AppDbContext context) : IPartInventoryRep
     {
         return await _context.PartInventories
             .AsNoTracking()
-            .Where(p => p.IsActive && p.OnHand < p.ReorderPoint)
+            .Where(p => p.IsActive && p.OnHand <= p.ReorderPoint)
             .OrderBy(p => p.Sku)
             .ToListAsync(ct);
     }
@@ -96,7 +97,7 @@ public class EfBinRepository(AppDbContext context) : IBinRepository
             return null;
         }
 
-        string trimmed = code.Trim();
+        string trimmed = PartInventoryIdentity.NormalizeBinCode(code);
         return await _context.Bins.FirstOrDefaultAsync(b => b.Code == trimmed, ct);
     }
 
@@ -164,6 +165,16 @@ public class EfPartOutputMappingRepository(AppDbContext context) : IPartOutputMa
 {
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
+    public async Task<List<PartOutputMapping>> GetAllAsync(CancellationToken ct = default)
+    {
+        return await _context.PartOutputMappings
+            .AsNoTracking()
+            .Include(m => m.PartInventory)
+            .OrderBy(m => m.PartInventory!.Sku)
+            .ThenBy(m => m.CreatedAt)
+            .ToListAsync(ct);
+    }
+
     public async Task<List<PartOutputMapping>> GetForPartAsync(Guid partInventoryId, CancellationToken ct = default)
     {
         return await _context.PartOutputMappings
@@ -197,6 +208,33 @@ public class EfPartOutputMappingRepository(AppDbContext context) : IPartOutputMa
         return await _context.PartOutputMappings
             .Include(m => m.PartInventory)
             .FirstOrDefaultAsync(m => m.Id == id, ct);
+    }
+
+    public async Task<bool> SourceExistsAsync(
+        Guid? gcodeFileId,
+        Guid? projectFileId,
+        CancellationToken ct = default)
+    {
+        if (gcodeFileId is Guid gcodeId)
+        {
+            return await _context.GcodeFiles.AsNoTracking().AnyAsync(file => file.Id == gcodeId, ct);
+        }
+
+        return projectFileId is Guid projectId
+            && await _context.PrintProjectFiles.AsNoTracking().AnyAsync(file => file.Id == projectId, ct);
+    }
+
+    public async Task<bool> MappingExistsAsync(
+        Guid partInventoryId,
+        Guid? gcodeFileId,
+        Guid? projectFileId,
+        CancellationToken ct = default)
+    {
+        return await _context.PartOutputMappings.AsNoTracking().AnyAsync(
+            mapping => mapping.PartInventoryId == partInventoryId
+                && mapping.GcodeFileId == gcodeFileId
+                && mapping.PrintProjectFileId == projectFileId,
+            ct);
     }
 
     public async Task AddAsync(PartOutputMapping entity, CancellationToken ct = default)

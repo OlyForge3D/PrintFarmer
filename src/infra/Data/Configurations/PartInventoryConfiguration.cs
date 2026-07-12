@@ -9,6 +9,12 @@ public class PartInventoryConfiguration : IEntityTypeConfiguration<PartInventory
 {
     public void Configure(EntityTypeBuilder<PartInventory> builder)
     {
+        _ = builder.ToTable(table =>
+        {
+            _ = table.HasCheckConstraint("CK_PartInventories_OnHand_NonNegative", "OnHand >= 0");
+            _ = table.HasCheckConstraint("CK_PartInventories_ReorderPoint_NonNegative", "ReorderPoint >= 0");
+            _ = table.HasCheckConstraint("CK_PartInventories_Sku_Normalized", "Sku = UPPER(Sku)");
+        });
         _ = builder.HasKey(p => p.Id);
         _ = builder.Property(p => p.Sku).IsRequired().HasMaxLength(64);
         _ = builder.Property(p => p.Name).IsRequired().HasMaxLength(200);

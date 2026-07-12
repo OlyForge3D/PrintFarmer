@@ -1,14 +1,17 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -31,6 +34,7 @@ public class JobQueueController(
     IPrinterStatusCacheReader printerStatusCache,
     IPrintFarmerTelemetryService telemetryService,
     IPartHarvestService partHarvestService,
+    IOperatorFeatureGate operatorFeatureGate,
     ILogger<JobQueueController> logger) : ControllerBase
 {
     /// <summary>
@@ -344,8 +348,17 @@ public class JobQueueController(
         [FromBody] HarvestJobRequest? request,
         CancellationToken ct)
     {
+        if (!operatorFeatureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return OperatorFeatureProblemDetails.NotFound(
+                operatorFeatureGate,
+                OperatorFeature.PrintedPartsInventory);
+        }
+
         HarvestJobRequest payload = request ?? new HarvestJobRequest();
-        string? userId = User.Identity?.Name;
+        string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("oid");
 
         HarvestResult result = await partHarvestService.HarvestJobAsync(id, payload, userId, ct);
         return result.Outcome switch
@@ -355,10 +368,14 @@ public class JobQueueController(
             PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.JobNotCompleted => Conflict(new { message = result.Message }),
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
+            PartInventoryOutcome.WrongBin => Conflict(result.WrongBin),
             PartInventoryOutcome.NoMappings => UnprocessableEntity(new { message = result.Message }),
             PartInventoryOutcome.PartNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.FeatureDisabled => OperatorFeatureProblemDetails.NotFound(
+                operatorFeatureGate,
+                OperatorFeature.PrintedPartsInventory),
             _ => Problem(result.Message ?? "Harvest failed.", statusCode: 500),
         };
     }
