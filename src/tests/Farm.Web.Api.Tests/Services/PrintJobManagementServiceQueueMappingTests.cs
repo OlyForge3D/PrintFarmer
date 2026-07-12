@@ -1,6 +1,7 @@
 ﻿using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Cameras;
@@ -8,6 +9,7 @@ using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -181,13 +183,147 @@ public class PrintJobManagementServiceQueueMappingTests
         Assert.Equal(to, capturedTo);
     }
 
-    private static PrintJobManagementService CreateService(Mock<IPrintJobManagementRepository> repository)
+    [Fact]
+    public async Task EnqueueJobAsync_AssignedJob_CapturesSnapshotAndDispatchLogBeforeSave()
+    {
+        Guid printerId = Guid.NewGuid();
+        var gcode = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "assigned.gcode",
+            FileName = "assigned.gcode",
+        };
+        var repository = new Mock<IPrintJobManagementRepository>(MockBehavior.Strict);
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        repository.Setup(value => value.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        repository.Setup(value => value.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        repository.Setup(value => value.AddWithoutSaveAsync(
+                It.Is<PrintJob>(job => job.AssignedPrinterId == printerId),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                It.Is<PrintJob>(job => job.DispatchedAt != null),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        repository.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log =>
+                log.PrinterId == printerId
+                && log.Action == Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched)));
+        repository.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        PrintJobManagementService service = CreateService(repository, snapshots.Object);
+
+        _ = await service.EnqueueJobAsync(
+            new EnqueueQueueJobRequest
+            {
+                GcodeFileId = gcode.Id.ToString(),
+                AssignedPrinterId = printerId.ToString(),
+            },
+            "operator");
+
+        repository.VerifyAll();
+        snapshots.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_FirstAssignment_CapturesSnapshotBeforeRepositorySave()
+    {
+        Guid printerId = Guid.NewGuid();
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "update.gcode",
+            Status = PrintJobStatus.Queued,
+        };
+        var repository = new Mock<IPrintJobManagementRepository>(MockBehavior.Strict);
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        repository.Setup(value => value.GetByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                job,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        repository.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log => log.PrintJobId == job.Id && log.PrinterId == printerId)));
+        repository.Setup(value => value.UpdateAsync(job, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        PrintJobManagementService service = CreateService(repository, snapshots.Object);
+
+        _ = await service.UpdateJobAsync(
+            job.Id.ToString(),
+            new UpdateQueueJobRequest { AssignedPrinterId = printerId.ToString() },
+            "operator");
+
+        Assert.Equal(printerId, job.AssignedPrinterId);
+        Assert.NotNull(job.DispatchedAt);
+        snapshots.VerifyAll();
+        repository.VerifyAll();
+    }
+
+    [Fact]
+    public async Task DispatchJobAsync_FirstStartAttempt_CapturesSnapshotBeforeFileFailure()
+    {
+        Guid printerId = Guid.NewGuid();
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "missing.gcode",
+            Status = PrintJobStatus.Assigned,
+            AssignedPrinterId = printerId,
+            AssignedPrinter = new Printer { Id = printerId, Name = "printer" },
+            GcodeFileId = Guid.NewGuid(),
+            GcodeFile = new GcodeFile
+            {
+                Id = Guid.NewGuid(),
+                Name = "missing.gcode",
+                FileName = "missing.gcode",
+                FilePath = "/missing",
+            },
+        };
+        var repository = new Mock<IPrintJobManagementRepository>(MockBehavior.Strict);
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        var storage = new Mock<IStoragePathService>(MockBehavior.Strict);
+        repository.Setup(value => value.GetByIdWithRelationsAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                job,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        repository.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log => log.PrintJobId == job.Id && log.PrinterId == printerId)));
+        repository.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        storage.Setup(value => value.GetGcodeStorageDirectory())
+            .Returns("/home/jpapiez/s/pf-wt/714/nonexistent-test-storage");
+        PrintJobManagementService service = CreateService(
+            repository,
+            snapshots.Object,
+            storage.Object);
+
+        Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto result =
+            await service.DispatchJobAsync(job.Id.ToString(), "operator");
+
+        Assert.Equal(nameof(PrintJobStatus.Assigned), result.Status);
+        Assert.NotNull(job.DispatchedAt);
+        Assert.Contains("not found on disk", job.FailureReason, StringComparison.OrdinalIgnoreCase);
+        snapshots.VerifyAll();
+        repository.Verify(
+            value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    private static PrintJobManagementService CreateService(
+        Mock<IPrintJobManagementRepository> repository,
+        IPartOutputSnapshotService? snapshots = null,
+        IStoragePathService? storage = null)
     {
         return new PrintJobManagementService(
             repository.Object,
             NullLogger<PrintJobManagementService>.Instance,
             Mock.Of<IPrintersService>(),
-            Mock.Of<IStoragePathService>(),
+            storage ?? Mock.Of<IStoragePathService>(),
             Mock.Of<IHubContext<PrinterHub>>(),
             Mock.Of<IStoredFileOperationsService>(),
             Mock.Of<IPrinterStatusCacheReader>(),
@@ -197,6 +333,7 @@ public class PrintJobManagementServiceQueueMappingTests
             jobCostCalculationService: Mock.Of<IJobCostCalculationService>(),
             cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
-            settingsService: null);
+            settingsService: null,
+            partOutputSnapshotService: snapshots);
     }
 }

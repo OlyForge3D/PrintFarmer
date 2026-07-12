@@ -36,6 +36,12 @@ public interface IPrintJobManagementRepository
     /// </summary>
     void Add(PrintJob job);
 
+    /// <summary>Adds a print job asynchronously without saving.</summary>
+    Task AddWithoutSaveAsync(PrintJob job, CancellationToken ct = default);
+
+    /// <summary>Adds a dispatch audit row without saving.</summary>
+    void AddDispatchLog(DispatchLog log);
+
     /// <summary>
     /// Remove a print job from the change tracker without saving.
     /// Call SaveChangesAsync() separately to persist.

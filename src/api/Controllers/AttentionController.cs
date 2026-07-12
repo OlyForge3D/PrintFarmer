@@ -5,6 +5,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
+using Farm.Web.Api.Infrastructure.PartsInventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -223,6 +224,12 @@ public sealed class AttentionController(
             return disabled;
         }
 
+        if (actionKind == AttentionActionKind.Harvest
+            && !_featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.PrintedPartsInventory);
+        }
+
         if (!TryGetUserId(out Guid userId, out ActionResult? error))
         {
             return error!;
@@ -234,6 +241,17 @@ public sealed class AttentionController(
 
         bool isFarmAdmin = User?.IsInRole(AttentionService.MaintenanceRoleName) ?? false;
         AttentionActionResult result = await _service.ExecuteActionAsync(userId, userName, isFarmAdmin, attentionItemId, actionKind, cancellationToken);
+        if (result.Outcome == AttentionActionOutcome.Conflict)
+        {
+            switch (result.Problem)
+            {
+                case AttentionPartMappingRequiredProblem mappingRequired:
+                    return PartsInventoryProblemDetails.PartMappingRequired(mappingRequired.Details);
+                case AttentionWrongBinProblem wrongBin:
+                    return PartsInventoryProblemDetails.WrongBin(wrongBin.Details);
+            }
+        }
+
         IActionResult response = result.Outcome switch
         {
             AttentionActionOutcome.Ok => Ok(new { outcome = result.Outcome.ToString() }),

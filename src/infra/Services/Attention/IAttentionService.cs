@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Dtos.PartsInventory;
 
 namespace Farm.Infrastructure.Services.Attention;
 
@@ -52,7 +53,52 @@ public sealed record AttentionFeedResult(AttentionFeedDto? Feed, bool InvalidCur
 /// <summary>
 /// Result of an action-dispatch operation.
 /// </summary>
-public sealed record AttentionActionResult(AttentionActionOutcome Outcome, string? Reason);
+public sealed record AttentionActionResult
+{
+    public AttentionActionResult(
+        AttentionActionOutcome outcome,
+        string? reason,
+        AttentionActionProblem? problem = null)
+    {
+        if (problem is not null && outcome != AttentionActionOutcome.Conflict)
+        {
+            throw new ArgumentException(
+                "A typed attention action problem is valid only for a conflict outcome.",
+                nameof(problem));
+        }
+
+        Outcome = outcome;
+        Reason = reason;
+        Problem = problem;
+    }
+
+    public AttentionActionOutcome Outcome { get; }
+
+    public string? Reason { get; }
+
+    public AttentionActionProblem? Problem { get; }
+}
+
+/// <summary>Discriminator for neutral typed action failures.</summary>
+public enum AttentionActionProblemKind
+{
+    PartMappingRequired = 0,
+    WrongBin = 1,
+}
+
+/// <summary>
+/// Neutral discriminated union for action failures that require a canonical
+/// transport mapping. Infrastructure remains independent of ASP.NET types.
+/// </summary>
+public abstract record AttentionActionProblem(AttentionActionProblemKind Kind);
+
+/// <summary>Typed missing printed-part mapping failure.</summary>
+public sealed record AttentionPartMappingRequiredProblem(PartMappingRequiredResponse Details)
+    : AttentionActionProblem(AttentionActionProblemKind.PartMappingRequired);
+
+/// <summary>Typed wrong destination-bin failure.</summary>
+public sealed record AttentionWrongBinProblem(WrongBinResponse Details)
+    : AttentionActionProblem(AttentionActionProblemKind.WrongBin);
 
 /// <summary>
 /// Orchestrates the unified attention feed: composes items across every registered

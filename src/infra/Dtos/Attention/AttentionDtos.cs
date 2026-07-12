@@ -81,7 +81,7 @@ public enum AttentionActionKind
     /// <summary>Snooze the item for a duration; use the dedicated snooze endpoint.</summary>
     Snooze = 6,
 
-    /// <summary>Harvest a completed plate (reserved for F9/#714; currently not offered).</summary>
+    /// <summary>Harvest a completed plate into printed-part inventory.</summary>
     Harvest = 7,
 }
 
