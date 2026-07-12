@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
@@ -42,6 +43,7 @@ public class JobQueueService : IJobQueueService
     private readonly IAutoDispatchService? _autoDispatchService;
     private readonly IPrinterGroupService? _printerGroupService;
     private readonly ISettingsService? _settingsService;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -54,6 +56,7 @@ public class JobQueueService : IJobQueueService
     /// <param name="autoDispatchService">Optional auto-dispatch ready-gate service for triggering bed-clear confirmation on idle printers</param>
     /// <param name="printerGroupService">Optional printer group service for ACL checks on queue submission</param>
     /// <param name="settingsService">Optional app settings service for queue deadline policy enforcement</param>
+    /// <param name="coverageBroadcaster">Optional filament coverage invalidation broadcaster.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -63,7 +66,8 @@ public class JobQueueService : IJobQueueService
         IAutoDispatchTrigger? dispatchTrigger = null,
         IAutoDispatchService? autoDispatchService = null,
         IPrinterGroupService? printerGroupService = null,
-        ISettingsService? settingsService = null)
+        ISettingsService? settingsService = null,
+        IFilamentCoverageBroadcaster? coverageBroadcaster = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -76,6 +80,7 @@ public class JobQueueService : IJobQueueService
         _autoDispatchService = autoDispatchService;
         _printerGroupService = printerGroupService;
         _settingsService = settingsService;
+        _coverageBroadcaster = coverageBroadcaster;
     }
 
     /// <summary>
@@ -204,6 +209,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = 0,
             RequiredNozzleDiameter = j.RequiredNozzleDiameter,
             RequiredMaterialType = j.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(j),
             EstimatedPrintTime = j.EstimatedPrintTime,
             EstimatedFilamentUsage = j.EstimatedFilamentUsage,
             ActualStartTime = j.ActualStartTime,
@@ -315,7 +321,13 @@ public class JobQueueService : IJobQueueService
             Priority = (int)request.Priority,
             QueuePosition = await _dataService.GetNextQueuePositionAsync(assignedPrinterId.Value, ct),
             RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-            RequiredMaterialType = request.RequiredMaterialType,
+
+            // Persist the effective scalar (request value falling back to G-code metadata),
+            // matching what dispatch/matching already computes above in effectiveRequest.
+            // Fixes the pre-#710 gap where the pre-fallback request value was persisted
+            // even though dispatch and validation compare against the fallback-aware value.
+            RequiredMaterialType = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper
+                .ResolveEffectiveMaterial(request.RequiredMaterialType, gcode),
             EstimatedPrintTime = gcode.EstimatedPrintTimeMinutes.HasValue ? TimeSpan.FromMinutes(gcode.EstimatedPrintTimeMinutes.Value) : null,
             EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
             ProjectId = request.ProjectId,
@@ -334,6 +346,13 @@ public class JobQueueService : IJobQueueService
             DeadlineAtUtc = resolvedDeadline
         };
 
+        // Project per-extruder G-code metadata onto the newly built job so that
+        // JobQueueService, PrintJobManagementService, and rerun all produce identical
+        // per-tool requirements — mandatory for authoritative multi-material swap
+        // validation on the guided flow endpoint. No-op when the source lacks
+        // per-extruder metadata.
+        Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcode);
+
         // Calculate estimated cost if cost calculator is available
         if (_costCalculator != null && job.SpoolmanFilamentId.HasValue)
         {
@@ -351,7 +370,13 @@ public class JobQueueService : IJobQueueService
         }
 
         await _repo.AddAsync(job, ct);
-        await _repo.SaveChangesAsync(ct);
+        if (_coverageBroadcaster is not null && assignedPrinterId.HasValue)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                assignedPrinterId.Value,
+                FilamentCoverageChangeReasons.JobAssignment,
+                ct).ConfigureAwait(false);
+        }
 
         // Notify auto-dispatch that a new job was queued for this printer.
         // This triggers immediate dispatch (skipping idle threshold) if the
@@ -392,6 +417,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             SpoolmanFilamentId = job.SpoolmanFilamentId,
@@ -441,6 +467,7 @@ public class JobQueueService : IJobQueueService
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
                 RequiredMaterialType = job.RequiredMaterialType,
+                ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
                 EstimatedPrintTime = job.EstimatedPrintTime,
                 EstimatedFilamentUsage = job.EstimatedFilamentUsage,
                 ActualStartTime = job.ActualStartTime,
@@ -491,8 +518,16 @@ public class JobQueueService : IJobQueueService
             return false;
         }
 
+        Guid? priorAssignedPrinterId = job.AssignedPrinterId;
         await _repo.RemoveAsync(job, ct);
-        await _repo.SaveChangesAsync(ct);
+        if (_coverageBroadcaster is not null && priorAssignedPrinterId.HasValue)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                priorAssignedPrinterId.Value,
+                FilamentCoverageChangeReasons.QueueChanged,
+                ct).ConfigureAwait(false);
+        }
+
         return true;
     }
 
@@ -530,6 +565,7 @@ public class JobQueueService : IJobQueueService
             Status = (PrintJobStatus?)job.Status,
             Priority = job.Priority,
             QueuePosition = job.QueuePosition,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             EstimatedCost = job.EstimatedCost,
@@ -575,6 +611,9 @@ public class JobQueueService : IJobQueueService
         {
             return null;
         }
+
+        Guid? priorAssignedPrinterId = job.AssignedPrinterId;
+        PrintJobStatus priorStatus = job.Status;
 
         // Update fields if provided
         if (request.Status.HasValue)
@@ -644,6 +683,23 @@ public class JobQueueService : IJobQueueService
 
         await _repo.SaveChangesAsync(ct);
 
+        bool assignmentChanged = request.AssignedPrinterId.HasValue
+            && priorAssignedPrinterId != job.AssignedPrinterId;
+        bool statusChanged = request.Status.HasValue && priorStatus != job.Status;
+        if (_coverageBroadcaster is not null && (assignmentChanged || statusChanged))
+        {
+            string reason = assignmentChanged
+                ? FilamentCoverageChangeReasons.JobAssignment
+                : FilamentCoverageChangeReasons.QueueChanged;
+            foreach (Guid printerId in new[] { priorAssignedPrinterId, job.AssignedPrinterId }
+                .OfType<Guid>()
+                .Distinct())
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(printerId, reason, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
         // Reload printer if assignment changed
         if (request.AssignedPrinterId.HasValue)
         {
@@ -662,6 +718,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             ActualStartTime = job.ActualStartTime,

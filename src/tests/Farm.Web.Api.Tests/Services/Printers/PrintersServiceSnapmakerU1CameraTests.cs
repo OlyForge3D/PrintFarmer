@@ -142,7 +142,8 @@ public class PrintersServiceSnapmakerU1CameraTests
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             Mock.Of<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(),
             Mock.Of<IGo2RtcService>(),
-            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>());
+            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
     }
 
     private static AppDbContext CreateDbContext()

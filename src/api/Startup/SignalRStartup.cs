@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Json;
 
 namespace Farm.Web.Api.Startup;
@@ -31,6 +32,7 @@ public static class SignalRStartup
             // Register custom converters for complex types
             options.PayloadSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
             options.PayloadSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
+            options.PayloadSerializerOptions.Converters.Add(new FilamentCoverageStatusJsonConverter());
 
             // Default string enum converter
             options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());

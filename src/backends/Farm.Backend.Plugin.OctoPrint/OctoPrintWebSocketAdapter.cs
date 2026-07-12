@@ -7,6 +7,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -24,12 +25,14 @@ public sealed class OctoPrintWebSocketAdapter(
     ILogger logger,
     IOctoPrintClient octoPrintClient,
     IHubContext<PrinterHub> hub,
-    IPrinterStatusCacheWriter statusCacheWriter) : IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IDisposable
 {
     private readonly ILogger _logger = logger;
     private readonly IOctoPrintClient _octoPrintClient = octoPrintClient;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly Guid _printerId = printerId;
     private readonly Printer _printer = printer;
     private readonly CancellationTokenSource _cts = new();
@@ -41,6 +44,7 @@ public sealed class OctoPrintWebSocketAdapter(
     private int _consecutiveFailures = 0;
     private bool _isAuthenticated = false;
     private string? _sessionToken;
+    private double? _lastBroadcastProgress;
 
     // API state tracking
     private string _apiState = "unset"; // "responding", "authFail", "noResponse"
@@ -264,6 +268,15 @@ public sealed class OctoPrintWebSocketAdapter(
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
             await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
+#pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
+            bool progressChanged = _lastBroadcastProgress is null || status.Progress is null
+                ? _lastBroadcastProgress != status.Progress
+                : Math.Abs(_lastBroadcastProgress.Value - status.Progress.Value) > 0.01;
+#pragma warning restore S1244
+            _lastBroadcastProgress = status.Progress;
+            await _coverageBroadcaster
+                .BroadcastJobProgressIfChangedAsync(_printerId, progressChanged, ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {

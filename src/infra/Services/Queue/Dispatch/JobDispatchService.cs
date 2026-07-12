@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -18,7 +19,8 @@ public class JobDispatchService(
     IPrintJobManagementService printJobManagement,
     ISpoolmanService spoolmanService,
     AppDbContext db,
-    ILogger<JobDispatchService> logger) : IJobDispatchService
+    ILogger<JobDispatchService> logger,
+    IFilamentCoverageBroadcaster coverageBroadcaster) : IJobDispatchService
 {
     public async Task<List<DispatchCandidateDto>> FindCandidatesAsync(Guid jobId, CancellationToken ct = default)
     {
@@ -132,6 +134,10 @@ public class JobDispatchService(
         });
 
         await db.SaveChangesAsync(ct);
+        await coverageBroadcaster.BroadcastPrinterChangedAsync(
+            printerId,
+            FilamentCoverageChangeReasons.JobAssignment,
+            ct).ConfigureAwait(false);
 
         logger.LogInformation(
             "Dispatching job {JobId} to printer {PrinterName} (score: {Score})",

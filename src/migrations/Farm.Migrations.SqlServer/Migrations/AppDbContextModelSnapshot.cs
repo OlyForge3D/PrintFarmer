@@ -855,6 +855,57 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("FailureDetectionIncidents");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentSwapOverride", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AffectedJobIdsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExpectedMaterial")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ScannedMaterial")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("SpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToolheadIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserId")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "CreatedAtUtc")
+                        .HasDatabaseName("IX_FilamentSwapOverrides_PrinterId_CreatedAtUtc");
+
+                    b.ToTable("FilamentSwapOverrides");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3289,6 +3340,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("RequiredMaterialType")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("RequiredMaterialsPerToolJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<decimal?>("RequiredNozzleDiameter")
                         .HasColumnType("decimal(18,2)");
 
@@ -4838,6 +4892,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("ToolheadModelDefId");
+
+                    b.HasIndex("PrinterId", "Index")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Toolheads_PrinterId_Index");
 
                     b.ToTable("Toolheads");
                 });

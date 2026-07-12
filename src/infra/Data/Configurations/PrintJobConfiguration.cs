@@ -82,6 +82,11 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
             .HasForeignKey(pj => pj.HarvestedIntoBinId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Per-tool material requirements: RequiredMaterialsPerToolJson is stored as text;
+        // the typed RequiredMaterialsPerTool accessor is [NotMapped] but declared explicitly
+        // here so the mapping remains obvious to future readers.
+        builder.Ignore(pj => pj.RequiredMaterialsPerTool);
+
         // History seeding fields
         builder.Property(pj => pj.ExternalJobId).HasMaxLength(255);
         builder.Property(pj => pj.WasSeededFromHistory).HasDefaultValue(false);

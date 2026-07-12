@@ -9,6 +9,7 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,11 +22,13 @@ public sealed class MoonrakerSubscriptionService(
     IServiceScopeFactory scopeFactory,
     ILogger<MoonrakerSubscriptionService> logger,
     IHttpClientFactory httpClientFactory,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
 {
     private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();
@@ -2227,6 +2230,11 @@ public sealed class MoonrakerSubscriptionService(
         // Detect state transitions for job completion synchronization
         string? previousState = state.PreviousState;
         bool stateChanged = stateValue != null && stateValue != previousState;
+#pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
+        bool progressChanged = state.Progress is null || progress is null
+            ? state.Progress != progress
+            : Math.Abs(state.Progress.Value - progress.Value) > 0.01;
+#pragma warning restore S1244
 
         // Update persistent state (including PreviousState tracking)
         if (stateValue != null)
@@ -2256,6 +2264,10 @@ public sealed class MoonrakerSubscriptionService(
         {
             await CheckAndSyncJobCompletionAsync(printerId, previousState, stateValue!, ct);
         }
+
+        await _coverageBroadcaster
+            .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
