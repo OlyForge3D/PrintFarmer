@@ -229,34 +229,21 @@ public class PartHarvestServiceTests : IDisposable
     {
         (PrintJob job, PartInventory bracket) = await SeedCompletedJobWithMappingAsync(copies: 2, mappingQuantity: 3);
 
-        Guid altId;
-        await using (var db = new AppDbContext(_options))
-        {
-            var alt = new PartInventory
-            {
-                Id = Guid.NewGuid(),
-                Sku = "PF-CLIP-99",
-                Name = "Clip",
-                DefaultBinId = bracket.DefaultBinId,
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            };
-            _ = db.PartInventories.Add(alt);
-            _ = await db.SaveChangesAsync();
-            altId = alt.Id;
-        }
-
         PartHarvestService sut = CreateSut();
         HarvestResult result = await sut.HarvestJobAsync(
             job.Id,
-            new HarvestJobRequest(Outputs: new[] { new HarvestOutputRequestItem("PF-CLIP-99", 4) }),
+            new HarvestJobRequest(
+                Outputs: [new HarvestOutputRequestItem(bracket.Sku, 4)],
+                OverrideReason: "Operator verified four good parts."),
             null);
 
         Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
         await using var db2 = new AppDbContext(_options);
-        Assert.Equal(0, (await db2.PartInventories.SingleAsync(p => p.Id == bracket.Id)).OnHand);
-        Assert.Equal(4, (await db2.PartInventories.SingleAsync(p => p.Id == altId)).OnHand);
+        Assert.Equal(4, (await db2.PartInventories.SingleAsync(p => p.Id == bracket.Id)).OnHand);
+        PartHarvestOutputSnapshot snapshot = await db2.PartHarvestOutputSnapshots.SingleAsync();
+        Assert.Equal(PartHarvestOutputOrigin.ExplicitOutputs, snapshot.Origin);
+        Assert.True(snapshot.OverrideApplied);
+        Assert.Equal("Operator verified four good parts.", snapshot.OverrideReason);
     }
 
     [Fact]
@@ -389,10 +376,14 @@ public class PartHarvestServiceTests : IDisposable
         Assert.Equal(PartInventoryOutcome.Ok, first.Outcome);
         Assert.Equal(PartInventoryOutcome.IdempotentReplay, second.Outcome);
         Assert.True(second.Response!.AlreadyHarvested);
+        HarvestOutputResponse firstOutput = Assert.Single(first.Response!.Outputs);
+        HarvestOutputResponse replayOutput = Assert.Single(second.Response.Outputs);
+        Assert.Equal(firstOutput, replayOutput);
 
         await using var db = new AppDbContext(_options);
         Assert.Equal(2, (await db.PartInventories.SingleAsync(p => p.Id == part.Id)).OnHand);
         _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+        _ = Assert.Single(await db.PartHarvestOutputSnapshots.ToListAsync());
     }
 
     [Fact]
@@ -425,6 +416,7 @@ public class PartHarvestServiceTests : IDisposable
             Assert.NotNull(r.Response);
             Assert.True(r.Response!.AlreadyHarvested);
             _ = Assert.Single(r.Response.Adjustments);
+            _ = Assert.Single(r.Response.Outputs);
         });
     }
 
@@ -566,12 +558,18 @@ public class PartHarvestServiceTests : IDisposable
             null);
 
         Assert.Equal(PartInventoryOutcome.WrongBin, result.Outcome);
-        Assert.Equal("BIN-B", result.WrongBin!.ActualBinCode);
-        Assert.Equal(["BIN-A"], result.WrongBin.ExpectedBinCodes);
+        WrongBinMismatchResponse mismatch = Assert.Single(result.WrongBin!.Mismatches);
+        Assert.Equal(part.Sku, mismatch.PartSku);
+        Assert.Equal("BIN-A", mismatch.ExpectedBinCode);
+        Assert.Equal("BIN-B", mismatch.ScannedBinCode);
         await using var verify = new AppDbContext(_options);
         Assert.Equal(0, (await verify.PartInventories.SingleAsync(p => p.Id == part.Id)).OnHand);
         Assert.Null((await verify.PrintJobs.SingleAsync(j => j.Id == job.Id)).HarvestedAt);
         Assert.Empty(await verify.PartInventoryAdjustments.ToListAsync());
+        Assert.Empty(await verify.PartHarvestOutputSnapshots.ToListAsync());
+        BarcodeScanLog scan = await verify.BarcodeScanLogs.SingleAsync();
+        Assert.Equal(BarcodeScanOutcome.WrongBin, scan.Outcome);
+        Assert.Equal(part.Id, scan.PartInventoryId);
     }
 
     [Fact]
@@ -654,6 +652,7 @@ public class PartHarvestServiceTests : IDisposable
         Assert.Equal(int.MaxValue, (await verify.PartInventories.SingleAsync(p => p.Id == overflowId)).OnHand);
         Assert.Null((await verify.PrintJobs.SingleAsync(j => j.Id == job.Id)).HarvestedAt);
         Assert.Empty(await verify.PartInventoryAdjustments.ToListAsync());
+        Assert.Empty(await verify.PartHarvestOutputSnapshots.ToListAsync());
         Assert.Empty(await verify.BarcodeScanLogs.ToListAsync());
     }
 
@@ -684,6 +683,273 @@ public class PartHarvestServiceTests : IDisposable
         Assert.Equal(part.DefaultBinId, scan.BinId);
         Assert.Equal("operator-1", scan.UserId);
         Assert.Equal(1, (await verify.PartInventoryAdjustments.SingleAsync()).ResultingBalance);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_JobSnapshotWinsAfterMappingEdit()
+    {
+        (PrintJob job, PartInventory part) = await SeedCompletedJobWithMappingAsync(mappingQuantity: 2);
+        await using (var db = new AppDbContext(_options))
+        {
+            PartOutputMapping mapping = await db.PartOutputMappings.SingleAsync();
+            Bin bin = await db.Bins.SingleAsync(value => value.Id == part.DefaultBinId);
+            _ = db.PrintJobPartOutputSnapshots.Add(new PrintJobPartOutputSnapshot
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = job.Id,
+                PartInventoryId = part.Id,
+                Sku = part.Sku,
+                QuantityPerPrint = 2,
+                ExpectedBinId = bin.Id,
+                ExpectedBinCode = bin.Code,
+                SourceKind = PartOutputMappingSourceKind.GcodeFile,
+                SourceFileId = job.GcodeFileId!.Value,
+                SourceMappingId = mapping.Id,
+                Sequence = 0,
+                CreatedAt = DateTime.UtcNow,
+            });
+            mapping.Quantity = 9;
+            _ = await db.SaveChangesAsync();
+        }
+
+        HarvestResult result = await CreateSut().HarvestJobAsync(job.Id, new HarvestJobRequest(), "actor");
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        HarvestOutputResponse output = Assert.Single(result.Response!.Outputs);
+        Assert.Equal(2, output.Quantity);
+        Assert.Equal(PartHarvestOutputOrigin.JobSnapshot, output.Origin);
+        await using var verify = new AppDbContext(_options);
+        Assert.Equal(2, (await verify.PartInventories.SingleAsync(value => value.Id == part.Id)).OnHand);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_TwoSkusDifferentBins_UsesPerSkuAssignmentsAtomically()
+    {
+        (PrintJob job, PartInventory first) = await SeedCompletedJobWithMappingAsync();
+        string firstBinCode;
+        Guid secondId;
+        const string SecondBinCode = "BIN-SECOND";
+        await using (var db = new AppDbContext(_options))
+        {
+            firstBinCode = await db.Bins
+                .Where(value => value.Id == first.DefaultBinId)
+                .Select(value => value.Code)
+                .SingleAsync();
+            var secondBin = new Bin
+            {
+                Id = Guid.NewGuid(),
+                Code = SecondBinCode,
+                Name = "Second",
+                IsActive = true,
+            };
+            var second = new PartInventory
+            {
+                Id = Guid.NewGuid(),
+                Sku = "SKU-SECOND-BIN",
+                Name = "Second",
+                DefaultBinId = secondBin.Id,
+                IsActive = true,
+            };
+            _ = db.Bins.Add(secondBin);
+            _ = db.PartInventories.Add(second);
+            _ = db.PartOutputMappings.Add(new PartOutputMapping
+            {
+                Id = Guid.NewGuid(),
+                PartInventoryId = second.Id,
+                GcodeFileId = job.GcodeFileId,
+                Quantity = 2,
+            });
+            _ = await db.SaveChangesAsync();
+            secondId = second.Id;
+        }
+
+        HarvestResult missingAssignments = await CreateSut().HarvestJobAsync(
+            job.Id,
+            new HarvestJobRequest(),
+            "actor");
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, missingAssignments.Outcome);
+
+        HarvestResult result = await CreateSut().HarvestJobAsync(
+            job.Id,
+            new HarvestJobRequest(OutputBins:
+            [
+                new HarvestOutputBinRequest(first.Sku, firstBinCode),
+                new HarvestOutputBinRequest("SKU-SECOND-BIN", SecondBinCode),
+            ]),
+            "actor");
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        Assert.Null(result.Response!.BinId);
+        Assert.Equal(2, result.Response.Outputs.Count);
+        Assert.Contains(result.Response.Outputs, output =>
+            output.PartSku == first.Sku && output.ActualBinCode == firstBinCode);
+        Assert.Contains(result.Response.Outputs, output =>
+            output.PartSku == "SKU-SECOND-BIN" && output.ActualBinCode == SecondBinCode);
+        await using var verify = new AppDbContext(_options);
+        Assert.Equal(1, (await verify.PartInventories.SingleAsync(value => value.Id == first.Id)).OnHand);
+        Assert.Equal(2, (await verify.PartInventories.SingleAsync(value => value.Id == secondId)).OnHand);
+        Assert.Equal(2, await verify.PartInventoryAdjustments.CountAsync());
+        Assert.Equal(2, await verify.PartHarvestOutputSnapshots.CountAsync());
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_WrongBinOverride_RequiresReasonAndPersistsAudit()
+    {
+        (PrintJob job, PartInventory part) = await SeedCompletedJobWithMappingAsync();
+        await using (var db = new AppDbContext(_options))
+        {
+            _ = db.Bins.Add(new Bin
+            {
+                Id = Guid.NewGuid(),
+                Code = "BIN-WRONG-OVERRIDE",
+                Name = "Wrong",
+                IsActive = true,
+            });
+            _ = await db.SaveChangesAsync();
+        }
+
+        HarvestResult missingReason = await CreateSut().HarvestJobAsync(
+            job.Id,
+            new HarvestJobRequest(
+                BinCode: "BIN-WRONG-OVERRIDE",
+                AllowWrongBin: true,
+                OverrideReason: " "),
+            "actor");
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, missingReason.Outcome);
+
+        HarvestResult overridden = await CreateSut().HarvestJobAsync(
+            job.Id,
+            new HarvestJobRequest(
+                BinCode: "BIN-WRONG-OVERRIDE",
+                AllowWrongBin: true,
+                OverrideReason: "Bin A is temporarily unavailable."),
+            "actor");
+
+        Assert.Equal(PartInventoryOutcome.Ok, overridden.Outcome);
+        HarvestOutputResponse output = Assert.Single(overridden.Response!.Outputs);
+        Assert.Equal(part.Sku, output.PartSku);
+        Assert.NotEqual(output.ExpectedBinCode, output.ActualBinCode);
+        Assert.True(output.OverrideApplied);
+        Assert.Equal("Bin A is temporarily unavailable.", output.OverrideReason);
+        await using var verify = new AppDbContext(_options);
+        PartHarvestOutputSnapshot snapshot = await verify.PartHarvestOutputSnapshots.SingleAsync();
+        Assert.True(snapshot.OverrideApplied);
+        Assert.Equal("Bin A is temporarily unavailable.", snapshot.OverrideReason);
+        Assert.Equal(2, await verify.BarcodeScanLogs.CountAsync(
+            value => value.Outcome == BarcodeScanOutcome.WrongBin));
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_PartialExplicitOutputs_AreRejectedBeforeMutation()
+    {
+        (PrintJob job, PartInventory first) = await SeedCompletedJobWithMappingAsync();
+        await using (var db = new AppDbContext(_options))
+        {
+            var second = new PartInventory
+            {
+                Id = Guid.NewGuid(),
+                Sku = "SKU-PARTIAL-SECOND",
+                Name = "Second",
+                DefaultBinId = first.DefaultBinId,
+                IsActive = true,
+            };
+            _ = db.PartInventories.Add(second);
+            _ = db.PartOutputMappings.Add(new PartOutputMapping
+            {
+                Id = Guid.NewGuid(),
+                PartInventoryId = second.Id,
+                GcodeFileId = job.GcodeFileId,
+                Quantity = 1,
+            });
+            _ = await db.SaveChangesAsync();
+        }
+
+        HarvestResult result = await CreateSut().HarvestJobAsync(
+            job.Id,
+            new HarvestJobRequest(
+                Outputs: [new HarvestOutputRequestItem(first.Sku, 1)],
+                OverrideReason: "Incorrectly omitted second output."),
+            "actor");
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+        await using var verify = new AppDbContext(_options);
+        Assert.Null((await verify.PrintJobs.SingleAsync(value => value.Id == job.Id)).HarvestedAt);
+        Assert.Empty(await verify.PartInventoryAdjustments.ToListAsync());
+        Assert.Empty(await verify.PartHarvestOutputSnapshots.ToListAsync());
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_DuplicateOutputBinSku_IsRejected()
+    {
+        (PrintJob job, PartInventory part) = await SeedCompletedJobWithMappingAsync();
+        string binCode;
+        await using (var db = new AppDbContext(_options))
+        {
+            binCode = await db.Bins
+                .Where(value => value.Id == part.DefaultBinId)
+                .Select(value => value.Code)
+                .SingleAsync();
+        }
+
+        HarvestResult result = await CreateSut().HarvestJobAsync(
+            job.Id,
+            new HarvestJobRequest(OutputBins:
+            [
+                new HarvestOutputBinRequest(part.Sku, binCode),
+                new HarvestOutputBinRequest(part.Sku.ToLowerInvariant(), binCode),
+            ]),
+            "actor");
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_ExplicitOutputsWithoutMapping_SupplyCompleteFinalSet()
+    {
+        Guid jobId;
+        Guid partId;
+        await using (var db = new AppDbContext(_options))
+        {
+            var bin = new Bin
+            {
+                Id = Guid.NewGuid(),
+                Code = "BIN-MANUAL",
+                Name = "Manual",
+                IsActive = true,
+            };
+            var part = new PartInventory
+            {
+                Id = Guid.NewGuid(),
+                Sku = "SKU-MANUAL",
+                Name = "Manual",
+                DefaultBinId = bin.Id,
+                IsActive = true,
+            };
+            var job = new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "legacy-external.gcode",
+                Status = PrintJobStatus.Completed,
+            };
+            _ = db.Bins.Add(bin);
+            _ = db.PartInventories.Add(part);
+            _ = db.PrintJobs.Add(job);
+            _ = await db.SaveChangesAsync();
+            jobId = job.Id;
+            partId = part.Id;
+        }
+
+        HarvestResult result = await CreateSut().HarvestJobAsync(
+            jobId,
+            new HarvestJobRequest(
+                Outputs: [new HarvestOutputRequestItem("SKU-MANUAL", 3)],
+                OverrideReason: "Legacy job manually identified."),
+            "actor");
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        Assert.Equal(PartHarvestOutputOrigin.ExplicitOutputs, Assert.Single(result.Response!.Outputs).Origin);
+        await using var verify = new AppDbContext(_options);
+        Assert.Equal(3, (await verify.PartInventories.SingleAsync(value => value.Id == partId)).OnHand);
     }
 
     [Fact]

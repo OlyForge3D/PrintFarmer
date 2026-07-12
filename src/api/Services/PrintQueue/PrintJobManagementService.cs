@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -41,7 +42,8 @@ public class PrintJobManagementService(
     ICameraSnapshotService? cameraSnapshotService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     ISettingsService? settingsService = null,
-    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IPrintJobManagementService
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IPartOutputSnapshotService? partOutputSnapshotService = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -58,6 +60,7 @@ public class PrintJobManagementService(
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly ISettingsService? _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPartOutputSnapshotService? _partOutputSnapshotService = partOutputSnapshotService;
     private const int QueuePlanningMaxJobs = 5000;
     private const int DefaultEstimatedPrintMinutes = 90;
     private const int MinimumRemainingPrintMinutes = 5;
@@ -528,7 +531,25 @@ public class PrintJobManagementService(
             // Preserves RequiredMaterialType for legacy dispatch / reporting.
             Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
 
-            _ = await _repository.AddAsync(job, cancellationToken);
+            if (_partOutputSnapshotService is null)
+            {
+                _ = await _repository.AddAsync(job, cancellationToken);
+            }
+            else
+            {
+                await _repository.AddWithoutSaveAsync(job, cancellationToken);
+                if (assignedPrinterId.HasValue)
+                {
+                    await PrepareFirstAssignmentAsync(
+                        job,
+                        assignedPrinterId.Value,
+                        userId,
+                        "Assigned during enqueue.",
+                        cancellationToken);
+                }
+
+                await _repository.SaveChangesAsync(cancellationToken);
+            }
 
             _logger.LogInformation("Print job {JobId} enqueued by user {UserId}", job.Id.ToString(), userId);
 
@@ -601,6 +622,15 @@ public class PrintJobManagementService(
             if (!string.IsNullOrEmpty(request.AssignedPrinterId))
             {
                 job.AssignedPrinterId = Guid.Parse(request.AssignedPrinterId);
+                if (priorAssignedPrinterId != job.AssignedPrinterId)
+                {
+                    await PrepareFirstAssignmentAsync(
+                        job,
+                        job.AssignedPrinterId.Value,
+                        userId,
+                        "Assigned during queue update.",
+                        cancellationToken);
+                }
             }
 
             if (!string.IsNullOrEmpty(request.Status))
@@ -836,6 +866,12 @@ public class PrintJobManagementService(
             }
 
             // Update status to Starting
+            await PrepareFirstAssignmentAsync(
+                job,
+                job.AssignedPrinterId.Value,
+                userId,
+                "Dispatched to start printing.",
+                cancellationToken);
             job.Status = PrintJobStatus.Starting;
             job.FailureReason = null;
             job.ActualStartTime = DateTime.UtcNow;
@@ -1056,6 +1092,36 @@ public class PrintJobManagementService(
             _logger.LogError(ex, "Error dispatching print job {JobId}", jobId);
             throw;
         }
+    }
+
+    private async Task PrepareFirstAssignmentAsync(
+        PrintJob job,
+        Guid printerId,
+        string? userId,
+        string reason,
+        CancellationToken ct)
+    {
+        if (_partOutputSnapshotService is null)
+        {
+            return;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        job.DispatchedAt ??= now;
+        job.DispatchMode ??= (int)Farm.Infrastructure.Services.Queue.Dispatch.DispatchMode.Manual;
+        _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
+        _repository.AddDispatchLog(new DispatchLog
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            Action = Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched,
+            DispatchMode = Farm.Infrastructure.Services.Queue.Dispatch.DispatchMode.Manual,
+            DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
+            DispatchedByUserId = userId,
+            Reason = reason,
+            CreatedAtUtc = now,
+        });
     }
 
     /// <summary>

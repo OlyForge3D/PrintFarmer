@@ -517,7 +517,7 @@ public class AttentionServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HarvestResult(
                 PartInventoryOutcome.Ok,
-                new HarvestJobResponse(jobId, Now, null, null, false, []),
+                new HarvestJobResponse(jobId, Now, null, null, false, [], []),
                 null));
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);

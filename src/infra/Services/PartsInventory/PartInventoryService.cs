@@ -17,32 +17,15 @@ namespace Farm.Infrastructure.Services.PartsInventory;
 /// same commit. Uses <see cref="IDbContextFactory{TContext}"/> so the service
 /// is safe to invoke from background workers as well as HTTP request scopes.
 /// </para>
-/// <para>
-/// Concurrency contract:
-/// <list type="bullet">
-///   <item>Idempotency is enforced by the composite unique index
-///     <c>(PartInventoryId, OperationKey)</c>. Same-SKU duplicates surface as
-///     <see cref="PartInventoryOutcome.IdempotentReplay"/> with the actual
-///     committed adjustment and committed <see cref="PartInventory.OnHand"/>,
-///     never an in-memory value from a rolled-back transaction.</item>
-///   <item>On PostgreSQL a failed transaction is <em>poisoned</em>: any further
-///     query raises <c>25P02</c>. We therefore always rollback on
-///     <see cref="DbUpdateException"/> / <see cref="DbUpdateConcurrencyException"/>
-///     and re-read committed state from a fresh <see cref="AppDbContext"/>.</item>
-///   <item><see cref="DbUpdateConcurrencyException"/> on
-///     <see cref="PartInventory"/> (RowVersion contention from a different
-///     writer) triggers a bounded retry against fresh state.</item>
-/// </list>
-/// </para>
+/// Idempotency is enforced by the composite unique index
+/// <c>(PartInventoryId, OperationKey)</c>. Stock arithmetic uses a conditional
+/// database-side update so concurrent writers cannot lose increments.
 /// </summary>
 public class PartInventoryService(
     IDbContextFactory<AppDbContext> dbFactory,
     ILogger<PartInventoryService> logger,
     IOperatorFeatureGate? featureGate = null) : IPartInventoryService
 {
-    /// <summary>Maximum retries for a benign RowVersion collision on <see cref="PartInventory"/>.</summary>
-    private const int MaxConcurrencyRetries = 3;
-
     public async Task<AdjustResult> AdjustAsync(string sku, AdjustCommand command, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sku);
@@ -86,29 +69,7 @@ public class PartInventoryService(
             }
         }
 
-        for (int attempt = 0; attempt < MaxConcurrencyRetries; attempt++)
-        {
-            AdjustResult result = await TryAdjustOnceAsync(trimmedSku, command, operationKey, ct);
-            switch (result.Outcome)
-            {
-                case PartInventoryOutcome.Conflict when attempt < MaxConcurrencyRetries - 1:
-                    // Benign RowVersion collision from a concurrent writer on the same SKU.
-                    // Fresh state on the next iteration lets us serialize behind them.
-                    logger.LogDebug(
-                        "Retrying AdjustAsync for SKU {Sku} after concurrency collision (attempt {Attempt}).",
-                        trimmedSku,
-                        attempt + 1);
-                    continue;
-                default:
-                    return result;
-            }
-        }
-
-        return new AdjustResult(
-            PartInventoryOutcome.Conflict,
-            null,
-            0,
-            "Persistent concurrency conflict; please retry.");
+        return await TryAdjustOnceAsync(trimmedSku, command, operationKey, ct);
     }
 
     public async Task<CreatePartResult> CreatePartAsync(CreatePartCommand command, CancellationToken ct = default)
@@ -285,47 +246,27 @@ public class PartInventoryService(
 
         bool relational = db.Database.IsRelational();
         IDbContextTransaction? transaction = relational
-            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct)
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)
             : null;
 
         try
         {
-            PartInventory? part = await db.PartInventories
-                .FirstOrDefaultAsync(p => p.Sku == trimmedSku, ct);
-            if (part is null)
-            {
-                if (transaction is not null)
-                {
-                    await transaction.RollbackAsync(ct);
-                }
-
-                return new AdjustResult(PartInventoryOutcome.PartNotFound, null, 0, $"SKU '{trimmedSku}' not found.");
-            }
-
-            if (!part.IsActive)
-            {
-                if (transaction is not null)
-                {
-                    await transaction.RollbackAsync(ct);
-                }
-
-                return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, part.OnHand, $"SKU '{trimmedSku}' is inactive.");
-            }
-
             Guid? binId = null;
+            Bin? bin = null;
             if (!string.IsNullOrWhiteSpace(command.BinCode))
             {
                 string trimmedCode = PartInventoryIdentity.NormalizeBinCode(command.BinCode);
-                Bin? bin = await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Code == trimmedCode, ct);
+                bin = await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Code == trimmedCode, ct);
                 if (bin is null || !bin.IsActive)
                 {
-                    if (transaction is not null)
-                    {
-                        await transaction.RollbackAsync(ct);
-                    }
-
-                    return new AdjustResult(PartInventoryOutcome.BinNotFound, null, part.OnHand,
-                        $"Bin '{trimmedCode}' not found or inactive.");
+                    return await RollbackAndReturnAsync(
+                        transaction,
+                        new AdjustResult(
+                            PartInventoryOutcome.BinNotFound,
+                            null,
+                            0,
+                            $"Bin '{trimmedCode}' not found or inactive."),
+                        ct);
                 }
 
                 binId = bin.Id;
@@ -334,54 +275,108 @@ public class PartInventoryService(
             if (command.PrintJobId is Guid printJobId
                 && !await db.PrintJobs.AsNoTracking().AnyAsync(job => job.Id == printJobId, ct))
             {
-                if (transaction is not null)
-                {
-                    await transaction.RollbackAsync(ct);
-                }
-
-                return new AdjustResult(
-                    PartInventoryOutcome.JobNotFound,
-                    null,
-                    part.OnHand,
-                    $"Print job '{printJobId}' not found.");
+                return await RollbackAndReturnAsync(
+                    transaction,
+                    new AdjustResult(
+                        PartInventoryOutcome.JobNotFound,
+                        null,
+                        0,
+                        $"Print job '{printJobId}' not found."),
+                    ct);
             }
 
-            long proposedOnHand = (long)part.OnHand + command.Delta;
-            if (proposedOnHand is < 0 or > int.MaxValue)
+            DateTime now = DateTime.UtcNow;
+            int updated;
+            if (command.Delta > 0)
             {
-                if (transaction is not null)
+                int maxCurrentBalance = int.MaxValue - command.Delta;
+                updated = await db.PartInventories
+                    .Where(part => part.Sku == trimmedSku
+                        && part.IsActive
+                        && part.OnHand <= maxCurrentBalance)
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(part => part.OnHand, part => part.OnHand + command.Delta)
+                            .SetProperty(part => part.UpdatedAt, now),
+                        ct);
+            }
+            else
+            {
+                long requiredBalance = -(long)command.Delta;
+                if (requiredBalance > int.MaxValue)
                 {
-                    await transaction.RollbackAsync(ct);
+                    return await RollbackAndReturnAsync(
+                        transaction,
+                        new AdjustResult(
+                            PartInventoryOutcome.InvalidRequest,
+                            null,
+                            0,
+                            "Adjustment would make on-hand stock negative."),
+                        ct);
                 }
 
-                string message = proposedOnHand < 0
-                    ? "Adjustment would make on-hand stock negative."
-                    : "Adjustment would overflow on-hand stock.";
-                return new AdjustResult(
-                    PartInventoryOutcome.InvalidRequest,
-                    null,
-                    part.OnHand,
-                    message);
+                int minimumCurrentBalance = (int)requiredBalance;
+                updated = await db.PartInventories
+                    .Where(part => part.Sku == trimmedSku
+                        && part.IsActive
+                        && part.OnHand >= minimumCurrentBalance)
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(part => part.OnHand, part => part.OnHand + command.Delta)
+                            .SetProperty(part => part.UpdatedAt, now),
+                        ct);
             }
 
+            if (updated != 1)
+            {
+                PartInventory? current = await db.PartInventories
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(part => part.Sku == trimmedSku, ct);
+                if (current is null)
+                {
+                    return await RollbackAndReturnAsync(
+                        transaction,
+                        new AdjustResult(
+                            PartInventoryOutcome.PartNotFound,
+                            null,
+                            0,
+                            $"SKU '{trimmedSku}' not found."),
+                        ct);
+                }
+
+                string message = !current.IsActive
+                    ? $"SKU '{trimmedSku}' is inactive."
+                    : command.Delta < 0
+                        ? "Adjustment would make on-hand stock negative."
+                        : "Adjustment would overflow on-hand stock.";
+                return await RollbackAndReturnAsync(
+                    transaction,
+                    new AdjustResult(
+                        PartInventoryOutcome.InvalidRequest,
+                        null,
+                        current.OnHand,
+                        message),
+                    ct);
+            }
+
+            PartInventory part = await db.PartInventories
+                .AsNoTracking()
+                .SingleAsync(value => value.Sku == trimmedSku, ct);
             var adjustment = new PartInventoryAdjustment
             {
                 Id = Guid.NewGuid(),
                 PartInventoryId = part.Id,
                 BinId = binId,
                 Delta = command.Delta,
-                ResultingBalance = (int)proposedOnHand,
+                ResultingBalance = part.OnHand,
                 Reason = command.Reason,
                 PrintJobId = command.PrintJobId,
                 OperationKey = operationKey,
                 Notes = command.Notes,
                 UserId = command.UserId,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = now,
             };
             _ = db.PartInventoryAdjustments.Add(adjustment);
-
-            part.OnHand = (int)proposedOnHand;
-            part.UpdatedAt = DateTime.UtcNow;
 
             _ = await db.SaveChangesAsync(ct);
             if (transaction is not null)
@@ -389,12 +384,7 @@ public class PartInventoryService(
                 await transaction.CommitAsync(ct);
             }
 
-            // Reload the bin for the DTO (adjustment.Bin may be null when we
-            // resolved binId via AsNoTracking above).
-            Bin? binForDto = binId.HasValue
-                ? await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Id == binId, ct)
-                : null;
-            adjustment.Bin = binForDto;
+            adjustment.Bin = bin;
             return new AdjustResult(PartInventoryOutcome.Ok, ToDto(adjustment, part.Sku), part.OnHand, null);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex) && operationKey is not null)
@@ -423,30 +413,6 @@ public class PartInventoryService(
                 0,
                 "Duplicate operation key but prior adjustment could not be reloaded.");
         }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            if (transaction is not null)
-            {
-                try
-                {
-                    await transaction.RollbackAsync(ct);
-                }
-                catch
-                {
-                    // swallow — the outer catch will observe the transaction as rolled back either way.
-                }
-            }
-
-            logger.LogInformation(
-                ex,
-                "Concurrency (RowVersion) conflict on SKU {Sku}; caller will retry.",
-                trimmedSku);
-            return new AdjustResult(
-                PartInventoryOutcome.Conflict,
-                null,
-                0,
-                "Concurrent adjustment collision; please retry.");
-        }
         catch
         {
             if (transaction is not null)
@@ -470,6 +436,19 @@ public class PartInventoryService(
                 await transaction.DisposeAsync();
             }
         }
+    }
+
+    private static async Task<AdjustResult> RollbackAndReturnAsync(
+        IDbContextTransaction? transaction,
+        AdjustResult result,
+        CancellationToken ct)
+    {
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync(ct);
+        }
+
+        return result;
     }
 
     /// <summary>

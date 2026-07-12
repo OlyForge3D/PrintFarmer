@@ -50,6 +50,18 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         _context.PrintJobs.Add(job);
     }
 
+    public async Task AddWithoutSaveAsync(PrintJob job, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        _ = await _context.PrintJobs.AddAsync(job, ct);
+    }
+
+    public void AddDispatchLog(DispatchLog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        _ = _context.DispatchLogs.Add(log);
+    }
+
     public void Remove(PrintJob job)
     {
         _context.PrintJobs.Remove(job);

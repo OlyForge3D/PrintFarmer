@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
+using Farm.Web.Api.Infrastructure.PartsInventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -332,7 +333,6 @@ public class JobQueueController(
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
-    [ProducesResponseType(422)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<HarvestJobResponse>> HarvestJobAsync(
         Guid id,
@@ -359,8 +359,10 @@ public class JobQueueController(
             PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.JobNotCompleted => Conflict(new { message = result.Message }),
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
-            PartInventoryOutcome.WrongBin => Conflict(result.WrongBin),
-            PartInventoryOutcome.NoMappings => UnprocessableEntity(new { message = result.Message }),
+            PartInventoryOutcome.WrongBin when result.WrongBin is not null
+                => PartsInventoryProblemDetails.WrongBin(result.WrongBin),
+            PartInventoryOutcome.NoMappings when result.MappingRequired is not null
+                => PartsInventoryProblemDetails.PartMappingRequired(result.MappingRequired),
             PartInventoryOutcome.PartNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),

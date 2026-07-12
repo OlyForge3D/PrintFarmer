@@ -3,6 +3,8 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -95,7 +97,14 @@ public sealed class JobDispatchServiceTests : IDisposable
     {
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
-        JobDispatchService service = CreateService(management, broadcaster, SpoolmanWithFilament(73));
+        var service = new JobDispatchService(
+            new Mock<IDispatchScorer>(MockBehavior.Strict).Object,
+            management.Object,
+            SpoolmanWithFilament(73).Object,
+            _db,
+            NullLogger<JobDispatchService>.Instance,
+            broadcaster.Object,
+            CreateRealSnapshotService());
         _saveInterceptor.FailNextSave = true;
 
         Func<Task> act = () => service.DispatchJobAsync(
@@ -113,6 +122,60 @@ public sealed class JobDispatchServiceTests : IDisposable
         persisted.AssignedPrinterId.Should().BeNull();
         persisted.SpoolmanSpoolId.Should().BeNull();
         persisted.SpoolmanFilamentId.Should().BeNull();
+        (await _db.DispatchLogs.CountAsync()).Should().Be(0);
+        (await _db.PrintJobPartOutputSnapshots.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DispatchJobAsync_FirstDispatchCapturesSnapshot_RetryDoesNotOverwrite()
+    {
+        Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
+        management
+            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueuedPrintJobDto
+            {
+                Id = _jobId.ToString(),
+                AssignedPrinterId = _printerId.ToString(),
+                Status = nameof(PrintJobStatus.Assigned),
+            });
+        Mock<IFilamentCoverageBroadcaster> broadcaster = Broadcaster();
+        PartOutputSnapshotService snapshots = CreateRealSnapshotService();
+        var service = new JobDispatchService(
+            new Mock<IDispatchScorer>(MockBehavior.Strict).Object,
+            management.Object,
+            SpoolmanWithFilament(73).Object,
+            _db,
+            NullLogger<JobDispatchService>.Instance,
+            broadcaster.Object,
+            snapshots);
+
+        _ = await service.DispatchJobAsync(
+            _jobId,
+            _printerId,
+            "operator",
+            Score(),
+            CancellationToken.None);
+        PartOutputMapping mapping = await _db.PartOutputMappings.SingleAsync();
+        mapping.Quantity = 9;
+        _ = await _db.SaveChangesAsync();
+        _ = await service.DispatchJobAsync(
+            _jobId,
+            _printerId,
+            "operator",
+            Score(),
+            CancellationToken.None);
+
+        _db.ChangeTracker.Clear();
+        PrintJobPartOutputSnapshot snapshot =
+            await _db.PrintJobPartOutputSnapshots.SingleAsync();
+        snapshot.QuantityPerPrint.Should().Be(2);
+        (await _db.DispatchLogs.CountAsync()).Should().Be(2);
+        management.Verify(
+            value => value.DispatchJobAsync(
+                _jobId.ToString(),
+                "operator",
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
     }
 
     [Fact]
@@ -203,14 +266,24 @@ public sealed class JobDispatchServiceTests : IDisposable
         Mock<IPrintJobManagementService> management,
         Mock<IFilamentCoverageBroadcaster> broadcaster,
         Mock<ISpoolmanService> spoolman,
-        Mock<IDispatchScorer>? scorer = null)
-        => new(
+        Mock<IDispatchScorer>? scorer = null,
+        Mock<IPartOutputSnapshotService>? snapshots = null)
+    {
+        snapshots ??= new Mock<IPartOutputSnapshotService>();
+        snapshots
+            .Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                It.IsAny<PrintJob>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        return new(
             (scorer ?? new Mock<IDispatchScorer>(MockBehavior.Strict)).Object,
             management.Object,
             spoolman.Object,
             _db,
             NullLogger<JobDispatchService>.Instance,
-            broadcaster.Object);
+            broadcaster.Object,
+            snapshots.Object);
+    }
 
     private Mock<IFilamentCoverageBroadcaster> Broadcaster(Action? onBroadcast = null)
     {
@@ -223,6 +296,13 @@ public sealed class JobDispatchServiceTests : IDisposable
             .Callback(() => onBroadcast?.Invoke())
             .Returns(Task.CompletedTask);
         return broadcaster;
+    }
+
+    private PartOutputSnapshotService CreateRealSnapshotService()
+    {
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
+        gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        return new PartOutputSnapshotService(_db, gate.Object);
     }
 
     private Mock<ISpoolmanService> SpoolmanWithFilament(int filamentId)
@@ -274,10 +354,52 @@ public sealed class JobDispatchServiceTests : IDisposable
             IsEnabled = true,
             IsAvailable = true,
         };
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/dispatch",
+            FolderType = "gcode",
+        };
+        var gcode = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "dispatch.gcode",
+            FileName = "dispatch.gcode",
+            FilePath = "/dispatch",
+            FolderId = folder.Id,
+            FileHash = "dispatch",
+            FileSizeBytes = 1,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var bin = new Bin
+        {
+            Id = Guid.NewGuid(),
+            Code = "BIN-DISPATCH",
+            Name = "Dispatch",
+            IsActive = true,
+        };
+        var part = new PartInventory
+        {
+            Id = Guid.NewGuid(),
+            Sku = "SKU-DISPATCH",
+            Name = "Dispatch",
+            DefaultBinId = bin.Id,
+            IsActive = true,
+        };
+        var mapping = new PartOutputMapping
+        {
+            Id = Guid.NewGuid(),
+            PartInventoryId = part.Id,
+            GcodeFileId = gcode.Id,
+            Quantity = 2,
+        };
         PrintJob job = new()
         {
             Id = _jobId,
             Name = "Dispatch Job",
+            GcodeFileId = gcode.Id,
             Status = PrintJobStatus.Queued,
             QueuePosition = 1,
             CreatedAt = DateTime.UtcNow,
@@ -285,7 +407,7 @@ public sealed class JobDispatchServiceTests : IDisposable
             QueuedAt = DateTime.UtcNow,
         };
 
-        _db.AddRange(manufacturer, model, printer, job);
+        _db.AddRange(manufacturer, model, printer, folder, gcode, bin, part, mapping, job);
         _db.SaveChanges();
     }
 

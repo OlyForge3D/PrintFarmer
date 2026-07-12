@@ -15,10 +15,6 @@ public class PartInventory
 {
     public Guid Id { get; set; }
 
-    /// <summary>Concurrency token to serialize competing adjust/harvest writers.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
-
     /// <summary>
     /// Operator-owned unique identifier for the printed part (e.g. "PF-BRKT-01").
     /// Used as the canonical URL segment for the parts-inventory API.

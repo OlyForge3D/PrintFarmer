@@ -435,7 +435,8 @@ public class JobQueueControllerTests
             null,
             null,
             AlreadyHarvested: false,
-            new List<Farm.Infrastructure.Dtos.PartsInventory.PartAdjustmentResponse>());
+            new List<Farm.Infrastructure.Dtos.PartsInventory.PartAdjustmentResponse>(),
+            new List<Farm.Infrastructure.Dtos.PartsInventory.HarvestOutputResponse>());
         _partHarvestServiceMock
             .Setup(s => s.HarvestJobAsync(
                 jobId,
@@ -476,9 +477,13 @@ public class JobQueueControllerTests
     }
 
     [Fact]
-    public async Task HarvestJobAsync_NoMappings_MapsToUnprocessableEntity()
+    public async Task HarvestJobAsync_NoMappings_ReturnsCanonicalConflictProblemDetails()
     {
         var jobId = Guid.NewGuid();
+        Guid projectFileId = Guid.NewGuid();
+        Guid gcodeFileId = Guid.NewGuid();
+        const string Guidance =
+            "Configure a printed-part output mapping or resubmit with a complete explicit outputs[] list.";
         _partHarvestServiceMock
             .Setup(s => s.HarvestJobAsync(
                 jobId,
@@ -488,12 +493,65 @@ public class JobQueueControllerTests
             .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
                 Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.NoMappings,
                 null,
-                "no mappings"));
+                "no mappings",
+                MappingRequired: new Farm.Infrastructure.Dtos.PartsInventory.PartMappingRequiredResponse(
+                    jobId,
+                    projectFileId,
+                    gcodeFileId,
+                    Guidance)));
 
         ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
             await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
 
-        _ = Assert.IsType<UnprocessableEntityObjectResult>(result.Result);
+        ObjectResult conflict = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        Assert.Contains("application/problem+json", conflict.ContentTypes);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(conflict.Value);
+        Assert.Equal("partMappingRequired", problem.Extensions["code"]);
+        Assert.Equal(jobId, problem.Extensions["jobId"]);
+        Assert.Equal(projectFileId, problem.Extensions["projectFileId"]);
+        Assert.Equal(gcodeFileId, problem.Extensions["gcodeFileId"]);
+        Assert.Equal(Guidance, problem.Extensions["guidance"]);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_WrongBin_ReturnsCanonicalConflictProblemDetails()
+    {
+        Guid jobId = Guid.NewGuid();
+        var mismatches = new[]
+        {
+            new Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse(
+                "SKU-A",
+                "BIN-A",
+                "BIN-B"),
+        };
+        _partHarvestServiceMock
+            .Setup(service => service.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.WrongBin,
+                null,
+                "wrong bin",
+                new Farm.Infrastructure.Dtos.PartsInventory.WrongBinResponse(mismatches)));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        ObjectResult conflict = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        Assert.Contains("application/problem+json", conflict.ContentTypes);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(conflict.Value);
+        Assert.Equal("wrongBin", problem.Extensions["code"]);
+        IReadOnlyList<Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse> payload =
+            Assert.IsAssignableFrom<IReadOnlyList<Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse>>(
+                problem.Extensions["mismatches"]);
+        Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse mismatch = Assert.Single(payload);
+        Assert.Equal("SKU-A", mismatch.PartSku);
+        Assert.Equal("BIN-A", mismatch.ExpectedBinCode);
+        Assert.Equal("BIN-B", mismatch.ScannedBinCode);
     }
 
     [Fact]

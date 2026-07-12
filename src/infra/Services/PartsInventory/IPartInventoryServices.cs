@@ -36,7 +36,8 @@ public record HarvestResult(
     PartInventoryOutcome Outcome,
     HarvestJobResponse? Response,
     string? Message,
-    WrongBinResponse? WrongBin = null);
+    WrongBinResponse? WrongBin = null,
+    PartMappingRequiredResponse? MappingRequired = null);
 
 /// <summary>Result of a printed-part SKU creation attempt.</summary>
 public record CreatePartResult(

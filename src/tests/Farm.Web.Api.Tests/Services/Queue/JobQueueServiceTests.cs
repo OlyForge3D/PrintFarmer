@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Spoolman;
@@ -1528,6 +1529,93 @@ public class JobQueueServiceTests
 
         await act.Should().ThrowAsync<DbUpdateException>();
         broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_AssignedJob_CapturesSnapshotAndDispatchLogInSingleSave()
+    {
+        Guid printerId = Guid.NewGuid();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "part.gcode", FileName = "part.gcode" };
+        QueuePrintJobDto request = new() { GcodeFileId = gcode.Id, AssignedPrinterId = printerId };
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(value => value.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        _mockDataService.Setup(value => value.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(value => value.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Printer { Id = printerId, Name = "printer" }]);
+        _mockRepo.Setup(value => value.AddWithoutSaveAsync(
+                It.Is<PrintJob>(job => job.AssignedPrinterId == printerId),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                It.Is<PrintJob>(job => job.DispatchedAt != null),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _mockRepo.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log =>
+                log.PrintJobId != Guid.Empty
+                && log.PrinterId == printerId
+                && log.Action == Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched)));
+        _mockRepo.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        broadcaster.Setup(value => value.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.JobAssignment,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            coverageBroadcaster: broadcaster.Object,
+            partOutputSnapshotService: snapshots.Object);
+
+        _ = await service.AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        _mockRepo.VerifyAll();
+        snapshots.VerifyAll();
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_FirstAssignment_CapturesSnapshotAndDispatchLog()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        _mockDataService.SetupSequence(value => value.GetPrintJobByIdAsync(
+                job.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job)
+            .ReturnsAsync(job);
+        _mockDataService.Setup(value => value.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Printer { Id = printerId, Name = "printer" }]);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                job,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _mockRepo.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log => log.PrintJobId == job.Id && log.PrinterId == printerId)));
+        _mockRepo.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            partOutputSnapshotService: snapshots.Object);
+
+        JobQueuePrintJobDto? result = await service.UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto { AssignedPrinterId = printerId },
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(printerId, job.AssignedPrinterId);
+        Assert.NotNull(job.DispatchedAt);
+        snapshots.VerifyAll();
+        _mockRepo.VerifyAll();
     }
 
     [Fact]

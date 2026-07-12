@@ -235,6 +235,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PartOutputMapping> PartOutputMappings => Set<PartOutputMapping>();
 
+    public DbSet<PrintJobPartOutputSnapshot> PrintJobPartOutputSnapshots => Set<PrintJobPartOutputSnapshot>();
+
+    public DbSet<PartHarvestOutputSnapshot> PartHarvestOutputSnapshots => Set<PartHarvestOutputSnapshot>();
+
     // Per-user snoozes for the unified attention feed (issue #707).
     public DbSet<AttentionSnooze> AttentionSnoozes => Set<AttentionSnooze>();
 
@@ -309,7 +313,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             throw new InvalidOperationException(
                 "Printed-part inventory adjustments are immutable; append a correcting adjustment instead.");
         }
+
+        bool outputSnapshotMutationRequested = ChangeTracker.Entries<PrintJobPartOutputSnapshot>()
+            .Any(entry => entry.State == EntityState.Modified
+                || (entry.State == EntityState.Deleted && !IsParentJobDeleted(entry.Entity.PrintJobId)));
+        bool harvestSnapshotMutationRequested = ChangeTracker.Entries<PartHarvestOutputSnapshot>()
+            .Any(entry => entry.State == EntityState.Modified
+                || (entry.State == EntityState.Deleted && !IsParentJobDeleted(entry.Entity.PrintJobId)));
+        if (outputSnapshotMutationRequested || harvestSnapshotMutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part output snapshots are immutable; append a new harvest instead.");
+        }
     }
+
+    private bool IsParentJobDeleted(Guid printJobId)
+        => ChangeTracker.Entries<PrintJob>()
+            .Any(entry => entry.Entity.Id == printJobId && entry.State == EntityState.Deleted);
 
     private void EnsureInventoryIdentitiesAreImmutable()
     {

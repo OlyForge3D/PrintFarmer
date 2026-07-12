@@ -11,9 +11,6 @@ public class Bin
 {
     public Guid Id { get; set; }
 
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
-
     /// <summary>
     /// Canonical barcode / label value printed on the bin. Unique.
     /// This is the value returned by QR / 1D barcode scanners on the floor.

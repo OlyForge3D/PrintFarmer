@@ -275,6 +275,60 @@ public class PartInventoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AdjustAsync_ConcurrentDistinctOperations_ProduceExactBalanceAndLedger()
+    {
+        string connectionString =
+            $"Data Source=parts-adjust-{Guid.NewGuid():N};Mode=Memory;Cache=Shared;Default Timeout=30";
+        await using var anchor = new SqliteConnection(connectionString);
+        await anchor.OpenAsync();
+        TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled(anchor);
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using (var setup = new AppDbContext(options))
+        {
+            _ = setup.Database.EnsureCreated();
+            _ = setup.PartInventories.Add(new PartInventory
+            {
+                Id = Guid.NewGuid(),
+                Sku = "SKU-CONCURRENT",
+                Name = "Concurrent",
+                IsActive = true,
+            });
+            _ = await setup.SaveChangesAsync();
+        }
+
+        var factory = new Mock<IDbContextFactory<AppDbContext>>();
+        factory.Setup(value => value.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new AppDbContext(options));
+        var sut = new PartInventoryService(
+            factory.Object,
+            NullLogger<PartInventoryService>.Instance);
+        const int Writers = 8;
+
+        AdjustResult[] results = await Task.WhenAll(Enumerable.Range(1, Writers)
+            .Select(index => sut.AdjustAsync(
+                "SKU-CONCURRENT",
+                new AdjustCommand(
+                    1,
+                    PartAdjustmentReason.Manual,
+                    null,
+                    null,
+                    null,
+                    $"writer-{index}",
+                    $"actor-{index}"))));
+
+        Assert.All(results, result => Assert.Equal(PartInventoryOutcome.Ok, result.Outcome));
+        await using var verify = new AppDbContext(options);
+        Assert.Equal(Writers, (await verify.PartInventories.SingleAsync()).OnHand);
+        List<PartInventoryAdjustment> ledger = await verify.PartInventoryAdjustments
+            .OrderBy(value => value.ResultingBalance)
+            .ToListAsync();
+        Assert.Equal(Writers, ledger.Count);
+        Assert.Equal(Enumerable.Range(1, Writers), ledger.Select(value => value.ResultingBalance));
+    }
+
+    [Fact]
     public async Task AdjustAsync_UsesBinCode_WhenProvided()
     {
         _ = await SeedSkuAsync(onHand: 1);
@@ -485,6 +539,14 @@ public class PartInventoryServiceTests : IDisposable
                 () => db.SaveChangesAsync());
             Assert.Contains("immutable", binError.Message, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public void Model_PartInventoryAndBin_DoNotExposeInertRowVersionTokens()
+    {
+        using var db = new AppDbContext(_options);
+        Assert.Null(db.Model.FindEntityType(typeof(PartInventory))!.FindProperty("RowVersion"));
+        Assert.Null(db.Model.FindEntityType(typeof(Bin))!.FindProperty("RowVersion"));
     }
 
     [Fact]

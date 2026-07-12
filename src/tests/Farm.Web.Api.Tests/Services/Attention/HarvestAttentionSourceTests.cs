@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
@@ -139,7 +139,7 @@ public class HarvestAttentionSourceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HarvestResult(
                 PartInventoryOutcome.Ok,
-                new HarvestJobResponse(jobId, DateTime.UtcNow, null, null, false, []),
+                new HarvestJobResponse(jobId, DateTime.UtcNow, null, null, false, [], []),
                 null));
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);

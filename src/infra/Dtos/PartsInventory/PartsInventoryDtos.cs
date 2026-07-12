@@ -65,25 +65,61 @@ public record HarvestJobResponse(
     Guid? BinId,
     string? BinCode,
     bool AlreadyHarvested,
-    IReadOnlyList<PartAdjustmentResponse> Adjustments);
+    IReadOnlyList<PartAdjustmentResponse> Adjustments,
+    IReadOnlyList<HarvestOutputResponse> Outputs);
 
-/// <summary>Typed wrong-bin response returned before any harvest mutation.</summary>
-public record WrongBinResponse(
-    string? ActualBinCode,
-    IReadOnlyList<string> ExpectedBinCodes,
-    string Message);
+/// <summary>Persisted final output returned by a successful or replayed harvest.</summary>
+public record HarvestOutputResponse(
+    int Sequence,
+    Guid PartInventoryId,
+    string PartSku,
+    int Quantity,
+    Guid? ExpectedBinId,
+    string? ExpectedBinCode,
+    Guid ActualBinId,
+    string ActualBinCode,
+    PartHarvestOutputOrigin Origin,
+    Guid? SourceFileId,
+    Guid? SourceMappingId,
+    bool OverrideApplied,
+    string? OverrideReason,
+    DateTime CreatedAt);
+
+/// <summary>Single row in the canonical wrong-bin ProblemDetails extension.</summary>
+public record WrongBinMismatchResponse(
+    string PartSku,
+    string? ExpectedBinCode,
+    string ScannedBinCode);
+
+/// <summary>Typed wrong-bin details returned before stock or harvest mutation.</summary>
+public record WrongBinResponse(IReadOnlyList<WrongBinMismatchResponse> Mismatches);
+
+/// <summary>Typed missing-mapping details used to build canonical ProblemDetails.</summary>
+public record PartMappingRequiredResponse(
+    Guid JobId,
+    Guid? ProjectFileId,
+    Guid? GcodeFileId,
+    string Guidance);
 
 /// <summary>Item in a caller-supplied harvest override / mapping fallback.</summary>
 public record HarvestOutputRequestItem(
     [Required, MinLength(1), MaxLength(64)] string Sku,
     [Range(1, 10000)] int Quantity);
 
+/// <summary>Per-SKU destination bin assignment for a multi-output harvest.</summary>
+public record HarvestOutputBinRequest(
+    [Required, MinLength(1), MaxLength(64)] string PartSku,
+    [Required, MinLength(1), MaxLength(128)] string BinCode);
+
 /// <summary>Request body for harvesting a completed job into printed-part stock.</summary>
 public record HarvestJobRequest(
     string? BinCode = null,
     int? QuantityOverride = null,
     IReadOnlyList<HarvestOutputRequestItem>? Outputs = null,
-    string? OperationKey = null);
+    string? OperationKey = null,
+    IReadOnlyList<HarvestOutputBinRequest>? OutputBins = null,
+    bool AllowWrongBin = false,
+    string? OverrideReason = null);
 
 /// <summary>Request body for adjusting a printed-part SKU stock level.</summary>
 public record AdjustPartInventoryRequest(

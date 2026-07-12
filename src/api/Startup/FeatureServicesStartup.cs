@@ -112,6 +112,8 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.PartsInventory.PartInventoryService>();
         services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService,
             Farm.Infrastructure.Services.PartsInventory.PartHarvestService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartOutputSnapshotService,
+            Farm.Infrastructure.Services.PartsInventory.PartOutputSnapshotService>();
         services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IReorderEvaluationService,
             Farm.Infrastructure.Services.PartsInventory.ReorderEvaluationService>();
 
