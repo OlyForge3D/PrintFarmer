@@ -4658,6 +4658,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("ToolheadModelDefId");
 
+                    b.HasIndex("PrinterId", "Index")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Toolheads_PrinterId_Index");
+
                     b.ToTable("Toolheads");
                 });
 

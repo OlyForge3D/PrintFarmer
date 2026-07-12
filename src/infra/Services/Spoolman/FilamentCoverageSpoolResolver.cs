@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Infrastructure.Services.Spoolman;
 
 /// <summary>
-/// Source-aware spool resolver for filament coverage.
+/// Source-aware spool resolver shared by filament coverage and guided spool binding.
 /// </summary>
 public sealed class FilamentCoverageSpoolResolver(
     ISpoolmanService spoolmanService,
@@ -22,6 +22,36 @@ public sealed class FilamentCoverageSpoolResolver(
     private readonly ISpoolmanService _spoolmanService = spoolmanService;
     private readonly IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly ILogger<FilamentCoverageSpoolResolver> _logger = logger;
+
+    public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
+        Printer printer,
+        int spoolId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        SourceSelection selection = SelectSource(printer);
+        if (selection.ErrorReason is not null)
+        {
+            return new FilamentCoverageSpoolSnapshot(
+                null,
+                selection.Key.Native,
+                selection.ErrorReason);
+        }
+
+        var request = new SourceRequest(selection.NativeClient, selection.ServerUrl);
+        _ = request.SpoolIds.Add(spoolId);
+        Dictionary<int, FilamentCoverageSpoolSnapshot> resolved = selection.Key.Native
+            ? await ResolveNativeAsync(request, ct).ConfigureAwait(false)
+            : await ResolveCentralAsync(request.SpoolIds, ct).ConfigureAwait(false);
+
+        return resolved.TryGetValue(spoolId, out FilamentCoverageSpoolSnapshot? snapshot)
+            ? snapshot
+            : new FilamentCoverageSpoolSnapshot(
+                null,
+                selection.Key.Native,
+                ReasonSpoolNotFound);
+    }
 
     public async Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> ResolveAsync(
         IReadOnlyList<Printer> printers,
@@ -47,45 +77,24 @@ public sealed class FilamentCoverageSpoolResolver(
                 continue;
             }
 
-            if (printer.Backend == (int)PrinterBackend.Moonraker)
+            SourceSelection selection = SelectSource(printer);
+            if (selection.ErrorReason is not null)
             {
-                try
-                {
-                    IBackendClient client = _backendClientFactory.GetClient(printer.Backend);
-                    if (client is not ISupportsSpoolman native)
-                    {
-                        assignments[printer.Id] = new SourceAssignment(default, spoolIds, ReasonSourceUnavailable);
-                        continue;
-                    }
-
-                    SourceKey key = new(true, printer.Backend, NormalizeSource(printer.ServerUrl));
-                    assignments[printer.Id] = new SourceAssignment(key, spoolIds, null);
-                    if (!requests.TryGetValue(key, out SourceRequest? request))
-                    {
-                        request = new SourceRequest(native, printer.ServerUrl);
-                        requests[key] = request;
-                    }
-
-                    request.SpoolIds.UnionWith(spoolIds);
-                    continue;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "[FilamentCoverage] Backend source unavailable for printer {PrinterId}", printer.Id);
-                    assignments[printer.Id] = new SourceAssignment(default, spoolIds, ReasonSourceUnavailable);
-                    continue;
-                }
+                assignments[printer.Id] = new SourceAssignment(
+                    selection.Key,
+                    spoolIds,
+                    selection.ErrorReason);
+                continue;
             }
 
-            SourceKey centralKey = new(false, 0, "central");
-            assignments[printer.Id] = new SourceAssignment(centralKey, spoolIds, null);
-            if (!requests.TryGetValue(centralKey, out SourceRequest? central))
+            assignments[printer.Id] = new SourceAssignment(selection.Key, spoolIds, null);
+            if (!requests.TryGetValue(selection.Key, out SourceRequest? request))
             {
-                central = new SourceRequest(null, null);
-                requests[centralKey] = central;
+                request = new SourceRequest(selection.NativeClient, selection.ServerUrl);
+                requests[selection.Key] = request;
             }
 
-            central.SpoolIds.UnionWith(spoolIds);
+            request.SpoolIds.UnionWith(spoolIds);
         }
 
         Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources = [];
@@ -229,7 +238,41 @@ public sealed class FilamentCoverageSpoolResolver(
     private static string NormalizeSource(string serverUrl)
         => serverUrl.Trim().TrimEnd('/');
 
+    private SourceSelection SelectSource(Printer printer)
+    {
+        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        {
+            return new SourceSelection(new SourceKey(false, 0, "central"), null, null, null);
+        }
+
+        try
+        {
+            IBackendClient client = _backendClientFactory.GetClient(printer.Backend);
+            if (client is not ISupportsSpoolman native)
+            {
+                return new SourceSelection(default, null, null, ReasonSourceUnavailable);
+            }
+
+            return new SourceSelection(
+                new SourceKey(true, printer.Backend, NormalizeSource(printer.ServerUrl)),
+                native,
+                printer.ServerUrl,
+                null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[FilamentCoverage] Backend source unavailable for printer {PrinterId}", printer.Id);
+            return new SourceSelection(default, null, null, ReasonSourceUnavailable);
+        }
+    }
+
     private readonly record struct SourceKey(bool Native, int Backend, string Identity);
+
+    private sealed record SourceSelection(
+        SourceKey Key,
+        ISupportsSpoolman? NativeClient,
+        string? ServerUrl,
+        string? ErrorReason);
 
     private sealed record SourceAssignment(SourceKey Key, HashSet<int> SpoolIds, string? ErrorReason);
 

@@ -17,6 +17,27 @@ namespace Farm.Infrastructure;
 public record CommandResult(bool Success, string? Message = null);
 
 /// <summary>
+/// Non-serialized failure discriminator for a toolhead spool bind.
+/// </summary>
+public enum ToolheadSpoolBindFailureKind
+{
+    /// <summary>No typed conflict; generic command-result mapping applies.</summary>
+    None = 0,
+
+    /// <summary>A concurrent request created the same canonical printer/toolhead index.</summary>
+    TopologyConflict = 1,
+}
+
+/// <summary>
+/// Toolhead spool-binding result with a server-only conflict discriminator.
+/// </summary>
+public record ToolheadSpoolBindResult(
+    bool Success,
+    string? Message = null,
+    [property: JsonIgnore] ToolheadSpoolBindFailureKind FailureKind = ToolheadSpoolBindFailureKind.None)
+    : CommandResult(Success, Message);
+
+/// <summary>
 /// Discriminates why a filament-unload failed so the HTTP layer maps to the correct status
 /// code WITHOUT brittle message substring matching (GitHub issue OlyForge3D/PrintFarmer#710
 /// low-severity fix): a missing printer is 404, an invalid toolhead index is 400.

@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
@@ -58,13 +60,17 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
     private static PrintersService CreateService(
         AppDbContext db,
         Mock<ISpoolmanService> spoolman,
-        IFilamentCoverageBroadcaster? coverageBroadcaster = null)
+        IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+        IFilamentCoverageSpoolResolver? spoolResolver = null,
+        IBackendClientFactory? backendClientFactory = null)
     {
+        backendClientFactory ??= Mock.Of<IBackendClientFactory>();
+        spoolResolver ??= CreateResolver(spoolman);
         var uow = new AppUnitOfWork(db, Mock.Of<ISensitiveDataProtector>());
         return new PrintersService(
             uow,
             db,
-            Mock.Of<IBackendClientFactory>(),
+            backendClientFactory,
             Mock.Of<IBackendCapabilityFactory>(),
             Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
             Mock.Of<IHttpClientFactory>(),
@@ -78,7 +84,26 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
             spoolman.Object,
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
             Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            spoolResolver,
             coverageBroadcaster);
+    }
+
+    private static IFilamentCoverageSpoolResolver CreateResolver(Mock<ISpoolmanService> spoolman)
+    {
+        var resolver = new Mock<IFilamentCoverageSpoolResolver>();
+        resolver.Setup(r => r.ResolveSpoolAsync(
+                It.IsAny<Printer>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (Printer _, int spoolId, CancellationToken ct) =>
+            {
+                SpoolmanSpoolDto? spool = await spoolman.Object.GetSpoolByIdAsync(spoolId, ct);
+                return new FilamentCoverageSpoolSnapshot(
+                    spool,
+                    TracksLiveConsumption: false,
+                    spool is null ? FilamentCoverageSpoolResolver.ReasonSpoolNotFound : null);
+            });
+        return resolver.Object;
     }
 
     private static Mock<ISpoolmanService> Spoolman(int spoolId, string material)
@@ -134,7 +159,8 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
 
     private Guid SeedPrinterWithExistingToolhead(
         int? currentSpoolId = null,
-        string? currentMaterial = null)
+        string? currentMaterial = null,
+        PrinterBackend backend = PrinterBackend.Moonraker)
     {
         using AppDbContext db = NewDb();
         var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Toolhead Manufacturer" };
@@ -144,7 +170,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
             Id = Guid.NewGuid(),
             Name = "toolhead",
             ServerUrl = "http://toolhead.local",
-            Backend = (int)PrinterBackend.Moonraker,
+            Backend = (int)backend,
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
         };
@@ -352,6 +378,36 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         saved.CurrentMaterial.Should().BeNull();
     }
 
+    [Fact]
+    public async Task SetToolheadSpoolAsync_DirectMoonrakerBinding_RetainsCentralLookupSemantics()
+    {
+        Guid printerId = SeedPrinterWithExistingToolhead();
+        Mock<ISpoolmanService> central = Spoolman(77, "CENTRAL");
+        var sourceResolver = new Mock<IFilamentCoverageSpoolResolver>(MockBehavior.Strict);
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(
+                db,
+                central,
+                spoolResolver: sourceResolver.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId,
+                0,
+                77,
+                CancellationToken.None);
+            result.Success.Should().BeTrue();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Toolhead saved = await verify.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+        saved.CurrentMaterial.Should().Be("CENTRAL");
+        sourceResolver.VerifyNoOtherCalls();
+        central.Verify(
+            s => s.GetSpoolByIdAsync(77, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     // ── C3: gate materialization + bind + audit commit in ONE SaveChanges ──
 
     [Fact]
@@ -424,15 +480,15 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
 
         await using (AppDbContext db = NewDb())
         {
+            IFilamentCoverageSpoolResolver resolver = CreateResolver(spoolman);
             var validator = new PrinterToolheadSwapValidator(
                 db,
-                spoolman.Object,
-                NullLogger<PrinterToolheadSwapValidator>.Instance);
+                resolver);
             SwapValidationResult validation = await validator.ValidateAsync(
                 printerId, 0, 88, CancellationToken.None);
             validation.Result!.Status.Should().Be(SwapValidationStatus.Ok);
 
-            PrintersService service = CreateService(db, spoolman);
+            PrintersService service = CreateService(db, spoolman, spoolResolver: resolver);
             CommandResult result = await service.SetToolheadSpoolAsync(
                 printerId,
                 0,
@@ -464,10 +520,10 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
 
         await using (AppDbContext db = NewDb())
         {
+            IFilamentCoverageSpoolResolver resolver = CreateResolver(spoolman);
             var validator = new PrinterToolheadSwapValidator(
                 db,
-                spoolman.Object,
-                NullLogger<PrinterToolheadSwapValidator>.Instance);
+                resolver);
             SwapValidationResult validation = await validator.ValidateAsync(
                 printerId, 0, 88, CancellationToken.None);
             SwapValidationResultDto body = validation.Result!;
@@ -480,7 +536,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
                 body.Expected,
                 body.Scanned,
                 body.AffectedJobs.Select(j => j.JobId).ToArray());
-            PrintersService service = CreateService(db, spoolman);
+            PrintersService service = CreateService(db, spoolman, spoolResolver: resolver);
             CommandResult result = await service.SetToolheadSpoolAsync(
                 printerId,
                 0,
@@ -512,15 +568,15 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
 
         await using (AppDbContext db = NewDb())
         {
+            IFilamentCoverageSpoolResolver resolver = CreateResolver(spoolman);
             var validator = new PrinterToolheadSwapValidator(
                 db,
-                spoolman.Object,
-                NullLogger<PrinterToolheadSwapValidator>.Instance);
+                resolver);
             SwapValidationResult validation = await validator.ValidateAsync(
                 printerId, 1, 88, CancellationToken.None);
             validation.Result!.Status.Should().Be(SwapValidationStatus.Ok);
 
-            PrintersService service = CreateService(db, spoolman);
+            PrintersService service = CreateService(db, spoolman, spoolResolver: resolver);
             CommandResult result = await service.SetToolheadSpoolAsync(
                 printerId,
                 1,
@@ -613,6 +669,152 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
     }
 
     [Fact]
+    public void ToolheadModel_HasUniqueCanonicalPrinterIndex()
+    {
+        using AppDbContext db = NewDb();
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType toolheadEntity = db.Model
+            .FindEntityType(typeof(Toolhead))!;
+        Microsoft.EntityFrameworkCore.Metadata.IIndex index = toolheadEntity
+            .GetIndexes()
+            .Single(i => i.Properties.Select(p => p.Name)
+                .SequenceEqual(new[] { nameof(Toolhead.PrinterId), nameof(Toolhead.Index) }));
+
+        index.IsUnique.Should().BeTrue();
+        index.GetDatabaseName().Should().Be("UX_Toolheads_PrinterId_Index");
+        toolheadEntity.GetReferencingForeignKeys().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GuidedConcurrentFirstGateBinds_OneSucceeds_OneConflicts_AndTopologyRemainsCanonical()
+    {
+        string databasePath = Path.Combine(
+            AppContext.BaseDirectory,
+            $"toolhead-race-{Guid.NewGuid():N}.db");
+        string connectionString = $"Data Source={databasePath};Default Timeout=30";
+
+        try
+        {
+            await using var anchor = new SqliteConnection(connectionString);
+            await anchor.OpenAsync();
+            await using (SqliteCommand command = anchor.CreateCommand())
+            {
+                command.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=30000;";
+                _ = await command.ExecuteNonQueryAsync();
+            }
+
+            DbContextOptions<AppDbContext> seedOptions = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+            Guid printerId;
+            await using (var seed = new AppDbContext(seedOptions))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Race Manufacturer" };
+                var model = new PrinterModel
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Race Model",
+                    ManufacturerId = manufacturer.Id,
+                };
+                var printer = new Printer
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "race-printer",
+                    ServerUrl = "http://race.local",
+                    Backend = (int)PrinterBackend.Moonraker,
+                    ManufacturerId = manufacturer.Id,
+                    ModelId = model.Id,
+                    HasMmu = true,
+                };
+                printerId = printer.Id;
+                seed.AddRange(manufacturer, model, printer);
+                await seed.SaveChangesAsync();
+            }
+
+            using var barrier = new Barrier(2);
+            Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+            var resolver = new Mock<IFilamentCoverageSpoolResolver>();
+            resolver.Setup(r => r.ResolveSpoolAsync(
+                    It.IsAny<Printer>(),
+                    88,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FilamentCoverageSpoolSnapshot(
+                    new SpoolmanSpoolDto(88, "race", "PETG", 500, "#ABCDEF", true),
+                    TracksLiveConsumption: true,
+                    ErrorReason: null));
+
+            async Task<CommandResult> BindAsync(string userId)
+            {
+                var interceptor = new CoordinatedFirstSaveInterceptor(barrier);
+                DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+                    .UseSqlite(connectionString)
+                    .AddInterceptors(interceptor)
+                    .Options;
+                await using var db = new AppDbContext(options);
+                PrintersService service = CreateService(
+                    db,
+                    central,
+                    spoolResolver: resolver.Object);
+                var audit = new FilamentSwapOverrideContext(
+                    userId,
+                    userId,
+                    "concurrent override",
+                    "PLA",
+                    "PETG",
+                    Array.Empty<Guid>());
+                CommandResult result = await service.SetToolheadSpoolAsync(
+                    printerId,
+                    1,
+                    88,
+                    audit,
+                    SpoolBindPolicy.Guided,
+                    CancellationToken.None);
+                await db.SaveChangesAsync();
+                return result;
+            }
+
+            Task<CommandResult> first = Task.Run(() => BindAsync("user-a"));
+            Task<CommandResult> second = Task.Run(() => BindAsync("user-b"));
+            CommandResult[] results = await Task.WhenAll(first, second);
+
+            results.Count(r => r.Success).Should().Be(1);
+            ToolheadSpoolBindResult conflict = results
+                .OfType<ToolheadSpoolBindResult>()
+                .Single(r => r.FailureKind == ToolheadSpoolBindFailureKind.TopologyConflict);
+            conflict.Success.Should().BeFalse();
+
+            await using var verify = new AppDbContext(seedOptions);
+            Printer saved = await verify.Printers
+                .Include(p => p.Toolheads)
+                .SingleAsync(p => p.Id == printerId);
+            saved.MultiMaterial.Should().BeTrue();
+            saved.Toolheads.Should().HaveCount(4);
+            saved.Toolheads.GroupBy(t => t.Index).Should().OnlyContain(g => g.Count() == 1);
+            Toolhead gate = saved.Toolheads.Single(t => t.Index == 1);
+            gate.CurrentSpoolId.Should().Be(88);
+            gate.CurrentMaterial.Should().Be("PETG");
+            (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(1);
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+
+            if (File.Exists($"{databasePath}-wal"))
+            {
+                File.Delete($"{databasePath}-wal");
+            }
+
+            if (File.Exists($"{databasePath}-shm"))
+            {
+                File.Delete($"{databasePath}-shm");
+            }
+        }
+    }
+
+    [Fact]
     public async Task SetToolheadSpoolAsync_CoverageBroadcastFailsAfterCommit_ReturnsSuccess()
     {
         Guid printerId = SeedPrinterWithExistingToolhead();
@@ -643,6 +845,250 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         saved.CurrentMaterial.Should().Be("PLA");
     }
 
+    [Fact]
+    public async Task GuidedNativePrinter_DuplicateCentralId_ValidatesBindsAndAuditsNativeMaterial()
+    {
+        Guid printerId = SeedPrinterWithExistingToolhead();
+        SeedRelevantJob(printerId, "PLA");
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .SetupSequence(n => n.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(JsonSerializer.Serialize(
+                new[] { new { id = 88, material = "PETG", remaining_weight = 400 } }))
+            .ReturnsAsync(JsonSerializer.Serialize(
+                new[] { new { id = 88, material = "ABS", remaining_weight = 400 } }));
+        Mock<IBackendClientFactory> backendFactory = new();
+        backendFactory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        var resolver = new FilamentCoverageSpoolResolver(
+            central.Object,
+            backendFactory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+
+        await using (AppDbContext db = NewDb())
+        {
+            var validator = new PrinterToolheadSwapValidator(db, resolver);
+            SwapValidationResult validation = await validator.ValidateAsync(
+                printerId,
+                0,
+                88,
+                CancellationToken.None);
+            SwapValidationResultDto body = validation.Result!;
+            body.Status.Should().Be(SwapValidationStatus.Mismatch);
+            body.Expected.Should().Be("PLA");
+            body.Scanned.Should().Be("PETG");
+
+            var audit = new FilamentSwapOverrideContext(
+                "native-user",
+                "operator",
+                "native material override",
+                body.Expected,
+                body.Scanned,
+                body.AffectedJobs.Select(j => j.JobId).ToArray());
+            PrintersService service = CreateService(
+                db,
+                central,
+                spoolResolver: resolver,
+                backendClientFactory: backendFactory.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId,
+                0,
+                88,
+                audit,
+                SpoolBindPolicy.Guided,
+                CancellationToken.None);
+            result.Success.Should().BeTrue();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Toolhead saved = await verify.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+        saved.CurrentSpoolId.Should().Be(88);
+        saved.CurrentMaterial.Should().Be("ABS");
+        FilamentSwapOverride persistedAudit = await verify.FilamentSwapOverrides.SingleAsync();
+        persistedAudit.ExpectedMaterial.Should().Be("PLA");
+        persistedAudit.ScannedMaterial.Should().Be("ABS");
+        native.As<ISupportsSpoolman>().Verify(
+            n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        central.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GuidedManagedPrinter_DuplicateNativeId_UsesCentralMaterialForValidationAndBinding()
+    {
+        Guid printerId = SeedPrinterWithExistingToolhead(backend: PrinterBackend.OctoPrint);
+        SeedRelevantJob(printerId, "PLA");
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central.Setup(s => s.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+                [new SpoolmanSpoolDto(88, "central", "PLA", 400, "#FFFFFF", true)],
+                1));
+        Mock<IBackendClientFactory> backendFactory = new(MockBehavior.Strict);
+        var resolver = new FilamentCoverageSpoolResolver(
+            central.Object,
+            backendFactory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+
+        await using (AppDbContext db = NewDb())
+        {
+            var validator = new PrinterToolheadSwapValidator(db, resolver);
+            SwapValidationResult validation = await validator.ValidateAsync(
+                printerId,
+                0,
+                88,
+                CancellationToken.None);
+            validation.Result!.Status.Should().Be(SwapValidationStatus.Ok);
+            validation.Result.Scanned.Should().Be("PLA");
+
+            PrintersService service = CreateService(
+                db,
+                central,
+                spoolResolver: resolver,
+                backendClientFactory: backendFactory.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId,
+                0,
+                88,
+                overrideAudit: null,
+                SpoolBindPolicy.Guided,
+                CancellationToken.None);
+            result.Success.Should().BeTrue();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Toolhead saved = await verify.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+        saved.CurrentMaterial.Should().Be("PLA");
+        central.Verify(
+            s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        central.Verify(
+            s => s.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        backendFactory.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GuidedNativePrinter_CommitResolutionMissing_DoesNotSwitchToCentralOrWriteAudit()
+    {
+        Guid printerId = SeedPrinterWithExistingToolhead(currentSpoolId: 12, currentMaterial: "ABS");
+        SeedRelevantJob(printerId, "PLA");
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .SetupSequence(n => n.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(JsonSerializer.Serialize(new[] { new { id = 88, material = "PETG" } }))
+            .ReturnsAsync("[]");
+        Mock<IBackendClientFactory> backendFactory = new();
+        backendFactory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        var resolver = new FilamentCoverageSpoolResolver(
+            central.Object,
+            backendFactory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+
+        await using (AppDbContext db = NewDb())
+        {
+            var validator = new PrinterToolheadSwapValidator(db, resolver);
+            SwapValidationResultDto body = (await validator.ValidateAsync(
+                printerId,
+                0,
+                88,
+                CancellationToken.None)).Result!;
+            body.Status.Should().Be(SwapValidationStatus.Mismatch);
+            body.Scanned.Should().Be("PETG");
+
+            var audit = new FilamentSwapOverrideContext(
+                "native-user",
+                "operator",
+                "override",
+                body.Expected,
+                body.Scanned,
+                body.AffectedJobs.Select(j => j.JobId).ToArray());
+            PrintersService service = CreateService(
+                db,
+                central,
+                spoolResolver: resolver,
+                backendClientFactory: backendFactory.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId,
+                0,
+                88,
+                audit,
+                SpoolBindPolicy.Guided,
+                CancellationToken.None);
+            result.Success.Should().BeFalse();
+            await db.SaveChangesAsync();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Toolhead saved = await verify.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+        saved.CurrentSpoolId.Should().Be(12);
+        saved.CurrentMaterial.Should().Be("ABS");
+        (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
+        central.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GuidedNativePrinter_SourceUnavailable_IsUnknownAndCannotBindOrAudit()
+    {
+        Guid printerId = SeedPrinterWithExistingToolhead(currentSpoolId: 12, currentMaterial: "ABS");
+        SeedRelevantJob(printerId, "PLA");
+        Mock<IBackendClient> native = NativeClient(null);
+        Mock<IBackendClientFactory> backendFactory = new();
+        backendFactory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        var resolver = new FilamentCoverageSpoolResolver(
+            central.Object,
+            backendFactory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+
+        await using (AppDbContext db = NewDb())
+        {
+            var validator = new PrinterToolheadSwapValidator(db, resolver);
+            SwapValidationResult validation = await validator.ValidateAsync(
+                printerId,
+                0,
+                88,
+                CancellationToken.None);
+            validation.Result!.Status.Should().Be(SwapValidationStatus.Unknown);
+
+            var audit = new FilamentSwapOverrideContext(
+                "native-user",
+                "operator",
+                "must not persist",
+                "PLA",
+                "PETG",
+                Array.Empty<Guid>());
+            PrintersService service = CreateService(
+                db,
+                central,
+                spoolResolver: resolver,
+                backendClientFactory: backendFactory.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId,
+                0,
+                88,
+                audit,
+                SpoolBindPolicy.Guided,
+                CancellationToken.None);
+            result.Success.Should().BeFalse();
+            await db.SaveChangesAsync();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Toolhead saved = await verify.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+        saved.CurrentSpoolId.Should().Be(12);
+        saved.CurrentMaterial.Should().Be("ABS");
+        (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
+        central.VerifyNoOtherCalls();
+    }
+
     private static Mock<ISpoolmanService> SpoolmanReturningNull()
     {
         var spoolman = new Mock<ISpoolmanService>();
@@ -669,6 +1115,17 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         return spoolman;
     }
 
+    private static Mock<IBackendClient> NativeClient(string? json)
+    {
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(json);
+        return client;
+    }
+
     private sealed class ThrowOnceSaveChangesInterceptor : SaveChangesInterceptor
     {
         private bool _shouldThrow = true;
@@ -682,6 +1139,27 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
             {
                 _shouldThrow = false;
                 throw new InvalidOperationException("simulated relational save failure");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class CoordinatedFirstSaveInterceptor(Barrier barrier) : SaveChangesInterceptor
+    {
+        private int _coordinated;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _coordinated, 1) == 0)
+            {
+                if (!barrier.SignalAndWait(TimeSpan.FromSeconds(30), cancellationToken))
+                {
+                    throw new TimeoutException("Concurrent gate-save barrier timed out.");
+                }
             }
 
             return base.SavingChangesAsync(eventData, result, cancellationToken);

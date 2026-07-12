@@ -704,7 +704,9 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        // Filament coverage / runout prediction (issue #709). Registered as
+        // Source-aware spool resolution plus filament coverage / runout prediction (issue #709).
+        // The scoped resolver is also shared by #710 guided validation and commit-time binding.
+        // Registered as
         // both IFilamentCoverageService (per-printer + fleet endpoints) and
         // IFilamentCoverageAttentionSource (narrow input to the #707 adapter). The
         // broadcaster is a singleton so services that emit invalidations

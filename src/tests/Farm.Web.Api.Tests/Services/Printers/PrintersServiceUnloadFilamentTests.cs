@@ -181,7 +181,8 @@ public class PrintersServiceUnloadFilamentTests
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             Mock.Of<ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
-            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>());
+            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
 
         FilamentUnloadResult result = await service.UnloadFilamentAsync(Guid.NewGuid(), toolheadIndex: null, CancellationToken.None);
 
@@ -251,6 +252,7 @@ public class PrintersServiceUnloadFilamentTests
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             spoolman.Object,
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
-            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>());
+            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
     }
 }

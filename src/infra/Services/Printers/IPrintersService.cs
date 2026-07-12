@@ -17,15 +17,17 @@ public enum SpoolBindPolicy
 {
     /// <summary>
     /// Legacy direct binding: the spool id is assigned even if the commit-time Spoolman lookup
-    /// returns null (denormalized material simply stays unset). Used by the generic direct
-    /// control and whenever the guided-swap feature is disabled, preserving prior semantics.
+    /// returns null (denormalized material simply stays unset). Resolution continues to use the
+    /// centrally configured <c>ISpoolmanService</c>. Used whenever the guided-swap feature is
+    /// disabled, preserving the established direct-control semantics.
     /// </summary>
     Direct,
 
     /// <summary>
     /// Guided binding: fail closed if the commit-time Spoolman re-resolution returns null — no
     /// spool id, material, gate row, MultiMaterial promotion, or override audit is persisted.
-    /// Guarantees the binding that commits matches the spool the validator actually approved.
+    /// Resolution uses the printer-owned source selected by the shared #709 coverage resolver,
+    /// so native Moonraker ids never collide with central Spoolman ids.
     /// </summary>
     Guided,
 }

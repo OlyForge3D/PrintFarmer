@@ -8,6 +8,16 @@ namespace Farm.Infrastructure.Services.Spoolman;
 public interface IFilamentCoverageSpoolResolver
 {
     /// <summary>
+    /// Resolves one spool id from the source owned by <paramref name="printer"/>.
+    /// Moonraker printers use their native Spoolman source; all other backends use the
+    /// centrally managed source. Missing or unavailable native sources never fall back.
+    /// </summary>
+    Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
+        Printer printer,
+        int spoolId,
+        CancellationToken ct);
+
+    /// <summary>
     /// Resolves all assigned spool IDs, batching and caching independently by source.
     /// </summary>
     Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> ResolveAsync(

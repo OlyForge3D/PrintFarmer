@@ -2887,6 +2887,14 @@ public class PrintersController(
             _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
         }
 
+        if (result is ToolheadSpoolBindResult
+            {
+                FailureKind: ToolheadSpoolBindFailureKind.TopologyConflict,
+            })
+        {
+            return Conflict(result);
+        }
+
         return MapCommandResult(result);
     }
 

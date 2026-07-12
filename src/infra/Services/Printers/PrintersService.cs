@@ -27,6 +27,7 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -69,6 +70,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
 /// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
+/// <param name="spoolResolver">Resolves guided spool ids from each printer's owning source</param>
 /// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
@@ -88,6 +90,7 @@ public class PrintersService(
     Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
     Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
     IStoragePathService storagePathService,
+    IFilamentCoverageSpoolResolver spoolResolver,
     Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -109,6 +112,7 @@ public class PrintersService(
 
     // Optional: #709 filament coverage broadcaster. Nullable so unit tests
     // that build PrintersService directly do not need to supply a mock.
+    private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
     private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
 
     /// <summary>
@@ -116,6 +120,7 @@ public class PrintersService(
     /// Most MMU printers support 4-8 toolheads; 16 is a generous upper bound.
     /// </summary>
     private const int MaxToolheadIndex = 16;
+    private const string ToolheadPrinterIndexUniqueIndexName = "UX_Toolheads_PrinterId_Index";
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -3047,20 +3052,32 @@ public class PrintersService(
 
             try
             {
-                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+                SpoolBindingResolution resolution = await ResolveToolheadSpoolAsync(
+                    p,
+                    spoolId,
+                    policy,
+                    ct).ConfigureAwait(false);
+                SpoolmanSpoolDto? spool = resolution.Spool;
 
                 if (policy == SpoolBindPolicy.Guided && spool is null)
                 {
                     _logger.LogWarning(
                         "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for legacy T0 on printer {PName} ({Id})",
                         spoolId, p.Name, id);
-                    return new CommandResult(false, $"Spool {spoolId} could not be resolved at commit time");
+                    return new CommandResult(
+                        false,
+                        BuildGuidedResolutionFailureMessage(spoolId, resolution.FailureReason));
                 }
 
                 p.CurrentSpoolId = spoolId;
                 p.CurrentMaterial = spool?.Material ?? null;
 
-                stagedAudit = StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
+                stagedAudit = StageOverrideAudit(
+                    overrideAudit,
+                    id,
+                    toolheadIndex,
+                    spoolId,
+                    spool?.Material);
                 await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -3093,14 +3110,21 @@ public class PrintersService(
         {
             // C1/C3: resolve before mutating tracked topology. A guided null or lookup
             // exception therefore cannot leave a promotion or newly tracked gates behind.
-            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            SpoolBindingResolution resolution = await ResolveToolheadSpoolAsync(
+                p,
+                spoolId,
+                policy,
+                ct).ConfigureAwait(false);
+            SpoolmanSpoolDto? spool = resolution.Spool;
 
             if (policy == SpoolBindPolicy.Guided && spool is null)
             {
                 _logger.LogWarning(
                     "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for toolhead T{Index} on printer {PName} ({Id}); no gate/bind/audit persisted",
                     spoolId, toolheadIndex, p.Name, id);
-                return new CommandResult(false, $"Spool {spoolId} could not be resolved at commit time");
+                return new CommandResult(
+                    false,
+                    BuildGuidedResolutionFailureMessage(spoolId, resolution.FailureReason));
             }
 
             if (toolhead is null)
@@ -3147,8 +3171,37 @@ public class PrintersService(
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
             toolhead.UpdatedAt = DateTime.UtcNow;
 
-            stagedOverride = StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
+            stagedOverride = StageOverrideAudit(
+                overrideAudit,
+                id,
+                toolheadIndex,
+                spoolId,
+                spool?.Material);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (
+            stagedGates.Count > 0
+            && IsToolheadPrinterIndexUniqueViolation(ex))
+        {
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: concurrent gate materialization conflict for printer {Id} toolhead T{Index}",
+                id,
+                toolheadIndex);
+            return new ToolheadSpoolBindResult(
+                false,
+                $"Toolhead T{toolheadIndex} was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict);
         }
         catch (Exception ex)
         {
@@ -3186,7 +3239,8 @@ public class PrintersService(
         FilamentSwapOverrideContext? ctx,
         Guid printerId,
         int toolheadIndex,
-        int spoolId)
+        int spoolId,
+        string? commitTimeScannedMaterial)
     {
         if (ctx is null)
         {
@@ -3203,7 +3257,7 @@ public class PrintersService(
             UserName = ctx.UserName,
             Reason = ctx.Reason,
             ExpectedMaterial = ctx.ExpectedMaterial,
-            ScannedMaterial = ctx.ScannedMaterial,
+            ScannedMaterial = commitTimeScannedMaterial,
             AffectedJobIdsJson = JsonSerializer.Serialize(ctx.AffectedJobIds ?? Array.Empty<Guid>()),
             CreatedAtUtc = DateTime.UtcNow,
         };
@@ -3289,6 +3343,55 @@ public class PrintersService(
                 "SetToolheadSpoolAsync: spool binding committed for printer {PrinterId}, but coverage notification failed",
                 printerId);
         }
+    }
+
+    private async Task<SpoolBindingResolution> ResolveToolheadSpoolAsync(
+        Printer printer,
+        int spoolId,
+        SpoolBindPolicy policy,
+        CancellationToken ct)
+    {
+        if (policy == SpoolBindPolicy.Direct)
+        {
+            SpoolmanSpoolDto? directSpool = await _spoolmanService
+                .GetSpoolByIdAsync(spoolId, ct)
+                .ConfigureAwait(false);
+            return new SpoolBindingResolution(directSpool, null);
+        }
+
+        FilamentCoverageSpoolSnapshot snapshot = await _spoolResolver
+            .ResolveSpoolAsync(printer, spoolId, ct)
+            .ConfigureAwait(false);
+        return new SpoolBindingResolution(snapshot.Spool, snapshot.ErrorReason);
+    }
+
+    private static string BuildGuidedResolutionFailureMessage(int spoolId, string? failureReason) =>
+        failureReason is null
+            ? $"Spool {spoolId} could not be resolved at commit time"
+            : $"Spool {spoolId} could not be resolved at commit time ({failureReason})";
+
+    private sealed record SpoolBindingResolution(
+        SpoolmanSpoolDto? Spool,
+        string? FailureReason);
+
+    private static bool IsToolheadPrinterIndexUniqueViolation(DbUpdateException ex)
+    {
+        string fullMessage = ex.ToString();
+        bool identifiesCanonicalIndex =
+            fullMessage.Contains(ToolheadPrinterIndexUniqueIndexName, StringComparison.OrdinalIgnoreCase)
+            || (fullMessage.Contains("Toolheads.PrinterId", StringComparison.OrdinalIgnoreCase)
+                && fullMessage.Contains("Toolheads.Index", StringComparison.OrdinalIgnoreCase));
+        if (!identifiesCanonicalIndex)
+        {
+            return false;
+        }
+
+        return fullMessage.Contains("unique", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("23505", StringComparison.Ordinal)
+            || fullMessage.Contains("2601", StringComparison.Ordinal)
+            || fullMessage.Contains("2627", StringComparison.Ordinal)
+            || fullMessage.Contains("SQLite Error 19", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc/>

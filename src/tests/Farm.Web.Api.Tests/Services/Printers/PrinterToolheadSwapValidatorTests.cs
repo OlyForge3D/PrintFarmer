@@ -7,8 +7,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,12 +34,19 @@ public class PrinterToolheadSwapValidatorTests
     private static PrinterToolheadSwapValidator CreateValidator(
         AppDbContext db,
         SpoolmanSpoolDto? spoolResult,
-        out Mock<ISpoolmanService> spoolman)
+        out Mock<IFilamentCoverageSpoolResolver> spoolResolver)
     {
-        spoolman = new Mock<ISpoolmanService>();
-        spoolman.Setup(s => s.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(spoolResult);
-        return new PrinterToolheadSwapValidator(db, spoolman.Object, NullLogger<PrinterToolheadSwapValidator>.Instance);
+        spoolResolver = new Mock<IFilamentCoverageSpoolResolver>();
+        spoolResolver
+            .Setup(s => s.ResolveSpoolAsync(
+                It.IsAny<Printer>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FilamentCoverageSpoolSnapshot(
+                spoolResult,
+                TracksLiveConsumption: false,
+                spoolResult is null ? FilamentCoverageSpoolResolver.ReasonSpoolNotFound : null));
+        return new PrinterToolheadSwapValidator(db, spoolResolver.Object);
     }
 
     private static SpoolmanSpoolDto Spool(int id, string material) =>

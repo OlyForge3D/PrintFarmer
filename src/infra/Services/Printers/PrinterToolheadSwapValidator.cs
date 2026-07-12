@@ -1,8 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -21,8 +20,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// </remarks>
 public class PrinterToolheadSwapValidator(
     AppDbContext db,
-    ISpoolmanService spoolman,
-    ILogger<PrinterToolheadSwapValidator> logger) : IPrinterToolheadSwapValidator
+    IFilamentCoverageSpoolResolver spoolResolver) : IPrinterToolheadSwapValidator
 {
     /// <summary>
     /// Hard upper bound on a toolhead / MMU-gate index. Mirrors
@@ -72,20 +70,10 @@ public class PrinterToolheadSwapValidator(
             return new SwapValidationResult(SwapValidationOutcome.ToolheadNotFound, null);
         }
 
-        SpoolmanSpoolDto? spool = null;
-        try
-        {
-            spool = await spoolman.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Swap validation for printer {PrinterId} toolhead T{ToolheadIndex}: Spoolman lookup for spool {SpoolId} failed",
-                printerId,
-                toolheadIndex,
-                spoolId);
-        }
+        FilamentCoverageSpoolSnapshot spoolSnapshot = await spoolResolver
+            .ResolveSpoolAsync(printer, spoolId, ct)
+            .ConfigureAwait(false);
+        SpoolmanSpoolDto? spool = spoolSnapshot.Spool;
 
         string? scanned = spool?.Material;
 
@@ -120,12 +108,15 @@ public class PrinterToolheadSwapValidator(
         // must not proceed or override on an unknown result (B7).
         if (spool is null)
         {
+            string reason = spoolSnapshot.ErrorReason is null
+                ? "Scanned spool could not be resolved from the printer's spool source."
+                : $"Scanned spool could not be resolved from the printer's spool source ({spoolSnapshot.ErrorReason}).";
             return Validated(new SwapValidationResultDto(
                 Status: SwapValidationStatus.Unknown,
                 Expected: expected,
                 Scanned: null,
                 AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
-                Reason: "Scanned spool could not be resolved in Spoolman."));
+                Reason: reason));
         }
 
         // Any relevant job that uses this tool without a resolvable material makes the

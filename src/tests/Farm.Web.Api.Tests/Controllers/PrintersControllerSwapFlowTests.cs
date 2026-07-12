@@ -560,6 +560,51 @@ public class PrintersControllerSwapFlowTests
     }
 
     [Fact]
+    public async Task SetToolheadSpoolAsync_ConcurrentGateMaterializationConflict_Returns409()
+    {
+        Guid printerId = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService
+            .Setup(s => s.SetToolheadSpoolAsync(
+                printerId,
+                1,
+                42,
+                It.IsAny<FilamentSwapOverrideContext?>(),
+                SpoolBindPolicy.Guided,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ToolheadSpoolBindResult(
+                false,
+                "Toolhead T1 was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict));
+        var validator = new Mock<IPrinterToolheadSwapValidator>();
+        validator.Setup(v => v.ValidateAsync(printerId, 1, 42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Validated(SwapValidationStatus.Ok, expected: "PLA", scanned: "PLA"));
+        PrintersController controller = CreateController(
+            out Mock<IPrintFarmerTelemetryService> telemetry,
+            printersService,
+            statusCache: null);
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
+            printerId,
+            1,
+            new SetActiveSpoolRequest { SpoolId = 42 },
+            validator.Object,
+            Gate(),
+            CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        ToolheadSpoolBindResult body = Assert.IsType<ToolheadSpoolBindResult>(conflict.Value);
+        Assert.Equal(ToolheadSpoolBindFailureKind.TopologyConflict, body.FailureKind);
+        telemetry.Verify(
+            t => t.RecordPrinterOperation("set_toolhead_spool", printerId.ToString(), false),
+            Times.Once);
+        telemetry.Verify(
+            t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task SetToolheadSpoolAsync_ReturnsNotFound_WhenValidatorReportsPrinterNotFound_NoBind()
     {
         // B2: a printer-not-found outcome from the validator must return 404 and NEVER fall
@@ -634,6 +679,23 @@ public class PrintersControllerSwapFlowTests
         Assert.Equal(9, request!.SpoolId);
         Assert.True(request.OverrideMismatch);
         Assert.Equal("loaded PLA over PETG", request.OverrideReason);
+    }
+
+    [Fact]
+    public void ToolheadSpoolBindResult_DoesNotSerializeFailureKind()
+    {
+        var result = new ToolheadSpoolBindResult(
+            false,
+            "retry",
+            ToolheadSpoolBindFailureKind.TopologyConflict);
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+        string json = JsonSerializer.Serialize(result, options);
+
+        Assert.Contains("\"success\":false", json);
+        Assert.Contains("\"message\":\"retry\"", json);
+        Assert.DoesNotContain("failureKind", json);
+        Assert.DoesNotContain("topologyConflict", json);
     }
 
     [Fact]
