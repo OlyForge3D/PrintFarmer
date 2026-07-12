@@ -1,8 +1,35 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { QueueJobsTable } from "../QueueJobsTable";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import "@testing-library/jest-dom";
+
+vi.mock("@/services/printer-signalr", () => ({
+  printerSignalRService: {
+    connect: vi.fn().mockResolvedValue(undefined),
+    onFilamentCoverageChanged: vi.fn(() => () => {}),
+  },
+}));
+
+vi.mock("@/services/api", () => ({
+  apiClient: {
+    get: vi.fn().mockResolvedValue({
+      data: { printers: [], evaluatedAtUtc: new Date().toISOString() },
+    }),
+  },
+}));
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, refetchInterval: false, refetchOnWindowFocus: false, gcTime: 0 },
+    },
+  });
+  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 
 describe("QueueJobsTable Component", () => {
   const createMockJob = (overrides?: Partial<QueuedPrintJobWithFileMetaDto>): QueuedPrintJobWithFileMetaDto => ({

@@ -16,6 +16,10 @@ import {
 } from "@/types/api";
 import { apiClient } from "@/services/api";
 import { getHubUrl } from "@/common/utils/apiUrlHelpers";
+import {
+  decodeFilamentCoverageChangedEvent,
+  type FilamentCoverageChangedEvent,
+} from "@/features/filament-coverage/types";
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
@@ -27,6 +31,7 @@ type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
+type FilamentCoverageChangedCallback = (event: FilamentCoverageChangedEvent) => void;
 
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
@@ -267,6 +272,21 @@ export class PrinterSignalRService {
       }
     );
 
+    // Filament coverage invalidation cue (issue #709). Payload is only a
+    // hint — subscribers refetch the canonical filament-coverage queries.
+    // Only the lowercase event name is registered; do NOT add a PascalCase
+    // alias.
+    this.connection.on("filamentcoveragechanged", (raw: unknown) => {
+      const event = decodeFilamentCoverageChangedEvent(raw);
+      this.filamentCoverageChangedCallbacks.forEach((cb) => {
+        try {
+          cb(event);
+        } catch (e) {
+          console.error("Filament coverage callback error:", e);
+        }
+      });
+    });
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -309,6 +329,7 @@ export class PrinterSignalRService {
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
   private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
+  private filamentCoverageChangedCallbacks: FilamentCoverageChangedCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -606,6 +627,21 @@ export class PrinterSignalRService {
     };
   }
 
+  /**
+   * Subscribe to the lowercase `filamentcoveragechanged` invalidation cue
+   * from the printer hub. The event is a hint that the coverage snapshot
+   * for `printerId` (or the entire fleet, when `printerId === null`) may
+   * have changed — subscribers must refetch canonical queries and treat
+   * the payload as opaque.
+   */
+  onFilamentCoverageChanged(callback: FilamentCoverageChangedCallback): () => void {
+    this.filamentCoverageChangedCallbacks.push(callback);
+    return () => {
+      const idx = this.filamentCoverageChangedCallbacks.indexOf(callback);
+      if (idx > -1) this.filamentCoverageChangedCallbacks.splice(idx, 1);
+    };
+  }
+
   get connectionState(): HubConnectionState {
     return this.connection?.state ?? HubConnectionState.Disconnected;
   }
@@ -626,6 +662,7 @@ export class PrinterSignalRService {
     this.dispatchUploadProgressCallbacks = [];
     this.failureDetectionCallbacks = [];
     this.autoDispatchStatusCallbacks = [];
+    this.filamentCoverageChangedCallbacks = [];
     if (this.connection) {
       this.connection.stop();
       this.connection = null;
