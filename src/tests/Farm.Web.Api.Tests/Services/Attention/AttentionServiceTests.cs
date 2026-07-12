@@ -36,6 +36,20 @@ public class AttentionServiceTests
     private readonly Mock<IQueueDataService> _queueData = new(MockBehavior.Loose);
     private readonly FakeTimeProvider _clock = new(Now);
 
+    [Fact]
+    public void AttentionActionResult_TypedProblemWithNonConflictOutcome_IsRejected()
+    {
+        var details = new WrongBinResponse(
+        [
+            new WrongBinMismatchResponse("SKU-A", "BIN-A", "BIN-B"),
+        ]);
+
+        _ = Assert.Throws<ArgumentException>(() => new AttentionActionResult(
+            AttentionActionOutcome.Ok,
+            reason: null,
+            new AttentionWrongBinProblem(details)));
+    }
+
     private AttentionService CreateService(IEnumerable<IAttentionSource> sources)
     {
         return new AttentionService(
@@ -63,6 +77,24 @@ public class AttentionServiceTests
             _clock,
             broadcaster,
             failureHistory);
+    }
+
+    private AttentionService CreateHarvestService(
+        AttentionItemDto item,
+        IPartHarvestService partHarvestService)
+    {
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
+        gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        return new AttentionService(
+            [new StubSource("harvest", [item])],
+            _snoozeRepo.Object,
+            _printers.Object,
+            _maintenance.Object,
+            _queueData.Object,
+            NullLogger<AttentionService>.Instance,
+            _clock,
+            partHarvestService: partHarvestService,
+            featureGate: gate.Object);
     }
 
     private void SetupNoSnoozes(Guid userId)
@@ -542,6 +574,136 @@ public class AttentionServiceTests
 
         result.Outcome.Should().Be(AttentionActionOutcome.Ok);
         partHarvest.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_HarvestNoMappings_PreservesTypedProblemWithoutDataLoss()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        Guid projectFileId = Guid.NewGuid();
+        Guid gcodeFileId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, jobId);
+        AttentionItemDto item = BuildItem(
+            itemId,
+            AttentionKind.Harvest,
+            AttentionSeverity.Info,
+            Guid.NewGuid(),
+            Now,
+            actions: [new AttentionActionDto(AttentionActionKind.Harvest, "Harvest", false)],
+            jobId: jobId);
+        var details = new PartMappingRequiredResponse(
+            jobId,
+            projectFileId,
+            gcodeFileId,
+            "Configure a mapping or supply outputs.");
+        var partHarvest = new Mock<IPartHarvestService>(MockBehavior.Strict);
+        partHarvest.Setup(service => service.HarvestJobAsync(
+                jobId,
+                It.IsAny<HarvestJobRequest>(),
+                userId.ToString("D"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HarvestResult(
+                PartInventoryOutcome.NoMappings,
+                null,
+                "mapping required",
+                MappingRequired: details));
+        AttentionService service = CreateHarvestService(item, partHarvest.Object);
+
+        AttentionActionResult result = await service.ExecuteActionAsync(
+            userId,
+            "user",
+            isFarmAdmin: false,
+            itemId,
+            AttentionActionKind.Harvest);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Conflict);
+        result.Reason.Should().Be("mapping required");
+        AttentionPartMappingRequiredProblem problem =
+            Assert.IsType<AttentionPartMappingRequiredProblem>(result.Problem);
+        Assert.Same(details, problem.Details);
+        Assert.Equal(AttentionActionProblemKind.PartMappingRequired, problem.Kind);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_HarvestWrongBin_PreservesTypedMismatches()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, jobId);
+        AttentionItemDto item = BuildItem(
+            itemId,
+            AttentionKind.Harvest,
+            AttentionSeverity.Info,
+            Guid.NewGuid(),
+            Now,
+            actions: [new AttentionActionDto(AttentionActionKind.Harvest, "Harvest", false)],
+            jobId: jobId);
+        var details = new WrongBinResponse(
+        [
+            new WrongBinMismatchResponse("SKU-A", "BIN-A", "BIN-B"),
+        ]);
+        var partHarvest = new Mock<IPartHarvestService>(MockBehavior.Strict);
+        partHarvest.Setup(service => service.HarvestJobAsync(
+                jobId,
+                It.IsAny<HarvestJobRequest>(),
+                userId.ToString("D"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HarvestResult(
+                PartInventoryOutcome.WrongBin,
+                null,
+                "wrong bin",
+                details));
+        AttentionService service = CreateHarvestService(item, partHarvest.Object);
+
+        AttentionActionResult result = await service.ExecuteActionAsync(
+            userId,
+            "user",
+            isFarmAdmin: false,
+            itemId,
+            AttentionActionKind.Harvest);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Conflict);
+        AttentionWrongBinProblem problem = Assert.IsType<AttentionWrongBinProblem>(result.Problem);
+        Assert.Same(details, problem.Details);
+        Assert.Equal(AttentionActionProblemKind.WrongBin, problem.Kind);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_HarvestIdempotentReplay_RemainsSuccessWithoutProblem()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, jobId);
+        AttentionItemDto item = BuildItem(
+            itemId,
+            AttentionKind.Harvest,
+            AttentionSeverity.Info,
+            Guid.NewGuid(),
+            Now,
+            actions: [new AttentionActionDto(AttentionActionKind.Harvest, "Harvest", false)],
+            jobId: jobId);
+        var partHarvest = new Mock<IPartHarvestService>(MockBehavior.Strict);
+        partHarvest.Setup(service => service.HarvestJobAsync(
+                jobId,
+                It.IsAny<HarvestJobRequest>(),
+                userId.ToString("D"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HarvestResult(
+                PartInventoryOutcome.IdempotentReplay,
+                new HarvestJobResponse(jobId, Now, null, null, true, [], []),
+                null));
+        AttentionService service = CreateHarvestService(item, partHarvest.Object);
+
+        AttentionActionResult result = await service.ExecuteActionAsync(
+            userId,
+            "user",
+            isFarmAdmin: false,
+            itemId,
+            AttentionActionKind.Harvest);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Ok);
+        result.Problem.Should().BeNull();
     }
 
     [Fact]

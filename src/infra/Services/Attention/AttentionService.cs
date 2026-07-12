@@ -514,6 +514,16 @@ public sealed class AttentionService(
                 => new AttentionActionResult(AttentionActionOutcome.NotFound, result.Message),
             PartInventoryOutcome.FeatureDisabled
                 => new AttentionActionResult(AttentionActionOutcome.NotFound, result.Message),
+            PartInventoryOutcome.NoMappings when result.MappingRequired is not null
+                => new AttentionActionResult(
+                    AttentionActionOutcome.Conflict,
+                    result.Message,
+                    new AttentionPartMappingRequiredProblem(result.MappingRequired)),
+            PartInventoryOutcome.WrongBin when result.WrongBin is not null
+                => new AttentionActionResult(
+                    AttentionActionOutcome.Conflict,
+                    result.Message,
+                    new AttentionWrongBinProblem(result.WrongBin)),
             PartInventoryOutcome.JobNotCompleted
                 or PartInventoryOutcome.WrongBin
                 or PartInventoryOutcome.BinNotFound
