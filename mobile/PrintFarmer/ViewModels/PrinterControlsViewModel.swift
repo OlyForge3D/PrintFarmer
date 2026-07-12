@@ -382,6 +382,7 @@ final class PrinterControlsViewModel: ObservableObject {
             case .unauthorized: return ("Authentication required.", false)
             case .forbidden: return ("Access denied.", false)
             case .notFound: return ("Printer not found.", false)
+            case .featureDisabled: return ("This feature is disabled on the server.", false)
             case .methodNotAllowed: return (net.errorDescription ?? "Command not supported.", false)
             case .clientError(_, let api): return (api?.detail ?? api?.message ?? api?.title ?? "Command rejected.", false)
             case .unexpectedStatus(let code): return ("Unexpected response (\(code)).", false)
