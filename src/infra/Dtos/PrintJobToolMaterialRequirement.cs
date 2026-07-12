@@ -9,12 +9,15 @@ namespace Farm.Infrastructure;
 /// existing single-material dispatch and reporting behaviour unchanged.
 /// </summary>
 /// <param name="Tool">Zero-based toolhead index matching gcode T-commands (T0 = 0, T1 = 1, ...).</param>
-/// <param name="MaterialType">Material family required for this tool (e.g., "PLA", "PETG").</param>
+/// <param name="MaterialType">
+/// Material family required for this tool (e.g., "PLA", "PETG"), or <c>null</c> when slicer
+/// usage metadata proves the tool is used but its material is unresolved.
+/// </param>
 /// <param name="ColorHint">Optional hex color hint captured from the slicer (e.g., "#FF0000").</param>
 /// <param name="EstimatedGrams">Optional estimated grams of filament this tool will consume.</param>
 public sealed record PrintJobToolMaterialRequirement(
     [property: JsonPropertyName("tool")] int Tool,
-    [property: JsonPropertyName("materialType")] string MaterialType,
+    [property: JsonPropertyName("materialType")] string? MaterialType,
     [property: JsonPropertyName("colorHint")] string? ColorHint,
     [property: JsonPropertyName("estimatedGrams")] double? EstimatedGrams);
 

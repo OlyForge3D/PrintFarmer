@@ -106,15 +106,10 @@ public class PrinterToolheadSwapValidator(
             string? material = ExtractExpectedMaterial(job, gcodeToolIndex.Value);
             if (material is not null)
             {
-                // A concrete, known requirement wins — it lets us report ok/mismatch.
-                expected = material;
-                break;
+                expected ??= material;
+                continue;
             }
 
-            // C2: no known material for this job, but if the job will actually USE the
-            // requested G-code tool (per the authoritative slicer usage signal / an explicit
-            // per-tool slot) then its material is missing/blank/unresolved — that is `unknown`,
-            // not "no requirement". Keep scanning in case a later job has a known material.
             if (JobUsesGcodeTool(job, gcodeToolIndex.Value))
             {
                 anyUsesToolButUnknown = true;
@@ -133,22 +128,21 @@ public class PrinterToolheadSwapValidator(
                 Reason: "Scanned spool could not be resolved in Spoolman."));
         }
 
-        // No known requirement for this lane. Distinguish two very different cases (C2):
-        //   • A relevant current/assigned job WILL use this tool but its material is
-        //     missing/blank/unresolved → UNKNOWN (cannot validate, must not bind/override).
-        //   • Zero relevant jobs use this tool (truly unused lane) → OK (safe to bind).
+        // Any relevant job that uses this tool without a resolvable material makes the
+        // validation unknown, even if another relevant job has a known requirement.
+        if (anyUsesToolButUnknown)
+        {
+            return Validated(new SwapValidationResultDto(
+                Status: SwapValidationStatus.Unknown,
+                Expected: expected,
+                Scanned: scanned,
+                AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
+                Reason: "A queued or active job uses this tool but its required material is unknown."));
+        }
+
+        // No relevant job uses this lane, so there is no requirement to satisfy.
         if (expected is null)
         {
-            if (anyUsesToolButUnknown)
-            {
-                return Validated(new SwapValidationResultDto(
-                    Status: SwapValidationStatus.Unknown,
-                    Expected: null,
-                    Scanned: scanned,
-                    AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
-                    Reason: "A queued or active job uses this tool but its required material is unknown."));
-            }
-
             return Validated(new SwapValidationResultDto(
                 Status: SwapValidationStatus.Ok,
                 Expected: null,

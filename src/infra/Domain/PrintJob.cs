@@ -47,9 +47,11 @@ public class PrintJob
     /// <summary>
     /// JSON-serialized array of per-tool material requirements extracted from slicer / G-code
     /// metadata at queue time. Each element is a <see cref="PrintJobToolMaterialRequirement"/>
-    /// with <c>tool</c>, <c>materialType</c>, optional <c>colorHint</c>, and optional
-    /// <c>estimatedGrams</c>. Null when the source G-code lacks per-extruder metadata; in that
-    /// case validation falls back to <see cref="RequiredMaterialType"/>.
+    /// with <c>tool</c>, nullable <c>materialType</c>, optional <c>colorHint</c>, and optional
+    /// <c>estimatedGrams</c>. Entry presence means the slicer reported that tool as used; a null
+    /// material preserves the distinction between used-but-unresolved and unused. The column is
+    /// null when the source G-code lacks authoritative per-extruder usage metadata; in that case
+    /// validation falls back to <see cref="RequiredMaterialType"/>.
     /// </summary>
     public string? RequiredMaterialsPerToolJson { get; set; }
 

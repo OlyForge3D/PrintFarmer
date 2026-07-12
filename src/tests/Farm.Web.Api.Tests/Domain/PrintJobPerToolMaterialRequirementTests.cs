@@ -75,6 +75,26 @@ public class PrintJobPerToolMaterialRequirementTests
     }
 
     [Fact]
+    public void RequiredMaterialsPerTool_UsedToolWithUnknownMaterial_RoundTripsThroughJson()
+    {
+        var job = new PrintJob
+        {
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(1, MaterialType: null, ColorHint: null, EstimatedGrams: 4.25),
+            },
+        };
+
+        Assert.Contains("\"tool\":1", job.RequiredMaterialsPerToolJson);
+        Assert.Contains("\"materialType\":null", job.RequiredMaterialsPerToolJson);
+
+        PrintJobToolMaterialRequirement requirement = Assert.Single(job.RequiredMaterialsPerTool!);
+        Assert.Equal(1, requirement.Tool);
+        Assert.Null(requirement.MaterialType);
+        Assert.Equal(4.25, requirement.EstimatedGrams);
+    }
+
+    [Fact]
     public void RequiredMaterialsPerTool_InvalidJson_ReturnsNull()
     {
         var job = new PrintJob { RequiredMaterialsPerToolJson = "not-json" };

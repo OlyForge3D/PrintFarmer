@@ -41,8 +41,9 @@ public static class PrintJobRequirementsMapper
 
     /// <summary>
     /// Populates <see cref="PrintJob.RequiredMaterialsPerTool"/> from the slicer
-    /// per-extruder metadata carried on <paramref name="gcodeFile"/>. No-op when the
-    /// source lacks per-extruder material data — the legacy single-material scalar
+    /// per-extruder metadata carried on <paramref name="gcodeFile"/>. Entry presence records
+    /// authoritative tool usage even when the material label is blank or missing. No-op when
+    /// the source lacks both material and usage data — the legacy single-material scalar
     /// continues to drive validation in that case.
     /// </summary>
     /// <param name="job">The newly constructed print job to mutate.</param>
@@ -57,24 +58,31 @@ public static class PrintJobRequirementsMapper
         }
 
         string[]? materials = TryParseJsonArray<string>(gcodeFile.FilamentPerExtruderType);
-        if (materials is null || materials.Length == 0)
+        double[]? weights = TryParseJsonArray<double>(gcodeFile.FilamentPerExtruderWeightG);
+        int toolCount = Math.Max(materials?.Length ?? 0, weights?.Length ?? 0);
+        if (toolCount == 0)
         {
             return;
         }
 
-        double[]? weights = TryParseJsonArray<double>(gcodeFile.FilamentPerExtruderWeightG);
         string[]? colors = TryParseJsonArray<string>(gcodeFile.FilamentPerExtruderColorHex);
 
-        var reqs = new List<PrintJobToolMaterialRequirement>(materials.Length);
-        for (int tool = 0; tool < materials.Length; tool++)
+        var reqs = new List<PrintJobToolMaterialRequirement>(toolCount);
+        for (int tool = 0; tool < toolCount; tool++)
         {
-            string? material = materials[tool];
-            if (string.IsNullOrWhiteSpace(material))
+            string? material = materials is not null && tool < materials.Length
+                ? materials[tool]
+                : null;
+            material = string.IsNullOrWhiteSpace(material) ? null : material.Trim();
+
+            bool hasWeightSignal = weights is not null && tool < weights.Length;
+            double? grams = hasWeightSignal ? weights![tool] : null;
+            bool isUsed = hasWeightSignal ? grams > 0 : material is not null;
+            if (!isUsed)
             {
                 continue;
             }
 
-            double? grams = weights is not null && tool < weights.Length ? weights[tool] : (double?)null;
             string? color = colors is not null && tool < colors.Length ? colors[tool] : null;
             if (string.IsNullOrWhiteSpace(color))
             {
@@ -129,6 +137,11 @@ public static class PrintJobRequirementsMapper
         var wire = new List<PrintJobToolRequirementDto>(perTool.Count);
         foreach (PrintJobToolMaterialRequirement req in perTool)
         {
+            if (string.IsNullOrWhiteSpace(req.MaterialType))
+            {
+                continue;
+            }
+
             wire.Add(new PrintJobToolRequirementDto(
                 ToolIndex: req.Tool,
                 MaterialType: req.MaterialType,

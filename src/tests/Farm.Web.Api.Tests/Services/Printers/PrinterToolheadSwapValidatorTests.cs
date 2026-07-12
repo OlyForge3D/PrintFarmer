@@ -685,7 +685,7 @@ public class PrinterToolheadSwapValidatorTests
             // Projected per-tool array is sparse — tool 1's blank material was dropped.
             RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
             {
-                new() { Tool = 0, MaterialType = "PLA" },
+                new(0, "PLA", null, null),
             },
             QueuePosition = 1,
             QueuedAt = DateTime.UtcNow,
@@ -726,8 +726,8 @@ public class PrinterToolheadSwapValidatorTests
             GcodeFileId = gcodeId,
             RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
             {
-                new() { Tool = 0, MaterialType = "PLA" },
-                new() { Tool = 1, MaterialType = "PETG" },
+                new(0, "PLA", null, null),
+                new(1, "PETG", null, null),
             },
             QueuePosition = 1,
             QueuedAt = DateTime.UtcNow,
@@ -745,11 +745,8 @@ public class PrinterToolheadSwapValidatorTests
     }
 
     [Fact]
-    public async Task ValidateAsync_KnownMaterialStillOk_EvenWhenAnotherJobUsesToolWithUnknownMaterial()
+    public async Task ValidateAsync_ReturnsUnknown_WhenAnyRelevantJobUsesToolWithUnknownMaterial()
     {
-        // A known requirement wins over a used-but-unknown one: the printing job requires PLA
-        // on tool 0, another queued job uses tool 0 with a blank material. Scanning PLA is a
-        // clean `ok`, not conflated to `unknown`.
         await using AppDbContext db = CreateDb();
         Printer printer = SeedPrinter(db);
         db.PrintJobs.Add(new PrintJob
@@ -760,10 +757,23 @@ public class PrinterToolheadSwapValidatorTests
             Status = PrintJobStatus.Printing,
             RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
             {
-                new() { Tool = 0, MaterialType = "PLA" },
+                new(0, "PLA", null, null),
             },
             QueuePosition = 1,
             QueuedAt = DateTime.UtcNow,
+        });
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "unknown-material",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Assigned,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(Tool: 0, MaterialType: null, ColorHint: null, EstimatedGrams: 3),
+            },
+            QueuePosition = 2,
+            QueuedAt = DateTime.UtcNow.AddSeconds(1),
         });
         await db.SaveChangesAsync();
 
@@ -771,7 +781,7 @@ public class PrinterToolheadSwapValidatorTests
 
         SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 3, CancellationToken.None));
 
-        Assert.Equal(SwapValidationStatus.Ok, result.Status);
+        Assert.Equal(SwapValidationStatus.Unknown, result.Status);
         Assert.Equal("PLA", result.Expected);
     }
 

@@ -3041,14 +3041,14 @@ public class PrintersService(
         // scalar (Printer.CurrentSpoolId). Never fabricate a fake MMU gate at index 0.
         if (toolhead is null && toolheadIndex == 0)
         {
+            int? previousSpoolId = p.CurrentSpoolId;
+            string? previousMaterial = p.CurrentMaterial;
+            FilamentSwapOverride? stagedAudit = null;
+
             try
             {
                 SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
 
-                // C1: in guided mode a null commit-time re-resolution must fail closed — do
-                // NOT assign the scalar, stage an audit, or save. The validator approved a
-                // concrete spool; if it is no longer resolvable we refuse rather than persist
-                // a stale/blank binding.
                 if (policy == SpoolBindPolicy.Guided && spool is null)
                 {
                     _logger.LogWarning(
@@ -3060,74 +3060,41 @@ public class PrintersService(
                 p.CurrentSpoolId = spoolId;
                 p.CurrentMaterial = spool?.Material ?? null;
 
-                StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
+                stagedAudit = StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
                 await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
-
-                _logger.LogInformation(
-                    "SetToolheadSpoolAsync: Assigned spool {SpoolId} to legacy T0 (Printer scalar) on printer {PName} ({Id})",
-                    spoolId, p.Name, id);
-
-                return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T0");
             }
             catch (Exception ex)
             {
+                RestoreLegacySpoolBinding(p, previousSpoolId, previousMaterial, stagedAudit);
                 _logger.LogError(
                     ex,
                     "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to legacy T0 on printer {PName} ({Id})",
                     spoolId, p.Name, id);
                 return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
             }
+
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to legacy T0 (Printer scalar) on printer {PName} ({Id})",
+                spoolId, p.Name, id);
+
+            await BroadcastSpoolBindingCoverageAsync(id, ct).ConfigureAwait(false);
+            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T0");
         }
 
-        // Auto-create MMU gates when the toolhead doesn't exist.
-        // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
-        // promote it and create the virtual gate rows so spool assignment works.
-        //
-        // C3: gate materialization and the MultiMaterial promotion are STAGED on the tracked
-        // context but NOT saved here. They commit in the single final SaveChanges below,
-        // together with the resolved spool binding and optional audit — so a commit-time
-        // resolution failure (C1) or any exception leaves no empty gates and no MultiMaterial
-        // mutation behind.
-        if (toolhead is null)
-        {
-            if (!p.MultiMaterial && toolheadIndex > 0)
-            {
-                _logger.LogInformation(
-                    "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
-                    p.Name, id, toolheadIndex);
-                p.MultiMaterial = true;
-            }
-
-            if (p.MultiMaterial)
-            {
-                int gateCount = Math.Max(4, toolheadIndex);
-                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
-                if (gates.Count > 0)
-                {
-                    // Tracked AddRange only — the single SaveChanges below is the sole commit
-                    // point (C3). Gate IDs are generated here, so no early save is required to
-                    // resolve them.
-                    _unitOfWork.Printers.AddToolheads(gates);
-                }
-
-                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
-                           ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
-            }
-        }
-
-        if (toolhead is null)
-        {
-            return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
-        }
-
+        bool previousMultiMaterial = p.MultiMaterial;
+        List<Toolhead> stagedGates = [];
+        Toolhead? existingToolhead = toolhead;
+        int? previousToolheadSpoolId = existingToolhead?.CurrentSpoolId;
+        string? previousToolheadMaterial = existingToolhead?.CurrentMaterial;
+        string? previousToolheadColor = existingToolhead?.CurrentFilamentColor;
+        DateTime? previousToolheadUpdatedAt = existingToolhead?.UpdatedAt;
+        FilamentSwapOverride? stagedOverride = null;
         try
         {
-            // Fetch spool details from Spoolman to populate material and color
+            // C1/C3: resolve before mutating tracked topology. A guided null or lookup
+            // exception therefore cannot leave a promotion or newly tracked gates behind.
             SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
 
-            // C1: guided fail-closed on a null commit-time re-resolution. Returning before the
-            // final SaveChanges means nothing persists — no gate row, no MultiMaterial
-            // promotion, no binding, no audit (C3 atomicity is what makes this safe).
             if (policy == SpoolBindPolicy.Guided && spool is null)
             {
                 _logger.LogWarning(
@@ -3136,44 +3103,78 @@ public class PrintersService(
                 return new CommandResult(false, $"Spool {spoolId} could not be resolved at commit time");
             }
 
-            // Assign spool ID and denormalized info
+            if (toolhead is null)
+            {
+                if (!p.MultiMaterial && toolheadIndex > 0)
+                {
+                    _logger.LogInformation(
+                        "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
+                        p.Name, id, toolheadIndex);
+                    p.MultiMaterial = true;
+                }
+
+                if (p.MultiMaterial)
+                {
+                    int gateCount = Math.Max(4, toolheadIndex);
+                    stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                    if (stagedGates.Count > 0)
+                    {
+                        _unitOfWork.Printers.AddToolheads(stagedGates);
+                    }
+
+                    toolhead = stagedGates.FirstOrDefault(t => t.Index == toolheadIndex)
+                               ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+                }
+            }
+
+            if (toolhead is null)
+            {
+                RestoreStagedToolheadBinding(
+                    p,
+                    previousMultiMaterial,
+                    stagedGates,
+                    existingToolhead,
+                    previousToolheadSpoolId,
+                    previousToolheadMaterial,
+                    previousToolheadColor,
+                    previousToolheadUpdatedAt,
+                    stagedOverride);
+                return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
+            }
+
             toolhead.CurrentSpoolId = spoolId;
             toolhead.CurrentMaterial = spool?.Material ?? null;
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
             toolhead.UpdatedAt = DateTime.UtcNow;
 
-            // Stage the override audit (if any) so it commits in the SAME SaveChanges as the
-            // binding (and any staged gate materialization) — a failed bind therefore never
-            // leaves an orphaned audit/gate and an audit is never missing for a committed
-            // override (B6 + C3 atomicity).
-            StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
-
+            stagedOverride = StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
-                spoolId, toolheadIndex, p.Name, id);
-
-            // #709 item 5: per-toolhead spool binding affects that slot's
-            // coverage classification.
-            if (_coverageBroadcaster is not null)
-            {
-                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
-                    id,
-                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
-                    ct).ConfigureAwait(false);
-            }
-
-            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
         }
         catch (Exception ex)
         {
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
             _logger.LogError(
                 ex,
                 "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
                 spoolId, toolheadIndex, p.Name, id);
             return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
         }
+
+        _logger.LogInformation(
+            "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
+            spoolId, toolheadIndex, p.Name, id);
+
+        await BroadcastSpoolBindingCoverageAsync(id, ct).ConfigureAwait(false);
+        return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
     }
 
     /// <summary>
@@ -3181,14 +3182,18 @@ public class PrintersService(
     /// commits atomically with the pending spool binding. No-op when no override context is
     /// supplied (issue #710, B6).
     /// </summary>
-    private void StageOverrideAudit(FilamentSwapOverrideContext? ctx, Guid printerId, int toolheadIndex, int spoolId)
+    private FilamentSwapOverride? StageOverrideAudit(
+        FilamentSwapOverrideContext? ctx,
+        Guid printerId,
+        int toolheadIndex,
+        int spoolId)
     {
         if (ctx is null)
         {
-            return;
+            return null;
         }
 
-        _unitOfWork.FilamentSwapOverrides.Add(new FilamentSwapOverride
+        var audit = new FilamentSwapOverride
         {
             Id = Guid.NewGuid(),
             PrinterId = printerId,
@@ -3201,7 +3206,89 @@ public class PrintersService(
             ScannedMaterial = ctx.ScannedMaterial,
             AffectedJobIdsJson = JsonSerializer.Serialize(ctx.AffectedJobIds ?? Array.Empty<Guid>()),
             CreatedAtUtc = DateTime.UtcNow,
-        });
+        };
+        _unitOfWork.FilamentSwapOverrides.Add(audit);
+        return audit;
+    }
+
+    private void RestoreLegacySpoolBinding(
+        Printer printer,
+        int? previousSpoolId,
+        string? previousMaterial,
+        FilamentSwapOverride? stagedAudit)
+    {
+        printer.CurrentSpoolId = previousSpoolId;
+        printer.CurrentMaterial = previousMaterial;
+        _db.Entry(printer).Property(p => p.CurrentSpoolId).IsModified = false;
+        _db.Entry(printer).Property(p => p.CurrentMaterial).IsModified = false;
+        DetachStagedAudit(stagedAudit);
+    }
+
+    private void RestoreStagedToolheadBinding(
+        Printer printer,
+        bool previousMultiMaterial,
+        IReadOnlyCollection<Toolhead> stagedGates,
+        Toolhead? existingToolhead,
+        int? previousSpoolId,
+        string? previousMaterial,
+        string? previousColor,
+        DateTime? previousUpdatedAt,
+        FilamentSwapOverride? stagedAudit)
+    {
+        foreach (Toolhead gate in stagedGates)
+        {
+            printer.Toolheads.Remove(gate);
+            _db.Entry(gate).State = EntityState.Detached;
+        }
+
+        printer.MultiMaterial = previousMultiMaterial;
+        _db.Entry(printer).Property(p => p.MultiMaterial).IsModified = false;
+
+        if (existingToolhead is not null && previousUpdatedAt.HasValue)
+        {
+            existingToolhead.CurrentSpoolId = previousSpoolId;
+            existingToolhead.CurrentMaterial = previousMaterial;
+            existingToolhead.CurrentFilamentColor = previousColor;
+            existingToolhead.UpdatedAt = previousUpdatedAt.Value;
+
+            _db.Entry(existingToolhead).Property(t => t.CurrentSpoolId).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.CurrentMaterial).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.CurrentFilamentColor).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.UpdatedAt).IsModified = false;
+        }
+
+        DetachStagedAudit(stagedAudit);
+    }
+
+    private void DetachStagedAudit(FilamentSwapOverride? stagedAudit)
+    {
+        if (stagedAudit is not null)
+        {
+            _db.Entry(stagedAudit).State = EntityState.Detached;
+        }
+    }
+
+    private async Task BroadcastSpoolBindingCoverageAsync(Guid printerId, CancellationToken ct)
+    {
+        if (_coverageBroadcaster is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: spool binding committed for printer {PrinterId}, but coverage notification failed",
+                printerId);
+        }
     }
 
     /// <inheritdoc/>

@@ -16,6 +16,7 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.PrintJobs;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.AspNetCore.SignalR;
@@ -115,6 +116,62 @@ public class PrintJobManagementServicePerToolPopulationTests
         // Slot 1 (empty) is skipped; slot 2 keeps its original tool index for downstream lookup.
         Assert.Equal(new[] { 0, 2 }, reqs!.Select(r => r.Tool).ToArray());
         Assert.Equal(new[] { "PLA", "PETG" }, reqs.Select(r => r.MaterialType).ToArray());
+    }
+
+    [Fact]
+    public void PopulatePerToolRequirementsFromGcode_UsedBlankMaterial_PersistsUnknownEntry()
+    {
+        var job = new PrintJob();
+        var gcode = new GcodeFile
+        {
+            FileName = "used-unknown.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA", "" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 10.0, 4.0 }),
+        };
+
+        PrintJobManagementService.PopulatePerToolRequirementsFromGcode(job, gcode);
+
+        IReadOnlyList<PrintJobToolMaterialRequirement> reqs = job.RequiredMaterialsPerTool!;
+        Assert.Equal(new[] { 0, 1 }, reqs.Select(r => r.Tool));
+        Assert.Equal("PLA", reqs[0].MaterialType);
+        Assert.Null(reqs[1].MaterialType);
+        Assert.Contains("\"materialType\":null", job.RequiredMaterialsPerToolJson);
+    }
+
+    [Fact]
+    public void PopulatePerToolRequirementsFromGcode_MissingMaterialArray_UsesWeightAsUsageSignal()
+    {
+        var job = new PrintJob();
+        var gcode = new GcodeFile
+        {
+            FileName = "missing-types.gcode",
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 0.0, 6.5 }),
+        };
+
+        PrintJobManagementService.PopulatePerToolRequirementsFromGcode(job, gcode);
+
+        PrintJobToolMaterialRequirement requirement = Assert.Single(job.RequiredMaterialsPerTool!);
+        Assert.Equal(1, requirement.Tool);
+        Assert.Null(requirement.MaterialType);
+        Assert.Equal(6.5, requirement.EstimatedGrams);
+    }
+
+    [Fact]
+    public void PopulatePerToolRequirementsFromGcode_ZeroWeightKnownSlot_IsUnused()
+    {
+        var job = new PrintJob();
+        var gcode = new GcodeFile
+        {
+            FileName = "configured-unused.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA", "PETG" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 10.0, 0.0 }),
+        };
+
+        PrintJobManagementService.PopulatePerToolRequirementsFromGcode(job, gcode);
+
+        PrintJobToolMaterialRequirement requirement = Assert.Single(job.RequiredMaterialsPerTool!);
+        Assert.Equal(0, requirement.Tool);
+        Assert.Equal("PLA", requirement.MaterialType);
     }
 
     [Fact]
@@ -300,6 +357,26 @@ public class PrintJobManagementServicePerToolPopulationTests
         Assert.Equal(new[] { 0, 1 }, dto.ToolRequirements.Select(r => r.ToolIndex));
         Assert.Equal(new[] { "PLA", "PETG" }, dto.ToolRequirements.Select(r => r.MaterialType));
         Assert.Equal(12.0, dto.ToolRequirements[0].EstimatedGrams);
+    }
+
+    [Fact]
+    public void ToWireRequirements_OmitsUnknownInternalEntries_AndDoesNotSynthesizeScalarT0()
+    {
+        var job = new PrintJob
+        {
+            RequiredMaterialType = "PLA",
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new(1, MaterialType: null, ColorHint: null, EstimatedGrams: 4.0),
+            },
+        };
+
+        List<PrintJobToolRequirementDto> wire = PrintJobRequirementsMapper.ToWireRequirements(job);
+
+        Assert.Empty(wire);
+
+        var scalarOnly = new PrintJob { RequiredMaterialType = "PETG" };
+        Assert.Empty(PrintJobRequirementsMapper.ToWireRequirements(scalarOnly));
     }
 
     [Fact]
