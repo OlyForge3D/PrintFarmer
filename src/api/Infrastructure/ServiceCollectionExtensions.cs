@@ -699,6 +699,22 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // Filament coverage / runout prediction (issue #709). Registered as
+        // both IFilamentCoverageService (per-printer + fleet endpoints) and
+        // IFilamentCoverageAttentionSource (narrow input to the #707 adapter). The
+        // broadcaster is a singleton so services that emit invalidations
+        // (spool binding changes, job progress ticks) can inject it without
+        // a scope hop.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver, Farm.Infrastructure.Services.Spoolman.FilamentCoverageSpoolResolver>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageService>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutAttentionSource>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster, Farm.Infrastructure.Services.Spoolman.FilamentCoverageBroadcaster>();
+
         // Obico ML API HTTP client (15s timeout for image analysis)
         _ = services.AddHttpClient("ObicoML", client =>
         {
