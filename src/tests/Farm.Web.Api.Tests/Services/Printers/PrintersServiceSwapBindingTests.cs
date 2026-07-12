@@ -149,7 +149,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         await using (AppDbContext db = NewDb())
         {
             PrintersService service = CreateService(db, spoolman);
-            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 88, ctx, CancellationToken.None);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 88, ctx, SpoolBindPolicy.Guided, CancellationToken.None);
             result.Success.Should().BeTrue();
         }
 
@@ -180,7 +180,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         await using (AppDbContext db = NewDb())
         {
             PrintersService service = CreateService(db, spoolman);
-            await service.SetToolheadSpoolAsync(printerId, 0, 5, overrideAudit: null, CancellationToken.None);
+            await service.SetToolheadSpoolAsync(printerId, 0, 5, overrideAudit: null, SpoolBindPolicy.Guided, CancellationToken.None);
         }
 
         await using AppDbContext verify = NewDb();
@@ -202,7 +202,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         await using (AppDbContext db = NewDb())
         {
             PrintersService service = CreateService(db, spoolman);
-            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 99, ctx, CancellationToken.None);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 99, ctx, SpoolBindPolicy.Guided, CancellationToken.None);
             result.Success.Should().BeFalse();
         }
 
@@ -222,11 +222,124 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         await using (AppDbContext db = NewDb())
         {
             PrintersService service = CreateService(db, spoolman);
-            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 99, 1, ctx, CancellationToken.None);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 99, 1, ctx, SpoolBindPolicy.Guided, CancellationToken.None);
             result.Success.Should().BeFalse();
         }
 
         await using AppDbContext verify = NewDb();
         (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
+    }
+
+    // ── C1: guided bind fails closed when the commit-time spool re-resolution is null ──
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_GuidedLegacyT0_CommitTimeSpoolNull_PersistsNothing()
+    {
+        Guid printerId = SeedLegacyPrinterNoToolheads();
+        Mock<ISpoolmanService> spoolman = SpoolmanReturningNull();
+        var ctx = new FilamentSwapOverrideContext("u", "n", "reason", "PLA", "PETG", Array.Empty<Guid>());
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId, 0, 77, ctx, SpoolBindPolicy.Guided, CancellationToken.None);
+            result.Success.Should().BeFalse();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Printer saved = await verify.Printers.Include(p => p.Toolheads).FirstAsync(p => p.Id == printerId);
+        saved.CurrentSpoolId.Should().BeNull();
+        saved.CurrentMaterial.Should().BeNull();
+        saved.Toolheads.Should().BeEmpty();
+        (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_DirectLegacyT0_CommitTimeSpoolNull_StillAssigns()
+    {
+        // Converged non-change: the generic/legacy DIRECT control keeps its assign-anyway
+        // behavior even when the spool no longer resolves (material simply stays null).
+        Guid printerId = SeedLegacyPrinterNoToolheads();
+        Mock<ISpoolmanService> spoolman = SpoolmanReturningNull();
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 77, CancellationToken.None);
+            result.Success.Should().BeTrue();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Printer saved = await verify.Printers.FirstAsync(p => p.Id == printerId);
+        saved.CurrentSpoolId.Should().Be(77);
+        saved.CurrentMaterial.Should().BeNull();
+    }
+
+    // ── C3: gate materialization + bind + audit commit in ONE SaveChanges ──
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_GuidedMmuGate_CommitTimeSpoolNull_NoGate_NoPromotion_NoAudit()
+    {
+        // Requesting an unmaterialized gate on a non-MMU printer would promote MultiMaterial
+        // and stage gate rows. Under guided mode a null commit-time re-resolution must roll all
+        // of that back — nothing persisted (C1 + C3).
+        Guid printerId = SeedLegacyPrinterNoToolheads();
+        Mock<ISpoolmanService> spoolman = SpoolmanReturningNull();
+        var ctx = new FilamentSwapOverrideContext("u", "n", "reason", "PLA", "PETG", Array.Empty<Guid>());
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId, 1, 88, ctx, SpoolBindPolicy.Guided, CancellationToken.None);
+            result.Success.Should().BeFalse();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Printer saved = await verify.Printers.Include(p => p.Toolheads).FirstAsync(p => p.Id == printerId);
+        saved.Toolheads.Should().BeEmpty();
+        saved.MultiMaterial.Should().BeFalse();
+        (await verify.Toolheads.CountAsync()).Should().Be(0);
+        (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_GuidedMmuGate_Success_CommitsGateBindAndAudit_Atomically()
+    {
+        Guid printerId = SeedLegacyPrinterNoToolheads();
+        Mock<ISpoolmanService> spoolman = Spoolman(88, "PETG");
+        Guid affectedJob = Guid.NewGuid();
+        var ctx = new FilamentSwapOverrideContext(
+            "user-9", "op", "override", "PLA", "PETG", new[] { affectedJob });
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman);
+            CommandResult result = await service.SetToolheadSpoolAsync(
+                printerId, 1, 88, ctx, SpoolBindPolicy.Guided, CancellationToken.None);
+            result.Success.Should().BeTrue();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Printer saved = await verify.Printers.Include(p => p.Toolheads).FirstAsync(p => p.Id == printerId);
+        saved.MultiMaterial.Should().BeTrue();
+
+        Toolhead gate = saved.Toolheads.Single(t => t.Index == 1);
+        gate.CurrentSpoolId.Should().Be(88);
+        gate.CurrentMaterial.Should().Be("PETG");
+
+        FilamentSwapOverride audit = await verify.FilamentSwapOverrides.SingleAsync();
+        audit.ToolheadIndex.Should().Be(1);
+        audit.SpoolId.Should().Be(88);
+        audit.UserId.Should().Be("user-9");
+    }
+
+    private static Mock<ISpoolmanService> SpoolmanReturningNull()
+    {
+        var spoolman = new Mock<ISpoolmanService>();
+        spoolman.Setup(s => s.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SpoolmanSpoolDto?)null);
+        return spoolman;
     }
 }

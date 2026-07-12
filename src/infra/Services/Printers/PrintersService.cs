@@ -2988,7 +2988,7 @@ public class PrintersService(
 
     /// <inheritdoc/>
     public Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct) =>
-        SetToolheadSpoolAsync(id, toolheadIndex, spoolId, null, ct);
+        SetToolheadSpoolAsync(id, toolheadIndex, spoolId, null, SpoolBindPolicy.Direct, ct);
 
     /// <inheritdoc/>
     public async Task<CommandResult> SetToolheadSpoolAsync(
@@ -2996,6 +2996,7 @@ public class PrintersService(
         int toolheadIndex,
         int spoolId,
         FilamentSwapOverrideContext? overrideAudit,
+        SpoolBindPolicy policy,
         CancellationToken ct)
     {
         // Load printer with toolheads collection
@@ -3027,6 +3028,19 @@ public class PrintersService(
             try
             {
                 SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+
+                // C1: in guided mode a null commit-time re-resolution must fail closed — do
+                // NOT assign the scalar, stage an audit, or save. The validator approved a
+                // concrete spool; if it is no longer resolvable we refuse rather than persist
+                // a stale/blank binding.
+                if (policy == SpoolBindPolicy.Guided && spool is null)
+                {
+                    _logger.LogWarning(
+                        "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for legacy T0 on printer {PName} ({Id})",
+                        spoolId, p.Name, id);
+                    return new CommandResult(false, $"Spool {spoolId} could not be resolved at commit time");
+                }
+
                 p.CurrentSpoolId = spoolId;
                 p.CurrentMaterial = spool?.Material ?? null;
 
@@ -3052,6 +3066,12 @@ public class PrintersService(
         // Auto-create MMU gates when the toolhead doesn't exist.
         // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
         // promote it and create the virtual gate rows so spool assignment works.
+        //
+        // C3: gate materialization and the MultiMaterial promotion are STAGED on the tracked
+        // context but NOT saved here. They commit in the single final SaveChanges below,
+        // together with the resolved spool binding and optional audit — so a commit-time
+        // resolution failure (C1) or any exception leaves no empty gates and no MultiMaterial
+        // mutation behind.
         if (toolhead is null)
         {
             if (!p.MultiMaterial && toolheadIndex > 0)
@@ -3068,8 +3088,10 @@ public class PrintersService(
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
+                    // Tracked AddRange only — the single SaveChanges below is the sole commit
+                    // point (C3). Gate IDs are generated here, so no early save is required to
+                    // resolve them.
                     _unitOfWork.Printers.AddToolheads(gates);
-                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
                 }
 
                 toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
@@ -3087,6 +3109,17 @@ public class PrintersService(
             // Fetch spool details from Spoolman to populate material and color
             SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
 
+            // C1: guided fail-closed on a null commit-time re-resolution. Returning before the
+            // final SaveChanges means nothing persists — no gate row, no MultiMaterial
+            // promotion, no binding, no audit (C3 atomicity is what makes this safe).
+            if (policy == SpoolBindPolicy.Guided && spool is null)
+            {
+                _logger.LogWarning(
+                    "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for toolhead T{Index} on printer {PName} ({Id}); no gate/bind/audit persisted",
+                    spoolId, toolheadIndex, p.Name, id);
+                return new CommandResult(false, $"Spool {spoolId} could not be resolved at commit time");
+            }
+
             // Assign spool ID and denormalized info
             toolhead.CurrentSpoolId = spoolId;
             toolhead.CurrentMaterial = spool?.Material ?? null;
@@ -3094,8 +3127,9 @@ public class PrintersService(
             toolhead.UpdatedAt = DateTime.UtcNow;
 
             // Stage the override audit (if any) so it commits in the SAME SaveChanges as the
-            // binding — a failed bind therefore never leaves an orphaned audit and an audit is
-            // never missing for a committed override (B6 atomicity).
+            // binding (and any staged gate materialization) — a failed bind therefore never
+            // leaves an orphaned audit/gate and an audit is never missing for a committed
+            // override (B6 + C3 atomicity).
             StageOverrideAudit(overrideAudit, id, toolheadIndex, spoolId);
 
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);

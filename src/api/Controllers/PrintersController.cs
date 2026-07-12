@@ -2858,8 +2858,17 @@ public class PrintersController(
             }
         }
 
+        // C1: the guided binding contract (fail closed on a null commit-time re-resolution)
+        // applies only when the guided-swap feature is on. When disabled we pass Direct so the
+        // generic/legacy direct binding semantics are preserved unchanged. Guided mode is NOT
+        // inferred from overrideAudit — a normal guided `ok` bind has no audit but must still
+        // fail closed.
+        Farm.Infrastructure.Services.Printers.SpoolBindPolicy bindPolicy = guidedSwapEnabled
+            ? Farm.Infrastructure.Services.Printers.SpoolBindPolicy.Guided
+            : Farm.Infrastructure.Services.Printers.SpoolBindPolicy.Direct;
+
         CommandResult result = await _printersService
-            .SetToolheadSpoolAsync(id, toolheadIndex, spoolId, overrideAudit, ct)
+            .SetToolheadSpoolAsync(id, toolheadIndex, spoolId, overrideAudit, bindPolicy, ct)
             .ConfigureAwait(false);
         _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
 

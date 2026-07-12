@@ -9,6 +9,28 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
+/// Determines how <see cref="IPrintersService"/> spool binding treats a commit-time Spoolman
+/// re-resolution that returns <c>null</c> (the spool the validator approved has since become
+/// unresolvable). Introduced for GitHub issue OlyForge3D/PrintFarmer#710, C1.
+/// </summary>
+public enum SpoolBindPolicy
+{
+    /// <summary>
+    /// Legacy direct binding: the spool id is assigned even if the commit-time Spoolman lookup
+    /// returns null (denormalized material simply stays unset). Used by the generic direct
+    /// control and whenever the guided-swap feature is disabled, preserving prior semantics.
+    /// </summary>
+    Direct,
+
+    /// <summary>
+    /// Guided binding: fail closed if the commit-time Spoolman re-resolution returns null — no
+    /// spool id, material, gate row, MultiMaterial promotion, or override audit is persisted.
+    /// Guarantees the binding that commits matches the spool the validator actually approved.
+    /// </summary>
+    Guided,
+}
+
+/// <summary>
 /// Service interface for printer management and operations.
 /// Provides CRUD operations, status retrieval, file management, printer control operations,
 /// and integration with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
@@ -506,6 +528,12 @@ public interface IPrintersService
     /// binding. Supplied only for an authorized mismatch override; never persisted on a failed
     /// bind. Pass null for normal (non-override) assignments.
     /// </param>
+    /// <param name="policy">
+    /// Governs how a null commit-time Spoolman re-resolution is handled.
+    /// <see cref="SpoolBindPolicy.Guided"/> fails closed (persists nothing);
+    /// <see cref="SpoolBindPolicy.Direct"/> preserves the legacy assign-anyway behavior for
+    /// the generic direct control and the disabled-gate path (issue #710, C1).
+    /// </param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>CommandResult with success/failure and descriptive message</returns>
     Task<CommandResult> SetToolheadSpoolAsync(
@@ -513,6 +541,7 @@ public interface IPrintersService
         int toolheadIndex,
         int spoolId,
         FilamentSwapOverrideContext? overrideAudit,
+        SpoolBindPolicy policy,
         CancellationToken ct);
 
     /// <summary>

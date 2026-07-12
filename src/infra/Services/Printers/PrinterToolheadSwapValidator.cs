@@ -100,13 +100,24 @@ public class PrinterToolheadSwapValidator(
             .ConfigureAwait(false);
 
         string? expected = null;
+        bool anyUsesToolButUnknown = false;
         foreach (PrintJob job in candidateJobs)
         {
             string? material = ExtractExpectedMaterial(job, gcodeToolIndex.Value);
             if (material is not null)
             {
+                // A concrete, known requirement wins — it lets us report ok/mismatch.
                 expected = material;
                 break;
+            }
+
+            // C2: no known material for this job, but if the job will actually USE the
+            // requested G-code tool (per the authoritative slicer usage signal / an explicit
+            // per-tool slot) then its material is missing/blank/unresolved — that is `unknown`,
+            // not "no requirement". Keep scanning in case a later job has a known material.
+            if (JobUsesGcodeTool(job, gcodeToolIndex.Value))
+            {
+                anyUsesToolButUnknown = true;
             }
         }
 
@@ -122,9 +133,22 @@ public class PrinterToolheadSwapValidator(
                 Reason: "Scanned spool could not be resolved in Spoolman."));
         }
 
-        // No requirement to satisfy for this lane → OK (safe to bind).
+        // No known requirement for this lane. Distinguish two very different cases (C2):
+        //   • A relevant current/assigned job WILL use this tool but its material is
+        //     missing/blank/unresolved → UNKNOWN (cannot validate, must not bind/override).
+        //   • Zero relevant jobs use this tool (truly unused lane) → OK (safe to bind).
         if (expected is null)
         {
+            if (anyUsesToolButUnknown)
+            {
+                return Validated(new SwapValidationResultDto(
+                    Status: SwapValidationStatus.Unknown,
+                    Expected: null,
+                    Scanned: scanned,
+                    AffectedJobs: Array.Empty<SwapValidationAffectedJobDto>(),
+                    Reason: "A queued or active job uses this tool but its required material is unknown."));
+            }
+
             return Validated(new SwapValidationResultDto(
                 Status: SwapValidationStatus.Ok,
                 Expected: null,
@@ -182,6 +206,74 @@ public class PrinterToolheadSwapValidator(
             Scanned: scanned,
             AffectedJobs: affected,
             Reason: $"Scanned material '{scanned}' does not match expected '{expected}'."));
+    }
+
+    /// <summary>
+    /// Determines whether <paramref name="job"/> will actually use the 0-based G-code tool
+    /// <paramref name="gcodeToolIndex"/>, independent of whether its material is known. This is
+    /// what lets the validator tell a genuinely unused lane (→ ok) apart from a lane that a
+    /// relevant job uses but whose material is missing/blank/unresolved (→ unknown) — issue
+    /// #710, C2.
+    /// <para>
+    /// Signals, in order of authority:
+    /// <list type="number">
+    /// <item>An explicit per-tool requirement slot for the index (even with blank material) —
+    /// the slicer emitted this extruder.</item>
+    /// <item>The linked G-code file's per-extruder metadata: a non-zero filament weight, or a
+    /// present type slot, at the index means the extruder printed.</item>
+    /// </list>
+    /// Persisted per-tool arrays are sparse (blank slots were dropped on projection), so the
+    /// G-code file is consulted as the authoritative fallback for existing jobs.
+    /// </para>
+    /// </summary>
+    internal static bool JobUsesGcodeTool(PrintJob job, int gcodeToolIndex)
+    {
+        if (gcodeToolIndex < 0)
+        {
+            return false;
+        }
+
+        IReadOnlyList<PrintJobToolMaterialRequirement>? perTool = job.RequiredMaterialsPerTool;
+        if (perTool is not null && perTool.Any(r => r.Tool == gcodeToolIndex))
+        {
+            return true;
+        }
+
+        GcodeFile? gcode = job.GcodeFile;
+        if (gcode is not null)
+        {
+            double[]? weights = TryParseJsonArray<double>(gcode.FilamentPerExtruderWeightG);
+            if (weights is not null && gcodeToolIndex < weights.Length && weights[gcodeToolIndex] > 0)
+            {
+                return true;
+            }
+
+            string[]? types = TryParseJsonArray<string>(gcode.FilamentPerExtruderType);
+            if (types is not null && gcodeToolIndex < types.Length
+                && !string.IsNullOrWhiteSpace(types[gcodeToolIndex]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static T[]? TryParseJsonArray<T>(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<T[]>(json);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private static SwapValidationResult Validated(SwapValidationResultDto dto) =>

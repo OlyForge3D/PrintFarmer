@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -613,6 +614,165 @@ public class PrinterToolheadSwapValidatorTests
 
         Assert.Equal(SwapValidationStatus.Ok, result.Status);
         Assert.Equal("TPU", result.Expected);
+    }
+
+    // ── C2: relevant job with unresolved material must be `unknown`, not `ok` ──
+
+    [Fact]
+    public async Task ValidateAsync_ReturnsUnknown_WhenActiveJobUsesToolButMaterialBlank()
+    {
+        // A printing job uses G-code tool 0 (non-zero filament weight) but its material label
+        // is blank — the slicer emitted the extruder with unresolved material. That is
+        // `unknown` (cannot validate / must not bind), NOT `ok`.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedPrinter(db);
+        Guid gcodeId = Guid.NewGuid();
+        db.GcodeFiles.Add(new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "blank-mat.gcode",
+            FileName = "blank-mat.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 12.0 }),
+        });
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "printing-blank",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Printing,
+            GcodeFileId = gcodeId,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>(),
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(42, "PLA"), out _);
+
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 42, CancellationToken.None));
+
+        Assert.Equal(SwapValidationStatus.Unknown, result.Status);
+        Assert.Null(result.Expected);
+        Assert.Empty(result.AffectedJobs);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ReturnsUnknown_WhenAssignedQueuedJobUsesToolWithMissingMetadata()
+    {
+        // An assigned/queued job whose G-code will use gate T2 (→ G-code tool 1) but has no
+        // resolvable material for that tool (sparse per-tool array: tool 1's blank slot was
+        // dropped on projection, weight signal proves it is used) => `unknown`.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedMmuPrinter(db);
+        Guid gcodeId = Guid.NewGuid();
+        db.GcodeFiles.Add(new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "sparse.gcode",
+            FileName = "sparse.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA", "" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 10.0, 4.0 }),
+        });
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "assigned-sparse",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Assigned,
+            GcodeFileId = gcodeId,
+
+            // Projected per-tool array is sparse — tool 1's blank material was dropped.
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new() { Tool = 0, MaterialType = "PLA" },
+            },
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(9, "PETG"), out _);
+
+        // Gate index 2 → G-code tool 1.
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 2, 9, CancellationToken.None));
+
+        Assert.Equal(SwapValidationStatus.Unknown, result.Status);
+        Assert.Empty(result.AffectedJobs);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ReturnsOk_WhenLaneTrulyUnusedByAnyJob()
+    {
+        // The job only uses G-code tools 0 and 1 (weights present). Validating gate T4 →
+        // G-code tool 3, which no job uses, must remain `ok` — an unused lane is not blocked.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedMmuPrinter(db);
+        Guid gcodeId = Guid.NewGuid();
+        db.GcodeFiles.Add(new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "two-tool.gcode",
+            FileName = "two-tool.gcode",
+            FilamentPerExtruderType = JsonSerializer.Serialize(new[] { "PLA", "PETG" }),
+            FilamentPerExtruderWeightG = JsonSerializer.Serialize(new[] { 10.0, 4.0 }),
+        });
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "two-tool-job",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Printing,
+            GcodeFileId = gcodeId,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new() { Tool = 0, MaterialType = "PLA" },
+                new() { Tool = 1, MaterialType = "PETG" },
+            },
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(9, "ABS"), out _);
+
+        // Gate index 4 → G-code tool 3 (unused).
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 4, 9, CancellationToken.None));
+
+        Assert.Equal(SwapValidationStatus.Ok, result.Status);
+        Assert.Null(result.Expected);
+        Assert.Empty(result.AffectedJobs);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_KnownMaterialStillOk_EvenWhenAnotherJobUsesToolWithUnknownMaterial()
+    {
+        // A known requirement wins over a used-but-unknown one: the printing job requires PLA
+        // on tool 0, another queued job uses tool 0 with a blank material. Scanning PLA is a
+        // clean `ok`, not conflated to `unknown`.
+        await using AppDbContext db = CreateDb();
+        Printer printer = SeedPrinter(db);
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "known-pla",
+            AssignedPrinterId = printer.Id,
+            Status = PrintJobStatus.Printing,
+            RequiredMaterialsPerTool = new List<PrintJobToolMaterialRequirement>
+            {
+                new() { Tool = 0, MaterialType = "PLA" },
+            },
+            QueuePosition = 1,
+            QueuedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        PrinterToolheadSwapValidator validator = CreateValidator(db, Spool(3, "PLA"), out _);
+
+        SwapValidationResultDto result = Body(await validator.ValidateAsync(printer.Id, 0, 3, CancellationToken.None));
+
+        Assert.Equal(SwapValidationStatus.Ok, result.Status);
+        Assert.Equal("PLA", result.Expected);
     }
 
     // ── ToolheadIndexMapper unit tests ──

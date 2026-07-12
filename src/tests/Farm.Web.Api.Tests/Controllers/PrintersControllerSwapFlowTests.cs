@@ -370,8 +370,8 @@ public class PrintersControllerSwapFlowTests
         FilamentSwapOverrideContext? captured = null;
         var printersService = new Mock<IPrintersService>();
         printersService
-            .Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, int, int, FilamentSwapOverrideContext?, CancellationToken>((_, _, _, ctx, _) => captured = ctx)
+            .Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<SpoolBindPolicy>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, int, int, FilamentSwapOverrideContext?, SpoolBindPolicy, CancellationToken>((_, _, _, ctx, _, _) => captured = ctx)
             .ReturnsAsync(new CommandResult(true, "Spool 42 assigned to toolhead T0"));
 
         var validator = new Mock<IPrinterToolheadSwapValidator>();
@@ -432,10 +432,11 @@ public class PrintersControllerSwapFlowTests
         Guid printerId = Guid.NewGuid();
 
         FilamentSwapOverrideContext? captured = new("x", "y", "z", null, null, Array.Empty<Guid>());
+        SpoolBindPolicy capturedPolicy = SpoolBindPolicy.Direct;
         var printersService = new Mock<IPrintersService>();
         printersService
-            .Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, int, int, FilamentSwapOverrideContext?, CancellationToken>((_, _, _, ctx, _) => captured = ctx)
+            .Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<SpoolBindPolicy>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, int, int, FilamentSwapOverrideContext?, SpoolBindPolicy, CancellationToken>((_, _, _, ctx, policy, _) => { captured = ctx; capturedPolicy = policy; })
             .ReturnsAsync(new CommandResult(true, "ok"));
 
         var validator = new Mock<IPrinterToolheadSwapValidator>();
@@ -450,6 +451,7 @@ public class PrintersControllerSwapFlowTests
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Null(captured); // no audit context on the ok path
+        Assert.Equal(SpoolBindPolicy.Guided, capturedPolicy); // C1: guided bind policy when the feature is on
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
@@ -531,7 +533,7 @@ public class PrintersControllerSwapFlowTests
         Guid printerId = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
         printersService
-            .Setup(s => s.SetToolheadSpoolAsync(printerId, 1, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SetToolheadSpoolAsync(printerId, 1, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<SpoolBindPolicy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CommandResult(false, "Backend rejected assignment"));
 
         var validator = new Mock<IPrinterToolheadSwapValidator>();
@@ -667,10 +669,11 @@ public class PrintersControllerSwapFlowTests
         // audit context.
         Guid printerId = Guid.NewGuid();
         FilamentSwapOverrideContext? captured = new("x", "y", "z", null, null, Array.Empty<Guid>());
+        SpoolBindPolicy capturedPolicy = SpoolBindPolicy.Guided;
         var printersService = new Mock<IPrintersService>();
         printersService
-            .Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, int, int, FilamentSwapOverrideContext?, CancellationToken>((_, _, _, ctx, _) => captured = ctx)
+            .Setup(s => s.SetToolheadSpoolAsync(printerId, 0, 42, It.IsAny<FilamentSwapOverrideContext?>(), It.IsAny<SpoolBindPolicy>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, int, int, FilamentSwapOverrideContext?, SpoolBindPolicy, CancellationToken>((_, _, _, ctx, policy, _) => { captured = ctx; capturedPolicy = policy; })
             .ReturnsAsync(new CommandResult(true, "assigned"));
 
         var validator = new Mock<IPrinterToolheadSwapValidator>(MockBehavior.Strict);
@@ -690,6 +693,7 @@ public class PrintersControllerSwapFlowTests
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Null(captured); // no audit context when the feature is disabled
+        Assert.Equal(SpoolBindPolicy.Direct, capturedPolicy); // C1: direct bind policy preserves pre-#710 behavior
         validator.VerifyNoOtherCalls();
         // Assignment telemetry still fires; override audit telemetry must NOT.
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool", printerId.ToString(), true), Times.Once);
