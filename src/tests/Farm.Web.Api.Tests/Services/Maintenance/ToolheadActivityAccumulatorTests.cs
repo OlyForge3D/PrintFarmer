@@ -275,6 +275,84 @@ public class ToolheadActivityAccumulatorTests
     }
 
     [Fact]
+    public void SampleKnownIdle_SegmentExceedingMaxSegment_IsNotCreditedAsKnownIdle()
+    {
+        // r22: a telemetry outage between an idle sample and the next sample (any state) must NOT
+        // be credited as known-idle when the gap exceeds _maxSegment. The gap still accrues to the
+        // window, becoming unknown coverage that properly dilutes the coverage denominator.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromSeconds(10));
+        Guid printerId = Guid.NewGuid();
+
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromMinutes(5));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.KnownIdleSeconds.Should().Be(0,
+            "a gap exceeding maxSegment cannot be confirmed idle — it is a telemetry outage");
+        snapshot.WindowSeconds.Should().BeApproximately(300, 0.0001,
+            "the gap still accrues to the window as unknown coverage");
+    }
+
+    [Fact]
+    public void SampleKnownIdle_GapExceedingMaxSegmentBetweenTwoIdleSamples_IsNotCreditedAsKnownIdle()
+    {
+        // r22: even when both endpoints of a gap are idle, a gap exceeding _maxSegment is a
+        // telemetry outage — we cannot confirm idle status during the unobserved interval.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromSeconds(10));
+        Guid printerId = Guid.NewGuid();
+
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromMinutes(5));
+        accumulator.SampleKnownIdle(printerId);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.KnownIdleSeconds.Should().Be(0);
+        snapshot.WindowSeconds.Should().BeApproximately(300, 0.0001);
+    }
+
+    [Fact]
+    public void SampleKnownIdle_SubCapSegmentLoop_FullyCreditedAsKnownIdle()
+    {
+        // r22: sub-cap idle segments (the normal production cadence — idle is re-sampled every ≤60s,
+        // well under the 2-minute freshness cap) must all be credited as known-idle. This proves the
+        // freshness cap does not break the healthy-connection case.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromMinutes(2));
+        Guid printerId = Guid.NewGuid();
+
+        accumulator.SampleKnownIdle(printerId);
+        for (int i = 0; i < 60; i++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(60));
+            accumulator.SampleKnownIdle(printerId);
+        }
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.KnownIdleSeconds.Should().BeApproximately(3600, 0.0001,
+            "all 60 sub-cap idle segments must be fully credited");
+        snapshot.WindowSeconds.Should().BeApproximately(3600, 0.0001);
+
+        // Now add printing and verify the full idle is properly excluded from the denominator
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(60));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        ToolheadActivitySnapshot withPrint = accumulator.PeekActiveSeconds(printerId);
+
+        withPrint.KnownIdleSeconds.Should().BeApproximately(3600, 0.0001);
+        withPrint.ActiveSeconds[0].Should().BeApproximately(60, 0.0001);
+        double effectiveWindow = withPrint.WindowSeconds - withPrint.KnownIdleSeconds;
+        effectiveWindow.Should().BeApproximately(60, 0.0001,
+            "effective window after subtracting known-idle equals the print segment");
+    }
+
+    [Fact]
     public void Sample_DecreasingMonotonicTimestamp_IsIgnoredAndDoesNotRewindWindow()
     {
         (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();

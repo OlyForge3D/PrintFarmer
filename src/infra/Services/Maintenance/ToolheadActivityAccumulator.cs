@@ -76,7 +76,8 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
                     // (windowSeconds - knownIdleSeconds) without losing the raw total.
                     activity.CumulativeWindowSeconds += elapsed.TotalSeconds;
 
-                    if (activity.LastState == SegmentState.KnownIdle)
+                    if (activity.LastState == SegmentState.KnownIdle
+                        && elapsed <= _maxSegment)
                     {
                         activity.CumulativeKnownIdleSeconds += elapsed.TotalSeconds;
                     }

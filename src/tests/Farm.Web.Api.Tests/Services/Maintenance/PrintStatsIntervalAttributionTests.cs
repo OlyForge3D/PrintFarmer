@@ -233,6 +233,11 @@ public class PrintStatsIntervalAttributionTests
         // fresh telemetry) must be excluded from both the numerator and the coverage denominator.
         // Before the fix, 23h of confirmed idle followed by 1h of fully-observed printing computed
         // coverage = 1h / 24h ~= 0.04, destroying 96% of the attributable external-history delta.
+        //
+        // r22: the idle duration must be accumulated in sub-cap segments as production does (idle is
+        // re-sampled every ≤60s, well under the 2-minute freshness cap). A single over-cap idle
+        // segment is a telemetry outage, not confirmed idle, and would not be credited after the r22
+        // freshness-cap fix. Here we use 1-hour cadence against a 2-hour maxSegment for test brevity.
         await using AppDbContext db = NewDb();
         Guid printerId = Guid.NewGuid();
         Toolhead t0 = CreateToolhead(printerId, index: 0);
@@ -242,8 +247,15 @@ public class PrintStatsIntervalAttributionTests
         EfToolheadStatisticsRepository repository = new(db);
         (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator(TimeSpan.FromHours(2));
 
+        // 23h of confirmed idle, accumulated in sub-cap 1-hour segments
         accumulator.SampleKnownIdle(printerId);
-        clock.Advance(TimeSpan.FromHours(23));
+        for (int i = 0; i < 23; i++)
+        {
+            clock.Advance(TimeSpan.FromHours(1));
+            accumulator.SampleKnownIdle(printerId);
+        }
+
+        // 1h of fully-observed printing
         accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
         clock.Advance(TimeSpan.FromHours(1));
         accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
@@ -264,6 +276,98 @@ public class PrintStatsIntervalAttributionTests
         t0.CumulativePrintHours.Should().BeApproximately(1, 0.0001,
             "the full observed print hour must be credited, not diluted by the preceding 23h of confirmed idle");
         t1.CumulativePrintHours.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task IntervalTelemetry_IdleOutageThenPrint_OutageIsUnknownCoverage()
+    {
+        // r22: a telemetry outage bracketed by an idle sample and a subsequent print sample must NOT
+        // be credited as known-idle. The gap exceeds maxSegment, so it becomes unknown coverage in
+        // the denominator, preventing the post-gap print from receiving full external-delta credit.
+        await using AppDbContext db = NewDb();
+        Guid printerId = Guid.NewGuid();
+        Toolhead t0 = CreateToolhead(printerId, index: 0);
+        db.Toolheads.Add(t0);
+        await db.SaveChangesAsync();
+        EfToolheadStatisticsRepository repository = new(db);
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromMinutes(2));
+
+        // Fresh idle sample, then 5-minute outage (>> 2 min maxSegment), then 2 min print
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromMinutes(5));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromMinutes(2));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+        snapshot.KnownIdleSeconds.Should().Be(0,
+            "a gap exceeding maxSegment cannot be confirmed idle");
+        snapshot.WindowSeconds.Should().BeApproximately(420, 0.0001,
+            "the full 7-minute window is tracked");
+
+        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
+            printerId,
+            statsExisted: true,
+            externalSyncSuccess: true,
+            perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
+            externalDelta: 1,
+            repository,
+            CancellationToken.None,
+            activityAccumulator: accumulator);
+        await db.SaveChangesAsync();
+
+        credited.Should().Equal(t0.Id);
+        t0.CumulativePrintHours.Should().BeApproximately(2.0 / 7.0, 0.01,
+            "the 5-minute outage must not be treated as known-idle; it stays in the denominator " +
+            "as unknown coverage, so only 2/7 of the delta is attributed");
+    }
+
+    [Fact]
+    public async Task IntervalTelemetry_IdleOutageThenIdle_OutageIsUnknownNotKnownIdle()
+    {
+        // r22: a gap exceeding maxSegment between two idle samples is a telemetry outage, not
+        // confirmed idle. The gap accrues to the window but not to known-idle seconds.
+        await using AppDbContext db = NewDb();
+        Guid printerId = Guid.NewGuid();
+        Toolhead t0 = CreateToolhead(printerId, index: 0);
+        db.Toolheads.Add(t0);
+        await db.SaveChangesAsync();
+        EfToolheadStatisticsRepository repository = new(db);
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromMinutes(2));
+
+        // Two idle samples separated by a 10-minute gap (>> 2 min maxSegment)
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromMinutes(10));
+        accumulator.SampleKnownIdle(printerId);
+
+        // Then 2 min of printing to have something to attribute
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromMinutes(2));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+        snapshot.KnownIdleSeconds.Should().Be(0,
+            "neither the outage gap nor the zero-elapsed boundary segment should be known-idle");
+        snapshot.WindowSeconds.Should().BeApproximately(720, 0.0001);
+
+        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
+            printerId,
+            statsExisted: true,
+            externalSyncSuccess: true,
+            perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
+            externalDelta: 1,
+            repository,
+            CancellationToken.None,
+            activityAccumulator: accumulator);
+        await db.SaveChangesAsync();
+
+        credited.Should().Equal(t0.Id);
+        t0.CumulativePrintHours.Should().BeApproximately(2.0 / 12.0, 0.01,
+            "the 10-minute outage between idle samples is unknown coverage in the denominator");
     }
 
     [Fact]
