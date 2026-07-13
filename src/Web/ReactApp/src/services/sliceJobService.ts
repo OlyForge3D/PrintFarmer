@@ -30,6 +30,15 @@ export interface SubmitSliceJobRequest {
   modelFileUrl: string;
   modelFileName: string;
   slicerEngine: number;
+  /**
+   * Optional slicer engine version pin (issue #578). When set, the job is
+   * routed to a worker advertising the matching versioned capability tag
+   * (e.g. "orcaslicer:2.4.0"). When omitted, any registered worker for the
+   * engine may claim the job (backwards-compatible legacy behaviour).
+   * The server validates against the plugin registry; unknown versions
+   * return HTTP 400.
+   */
+  slicerEngineVersion?: string;
   slicerProfileJson: string;
   // Optional reference to a stored slicer profile (takes precedence over slicerProfileJson if provided)
   slicerProfileId?: string;
@@ -59,6 +68,11 @@ export interface SubmitSliceJobResponse {
 export interface SliceJobStatusResponse {
   id: string;
   status: string;
+  /**
+   * Slicer engine version resolved on submit (issue #578). Null/undefined
+   * indicates a legacy/unpinned job.
+   */
+  slicerEngineVersion?: string | null;
   progressPercent: number;
   progressMessage?: string;
   queuedAt: string;

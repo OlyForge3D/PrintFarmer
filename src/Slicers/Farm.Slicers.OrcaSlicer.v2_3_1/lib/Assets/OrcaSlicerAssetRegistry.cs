@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Slicer.Module.Contracts.Libraries;
 
 namespace Farm.Slicers.OrcaSlicer.v2_3_1;

@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Contracts.Libraries;
+﻿using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicers.OrcaSlicer.v2_3_1;
 
 #pragma warning disable S101 // Class names required to match version numbering for plugin discovery

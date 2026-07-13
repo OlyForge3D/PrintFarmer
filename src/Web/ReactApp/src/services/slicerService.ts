@@ -168,6 +168,29 @@ class SlicerService {
   async deleteModel(modelId: string): Promise<void> {
     await apiClient.delete(`/3d-models/${modelId}`);
   }
+
+  /**
+   * List all slicer engines currently registered in the plugin registry,
+   * including all installed versions per engine. Fed by the API endpoint
+   * added for issue #578 dual-engine support.
+   */
+  async listEngines(): Promise<SlicerEngineInfo[]> {
+    const response = await apiClient.get<SlicerEngineInfo[]>('/slicers/engines');
+    return response.data ?? [];
+  }
+}
+
+/**
+ * A slicer engine surface with all installed versions (issue #578).
+ * Emitted by GET /api/slicers/engines.
+ */
+export interface SlicerEngineInfo {
+  /** Canonical engine name (e.g. "OrcaSlicer", "PrusaSlicer"). */
+  engine: string;
+  /** All installed versions, newest first (System.Version sort). */
+  versions: string[];
+  /** The newest installed version, or null if none registered. */
+  latest: string | null;
 }
 
 export const slicerService = new SlicerService();

@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
+import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import { 
   slicerProfilesService,
   type CustomProfile,
@@ -228,6 +229,27 @@ export const NewSliceJobPage: React.FC = () => {
 
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
+  /**
+   * Issue #578 dual-engine: user-selected pin for the OrcaSlicer engine version.
+   * Undefined = unpinned (server picks latest / any worker may claim). Only
+   * shown in the UI when 2+ versions are registered.
+   */
+  const [selectedEngineVersion, setSelectedEngineVersion] = useState<string | undefined>(undefined);
+  const { data: registeredEngines } = useQuery<SlicerEngineInfo[]>({
+    queryKey: ['slicer-engines-registry'],
+    queryFn: () => slicerService.listEngines(),
+    staleTime: 300_000,
+  });
+  const engineName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
+  const versionsForEngine = useMemo(
+    () => registeredEngines?.find(e => e.engine.toLowerCase() === engineName.toLowerCase())?.versions ?? [],
+    [registeredEngines, engineName],
+  );
+  useEffect(() => {
+    // Reset the pin whenever engine changes so a stale pin doesn't survive.
+    setSelectedEngineVersion(undefined);
+  }, [selectedSlicerId]);
+
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
     try {
       return localStorage.getItem(STORAGE_KEYS.printerId) ?? '';
@@ -1668,6 +1690,7 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrl: effectiveModelFileUrl,
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
+      slicerEngineVersion: selectedEngineVersion,
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
             filamentProfileName: selectedFilamentProfileId,
@@ -1732,6 +1755,7 @@ export const NewSliceJobPage: React.FC = () => {
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
+    selectedEngineVersion,
     slicerInfo.engine,
     slicerSettings,
     submitMutation,
@@ -1914,6 +1938,32 @@ export const NewSliceJobPage: React.FC = () => {
             onSlicerChange={setSelectedSlicerId}
             engineOptions={engineOptions}
           />
+
+          {/* ENGINE VERSION PIN (issue #578) — only shown when 2+ versions are registered. */}
+          {versionsForEngine.length > 1 && (
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5">
+              <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary mb-1.5">
+                Engine version
+              </label>
+              <Select
+                id="slicer-engine-version"
+                value={selectedEngineVersion ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSelectedEngineVersion(v === '' ? undefined : v);
+                }}
+              >
+                <option value="">Latest ({versionsForEngine[0]})</option>
+                {versionsForEngine.map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-pf-text-muted">
+                Pins the slice job to a specific {engineName} engine. Leave on Latest
+                unless you need a particular version for compatibility.
+              </p>
+            </div>
+          )}
 
           {/* PRINTER + MACHINE SELECTION - one compact flow */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5 space-y-2">

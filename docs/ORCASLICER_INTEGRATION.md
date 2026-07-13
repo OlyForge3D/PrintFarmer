@@ -63,6 +63,37 @@ While many components are implemented, the OrcaSlicer integration is **NOT produ
 
 ---
 
+## Dual-Engine (Current + Previous) Support
+
+As of issue #578, PrintFarmer can run **two** OrcaSlicer engine versions concurrently — the current default (`2.4.0`) plus the previous version (`2.3.1`). This lets operators finish jobs sliced against a prior engine while migrating to the newer one, without a big-bang cutover.
+
+### How dispatch works
+
+- Every OrcaSlicer plugin registers itself under a `(name, version)` key in `ISlicerRegistry`. `SlicerPluginDiscovery` de-duplicates on that tuple so a repeated version is a no-op.
+- Slice jobs carry an optional `slicerEngineVersion` (persisted on `SliceJob` — see the `AddSliceJobSlicerEngineVersion` migrations for PostgreSQL and SQL Server). `SliceJobController.SubmitAsync` validates the version against the registry and returns HTTP 400 with the list of registered versions if it's unknown.
+- The controller **server-derives** `RequiredCapabilitiesJson`:
+  - Pinned to a version → `["orcaslicer:<version>"]` only. No generic `orcaslicer` capability.
+  - Unpinned → `["orcaslicer"]` only.
+  This is deliberate: `EfSliceJobRepository.ClaimNextJobAsync` uses OR-match, so a mixed capability set would let a wrong-version worker claim a pinned job.
+- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, which emits `["orcaslicer","orcaslicer:<Worker:EngineVersion>","stl-processing","gcode-generation"]`. Both `SlicerRegistrationClient` (initial registration payload) and `QueueConsumerService` (per-poll capability list) use the same provider so they never drift.
+- `GET /api/slicers/engines` returns `[{ engine, versions[], latest }]` for the React version picker.
+
+### Deploying a second (previous) worker
+
+1. Set `Worker__EngineVersion=2.3.1` (or your previous version), and set **distinct** values for `SlicerRegistry__Host`, `Worker__WorkerId`, `Worker__InstanceId`, and `SlicerRegistry__ServiceName` so `SlicersService.UpsertAsync` doesn't collapse the two workers into one row.
+2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` does exactly this. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
+3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
+
+### Lifecycle policy
+
+We ship **at most two** engine versions in-tree at any time: the current default and one prior. When a new default is promoted, drop the oldest plugin project and its Dockerfile restore stanza. This keeps the arm64 emulation cost, image size, and cache surface bounded, and matches the operational reality that operators rarely need more than one migration window overlap.
+
+### Caveats
+
+- **arm64 hosts**: OrcaSlicer AppImages are x86-64; running two workers on an arm64 host doubles the emulation overhead. Prefer running the previous-version worker on x86-64 nodes when possible.
+- **Profile/asset caches** are keyed per plugin assembly, so v2.3.1 and v2.4.0 have independent embedded resources and cannot poison each other.
+- **Backwards compatibility**: `slicerEngineVersion` is nullable everywhere. Jobs submitted before this change (or by clients that omit the field) route to any registered `orcaslicer` worker exactly as before.
+
 ## Architecture Overview
 
 ### System Diagram
