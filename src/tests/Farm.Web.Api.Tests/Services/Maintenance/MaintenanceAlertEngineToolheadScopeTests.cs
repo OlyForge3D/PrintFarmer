@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
@@ -35,7 +36,7 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
     private readonly Mock<IOptionsMonitor<MaintenanceAlertSettings>> _settings = new(MockBehavior.Loose);
     private readonly Mock<IAttentionBroadcaster> _broadcaster = new(MockBehavior.Loose);
 
-    private MaintenanceAlertEngine CreateEngine()
+    private MaintenanceAlertEngine CreateEngine(IOperatorFeatureGate? operatorFeatureGate = null)
     {
         _settings.SetupGet(s => s.CurrentValue)
                  .Returns(new MaintenanceAlertSettings { EnableSignalRNotifications = false });
@@ -49,7 +50,8 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
             _hub.Object,
             _settings.Object,
             NullLogger<MaintenanceAlertEngine>.Instance,
-            _broadcaster.Object);
+            _broadcaster.Object,
+            operatorFeatureGate: operatorFeatureGate);
     }
 
     private static PrinterMaintenanceSchedule BuildSchedule(Guid printerId, Guid taskId, Guid? toolheadId)
@@ -291,5 +293,87 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
         generated.Should().Be(1, "only the printer-wide schedule may alert while per-tool maintenance is disabled");
         captured.Should().ContainSingle();
         captured[0].ToolheadId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(AlertMutation.Acknowledge)]
+    [InlineData(AlertMutation.Resolve)]
+    [InlineData(AlertMutation.Dismiss)]
+    public async Task MutateAlert_ToolheadScopedAndGateDisabled_ThrowsBeforePersistence(
+        AlertMutation mutation)
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            ToolheadId = Guid.NewGuid()
+        };
+        _alerts.Setup(a => a.GetByIdAsync(alertId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        MaintenanceAlertEngine engine = CreateEngine(gate.Object);
+
+        Func<Task> act = mutation switch
+        {
+            AlertMutation.Acknowledge => () => engine.AcknowledgeAlertAsync(alertId, "operator"),
+            AlertMutation.Resolve => () => engine.ResolveAlertAsync(alertId, "operator"),
+            AlertMutation.Dismiss => () => engine.DismissAlertAsync(alertId, "operator"),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+
+        await act.Should().ThrowAsync<PerToolMaintenanceDisabledException>()
+            .WithMessage("Per-tool maintenance is disabled.");
+        _alerts.Verify(
+            a => a.UpdateAsync(It.IsAny<MaintenanceAlert>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _alerts.Verify(a => a.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(AlertMutation.Acknowledge)]
+    [InlineData(AlertMutation.Resolve)]
+    [InlineData(AlertMutation.Dismiss)]
+    public async Task MutateAlert_PrinterWideAndGateDisabled_PersistsNormally(
+        AlertMutation mutation)
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            ToolheadId = null
+        };
+        _alerts.Setup(a => a.GetByIdAsync(alertId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+        _alerts.Setup(a => a.UpdateAsync(alert, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _alerts.Setup(a => a.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        MaintenanceAlertEngine engine = CreateEngine(gate.Object);
+
+        Task act = mutation switch
+        {
+            AlertMutation.Acknowledge => engine.AcknowledgeAlertAsync(alertId, "operator"),
+            AlertMutation.Resolve => engine.ResolveAlertAsync(alertId, "operator"),
+            AlertMutation.Dismiss => engine.DismissAlertAsync(alertId, "operator"),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+        await act;
+
+        _alerts.Verify(a => a.UpdateAsync(alert, It.IsAny<CancellationToken>()), Times.Once);
+        _alerts.Verify(a => a.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    public enum AlertMutation
+    {
+        Acknowledge,
+        Resolve,
+        Dismiss
     }
 }

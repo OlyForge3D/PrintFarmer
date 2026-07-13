@@ -181,6 +181,12 @@ public class MaintenanceScheduleDeploymentController(
             return NotFound();
         }
 
+        if (schedule.ToolheadId.HasValue
+            && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+        {
+            return BadRequest(new { message = "Per-tool maintenance is disabled." });
+        }
+
         schedule.IsActive = request.IsActive;
         schedule.Notes = request.Notes;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -201,6 +207,12 @@ public class MaintenanceScheduleDeploymentController(
         if (schedule == null)
         {
             return NotFound();
+        }
+
+        if (schedule.ToolheadId.HasValue
+            && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+        {
+            return BadRequest(new { message = "Per-tool maintenance is disabled." });
         }
 
         await _scheduleRepository.DeleteAsync(schedule, ct);

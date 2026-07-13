@@ -92,10 +92,17 @@ public class DispatchScorer(
         }
 
         List<DispatchScore> results = [];
+        bool multiSlotEnabled = featureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
 
         foreach (Printer printer in printers)
         {
-            DispatchScore score = ScorePrinter(job, printer, requiredFilament, queueDepths, clusterMateNames);
+            DispatchScore score = ScorePrinter(
+                job,
+                printer,
+                requiredFilament,
+                queueDepths,
+                clusterMateNames,
+                multiSlotEnabled);
             results.Add(score);
         }
 
@@ -122,7 +129,8 @@ public class DispatchScorer(
         Printer printer,
         FilamentType? requiredFilament,
         Dictionary<Guid, int> queueDepths,
-        HashSet<string> clusterMateNames)
+        HashSet<string> clusterMateNames,
+        bool multiSlotEnabled)
     {
         Dictionary<string, FactorScore> breakdown = [];
         List<string> eliminationReasons = [];
@@ -160,7 +168,6 @@ public class DispatchScorer(
         // filament — but it explains why the raw material match may over- or under-score
         // multi-material jobs.
         IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
-        bool multiSlotEnabled = featureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
         if (multiSlotEnabled && perToolReqs is { Count: > 0 })
         {
             foreach (PrintJobToolMaterialRequirement req in perToolReqs)

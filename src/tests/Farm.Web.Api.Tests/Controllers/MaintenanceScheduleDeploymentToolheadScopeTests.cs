@@ -200,4 +200,59 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
 
         duplicate.Result.Should().BeOfType<ConflictObjectResult>();
     }
+
+    [Fact]
+    public async Task Update_ToolheadScopedScheduleAndFeatureDisabled_ReturnsBadRequest()
+    {
+        (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
+        PrinterMaintenanceScheduleResponse deployed = GetCreatedBody(
+            await _controller.DeployAsync(
+                new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id),
+                CancellationToken.None));
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        MaintenanceScheduleDeploymentController controller = new(
+            NullLogger<MaintenanceScheduleDeploymentController>.Instance,
+            _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IMaintenancePlanRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IPrintersRepository>(),
+            gate.Object);
+
+        ActionResult<PrinterMaintenanceScheduleResponse> result = await controller.UpdateAsync(
+            deployed.Id,
+            new UpdateScheduleDeploymentRequest(IsActive: false, Notes: "blocked"),
+            CancellationToken.None);
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        _db.ChangeTracker.Clear();
+        PrinterMaintenanceSchedule stored = await _db.Set<PrinterMaintenanceSchedule>()
+            .SingleAsync(s => s.Id == deployed.Id);
+        stored.IsActive.Should().BeTrue();
+        stored.Notes.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Delete_ToolheadScopedScheduleAndFeatureDisabled_ReturnsBadRequest()
+    {
+        (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
+        PrinterMaintenanceScheduleResponse deployed = GetCreatedBody(
+            await _controller.DeployAsync(
+                new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id),
+                CancellationToken.None));
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        MaintenanceScheduleDeploymentController controller = new(
+            NullLogger<MaintenanceScheduleDeploymentController>.Instance,
+            _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IMaintenancePlanRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IPrintersRepository>(),
+            gate.Object);
+
+        IActionResult result = await controller.DeleteAsync(deployed.Id, CancellationToken.None);
+
+        result.Should().BeOfType<BadRequestObjectResult>();
+        _db.ChangeTracker.Clear();
+        (await _db.Set<PrinterMaintenanceSchedule>().AnyAsync(s => s.Id == deployed.Id))
+            .Should().BeTrue();
+    }
 }

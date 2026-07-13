@@ -113,4 +113,85 @@ public sealed class MaintenanceControllerResolveAlertGateTests
         Assert.IsType<OkObjectResult>(result.Result);
         _logRepository.Verify(r => r.AddAsync(It.Is<MaintenanceLog>(l => l.ToolheadId == null), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task AcknowledgeAlert_ToolheadScopedAlert_GateDisabled_ReturnsBadRequest()
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            ToolheadId = Guid.NewGuid()
+        };
+        _alertRepository.Setup(r => r.GetByIdAsync(alertId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+        _alertService
+            .Setup(s => s.AcknowledgeAlertAsync(alertId, "operator", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PerToolMaintenanceDisabledException());
+
+        ActionResult<MaintenanceAlert> result = await CreateController().AcknowledgeAlertAsync(
+            alertId,
+            new AcknowledgeAlertRequest("operator"),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        badRequest.Value.Should().Be("Per-tool maintenance is disabled.");
+    }
+
+    [Fact]
+    public async Task DismissAlert_ToolheadScopedAlert_GateDisabled_ReturnsBadRequest()
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            ToolheadId = Guid.NewGuid()
+        };
+        _alertRepository.Setup(r => r.GetByIdAsync(alertId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+        _alertService
+            .Setup(s => s.DismissAlertAsync(
+                alertId,
+                "operator",
+                "later",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PerToolMaintenanceDisabledException());
+
+        ActionResult<MaintenanceAlert> result = await CreateController().DismissAlertAsync(
+            alertId,
+            new DismissAlertRequest("operator", "later"),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        badRequest.Value.Should().Be("Per-tool maintenance is disabled.");
+    }
+
+    [Fact]
+    public async Task AcknowledgeAndDismissAlert_PrinterWideAlert_GateDisabled_ReturnOk()
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            ToolheadId = null
+        };
+        _alertRepository.Setup(r => r.GetByIdAsync(alertId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+
+        MaintenanceController controller = CreateController();
+        ActionResult<MaintenanceAlert> acknowledge = await controller.AcknowledgeAlertAsync(
+            alertId,
+            new AcknowledgeAlertRequest("operator"),
+            CancellationToken.None);
+        ActionResult<MaintenanceAlert> dismiss = await controller.DismissAlertAsync(
+            alertId,
+            new DismissAlertRequest("operator", null),
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(acknowledge.Result);
+        Assert.IsType<OkObjectResult>(dismiss.Result);
+    }
 }

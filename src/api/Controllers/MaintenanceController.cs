@@ -120,6 +120,7 @@ public class MaintenanceController(
     /// </summary>
     [HttpPost("alerts/{id:guid}/acknowledge")]
     [ProducesResponseType(typeof(MaintenanceAlert), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<MaintenanceAlert>> AcknowledgeAlertAsync(
         Guid id,
@@ -153,6 +154,10 @@ public class MaintenanceController(
 
             return Ok(alert);
         }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return BadRequest(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[MaintenanceController] Error acknowledging alert {Id}", id);
@@ -165,6 +170,7 @@ public class MaintenanceController(
     /// </summary>
     [HttpPost("alerts/{id:guid}/resolve")]
     [ProducesResponseType(typeof(ResolveAlertResponse), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ResolveAlertResponse>> ResolveAlertAsync(
         Guid id,
@@ -256,6 +262,10 @@ public class MaintenanceController(
 
             return Ok(new ResolveAlertResponse(alert, createdLog));
         }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return BadRequest(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[MaintenanceController] Error resolving alert {Id}", id);
@@ -268,6 +278,7 @@ public class MaintenanceController(
     /// </summary>
     [HttpPost("alerts/{id:guid}/dismiss")]
     [ProducesResponseType(typeof(MaintenanceAlert), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<MaintenanceAlert>> DismissAlertAsync(
         Guid id,
@@ -301,6 +312,10 @@ public class MaintenanceController(
             }, ct);
 
             return Ok(alert);
+        }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {

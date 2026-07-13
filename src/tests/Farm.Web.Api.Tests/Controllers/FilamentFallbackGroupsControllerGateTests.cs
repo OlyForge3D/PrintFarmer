@@ -93,4 +93,32 @@ public class FilamentFallbackGroupsControllerGateTests
         ok.Value.Should().BeSameAs(groups);
         _service.Verify(s => s.ListForPrinterAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Create_WhenFieldIsOversized_Returns400(bool oversizedName)
+    {
+        Guid printerId = Guid.NewGuid();
+        CreateFilamentFallbackGroupRequest request = new(
+            oversizedName ? new string('N', 129) : "Valid",
+            oversizedName ? "PLA" : new string('M', 65),
+            null,
+            [Guid.NewGuid(), Guid.NewGuid()]);
+        _service
+            .Setup(s => s.CreateAsync(printerId, request, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FilamentFallbackGroupValidationException(
+                oversizedName
+                    ? "Fallback group name must be 128 characters or fewer."
+                    : "Fallback group material type must be 64 characters or fewer."));
+        FilamentFallbackGroupsController controller = CreateController(enabled: true);
+
+        ActionResult<FilamentFallbackGroupDto> result =
+            await controller.CreateAsync(printerId, request, CancellationToken.None);
+
+        BadRequestObjectResult badRequest =
+            result.Result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        ProblemDetails details = badRequest.Value.Should().BeOfType<ProblemDetails>().Subject;
+        details.Status.Should().Be(400);
+    }
 }

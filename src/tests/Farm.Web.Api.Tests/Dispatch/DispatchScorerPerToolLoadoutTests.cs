@@ -59,11 +59,13 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
     private (Printer P, Toolhead T0, Toolhead T1) SeedMultiToolheadPrinter(string? t0Material, string? t1Material)
     {
-        Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = "PerTool Mfg" };
-        PrinterModel model = new() { Id = Guid.NewGuid(), ManufacturerId = mfg.Id, Name = "IDEX" };
+        string suffix = Guid.NewGuid().ToString("N")[..8];
+        Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = $"PerTool Mfg {suffix}" };
+        PrinterModel model = new() { Id = Guid.NewGuid(), ManufacturerId = mfg.Id, Name = $"IDEX {suffix}" };
         Printer printer = new PrinterBuilder().Build();
         printer.ManufacturerId = mfg.Id;
         printer.ModelId = model.Id;
+        printer.ServerUrl = $"http://per-tool-{suffix}.local";
         printer.MultiMaterial = true;
         printer.CurrentMaterial = null;
         printer.IsAvailable = true;
@@ -343,5 +345,25 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
         s.ScoreBreakdown.Should().ContainKey("PerToolLoadout.T0");
         s.ScoreBreakdown.Should().ContainKey("PerToolLoadout.T1");
+    }
+
+    [Fact]
+    public async Task ScorePrinters_MultipleCandidates_QueriesFeatureGateOnce()
+    {
+        _ = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        _ = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 25.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance, gate.Object);
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+
+        scores.Should().HaveCount(2);
+        gate.Verify(g => g.IsEnabled(OperatorFeature.MultiSlotFallback), Times.Once);
     }
 }

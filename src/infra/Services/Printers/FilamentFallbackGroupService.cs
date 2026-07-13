@@ -466,9 +466,21 @@ public sealed class FilamentFallbackGroupService(
             throw new FilamentFallbackGroupValidationException("Fallback group name is required.");
         }
 
+        if (name.Trim().Length > 128)
+        {
+            throw new FilamentFallbackGroupValidationException(
+                "Fallback group name must be 128 characters or fewer.");
+        }
+
         if (string.IsNullOrWhiteSpace(materialType))
         {
             throw new FilamentFallbackGroupValidationException("Fallback group material type is required.");
+        }
+
+        if (materialType.Trim().Length > 64)
+        {
+            throw new FilamentFallbackGroupValidationException(
+                "Fallback group material type must be 64 characters or fewer.");
         }
 
         if (toolheadIds is null || toolheadIds.Count < 2)

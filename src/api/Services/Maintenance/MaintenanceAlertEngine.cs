@@ -413,6 +413,8 @@ public class MaintenanceAlertEngine(
             return;
         }
 
+        EnsureAlertMutationEnabled(alert);
+
         alert.Status = MaintenanceAlertStatus.Acknowledged;
         alert.AcknowledgedAt = DateTime.UtcNow;
         alert.AcknowledgedBy = acknowledgedBy;
@@ -440,6 +442,8 @@ public class MaintenanceAlertEngine(
             _logger.LogWarning("Alert {AlertId} not found for resolution", alertId);
             return;
         }
+
+        EnsureAlertMutationEnabled(alert);
 
         alert.Status = MaintenanceAlertStatus.Resolved;
         alert.ResolvedAt = DateTime.UtcNow;
@@ -470,6 +474,8 @@ public class MaintenanceAlertEngine(
             return;
         }
 
+        EnsureAlertMutationEnabled(alert);
+
         alert.Status = MaintenanceAlertStatus.Dismissed;
         alert.DismissedAt = DateTime.UtcNow;
         alert.DismissedBy = dismissedBy;
@@ -486,6 +492,16 @@ public class MaintenanceAlertEngine(
 
         // Broadcast status change
         await BroadcastAlertStatusChangedAsync(alert);
+    }
+
+    private void EnsureAlertMutationEnabled(MaintenanceAlert alert)
+    {
+        bool perToolMaintenanceEnabled =
+            _operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+        if (alert.ToolheadId.HasValue && !perToolMaintenanceEnabled)
+        {
+            throw new PerToolMaintenanceDisabledException();
+        }
     }
 
     private async Task BroadcastAlertStatusChangedAsync(MaintenanceAlert alert)

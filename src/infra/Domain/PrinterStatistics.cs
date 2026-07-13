@@ -37,6 +37,13 @@ public class PrinterStatistics
     public double ExternalPrintHours { get; set; }
 
     /// <summary>
+    /// Number of completed jobs reported only by the external printer backend. This remains
+    /// unchanged when external synchronization fails and is the clean baseline for adding
+    /// absolute PrintFarmer job-history totals.
+    /// </summary>
+    public long ExternalJobsCompleted { get; set; }
+
+    /// <summary>
     /// Total number of completed print jobs
     /// </summary>
     public int TotalJobsCompleted { get; set; }

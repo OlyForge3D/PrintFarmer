@@ -133,6 +133,25 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             .WithMessage("*at most once*");
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CreateAsync_WithOversizedField_ThrowsValidationException(bool oversizedName)
+    {
+        (Printer p, Toolhead t0, Toolhead t1, _) = await SeedPrinterWithToolheadsAsync();
+        string name = oversizedName ? new string('N', 129) : "Valid";
+        string material = oversizedName ? "PLA" : new string('M', 65);
+
+        Func<Task> act = () => _service.CreateAsync(
+            p.Id,
+            new CreateFilamentFallbackGroupRequest(name, material, null, [t0.Id, t1.Id]),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<FilamentFallbackGroupValidationException>()
+            .WithMessage(oversizedName ? "*128 characters or fewer*" : "*64 characters or fewer*");
+        (await _db.FilamentFallbackGroups.CountAsync()).Should().Be(0);
+    }
+
     [Fact]
     public async Task CreateAsync_ForeignToolhead_Throws()
     {

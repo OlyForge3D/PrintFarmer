@@ -4639,6 +4639,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long>("ExternalJobsCompleted")
+                        .HasColumnType("bigint");
+
                     b.Property<double>("ExternalPrintHours")
                         .HasColumnType("double precision");
 

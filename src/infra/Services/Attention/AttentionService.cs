@@ -472,6 +472,10 @@ public sealed class AttentionService(
                     return new AttentionActionResult(AttentionActionOutcome.InvalidAction, $"Action '{actionKind}' is not valid for maintenance items.");
             }
         }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return new AttentionActionResult(AttentionActionOutcome.InvalidAction, ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[AttentionService] Maintenance dispatch for '{Action}' on alert {AlertId} failed", actionKind, alertId);

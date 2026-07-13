@@ -526,6 +526,38 @@ public class AttentionServiceTests
     }
 
     [Fact]
+    public async Task ExecuteActionAsync_MaintenanceFeatureDisabled_ReturnsInvalidAction()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        Guid alertId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Maintenance, alertId);
+        AttentionActionDto acknowledge = new(AttentionActionKind.Acknowledge, "Acknowledge", true);
+        AttentionItemDto item = BuildItem(
+            itemId,
+            AttentionKind.Maintenance,
+            AttentionSeverity.Warning,
+            printer,
+            Now,
+            actions: [acknowledge]);
+        _maintenance
+            .Setup(m => m.AcknowledgeAlertAsync(alertId, "user", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PerToolMaintenanceDisabledException());
+
+        AttentionService svc = CreateService([new StubSource("s", [item])]);
+        AttentionActionResult result = await svc.ExecuteActionAsync(
+            userId,
+            "user",
+            isFarmAdmin: true,
+            itemId,
+            AttentionActionKind.Acknowledge,
+            CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
+        result.Reason.Should().Be("Per-tool maintenance is disabled.");
+    }
+
+    [Fact]
     public async Task ExecuteActionAsync_HarvestKind_DispatchesProductionHarvestService()
     {
         Guid userId = Guid.NewGuid();

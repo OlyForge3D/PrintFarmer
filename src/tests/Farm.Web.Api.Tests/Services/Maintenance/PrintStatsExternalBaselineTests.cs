@@ -150,8 +150,157 @@ public class PrintStatsExternalBaselineTests
             PrinterStatistics stats = await verify.PrinterStatisticsSet.FirstAsync(s => s.PrinterId == printerId);
             stats.ExternalPrintHours.Should().BeApproximately(110.0, 0.0001,
                 "ExternalPrintHours must track only the external backend total");
+            stats.ExternalJobsCompleted.Should().Be(5,
+                "ExternalJobsCompleted must track only the external backend total");
             stats.TotalPrintHours.Should().BeApproximately(160.0, 0.0001,
                 "TotalPrintHours is 110h external + 50h PrintFarmer jobs");
+            stats.TotalJobsCompleted.Should().Be(6,
+                "TotalJobsCompleted is 5 external jobs + 1 PrintFarmer job");
         }
+    }
+
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_PrusaLinkTwoCycles_DoesNotCompoundPrintFarmerTotals()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "PrusaLink Printer",
+            Backend = (int)PrinterBackend.PrusaLink,
+            ModelId = modelId
+        };
+        List<PrintJobStatistics> pfJobs =
+        [
+            new() { ActualDurationMs = (long)(2.0 * 3600 * 1000) },
+            new() { ActualDurationMs = (long)(1.0 * 3600 * 1000) }
+        ];
+        Mock<IPrintJobStatisticsRepository> jobStats = new();
+        jobStats
+            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pfJobs);
+        using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
+        PrintStatsSyncHostedService service = CreateService(provider);
+        PrintStatsSyncSettings settings = new()
+        {
+            IncludePrintFarmerJobs = true,
+            ApiTimeoutSeconds = 30
+        };
+
+        for (int cycle = 0; cycle < 2; cycle++)
+        {
+            await using AppDbContext db = new(options);
+            await service.SyncPrinterStatisticsAsync(
+                printer,
+                settings,
+                new EfPrinterStatisticsRepository(db),
+                new EfToolheadStatisticsRepository(db),
+                jobStats.Object,
+                Mock.Of<IOperatorFeatureGate>(),
+                provider,
+                CancellationToken.None);
+            await db.SaveChangesAsync();
+        }
+
+        await using AppDbContext verify = new(options);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync();
+        stats.ExternalPrintHours.Should().Be(0);
+        stats.ExternalJobsCompleted.Should().Be(0);
+        stats.TotalPrintHours.Should().BeApproximately(3.0, 0.0001,
+            "absolute PrintFarmer history must be re-added to a clean baseline each cycle");
+        stats.TotalJobsCompleted.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_ExternalFailureTwoCycles_UsesLastKnownBaselines()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrinterStatisticsSet.Add(new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                ExternalPrintHours = 100,
+                ExternalJobsCompleted = 5,
+                TotalPrintHours = 150,
+                TotalJobsCompleted = 6
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Moonraker Printer",
+            Backend = (int)PrinterBackend.Moonraker,
+            ModelId = modelId
+        };
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(c => c.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((HistoryTotals?)null);
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(factory.Object)
+            .BuildServiceProvider();
+        Mock<IPrintJobStatisticsRepository> jobStats = new();
+        jobStats
+            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new PrintJobStatistics { ActualDurationMs = (long)(50.0 * 3600 * 1000) }
+            ]);
+        PrintStatsSyncHostedService service = CreateService(provider);
+        PrintStatsSyncSettings settings = new()
+        {
+            IncludePrintFarmerJobs = true,
+            ApiTimeoutSeconds = 30
+        };
+
+        for (int cycle = 0; cycle < 2; cycle++)
+        {
+            await using AppDbContext db = new(options);
+            await service.SyncPrinterStatisticsAsync(
+                printer,
+                settings,
+                new EfPrinterStatisticsRepository(db),
+                new EfToolheadStatisticsRepository(db),
+                jobStats.Object,
+                Mock.Of<IOperatorFeatureGate>(),
+                provider,
+                CancellationToken.None);
+            await db.SaveChangesAsync();
+        }
+
+        await using AppDbContext verify = new(options);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync();
+        stats.ExternalPrintHours.Should().Be(100);
+        stats.ExternalJobsCompleted.Should().Be(5);
+        stats.TotalPrintHours.Should().BeApproximately(150.0, 0.0001);
+        stats.TotalJobsCompleted.Should().Be(6);
+    }
+
+    private static PrintStatsSyncHostedService CreateService(IServiceProvider provider)
+    {
+        return new PrintStatsSyncHostedService(
+            provider,
+            Mock.Of<ILogger<PrintStatsSyncHostedService>>(),
+            Mock.Of<IOptionsMonitor<PrintStatsSyncSettings>>(),
+            Mock.Of<IBackgroundServiceMonitor>());
     }
 }

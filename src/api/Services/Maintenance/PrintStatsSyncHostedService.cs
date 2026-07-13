@@ -220,13 +220,17 @@ public class PrintStatsSyncHostedService(
             // TotalPrintHours. From this point forward ExternalPrintHours tracks only external
             // growth, so the next cycle's baseline is uncontaminated (issue #711, round-5).
             stats.ExternalPrintHours = stats.TotalPrintHours;
+            stats.ExternalJobsCompleted = stats.TotalJobsCompleted;
             externalDelta = Math.Max(0, stats.ExternalPrintHours - previousExternalHours);
         }
 
-        // Sync from PrintFarmer job history. This mutates TotalPrintHours but not
-        // ExternalPrintHours, so per-toolhead attribution (already computed above) is unaffected.
+        // PrintFarmer history is an absolute all-time aggregate, not a per-cycle delta. Reset the
+        // combined totals to their last-known external baselines before adding it so failed or
+        // unsupported external syncs (for example PrusaLink) cannot compound PF totals each cycle.
         if (settings.IncludePrintFarmerJobs)
         {
+            stats.TotalPrintHours = stats.ExternalPrintHours;
+            stats.TotalJobsCompleted = checked((int)stats.ExternalJobsCompleted);
             await SyncPrintFarmerJobStatisticsAsync(printer, stats, jobStatsRepo, ct);
         }
 
