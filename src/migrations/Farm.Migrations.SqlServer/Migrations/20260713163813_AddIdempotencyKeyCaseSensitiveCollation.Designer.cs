@@ -1609,8 +1609,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("UserId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)")
                         .UseCollation("Latin1_General_100_BIN2");
 
                     b.HasKey("Id");

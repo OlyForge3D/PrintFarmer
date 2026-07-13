@@ -1,5 +1,6 @@
 ﻿using System.Security.Claims;
 using System.Text;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Web.Api.Infrastructure.Idempotency;
@@ -107,6 +108,9 @@ public class IdempotencyFilterTests : IDisposable
 
     private IdempotencyFilter CreateFilter(bool featureEnabled = true)
         => new(_store, GateWith(featureEnabled), NullLogger<IdempotencyFilter>.Instance);
+
+    private IdempotencyFilter CreateFilter(IIdempotencyStore store, bool featureEnabled = true)
+        => new(store, GateWith(featureEnabled), NullLogger<IdempotencyFilter>.Instance);
 
     private static async Task RunAsync(
         IdempotencyFilter filter,
@@ -391,5 +395,222 @@ public class IdempotencyFilterTests : IDisposable
         using Farm.Infrastructure.Data.AppDbContext db = new(_options);
         _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
             .Should().Be(0, "a rejected oversized request must not persist an idempotency record");
+    }
+
+    [Fact]
+    public async Task PostMutation_FlushFailure_DoesNotAbandonProcessingRow()
+    {
+        // Hicks H-1/H-2: a failure AFTER the mutation succeeded (here, flushing the
+        // buffered response to the real stream throws) must NOT abandon the Processing
+        // row. Abandoning would delete it and let a retry re-execute the already-applied
+        // mutation with no replay protection (the double-execution window).
+        InstrumentedStore store = new(_store);
+        IdempotencyFilter filter = CreateFilter(store);
+
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, "flush-fail-key",
+            Encoding.UTF8.GetBytes("{\"delta\":1}"),
+            path: "/api/parts-inventory/RD-1/adjust");
+
+        // The real response stream throws on write; next() succeeds (200) writing to the
+        // filter's buffer, and the post-mutation flush onto this stream then fails.
+        ctx.HttpContext.Response.Body = new WriteThrowingStream();
+
+        Func<Task> act = () => RunAsync(filter, ctx, StatusCodes.Status200OK, "{\"ok\":true}");
+
+        _ = await act.Should().ThrowAsync<IOException>(
+            "the post-mutation flush failure must surface to the caller");
+
+        _ = store.AbandonCalls.Should().Be(0,
+            "a post-mutation flush failure must not abandon the Processing row");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        IdempotencyRecord row = await db.IdempotencyRecords.SingleAsync(CancellationToken.None);
+        _ = row.Status.Should().Be(IdempotencyRecordStatus.Processing,
+            "the row must remain Processing so retries get 409 until staleness reclaim frees it");
+    }
+
+    [Fact]
+    public async Task PostMutation_CompleteAsyncFailure_LeavesProcessingRow()
+    {
+        // Hicks H-1/H-2: if CompleteAsync throws after the mutation already succeeded, the
+        // filter must leave the Processing row in place (not abandon) and rethrow.
+        InstrumentedStore store = new(_store)
+        {
+            ThrowFromComplete = new InvalidOperationException("simulated store write failure"),
+        };
+        IdempotencyFilter filter = CreateFilter(store);
+
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, "complete-fail-key",
+            Encoding.UTF8.GetBytes("{\"delta\":1}"),
+            path: "/api/parts-inventory/RD-2/adjust");
+
+        Func<Task> act = () => RunAsync(filter, ctx, StatusCodes.Status201Created, "{\"created\":true}");
+
+        _ = await act.Should().ThrowAsync<InvalidOperationException>(
+            "a post-mutation CompleteAsync failure must surface to the caller");
+
+        _ = store.CompleteCalls.Should().Be(1,
+            "CompleteAsync must have been attempted after the successful mutation");
+        _ = store.AbandonCalls.Should().Be(0,
+            "a post-mutation CompleteAsync failure must not abandon the Processing row");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        IdempotencyRecord row = await db.IdempotencyRecords.SingleAsync(CancellationToken.None);
+        _ = row.Status.Should().Be(IdempotencyRecordStatus.Processing,
+            "the row must remain Processing so retries get 409 until staleness reclaim frees it");
+    }
+
+    [Fact]
+    public async Task ChunkedOversizedBody_UnknownLength_Returns_413_AndPersistsNothing()
+    {
+        // Hicks H-6: the existing 413 test only covers the ContentLength-known path. A
+        // chunked upload has no Content-Length and streams its payload across multiple
+        // reads. The filter must still reject an over-limit body with 413, never invoke
+        // the action, and never persist a record.
+        IdempotencyFilter filter = CreateFilter();
+
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, "chunked-big-key", body: null,
+            path: "/api/parts-inventory/RD-3/adjust");
+
+        long total = (3L * IdempotencyFilter.MaxBufferedRequestBytes) / 2; // 1.5 MiB
+        ctx.HttpContext.Request.Body = new ChunkedBodyStream(total, 64 * 1024);
+        ctx.HttpContext.Request.ContentLength = null;
+        ctx.HttpContext.Request.ContentType = "application/json";
+
+        bool pipelineRan = false;
+        await filter.OnResourceExecutionAsync(ctx, () =>
+        {
+            pipelineRan = true;
+            throw new InvalidOperationException("pipeline must not run for an oversized chunked body");
+        });
+
+        _ = pipelineRan.Should().BeFalse("the action delegate must not be invoked for an oversized body");
+
+        ObjectResult result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        _ = result.StatusCode.Should().Be(StatusCodes.Status413PayloadTooLarge);
+        _ = result.Value.Should().BeOfType<ProblemDetails>();
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "a rejected oversized chunked request must not persist an idempotency record");
+    }
+
+    /// <summary>
+    /// Delegating <see cref="IIdempotencyStore"/> that counts Abandon/Complete calls and
+    /// can force <see cref="CompleteAsync"/> to throw, so the filter's post-mutation
+    /// abandon asymmetry can be asserted without mocking the store handshake away.
+    /// </summary>
+    private sealed class InstrumentedStore : IIdempotencyStore
+    {
+        private readonly IIdempotencyStore _inner;
+
+        public InstrumentedStore(IIdempotencyStore inner) => _inner = inner;
+
+        public int AbandonCalls;
+        public int CompleteCalls;
+        public Exception? ThrowFromComplete { get; init; }
+
+        public Task<IdempotencyLookupResult> TryBeginAsync(
+            string userId, string routeKey, string idempotencyKey, string requestHash, CancellationToken ct)
+            => _inner.TryBeginAsync(userId, routeKey, idempotencyKey, requestHash, ct);
+
+        public Task CompleteAsync(
+            Guid recordId, int statusCode, string? contentType, byte[] responseBody, CancellationToken ct)
+        {
+            _ = Interlocked.Increment(ref CompleteCalls);
+            return ThrowFromComplete is not null
+                ? throw ThrowFromComplete
+                : _inner.CompleteAsync(recordId, statusCode, contentType, responseBody, ct);
+        }
+
+        public Task AbandonProcessingAsync(Guid recordId, CancellationToken ct)
+        {
+            _ = Interlocked.Increment(ref AbandonCalls);
+            return _inner.AbandonProcessingAsync(recordId, ct);
+        }
+
+        public Task<int> PruneExpiredAsync(DateTime now, CancellationToken ct)
+            => _inner.PruneExpiredAsync(now, ct);
+    }
+
+    /// <summary>A writable stream that throws on every write, to simulate a flush failure.</summary>
+    private sealed class WriteThrowingStream : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set { } }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new IOException("simulated post-mutation flush failure");
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => throw new IOException("simulated post-mutation flush failure");
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => throw new IOException("simulated post-mutation flush failure");
+    }
+
+    /// <summary>
+    /// A non-seekable, unknown-length read stream that yields a fixed number of bytes
+    /// across multiple reads, modelling a chunked upload with no Content-Length.
+    /// </summary>
+    private sealed class ChunkedBodyStream : Stream
+    {
+        private long _remaining;
+        private readonly int _chunk;
+
+        public ChunkedBodyStream(long total, int chunk)
+        {
+            _remaining = total;
+            _chunk = chunk;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_remaining <= 0)
+            {
+                return 0;
+            }
+
+            int n = (int)Math.Min(Math.Min(count, _chunk), _remaining);
+            Array.Fill(buffer, (byte)'x', offset, n);
+            _remaining -= n;
+            return n;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => Task.FromResult(Read(buffer, offset, count));
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_remaining <= 0)
+            {
+                return new ValueTask<int>(0);
+            }
+
+            int n = (int)Math.Min(Math.Min(buffer.Length, _chunk), _remaining);
+            buffer.Span[..n].Fill((byte)'x');
+            _remaining -= n;
+            return new ValueTask<int>(n);
+        }
     }
 }

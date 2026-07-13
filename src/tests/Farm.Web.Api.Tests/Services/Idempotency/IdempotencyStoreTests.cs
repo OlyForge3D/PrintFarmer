@@ -1,4 +1,5 @@
 ﻿using System.Data.Common;
+using System.Runtime.CompilerServices;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
@@ -593,6 +594,208 @@ public class IdempotencyStoreTests : IDisposable
         DbContextOptions<AppDbContext> options,
         SqliteConnection connection) : AppDbContext(options)
     {
+        public override void Dispose()
+        {
+            base.Dispose();
+            connection.Dispose();
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await base.DisposeAsync();
+            await connection.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Contention_LoserAfterWinnerAbandoned_RetriesInsertNotBypass()
+    {
+        // Hicks H-2: a caller that loses the insert race and then reloads to find the
+        // winning row already gone (a concurrent caller abandoned its Processing row in
+        // between) must NOT return Bypassed — that would execute the mutation with no
+        // replay protection. It must retry the insert and win protection itself.
+        (string connectionString, SqliteConnection keepAlive) = await CreateSharedDbAsync();
+        await using SqliteConnection keepAliveConn = keepAlive;
+
+        StrongBox<int> insertFailures = new(1); // fail only the first insert
+        ConflictInjectingContextFactory factory = new(connectionString, insertFailures, onConflict: null);
+        IdempotencyStore sut = new(factory, NullLogger<IdempotencyStore>.Instance);
+
+        IdempotencyLookupResult result = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "vanish-key", "hash-A", CancellationToken.None);
+
+        _ = result.Outcome.Should().Be(IdempotencyLookupOutcome.Inserted,
+            "a loser whose winner vanished must retry the insert and win protection, never Bypass");
+        _ = result.Outcome.Should().NotBe(IdempotencyLookupOutcome.Bypassed);
+
+        await using SqliteConnection verifyConn = new(connectionString);
+        await verifyConn.OpenAsync();
+        await using AppDbContext verify = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(verifyConn).Options);
+        _ = (await verify.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "the retry must persist exactly one protected row");
+    }
+
+    [Fact]
+    public async Task Contention_WinnerKeepsVanishing_ExhaustsRetriesAndReturnsInProgress()
+    {
+        // If every attempt loses the race to a winner that then vanishes, the bounded
+        // retry loop must give up with InProgress (409) so the client backs off — never
+        // Bypassed, and never an unbounded livelock.
+        (string connectionString, SqliteConnection keepAlive) = await CreateSharedDbAsync();
+        await using SqliteConnection keepAliveConn = keepAlive;
+
+        // More failures than the loop can ever attempt, so every insert loses.
+        StrongBox<int> insertFailures = new(16);
+        ConflictInjectingContextFactory factory = new(connectionString, insertFailures, onConflict: null);
+        IdempotencyStore sut = new(factory, NullLogger<IdempotencyStore>.Instance);
+
+        IdempotencyLookupResult result = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "always-vanish-key", "hash-A", CancellationToken.None);
+
+        _ = result.Outcome.Should().Be(IdempotencyLookupOutcome.InProgress,
+            "exhausting the bounded retries must surface InProgress so the client backs off");
+        _ = result.Outcome.Should().NotBe(IdempotencyLookupOutcome.Bypassed);
+
+        await using SqliteConnection verifyConn = new(connectionString);
+        await verifyConn.OpenAsync();
+        await using AppDbContext verify = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(verifyConn).Options);
+        _ = (await verify.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "a caller that never wins the race must not persist a row");
+    }
+
+    [Fact]
+    public async Task TryBegin_WinnerReloadStaleProcessingRow_IsReclaimedAndRetried()
+    {
+        // Bishop NB3: the winner-reload path must apply the SAME staleness reclaim as the
+        // initial read. If the reloaded winner is itself a stale Processing row, delete it
+        // and retry the insert rather than reporting a dead request as InProgress.
+        (string connectionString, SqliteConnection keepAlive) = await CreateSharedDbAsync();
+        await using SqliteConnection keepAliveConn = keepAlive;
+
+        Guid staleId = Guid.NewGuid();
+        IdempotencyOptions options = new() { ProcessingStaleness = TimeSpan.FromMinutes(5) };
+
+        // On the first (forced) insert conflict, seed a STALE Processing winner so the
+        // winner-reload branch observes a reclaimable row.
+        void SeedStaleWinner()
+        {
+            using SqliteConnection seedConn = new(connectionString);
+            seedConn.Open();
+            using AppDbContext seed = new(
+                new DbContextOptionsBuilder<AppDbContext>().UseSqlite(seedConn).Options);
+            _ = seed.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = staleId,
+                UserId = "user-A",
+                RouteKey = IdempotencyRouteKeys.TaskComplete,
+                IdempotencyKey = "stale-winner-key",
+                RequestHash = "hash-A",
+                Status = IdempotencyRecordStatus.Processing,
+                CreatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(6),
+                UpdatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(6),
+            });
+            _ = seed.SaveChanges();
+        }
+
+        StrongBox<int> insertFailures = new(1);
+        ConflictInjectingContextFactory factory = new(connectionString, insertFailures, SeedStaleWinner);
+        IdempotencyStore sut = new(factory, NullLogger<IdempotencyStore>.Instance, options);
+
+        IdempotencyLookupResult result = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "stale-winner-key", "hash-A", CancellationToken.None);
+
+        _ = result.Outcome.Should().Be(IdempotencyLookupOutcome.Inserted,
+            "the winner-reload path must reclaim a stale Processing winner and retry the insert (Bishop NB3)");
+        _ = result.Record!.Id.Should().NotBe(staleId, "the stale winner is deleted and a fresh row inserted");
+
+        await using SqliteConnection verifyConn = new(connectionString);
+        await verifyConn.OpenAsync();
+        await using AppDbContext verify = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(verifyConn).Options);
+        _ = (await verify.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "the stale winner must be replaced, not duplicated");
+        _ = (await verify.IdempotencyRecords.AnyAsync(r => r.Id == staleId, CancellationToken.None))
+            .Should().BeFalse("the stale winner must have been reclaimed");
+    }
+
+    /// <summary>
+    /// Creates a shared-cache in-memory SQLite database and returns its connection
+    /// string plus a keep-alive connection (a shared-cache database is destroyed when
+    /// its last connection closes). The caller owns and must dispose the keep-alive.
+    /// </summary>
+    private static async Task<(string ConnectionString, SqliteConnection KeepAlive)> CreateSharedDbAsync()
+    {
+        string dbName = $"idemp-fixdg-{Guid.NewGuid():N}";
+        string connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
+        SqliteConnection keepAlive = new(connectionString);
+        await keepAlive.OpenAsync();
+        await using (AppDbContext create = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(keepAlive).Options))
+        {
+            _ = await create.Database.EnsureCreatedAsync();
+        }
+
+        return (connectionString, keepAlive);
+    }
+
+    /// <summary>
+    /// <see cref="IDbContextFactory{TContext}"/> that hands out
+    /// <see cref="ConflictInjectingContext"/> instances against a shared-cache in-memory
+    /// database, so the store's insert can be forced to lose the unique-index race a
+    /// controlled number of times (and optionally run a hook at the moment of conflict).
+    /// </summary>
+    private sealed class ConflictInjectingContextFactory(
+        string connectionString,
+        StrongBox<int> insertFailures,
+        Action? onConflict) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext()
+        {
+            SqliteConnection connection = new(connectionString);
+            connection.Open();
+            using (SqliteCommand pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA busy_timeout=10000;";
+                _ = pragma.ExecuteNonQuery();
+            }
+
+            DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connection)
+                .Options;
+            return new ConflictInjectingContext(options, connection, insertFailures, onConflict);
+        }
+
+        public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateDbContext());
+    }
+
+    /// <summary>
+    /// <see cref="AppDbContext"/> whose insert (<see cref="SaveChangesAsync(bool, CancellationToken)"/>)
+    /// throws a synthetic unique-violation <see cref="DbUpdateException"/> for the first
+    /// N calls (tracked via a shared counter), optionally invoking a hook first. Reads and
+    /// <c>ExecuteDeleteAsync</c> are unaffected because they do not funnel through
+    /// <c>SaveChangesAsync</c>, so only the TryBegin insert is intercepted.
+    /// </summary>
+    private sealed class ConflictInjectingContext(
+        DbContextOptions<AppDbContext> options,
+        SqliteConnection connection,
+        StrongBox<int> insertFailures,
+        Action? onConflict) : AppDbContext(options)
+    {
+        public override Task<int> SaveChangesAsync(
+            bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Decrement(ref insertFailures.Value) >= 0)
+            {
+                onConflict?.Invoke();
+                throw new DbUpdateException("simulated race loss", new FakeSqlStateException("23505"));
+            }
+
+            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+
         public override void Dispose()
         {
             base.Dispose();

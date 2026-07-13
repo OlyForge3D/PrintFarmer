@@ -17,7 +17,7 @@ public class IdempotencyRecordConfiguration : IEntityTypeConfiguration<Idempoten
     {
         _ = builder.HasKey(r => r.Id);
 
-        _ = builder.Property(r => r.UserId).HasMaxLength(450).IsRequired();
+        _ = builder.Property(r => r.UserId).HasMaxLength(256).IsRequired();
         _ = builder.Property(r => r.RouteKey).HasMaxLength(200).IsRequired();
         _ = builder.Property(r => r.IdempotencyKey).HasMaxLength(200).IsRequired();
         _ = builder.Property(r => r.RequestHash).HasMaxLength(64).IsRequired();

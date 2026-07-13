@@ -26,6 +26,14 @@ public static class IdempotencyProblemDetails
     public const string CodePayloadTooLarge = "idempotencyRequestTooLarge";
 
     /// <summary>
+    /// Seconds a client should wait before retrying an in-progress key. Surfaced both
+    /// as a <c>Retry-After</c> response header and a <c>retryAfterSeconds</c> ProblemDetails
+    /// extension. Matches the store's <c>ProcessingStaleness</c> reclaim horizon so a
+    /// backed-off retry lands after a wedged Processing row would be reclaimable.
+    /// </summary>
+    public const int RetryAfterSeconds = 5;
+
+    /// <summary>
     /// <c>400 Bad Request</c>: the client supplied a malformed <c>Idempotency-Key</c>
     /// header (empty, too long, or contained non-printable/whitespace bytes).
     /// </summary>
@@ -74,6 +82,7 @@ public static class IdempotencyProblemDetails
             Type = TypeUri,
         };
         problem.Extensions["code"] = CodeInProgress;
+        problem.Extensions["retryAfterSeconds"] = RetryAfterSeconds;
         return new ConflictObjectResult(problem);
     }
 

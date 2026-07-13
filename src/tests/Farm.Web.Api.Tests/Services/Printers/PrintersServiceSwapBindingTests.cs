@@ -1089,6 +1089,80 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         central.VerifyNoOtherCalls();
     }
 
+    // ── H-3: spool-bind natural idempotency backstop (no-op re-bind) ──
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_RebindSameSpoolToMaterializedToolhead_IsIdempotentNoOp()
+    {
+        // Hicks H-3: re-binding the SAME spool to the SAME materialized (printer, toolhead)
+        // slot must be a no-op — no coverage broadcast, no UpdatedAt churn, no audit — so a
+        // replayed bind (Idempotency-Key retry while the replay flag is off/transitioning,
+        // or a staleness-reclaimed retry) cannot produce duplicate state. This is
+        // spool-bind's natural idempotency backstop, mirroring adjust and harvest.
+        Guid printerId = SeedPrinterWithExistingToolhead(currentSpoolId: 77, currentMaterial: "PLA");
+
+        DateTime seededUpdatedAt;
+        await using (AppDbContext pre = NewDb())
+        {
+            Toolhead seeded = await pre.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+            seededUpdatedAt = seeded.UpdatedAt;
+        }
+
+        Mock<ISpoolmanService> spoolman = Spoolman(77, "PLA");
+        var broadcaster = new Mock<IFilamentCoverageBroadcaster>();
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman, broadcaster.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 77, CancellationToken.None);
+            result.Success.Should().BeTrue("re-binding the same spool to the same slot is a successful no-op");
+        }
+
+        await using AppDbContext verify = NewDb();
+        Toolhead saved = await verify.Toolheads.SingleAsync(t => t.PrinterId == printerId && t.Index == 0);
+        saved.CurrentSpoolId.Should().Be(77);
+        saved.CurrentMaterial.Should().Be("PLA");
+        saved.UpdatedAt.Should().Be(seededUpdatedAt, "a no-op re-bind must not churn UpdatedAt");
+        (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0, "a no-op re-bind must not write an audit row");
+        broadcaster.Verify(
+            b => b.BroadcastPrinterChangedAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a no-op re-bind must not broadcast a coverage change");
+    }
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_RebindSameSpoolToLegacyT0_IsIdempotentNoOp()
+    {
+        // Hicks H-3: the legacy single-tool T0 path (Printer.CurrentSpoolId scalar) gets the
+        // same natural idempotency backstop — a re-bind of the already-bound spool is a no-op
+        // that neither fabricates a toolhead row nor broadcasts a coverage change.
+        Guid printerId = SeedLegacyPrinterNoToolheads();
+        Mock<ISpoolmanService> spoolman = Spoolman(77, "PLA");
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman);
+            (await service.SetToolheadSpoolAsync(printerId, 0, 77, CancellationToken.None)).Success.Should().BeTrue();
+        }
+
+        var broadcaster = new Mock<IFilamentCoverageBroadcaster>();
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman, broadcaster.Object);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 77, CancellationToken.None);
+            result.Success.Should().BeTrue("re-binding the same spool via the legacy T0 scalar is a successful no-op");
+        }
+
+        await using AppDbContext verify = NewDb();
+        Printer saved = await verify.Printers.Include(p => p.Toolheads).FirstAsync(p => p.Id == printerId);
+        saved.CurrentSpoolId.Should().Be(77);
+        saved.Toolheads.Should().BeEmpty("a no-op re-bind must not fabricate a toolhead row");
+        broadcaster.Verify(
+            b => b.BroadcastPrinterChangedAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a no-op re-bind must not broadcast a coverage change");
+    }
+
     private static Mock<ISpoolmanService> SpoolmanReturningNull()
     {
         var spoolman = new Mock<ISpoolmanService>();

@@ -43,8 +43,13 @@ public enum IdempotencyLookupOutcome
     HashConflict,
 
     /// <summary>
-    /// The store bypassed persistence (feature disabled or malformed key). The
-    /// caller executes the mutation normally without replay support.
+    /// Legacy "execute without replay support" signal. The current
+    /// <see cref="IdempotencyStore"/> no longer produces this outcome: a
+    /// winner-reload that observes the winning row vanish or turn stale now retries
+    /// the insert and, if it keeps losing, returns <see cref="InProgress"/> rather
+    /// than bypassing protection (Hicks H-2). Retained so callers keep a defensive
+    /// branch and for wire/back-compat; a value here still means "execute the
+    /// mutation normally without replay support."
     /// </summary>
     Bypassed,
 }

@@ -53,6 +53,15 @@ public sealed class IdempotencyStore : IIdempotencyStore
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
+    /// <summary>
+    /// Maximum number of insert attempts before a caller that keeps losing the race
+    /// to a winner that then vanishes (or is stale) is told to back off with
+    /// <see cref="IdempotencyLookupOutcome.InProgress"/>. Bounds the loop so sustained
+    /// contention can never livelock, while still giving a genuine
+    /// abandon-in-between race a chance to re-insert and win protection.
+    /// </summary>
+    private const int MaxBeginAttempts = 3;
+
     /// <inheritdoc />
     public async Task<IdempotencyLookupResult> TryBeginAsync(
         string userId,
@@ -68,102 +77,146 @@ public sealed class IdempotencyStore : IIdempotencyStore
 
         DateTime now = DateTime.UtcNow;
 
-        await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
-
-        IdempotencyRecord? existing = await db.IdempotencyRecords
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                r => r.UserId == userId
-                    && r.RouteKey == routeKey
-                    && r.IdempotencyKey == idempotencyKey,
-                ct);
-
-        if (existing is not null)
+        // Bounded retry loop. The winner-reload path (after a unique-violation) can
+        // legitimately observe the winning row vanish — a concurrent caller abandoned
+        // its Processing row between our failed insert and our reload — or find it
+        // stale. Returning Bypassed there would let a retry execute the mutation with
+        // no replay protection (Hicks H-2), so instead we retry the insert. If every
+        // attempt races into the same vanish/stale pattern we surface InProgress (409)
+        // so the client backs off rather than executing unprotected.
+        for (int attempt = 1; attempt <= MaxBeginAttempts; attempt++)
         {
-            bool expired = IsExpired(existing.CreatedAt, now);
-            bool staleProcessing = !expired
-                && existing.Status == IdempotencyRecordStatus.Processing
-                && existing.CreatedAt < now - _options.ProcessingStaleness;
+            await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
 
-            if (expired || staleProcessing)
-            {
-                // Expired (past the retention window) OR a Processing row whose owning
-                // request appears to have died before completing (older than
-                // ProcessingStaleness): purge it before attempting a fresh insert so a
-                // crashed request cannot block the key until it ages out. If a concurrent
-                // caller beat us to the delete or the row is already gone, ExecuteDeleteAsync
-                // simply returns 0 — no error.
-                _ = await db.IdempotencyRecords
-                    .Where(r => r.Id == existing.Id)
-                    .ExecuteDeleteAsync(ct);
-            }
-            else if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
-            {
-                return new IdempotencyLookupResult(IdempotencyLookupOutcome.HashConflict, existing);
-            }
-            else if (existing.Status == IdempotencyRecordStatus.Completed)
-            {
-                return new IdempotencyLookupResult(IdempotencyLookupOutcome.ReplayCompleted, existing);
-            }
-            else
-            {
-                return new IdempotencyLookupResult(IdempotencyLookupOutcome.InProgress, existing);
-            }
-        }
-
-        IdempotencyRecord record = new()
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            RouteKey = routeKey,
-            IdempotencyKey = idempotencyKey,
-            RequestHash = requestHash,
-            Status = IdempotencyRecordStatus.Processing,
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        _ = db.IdempotencyRecords.Add(record);
-
-        try
-        {
-            _ = await db.SaveChangesAsync(ct);
-            return new IdempotencyLookupResult(IdempotencyLookupOutcome.Inserted, record);
-        }
-        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
-        {
-            // A concurrent first-request won the race. Reload the winning row and
-            // interpret it exactly as we would in the initial-read path.
-            _logger.LogDebug(
-                ex,
-                "Idempotency-Key race resolved by unique index for route={RouteKey}; reloading winner.",
-                routeKey);
-
-            await using AppDbContext readDb = await _dbFactory.CreateDbContextAsync(ct);
-            IdempotencyRecord? winner = await readDb.IdempotencyRecords
+            IdempotencyRecord? existing = await db.IdempotencyRecords
                 .AsNoTracking()
                 .FirstOrDefaultAsync(
                     r => r.UserId == userId
                         && r.RouteKey == routeKey
                         && r.IdempotencyKey == idempotencyKey,
                     ct);
-            if (winner is null || IsExpired(winner.CreatedAt, now))
+
+            if (existing is not null)
             {
-                // The winning row vanished or is itself expired. Rather than looping
-                // (which risks livelock under sustained contention) we fall back to
-                // Bypassed so the caller executes the mutation normally. A subsequent
-                // retry with the same key will find a stable state.
-                return new IdempotencyLookupResult(IdempotencyLookupOutcome.Bypassed, null);
+                if (IsReclaimable(existing, now))
+                {
+                    // Expired (past the retention window) OR a Processing row whose owning
+                    // request appears to have died before completing (older than
+                    // ProcessingStaleness): purge it before attempting a fresh insert so a
+                    // crashed request cannot block the key until it ages out. If a concurrent
+                    // caller beat us to the delete or the row is already gone, ExecuteDeleteAsync
+                    // simply returns 0 — no error. Fall through to the insert below.
+                    _ = await db.IdempotencyRecords
+                        .Where(r => r.Id == existing.Id)
+                        .ExecuteDeleteAsync(ct);
+                }
+                else if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
+                {
+                    return new IdempotencyLookupResult(IdempotencyLookupOutcome.HashConflict, existing);
+                }
+                else if (existing.Status == IdempotencyRecordStatus.Completed)
+                {
+                    return new IdempotencyLookupResult(IdempotencyLookupOutcome.ReplayCompleted, existing);
+                }
+                else
+                {
+                    return new IdempotencyLookupResult(IdempotencyLookupOutcome.InProgress, existing);
+                }
             }
 
-            if (!string.Equals(winner.RequestHash, requestHash, StringComparison.Ordinal))
+            IdempotencyRecord record = new()
             {
-                return new IdempotencyLookupResult(IdempotencyLookupOutcome.HashConflict, winner);
-            }
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                RouteKey = routeKey,
+                IdempotencyKey = idempotencyKey,
+                RequestHash = requestHash,
+                Status = IdempotencyRecordStatus.Processing,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            _ = db.IdempotencyRecords.Add(record);
 
-            return winner.Status == IdempotencyRecordStatus.Completed
-                ? new IdempotencyLookupResult(IdempotencyLookupOutcome.ReplayCompleted, winner)
-                : new IdempotencyLookupResult(IdempotencyLookupOutcome.InProgress, winner);
+            try
+            {
+                _ = await db.SaveChangesAsync(ct);
+                return new IdempotencyLookupResult(IdempotencyLookupOutcome.Inserted, record);
+            }
+            catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+            {
+                // A concurrent first-request won the race. Reload the winning row and
+                // interpret it exactly as we would in the initial-read path.
+                _logger.LogDebug(
+                    ex,
+                    "Idempotency-Key race resolved by unique index for route={RouteKey}; reloading winner (attempt {Attempt}).",
+                    routeKey,
+                    attempt);
+
+                await using AppDbContext readDb = await _dbFactory.CreateDbContextAsync(ct);
+                IdempotencyRecord? winner = await readDb.IdempotencyRecords
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        r => r.UserId == userId
+                            && r.RouteKey == routeKey
+                            && r.IdempotencyKey == idempotencyKey,
+                        ct);
+
+                if (winner is null)
+                {
+                    // The winning row vanished (a concurrent caller abandoned its
+                    // Processing row between our insert and this reload). Retry the
+                    // insert rather than Bypassing, so the mutation is never executed
+                    // unprotected (Hicks H-2). If every bounded attempt races into the
+                    // same vanish, the post-loop return surfaces InProgress (409).
+                    continue;
+                }
+
+                if (IsReclaimable(winner, now))
+                {
+                    // The reloaded winner is itself expired or a stale Processing row.
+                    // Apply the same reclaim the initial-read path uses (Bishop NB3) —
+                    // delete it and retry the insert so this caller can win protection
+                    // instead of being told a dead request is still in progress.
+                    _ = await readDb.IdempotencyRecords
+                        .Where(r => r.Id == winner.Id)
+                        .ExecuteDeleteAsync(ct);
+
+                    continue;
+                }
+
+                if (!string.Equals(winner.RequestHash, requestHash, StringComparison.Ordinal))
+                {
+                    return new IdempotencyLookupResult(IdempotencyLookupOutcome.HashConflict, winner);
+                }
+
+                return winner.Status == IdempotencyRecordStatus.Completed
+                    ? new IdempotencyLookupResult(IdempotencyLookupOutcome.ReplayCompleted, winner)
+                    : new IdempotencyLookupResult(IdempotencyLookupOutcome.InProgress, winner);
+            }
         }
+
+        // Every bounded attempt raced into the same vanish/stale pattern: surface
+        // InProgress (409) so the client backs off rather than executing unprotected.
+        return new IdempotencyLookupResult(IdempotencyLookupOutcome.InProgress, null);
+    }
+
+    /// <summary>
+    /// True when an existing record should be purged and replaced by a fresh insert:
+    /// it is either past the retention window (<see cref="IsExpired"/>) or a
+    /// <see cref="IdempotencyRecordStatus.Processing"/> row whose owning request
+    /// appears to have died (older than <see cref="IdempotencyOptions.ProcessingStaleness"/>).
+    /// Shared by the initial-read and winner-reload branches of
+    /// <see cref="TryBeginAsync"/> so both agree on exactly what is reclaimable.
+    /// </summary>
+    private bool IsReclaimable(IdempotencyRecord record, DateTime now)
+    {
+        if (IsExpired(record.CreatedAt, now))
+        {
+            return true;
+        }
+
+        return record.Status == IdempotencyRecordStatus.Processing
+            && record.CreatedAt < now - _options.ProcessingStaleness;
     }
 
     /// <inheritdoc />

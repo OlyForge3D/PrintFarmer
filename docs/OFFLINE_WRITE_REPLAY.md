@@ -52,7 +52,7 @@ the same key without colliding.
 | First request for a key | Mutation executes; response captured; `Idempotent-Replay` header absent |
 | Exact replay (same key + path + body) | Stored response replayed with `Idempotent-Replay: true` |
 | Same key + path, different body | `409 Conflict` (`idempotencyKeyConflict`) |
-| Prior request with the key still in-flight | `409 Conflict` (`idempotencyKeyInProgress`) |
+| Prior request with the key still in-flight | `409 Conflict` (`idempotencyKeyInProgress`), with a `Retry-After: 5` header and a `retryAfterSeconds` hint so the client backs off |
 | Malformed / multi-valued key header | `400 Bad Request` (`idempotencyKeyMalformed`) |
 | Body larger than 1 MiB | `413 Payload Too Large` (`idempotencyRequestTooLarge`) |
 
@@ -94,6 +94,39 @@ idempotency**, independent of this feature:
   claim plus `PartHarvestOutputSnapshot` uniqueness — prevents a job from being
   harvested twice **even after the idempotency record has expired and been
   pruned** (see `HarvestPermanenceIntegrationTests`).
+- **Spool-bind:** re-binding the same spool to the same `(printer, toolhead)` slot
+  is a no-op short-circuit — it returns the existing binding unchanged (`200 OK`)
+  without churning `UpdatedAt`, writing a `FilamentSwapOverride` audit row, or
+  broadcasting a coverage change. A replayed or re-delivered bind therefore cannot
+  produce duplicate state even when the flag is OFF or mid-transition.
 
 The `Idempotency-Key` layer is therefore a convenience/latency optimization over
 the durable domain guards, not the sole line of defense against double-apply.
+
+## Failure handling around the mutation boundary
+
+The filter's abandon behavior is deliberately **asymmetric** around the mutation:
+
+- **Before/at the mutation** — if the action pipeline throws, or surfaces a 5xx /
+  handled exception, the mutation has not been recorded and controllers run their
+  own transactions, so the `Processing` row is **abandoned** (deleted) and the
+  client may retry the same key immediately.
+- **After a successful mutation** — if flushing the buffered response or writing
+  the completion record fails, the mutation has already been applied. Abandoning
+  here would delete the `Processing` row and let a retry re-execute the
+  already-applied write with no replay protection (a double-execution window). The
+  row is therefore **left in place to expire naturally**: retries observe
+  `409 InProgress` until the `ProcessingStaleness` reclaim frees the key, by which
+  point the natural domain guards above plus a fresh execution close the loop. The
+  original exception is rethrown so the failure still surfaces.
+
+Under sustained contention, a caller that loses the insert race to a winner that
+then vanishes (or is stale) retries the insert a bounded number of times and, if
+it keeps losing, returns `409 InProgress` rather than executing unprotected.
+
+## Known follow-ups (out of #715 scope)
+
+- **Location/ETag replay fidelity:** replays currently reproduce the stored status
+  code, content type, and body, but do not yet re-emit resource-specific
+  `Location` / `ETag` headers on the replayed response. This is an intentional
+  follow-up tracked beyond #715.

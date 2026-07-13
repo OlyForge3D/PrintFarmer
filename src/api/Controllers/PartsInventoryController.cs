@@ -216,7 +216,7 @@ public class PartsInventoryController(
     /// double-application at the ledger level even when the general 7-day
     /// window has elapsed.
     /// </remarks>
-    [HttpPost("{sku}/adjust")]
+    [HttpPost("{sku:minlength(1):maxlength(64)}/adjust")]
     [Idempotent(IdempotencyRouteKeys.PartsInventoryAdjust)]
     [ProducesResponseType(typeof(PartAdjustmentResponse), 200)]
     [ProducesResponseType(400)]

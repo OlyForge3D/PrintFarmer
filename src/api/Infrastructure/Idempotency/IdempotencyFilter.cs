@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.Globalization;
+using System.Security.Claims;
 using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.AspNetCore.Http;
@@ -178,6 +179,10 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
                 return;
 
             case IdempotencyLookupOutcome.InProgress:
+                // Advise the client how long to back off before retrying. The staleness
+                // reclaim horizon means a wedged Processing row becomes reclaimable shortly,
+                // so a short, bounded Retry-After keeps retries from executing unprotected.
+                http.Response.Headers.RetryAfter = IdempotencyProblemDetails.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
                 context.Result = IdempotencyProblemDetails.InProgress();
                 return;
 
@@ -209,11 +214,22 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
     }
 
     /// <summary>
-    /// Executes the remaining pipeline while buffering the response body so we
-    /// can persist it verbatim for future replays. The post-<c>next()</c> region
-    /// (restore, flush, record) is itself wrapped so that a failure while writing
-    /// the response or recording the outcome abandons the Processing row instead
-    /// of leaving the key wedged as in-progress.
+    /// Executes the remaining pipeline while buffering the response body so we can
+    /// persist it verbatim for future replays. Failure handling is deliberately
+    /// asymmetric around the mutation boundary (Hicks H-1/H-2):
+    /// <list type="bullet">
+    /// <item><description><b>Before/at the mutation:</b> if <c>next()</c> throws, or the
+    /// action surfaces a 5xx / handled exception, the mutation has not been recorded and
+    /// controllers run their own transactions — so we <b>abandon</b> the Processing row and
+    /// let the client retry with the same key.</description></item>
+    /// <item><description><b>After a successful mutation:</b> if flushing the buffered
+    /// response or writing the completion record throws, the mutation has already been
+    /// applied. Abandoning here would delete the Processing row and let a retry re-execute
+    /// the already-applied write with no replay protection (the double-execution window). We
+    /// therefore <b>do not abandon</b>: the Processing row is left in place so retries get
+    /// <c>409 InProgress</c> until the staleness reclaim frees it, and the exception is
+    /// rethrown so the failure still surfaces.</description></item>
+    /// </list>
     /// </summary>
     private async Task ExecuteWithCaptureAsync(
         ResourceExecutingContext context,
@@ -233,56 +249,65 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
         }
         catch
         {
-            // Restore the original stream and abandon the record so the client
-            // can retry with the same key. The exception is re-thrown so the
-            // framework's normal error handling still fires.
+            // The mutation pipeline threw before recording an outcome. It is safe (and
+            // necessary) to abandon the Processing row so a retry with the same key can
+            // re-execute — controllers wrap their own writes in a transaction, so a
+            // partially-applied mutation has already rolled back. Restore the real stream
+            // and rethrow so the framework's normal error handling still fires.
             response.Body = originalBody;
             await _store.AbandonProcessingAsync(recordId, CancellationToken.None);
             throw;
         }
 
-        // Post-next() safety net: restoring the body, flushing the buffered bytes,
-        // and recording the outcome must all succeed together. If ANY step throws
-        // (client disconnected mid-flush, store write failed, ...) abandon the
-        // Processing row so a retry with the same key is not permanently blocked as
-        // in-progress, then rethrow so the framework's error handling still fires.
-        try
+        // Restore the original body BEFORE any I/O onto it so downstream code that
+        // inspects Response.Body sees the real stream.
+        response.Body = originalBody;
+
+        int statusCode = response.StatusCode;
+        bool isServerError = statusCode >= 500;
+        bool hadException = executed.Exception is not null && !executed.ExceptionHandled;
+
+        if (hadException || isServerError)
         {
-            // Restore the original body BEFORE we perform any I/O onto it, so any
-            // downstream code that inspects Response.Body sees the real stream.
-            response.Body = originalBody;
-
-            int statusCode = response.StatusCode;
-            bool isServerError = statusCode >= 500;
-            bool hadException = executed.Exception is not null && !executed.ExceptionHandled;
-
-            // Always flush what the action wrote to the real response so the client
-            // sees an unchanged first-response body. The bytes are already buffered in
-            // memory, so we deliberately flush with CancellationToken.None: a client
-            // disconnect must not skip the persistence bookkeeping below and strand the
-            // Processing row.
-            buffer.Position = 0;
-            if (buffer.Length > 0)
+            // The mutation itself failed (5xx or a handled exception). Do not persist a
+            // failed mutation as a replayable result, and abandon so the client can retry
+            // the same key against a healed backend. Flush the action's bytes first so the
+            // client still sees the original error body; abandon regardless of flush
+            // outcome because a failed mutation is always safe to re-execute.
+            try
             {
-                await buffer.CopyToAsync(originalBody, CancellationToken.None);
+                await FlushBufferedBodyAsync(buffer, originalBody);
             }
-
-            if (hadException || isServerError)
+            finally
             {
-                // Do not persist a failed mutation as a replayable result — the client
-                // must be free to retry the same key against a healed backend.
                 await _store.AbandonProcessingAsync(recordId, CancellationToken.None);
-                return;
             }
 
-            byte[] captured = buffer.ToArray();
-            string? contentType = response.ContentType;
-            await _store.CompleteAsync(recordId, statusCode, contentType, captured, CancellationToken.None);
+            return;
         }
-        catch
+
+        // The mutation SUCCEEDED. Any failure from here on is post-mutation: we must NOT
+        // abandon (that would reopen the double-execution window, Hicks H-1/H-2). Leave the
+        // Processing row so retries return 409 InProgress until the staleness reclaim frees
+        // them, and let the exception propagate so the failure surfaces to the caller.
+        await FlushBufferedBodyAsync(buffer, originalBody);
+
+        byte[] captured = buffer.ToArray();
+        string? contentType = response.ContentType;
+        await _store.CompleteAsync(recordId, statusCode, contentType, captured, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Flushes the buffered response bytes to the real response stream. Uses
+    /// <see cref="CancellationToken.None"/> deliberately: a client disconnect must not
+    /// abort the persistence bookkeeping in the caller and strand the Processing row.
+    /// </summary>
+    private static async Task FlushBufferedBodyAsync(MemoryStream buffer, Stream originalBody)
+    {
+        buffer.Position = 0;
+        if (buffer.Length > 0)
         {
-            await _store.AbandonProcessingAsync(recordId, CancellationToken.None);
-            throw;
+            await buffer.CopyToAsync(originalBody, CancellationToken.None);
         }
     }
 

@@ -43,7 +43,7 @@ public class IdempotencyRecord
     /// per-user: two different users may reuse the same client-supplied
     /// idempotency key without colliding.
     /// </summary>
-    [MaxLength(450)]
+    [MaxLength(256)]
     public string UserId { get; set; } = string.Empty;
 
     /// <summary>
