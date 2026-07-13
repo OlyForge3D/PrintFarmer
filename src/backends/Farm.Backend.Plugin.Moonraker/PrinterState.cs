@@ -34,6 +34,14 @@ internal sealed class PrinterState
 
     public string? HomedAxes { get; set; }
 
+    /// <summary>
+    /// Active Klipper extruder index parsed from the <c>toolhead.extruder</c> field
+    /// ("extruder" → 0, "extruder1" → 1, …). Used to attribute per-tool wear on native
+    /// multi-extruder toolchangers that do not expose an MMU object (issue #711, round-14).
+    /// Null until the printer reports a <c>toolhead.extruder</c> value.
+    /// </summary>
+    public int? ActiveExtruderIndex { get; set; }
+
     public string? CameraStreamUrl { get; set; }
 
     public string? ThumbnailUrl { get; set; }

@@ -7,6 +7,7 @@ using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -23,15 +24,24 @@ public sealed class MoonrakerSubscriptionService(
     ILogger<MoonrakerSubscriptionService> logger,
     IHttpClientFactory httpClientFactory,
     IPrinterStatusCacheWriter statusCacheWriter,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IToolheadActivityAccumulator? activityAccumulator = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
 {
     private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Optional (issue #711, round-14): accumulates per-tool active seconds so the statistics sync
+    // can attribute the external-history delta to the toolheads that actually printed. Null when the
+    // accumulator is not registered (e.g. some test hosts), in which case sampling is a no-op.
+    private readonly IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _loopCancellationSources = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();
+
+    internal Func<Printer, CancellationToken, Task>? SubscriptionLoopOverride { get; set; }
 
     // Persistent state tracking for each printer
     private readonly ConcurrentDictionary<Guid, PrinterState> _printerStates = new();
@@ -54,6 +64,7 @@ public sealed class MoonrakerSubscriptionService(
     // Spool info cache: keeps Spoolman HTTP round-trips out of the WebSocket hot path.
     // Invalidated on print state transitions and post-dispatch refreshes.
     private readonly ConcurrentDictionary<Guid, (PrinterSpoolInfoDto? Info, DateTime FetchedUtc)> _spoolInfoCache = new();
+    private readonly ConcurrentDictionary<Guid, int[]> _knownPhysicalToolheadIndices = new();
     private static readonly TimeSpan SpoolInfoCacheTtl = TimeSpan.FromSeconds(30);
 
     private enum PollingMode
@@ -73,6 +84,7 @@ public sealed class MoonrakerSubscriptionService(
     private static readonly TimeSpan StaleConnectionThreshold = TimeSpan.FromSeconds(60); // Trigger fallback if no status updates for 60 seconds
     private static readonly TimeSpan OfflineGracePeriod = TimeSpan.FromSeconds(5); // Wait before declaring offline on klippy disconnect
     private const int ConsecutiveFailuresBeforeOffline = 2; // Require N failures before broadcasting offline
+    private const int MaxAttributedToolIndexExclusive = 32;
 
     // Client identification for Moonraker
     private const string ClientName = "PrintFarmer";
@@ -130,6 +142,16 @@ public sealed class MoonrakerSubscriptionService(
             // Don't fail stop on background task errors
             _logger.LogDebug(ex, "Ignoring background task error during StopAsync");
         }
+
+        foreach ((Guid printerId, CancellationTokenSource source) in _loopCancellationSources.ToArray())
+        {
+            if (_loopCancellationSources.TryRemove(printerId, out _))
+            {
+                source.Dispose();
+            }
+        }
+
+        _loops.Clear();
     }
 
     /// <summary>
@@ -147,6 +169,14 @@ public sealed class MoonrakerSubscriptionService(
         }
         catch
         { /* ignore during dispose */
+        }
+
+        foreach ((Guid printerId, CancellationTokenSource source) in _loopCancellationSources.ToArray())
+        {
+            if (_loopCancellationSources.TryRemove(printerId, out _))
+            {
+                source.Dispose();
+            }
         }
 
         _cts.Dispose();
@@ -261,7 +291,7 @@ public sealed class MoonrakerSubscriptionService(
     /// Restarts subscription loops for printers that have exhausted reconnection attempts.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
-    private async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
+    internal async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
     {
         // Using an async scope while awaiting EF Core ToListAsync is intentional here.
         // The scope lifetime matches the query and is disposed immediately after.
@@ -273,8 +303,22 @@ public sealed class MoonrakerSubscriptionService(
         // Only subscribe to ENABLED Moonraker-backed printers
         // Note: Only Moonraker supports real-time WebSocket subscriptions
         // PrusaLink and SDCP are polled via HTTP on-demand, not continuously
-        List<Printer> allPrinters = await printersRepo.GetByBackendAsync(PrinterBackend.Moonraker, ct);
+        List<Printer> allPrinters = await printersRepo.GetByBackendWithToolheadsAsync(PrinterBackend.Moonraker, ct);
         List<Printer> enabledPrinters = allPrinters.Where(p => p.IsEnabled).ToList();
+        foreach (Printer printer in enabledPrinters)
+        {
+            UpdateKnownPhysicalToolheadIndices(printer);
+        }
+
+        HashSet<Guid> activePrinterIds = enabledPrinters.Select(printer => printer.Id).ToHashSet();
+        HashSet<Guid> trackedPrinterIds = _loops.Keys
+            .Concat(_loopCancellationSources.Keys)
+            .ToHashSet();
+
+        foreach (Guid removedPrinterId in trackedPrinterIds.Except(activePrinterIds))
+        {
+            await StopSubscriptionLoopAsync(removedPrinterId, discardRuntimeState: true);
+        }
 
         foreach (Printer? p in enabledPrinters)
         {
@@ -285,16 +329,117 @@ public sealed class MoonrakerSubscriptionService(
                 // remove it so we can start a fresh subscription loop with reset retry count
                 if (existingTask.IsCompleted)
                 {
-                    _loops.TryRemove(p.Id, out _);
+                    await StopSubscriptionLoopAsync(p.Id, discardRuntimeState: false);
                     _connectionMetrics.TryRemove(p.Id, out _); // Reset metrics (reconnect attempts) too
                     _logger.LogInformation(
                         "Restarting subscription loop for printer {PName} ({PId}) - previous loop completed", p.Name, p.Id);
                 }
             }
 
-            _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
+            if (!_loops.ContainsKey(p.Id))
+            {
+                await StartSubscriptionLoopAsync(p, ct);
+            }
         }
 #pragma warning restore IDISP013
+    }
+
+    private async Task StartSubscriptionLoopAsync(Printer printer, CancellationToken serviceToken)
+    {
+        CancellationTokenSource printerCts =
+            CancellationTokenSource.CreateLinkedTokenSource(serviceToken);
+        if (!_loopCancellationSources.TryAdd(printer.Id, printerCts))
+        {
+            // TryAdd failed, so ownership was not transferred and no task captured this source.
+#pragma warning disable IDISP016 // Don't use disposed instance
+            printerCts.Dispose();
+#pragma warning restore IDISP016 // Don't use disposed instance
+            return;
+        }
+
+        Func<Printer, CancellationToken, Task> loop =
+            SubscriptionLoopOverride ?? SubscribePrinterLoopAsync;
+        CancellationToken printerToken = printerCts.Token;
+        Task loopTask = Task.Run(
+            () => loop(printer, printerToken),
+            CancellationToken.None);
+
+        if (_loops.TryAdd(printer.Id, loopTask))
+        {
+            return;
+        }
+
+        await printerCts.CancelAsync();
+        try
+        {
+            await loopTask;
+        }
+        catch (OperationCanceledException) when (printerCts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loopCancellationSources.TryRemove(printer.Id, out _);
+            printerCts.Dispose();
+        }
+    }
+
+    private async Task StopSubscriptionLoopAsync(Guid printerId, bool discardRuntimeState)
+    {
+        _loopCancellationSources.TryGetValue(
+            printerId,
+            out CancellationTokenSource? printerCts);
+        if (printerCts is not null && !printerCts.IsCancellationRequested)
+        {
+            await printerCts.CancelAsync();
+        }
+
+        if (_loops.TryGetValue(printerId, out Task? loopTask))
+        {
+            try
+            {
+                await loopTask;
+            }
+            catch (OperationCanceledException) when (printerCts?.IsCancellationRequested == true)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Ignoring subscription loop error while stopping printer {PrinterId}",
+                    printerId);
+            }
+        }
+
+        _loops.TryRemove(printerId, out _);
+        if (_loopCancellationSources.TryRemove(
+            printerId,
+            out CancellationTokenSource? removedCts))
+        {
+            removedCts.Dispose();
+        }
+
+        if (discardRuntimeState)
+        {
+            ClearPrinterRuntimeState(printerId);
+        }
+    }
+
+    private void ClearPrinterRuntimeState(Guid printerId)
+    {
+        CancelOfflineGraceTimer(printerId);
+        _connectionMetrics.TryRemove(printerId, out _);
+        _printerStates.TryRemove(printerId, out _);
+        _parseErrorCounts.TryRemove(printerId, out _);
+        _lastHttpPollTimes.TryRemove(printerId, out _);
+        _lastStatusUpdateTimes.TryRemove(printerId, out _);
+        _pollingModes.TryRemove(printerId, out _);
+        _klippyReadyState.TryRemove(printerId, out _);
+        _connectionHealth.TryRemove(printerId, out _);
+        _spoolInfoCache.TryRemove(printerId, out _);
+        _knownPhysicalToolheadIndices.TryRemove(printerId, out _);
+        _activityAccumulator?.Reset(printerId);
     }
 
     /// <summary>
@@ -1090,8 +1235,171 @@ public sealed class MoonrakerSubscriptionService(
         // Send consolidated status update with persistent state for offline status and overall sync
         await EmitConsolidatedStatusAsync(printerId, state, spoolInfo, ct);
 
+        // Sample active-tool telemetry for interval-aware per-tool wear attribution (issue #711,
+        // round-14). The accumulator credits the elapsed time since the previous sample to the tool
+        // that was active while printing; the statistics sync later drains and attributes it.
+        // A CONFIRMED non-printing state (round-19 V19-1/H19-1) is sampled as known-idle so the
+        // coverage denominator excludes it, instead of diluting attribution as unknown coverage.
+        DateTime nowUtc = DateTime.UtcNow;
+        if (IsConfirmedNotPrinting(state))
+        {
+            _ = TrySampleKnownIdleTelemetry(printerId);
+        }
+        else
+        {
+            _ = TrySampleActiveToolTelemetry(
+                printerId,
+                ResolveActivePhysicalToolIndex(state),
+                IsPrinting(state));
+        }
+
         // Track successful status update time
-        _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
+        _lastStatusUpdateTimes[printerId] = nowUtc;
+    }
+
+    internal bool TrySampleActiveToolTelemetry(
+        Guid printerId,
+        int? activeToolIndex,
+        bool isPrinting)
+    {
+        if (_activityAccumulator is null
+            || !_loopCancellationSources.TryGetValue(
+                printerId,
+                out CancellationTokenSource? printerCts)
+            || printerCts.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        bool accepted = true;
+        int? sampledToolIndex = activeToolIndex;
+        if (activeToolIndex is int index && !IsKnownPhysicalToolIndex(printerId, index))
+        {
+            sampledToolIndex = null;
+            accepted = false;
+        }
+
+        _activityAccumulator.Sample(printerId, sampledToolIndex, isPrinting);
+        return accepted;
+    }
+
+    /// <summary>
+    /// Records a CONFIRMED not-printing observation for interval-aware per-tool wear attribution
+    /// (issue #711, round-19 V19-1/H19-1), so the coverage denominator can exclude known idle time
+    /// instead of treating it as unknown/unattributed coverage.
+    /// </summary>
+    internal bool TrySampleKnownIdleTelemetry(Guid printerId)
+    {
+        if (_activityAccumulator is null
+            || !_loopCancellationSources.TryGetValue(
+                printerId,
+                out CancellationTokenSource? printerCts)
+            || printerCts.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        _activityAccumulator.SampleKnownIdle(printerId);
+        return true;
+    }
+
+    private void UpdateKnownPhysicalToolheadIndices(Printer printer)
+    {
+        int[] indices =
+        [
+            .. printer.Toolheads
+                .Where(toolhead => toolhead.ToolheadType == ToolheadType.Physical
+                    && toolhead.Index is >= 0 and < MaxAttributedToolIndexExclusive)
+                .Select(toolhead => toolhead.Index)
+                .Distinct()
+                .OrderBy(static index => index)
+        ];
+        _knownPhysicalToolheadIndices[printer.Id] = indices;
+    }
+
+    private bool IsKnownPhysicalToolIndex(Guid printerId, int toolIndex) =>
+        toolIndex is >= 0 and < MaxAttributedToolIndexExclusive
+        && _knownPhysicalToolheadIndices.TryGetValue(printerId, out int[]? knownIndices)
+        && knownIndices.Contains(toolIndex);
+
+    /// <summary>
+    /// Resolves the backend/G-code index of the physically active toolhead for per-tool wear
+    /// attribution, or <c>null</c> when it cannot be determined (issue #711, round-14).
+    /// Snapmaker U1 (four physical lanes) and Happy Hare surface the active tool through
+    /// <see cref="PrinterState.MmuActiveTool"/>; a native Klipper toolchanger without an MMU object
+    /// is tracked via the active extruder index.
+    /// </summary>
+    private static int? ResolveActivePhysicalToolIndex(PrinterState state)
+    {
+        if (state is { MmuEnabled: true, MmuActiveTool: >= 0 })
+        {
+            return state.MmuActiveTool;
+        }
+
+        if (state.ActiveExtruderIndex is int extruderIndex && extruderIndex >= 0)
+        {
+            return extruderIndex;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the printer is actively printing. Only printing segments accrue per-tool wear so that
+    /// idle/paused time is never attributed (issue #711, round-14).
+    /// </summary>
+    private static bool IsPrinting(PrinterState state) =>
+        string.Equals(state.State, "printing", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The complete set of Klipper <c>print_stats.state</c> values other than "printing". Any of
+    /// these on a fresh snapshot means the printer is CONFIRMED not printing (issue #711, round-19
+    /// V19-1/H19-1) — as opposed to a stale/disconnected snapshot or an unmapped tool index, where
+    /// the active-tool state is merely unknown rather than confirmed idle.
+    /// </summary>
+    private static readonly HashSet<string> ConfirmedNotPrintingStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "standby",
+        "paused",
+        "complete",
+        "cancelled",
+        "error",
+    };
+
+    /// <summary>
+    /// Whether a fresh snapshot CONFIRMS the printer is not printing (issue #711, round-19
+    /// V19-1/H19-1), so the elapsed segment can be sampled as known-idle instead of unknown
+    /// coverage. Returns <c>false</c> for a missing/unrecognized state string — an absent state is
+    /// missing telemetry, not a confirmed observation.
+    /// </summary>
+    private static bool IsConfirmedNotPrinting(PrinterState state) =>
+        state.State is string value && ConfirmedNotPrintingStates.Contains(value);
+
+    /// <summary>
+    /// Parses a Klipper extruder object name into a zero-based tool index: "extruder" → 0,
+    /// "extruder1" → 1, "extruder2" → 2, … Returns <c>null</c> for unrecognized names.
+    /// </summary>
+    private static int? ParseExtruderIndex(string? extruder)
+    {
+        if (string.IsNullOrEmpty(extruder))
+        {
+            return null;
+        }
+
+        const string prefix = "extruder";
+        if (!extruder.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (extruder.Length == prefix.Length)
+        {
+            return 0;
+        }
+
+        return int.TryParse(extruder.AsSpan(prefix.Length), out int index) && index >= 0
+            ? index
+            : null;
     }
 
     /// <summary>
@@ -1141,6 +1449,18 @@ public sealed class MoonrakerSubscriptionService(
             // Klipper reports homed_axes as a string (e.g., "xyz") or an empty string when not homed.
             // Treat empty string as a *known* state so the UI can show "not homed" rather than "unknown".
             homedAxes = ha.GetString() ?? string.Empty;
+        }
+
+        // Track the active Klipper extruder for native multi-extruder toolchangers (issue #711,
+        // round-14). Klipper names extruders "extruder", "extruder1", "extruder2", …; this index lets
+        // per-tool wear attribution follow tool changes on toolchangers that expose no MMU object.
+        if (th.TryGetProperty("extruder", out JsonElement activeExtruder) && activeExtruder.ValueKind == JsonValueKind.String)
+        {
+            int? parsedExtruderIndex = ParseExtruderIndex(activeExtruder.GetString());
+            if (parsedExtruderIndex.HasValue)
+            {
+                state.ActiveExtruderIndex = parsedExtruderIndex;
+            }
         }
 
         // Update persistent state
@@ -1288,6 +1608,12 @@ public sealed class MoonrakerSubscriptionService(
 
         if (mmu.TryGetProperty("tool", out JsonElement tool) && tool.ValueKind == JsonValueKind.Number)
         {
+            // Happy Hare exposes the live active tool here. It feeds the interval-aware per-tool
+            // wear accumulator sampled in ProcessStatusUpdateAsync (issue #711, round-14): on a
+            // multi-physical-toolhead Moonraker printer (e.g. Snapmaker U1) this index maps 1:1 to a
+            // physical toolhead, so the external-history delta is attributed to the head that printed.
+            // Single-hotend Happy Hare printers keep SupportsPerToolAttribution=false (one hotend
+            // means there is nothing to differentiate), so their samples are drained but never applied.
             state.MmuActiveTool = tool.GetInt32();
         }
 

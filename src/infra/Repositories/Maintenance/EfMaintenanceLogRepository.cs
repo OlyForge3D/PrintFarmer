@@ -110,11 +110,21 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
 
     #region Analytics
 
-    public async Task<List<MaintenanceTrendEntry>> GetTrendsAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
+    public async Task<List<MaintenanceTrendEntry>> GetTrendsAsync(DateTime startDate, DateTime endDate, bool includeToolheadScope = true, CancellationToken cancellationToken = default)
     {
-        var logs = await _context.MaintenanceLogs
+        IQueryable<MaintenanceLog> query = _context.MaintenanceLogs
             .Include(l => l.Printer)
-            .Where(l => l.PerformedAt >= startDate && l.PerformedAt <= endDate)
+            .Where(l => l.PerformedAt >= startDate && l.PerformedAt <= endDate);
+
+        // Finding H5 (issue #711): when the multi-slot fallback feature is off,
+        // per-toolhead maintenance must not surface in analytics; only printer-wide
+        // logs (ToolheadId == null) are reported.
+        if (!includeToolheadScope)
+        {
+            query = query.Where(l => l.ToolheadId == null);
+        }
+
+        var logs = await query
             .OrderByDescending(l => l.PerformedAt)
             .ToListAsync(cancellationToken);
 
@@ -126,11 +136,19 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             l.Cost ?? 0m)).ToList();
     }
 
-    public async Task<List<ComponentLifespanEntry>> GetComponentLifespanAsync(CancellationToken cancellationToken = default)
+    public async Task<List<ComponentLifespanEntry>> GetComponentLifespanAsync(bool includeToolheadScope = true, CancellationToken cancellationToken = default)
     {
         // Get all logs grouped by component
-        var componentLogs = await _context.MaintenanceLogs
-            .Where(l => l.Component != null && l.Component != string.Empty)
+        IQueryable<MaintenanceLog> source = _context.MaintenanceLogs
+            .Where(l => l.Component != null && l.Component != string.Empty);
+
+        // Finding H5 (issue #711): exclude per-toolhead logs when the feature is off.
+        if (!includeToolheadScope)
+        {
+            source = source.Where(l => l.ToolheadId == null);
+        }
+
+        var componentLogs = await source
             .GroupBy(l => l.Component!)
             .Select(g => new
             {
@@ -200,13 +218,20 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
         return result.OrderByDescending(c => c.Replacements).ToList();
     }
 
-    public async Task<List<MaintenanceCostEntry>> GetCostAnalysisAsync(int months = 12, CancellationToken cancellationToken = default)
+    public async Task<List<MaintenanceCostEntry>> GetCostAnalysisAsync(int months = 12, bool includeToolheadScope = true, CancellationToken cancellationToken = default)
     {
         var startDate = DateTime.UtcNow.AddMonths(-months);
 
-        var logs = await _context.MaintenanceLogs
-            .Where(l => l.PerformedAt >= startDate && l.Cost.HasValue && l.Cost > 0)
-            .ToListAsync(cancellationToken);
+        IQueryable<MaintenanceLog> query = _context.MaintenanceLogs
+            .Where(l => l.PerformedAt >= startDate && l.Cost.HasValue && l.Cost > 0);
+
+        // Finding H5 (issue #711): exclude per-toolhead logs when the feature is off.
+        if (!includeToolheadScope)
+        {
+            query = query.Where(l => l.ToolheadId == null);
+        }
+
+        var logs = await query.ToListAsync(cancellationToken);
 
         // Group by year-month and sum costs
         var grouped = logs
@@ -220,7 +245,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
         return grouped;
     }
 
-    public async Task<List<PrinterUptimeEntry>> GetPrinterUptimeAsync(CancellationToken cancellationToken = default)
+    public async Task<List<PrinterUptimeEntry>> GetPrinterUptimeAsync(bool includeToolheadScope = true, CancellationToken cancellationToken = default)
     {
         // Get all printers with their maintenance logs and statistics
         var printers = await _context.Printers
@@ -232,8 +257,15 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
 
         foreach (var printer in printers)
         {
-            int maintenanceCount = printer.MaintenanceLogs.Count;
-            int totalDowntimeMinutes = printer.MaintenanceLogs
+            // Finding H5 (issue #711): exclude per-toolhead logs from maintenance
+            // counts and downtime when the multi-slot fallback feature is off.
+            IEnumerable<MaintenanceLog> logs = includeToolheadScope
+                ? printer.MaintenanceLogs
+                : printer.MaintenanceLogs.Where(l => l.ToolheadId == null);
+            var scopedLogs = logs.ToList();
+
+            int maintenanceCount = scopedLogs.Count;
+            int totalDowntimeMinutes = scopedLogs
                 .Where(l => l.DurationMinutes.HasValue)
                 .Sum(l => l.DurationMinutes!.Value);
 

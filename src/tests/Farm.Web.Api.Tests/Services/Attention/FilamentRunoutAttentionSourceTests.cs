@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Attention.Sources;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Spoolman;
 using FluentAssertions;
 using Moq;
@@ -108,6 +109,120 @@ public class FilamentRunoutAttentionSourceTests
 
         items.Should().BeEmpty();
         coverage.VerifyAll();
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_ActiveRunout_NoBackup_StaysCritical()
+    {
+        Mock<IFilamentCoverageAttentionSource> coverage = Source(ActiveRunout());
+        Mock<IFilamentRunoutSwitchEvaluator> evaluator = Evaluator(RunoutSwitchAssessment.NoBackup);
+        FilamentRunoutAttentionSource source = new(coverage.Object, evaluator.Object, EnabledGate());
+
+        AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
+
+        item.Severity.Should().Be(AttentionSeverity.Critical);
+        item.Title.Should().Be("Filament runout predicted");
+        item.DeadlineAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_ActiveRunout_BackupAvailableButNoTelemetry_DowngradesToWarning()
+    {
+        Mock<IFilamentCoverageAttentionSource> coverage = Source(ActiveRunout());
+        Mock<IFilamentRunoutSwitchEvaluator> evaluator = Evaluator(RunoutSwitchAssessment.BackupAvailable);
+        FilamentRunoutAttentionSource source = new(coverage.Object, evaluator.Object, EnabledGate());
+
+        AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
+
+        item.Severity.Should().Be(AttentionSeverity.Warning);
+        item.Detail.Should().Contain("no switch has been confirmed");
+        item.DeadlineAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_ActiveRunout_ConfirmedSwitch_DowngradesToInformational()
+    {
+        Mock<IFilamentCoverageAttentionSource> coverage = Source(ActiveRunout());
+        Mock<IFilamentRunoutSwitchEvaluator> evaluator = Evaluator(RunoutSwitchAssessment.SwitchConfirmed);
+        FilamentRunoutAttentionSource source = new(coverage.Object, evaluator.Object, EnabledGate());
+
+        AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
+
+        item.Severity.Should().Be(AttentionSeverity.Info);
+        item.Title.Should().Be("Filament auto-switch confirmed");
+        item.DeadlineAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_ActiveRunout_FeatureDisabled_StaysCriticalWithoutConsultingEvaluator()
+    {
+        Mock<IFilamentCoverageAttentionSource> coverage = Source(ActiveRunout());
+        Mock<IFilamentRunoutSwitchEvaluator> evaluator = new(MockBehavior.Strict);
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        FilamentRunoutAttentionSource source = new(coverage.Object, evaluator.Object, gate.Object);
+
+        AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
+
+        item.Severity.Should().Be(AttentionSeverity.Critical);
+        evaluator.Verify(
+            e => e.AssessAsync(It.IsAny<FilamentRunoutWarningDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_ActiveRunout_MmuGateZeroBasedIndex_DisplaysToolZeroNotToolOne()
+    {
+        // Issue #711 round-19 Finding M19-2: warning.ToolheadIndex is now the 0-based G-code
+        // index (matching the mapped ToolheadCoverageDto contract). MMU gate 1 maps to G-code T0,
+        // so the attention text must say "tool 0" — the old "+1" double-add displayed "tool 2"
+        // for gate 1 instead of the correct "tool 0".
+        Guid printerId = Guid.NewGuid();
+        DateTime runoutAt = new(2026, 7, 11, 4, 30, 0, DateTimeKind.Utc);
+        Mock<IFilamentCoverageAttentionSource> coverage = Source(
+            new FilamentRunoutWarningDto(
+                printerId,
+                "Printer One",
+                ToolheadIndex: 0,
+                SpoolId: 42,
+                Material: "PLA",
+                RemainingGrams: 12.5,
+                PredictedRunoutAt: runoutAt,
+                Reason: "runout-during-active-job"));
+        FilamentRunoutAttentionSource source = new(coverage.Object);
+
+        AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
+
+        item.Detail.Should().Contain("tool 0");
+        item.Detail.Should().NotContain("tool 1");
+        item.ToolheadIndex.Should().Be(0);
+    }
+
+    private static FilamentRunoutWarningDto ActiveRunout()
+        => new(
+            Guid.NewGuid(),
+            "Printer One",
+            ToolheadIndex: 1,
+            SpoolId: 42,
+            Material: "PLA",
+            RemainingGrams: 12.5,
+            PredictedRunoutAt: new DateTime(2026, 7, 11, 4, 30, 0, DateTimeKind.Utc),
+            Reason: "runout-during-active-job");
+
+    private static Mock<IFilamentRunoutSwitchEvaluator> Evaluator(RunoutSwitchAssessment assessment)
+    {
+        Mock<IFilamentRunoutSwitchEvaluator> evaluator = new(MockBehavior.Strict);
+        evaluator
+            .Setup(e => e.AssessAsync(It.IsAny<FilamentRunoutWarningDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(assessment);
+        return evaluator;
+    }
+
+    private static IOperatorFeatureGate EnabledGate()
+    {
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        return gate.Object;
     }
 
     private static Mock<IFilamentCoverageAttentionSource> Source(params FilamentRunoutWarningDto[] warnings)

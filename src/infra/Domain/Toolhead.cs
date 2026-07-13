@@ -91,6 +91,18 @@ public class Toolhead
     public string? CurrentMaterial { get; set; }
 
     /// <summary>
+    /// Cumulative print-hours attributed to this specific toolhead, used for per-toolhead
+    /// maintenance interval accrual (issue #711, F6). Printer-wide accrual continues to use
+    /// <see cref="PrinterStatistics.TotalPrintHours"/>; this counter lets a per-tool schedule
+    /// accrue wear only while its own toolhead is the active/primary spool source. The stats
+    /// sync background service increments this by the printer-wide hour delta observed each
+    /// poll, attributed to the active/primary physical toolhead. Per-toolhead tracking starts
+    /// at 0 at migration time (no historical per-tool attribution exists), so existing
+    /// per-tool schedules effectively begin a fresh baseline from their next maintenance log.
+    /// </summary>
+    public double CumulativePrintHours { get; set; }
+
+    /// <summary>
     /// Denormalized hex color of the filament currently loaded (e.g., "#FF0000").
     /// Kept in sync with Spoolman spool data for quick display without an external API call.
     /// </summary>

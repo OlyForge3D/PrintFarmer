@@ -211,6 +211,15 @@ public class Printer
 
     public bool SupportsAutoLeveling { get; set; }
 
+    /// <summary>
+    /// Whether this printer's backend can attribute external print-history to specific
+    /// toolheads over a sync interval (issue #711, F6, round-10 Finding 1). Set by backend
+    /// plugin discovery/init. When false (the default for every backend today), the statistics
+    /// sync leaves the per-cycle history delta unattributed for per-toolhead wear instead of
+    /// fabricating wear via an equal split across idle heads; printer-wide totals still update.
+    /// </summary>
+    public bool SupportsPerToolAttribution { get; set; }
+
     public int? MaxPrintSpeed { get; set; }
 
     // Bed temperature ranges

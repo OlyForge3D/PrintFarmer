@@ -3,6 +3,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -23,7 +24,9 @@ public class MaintenanceAlertEngine(
     IHubContext<MaintenanceHub> hubContext,
     IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
     ILogger<MaintenanceAlertEngine> logger,
-    IAttentionBroadcaster? attentionBroadcaster = null) : IMaintenanceAlertService
+    IAttentionBroadcaster? attentionBroadcaster = null,
+    IToolheadStatisticsRepository? toolheadStatsRepo = null,
+    IOperatorFeatureGate? operatorFeatureGate = null) : IMaintenanceAlertService
 {
     private readonly IPrinterStatisticsRepository _statsRepo = statsRepo ?? throw new ArgumentNullException(nameof(statsRepo));
     private readonly IPrinterMaintenanceScheduleRepository _deploymentRepo = deploymentRepo ?? throw new ArgumentNullException(nameof(deploymentRepo));
@@ -35,6 +38,17 @@ public class MaintenanceAlertEngine(
 
     // Attention feed invalidation (issue #707). Optional to preserve existing test constructors.
     private readonly IAttentionBroadcaster? _attentionBroadcaster = attentionBroadcaster;
+
+    // Per-toolhead cumulative hours for per-tool schedule accrual (issue #711, FIX B).
+    // Optional to preserve existing test constructors; when null, per-tool schedules fall
+    // back to printer-wide hours (previous behavior).
+    private readonly IToolheadStatisticsRepository? _toolheadStatsRepo = toolheadStatsRepo;
+
+    // Per-tool maintenance feature gate (issue #711, round-5 FIX 2). Optional to preserve
+    // existing test constructors; when null the gate is treated as enabled (previous behavior),
+    // matching DispatchScorer. When wired and disabled, toolhead-scoped deployments do not
+    // generate new per-tool alerts; printer-wide deployments continue normally.
+    private readonly IOperatorFeatureGate? _operatorFeatureGate = operatorFeatureGate;
 
     public async Task<int> EvaluatePrinterMaintenanceAsync(
         Guid printerId,
@@ -64,23 +78,48 @@ public class MaintenanceAlertEngine(
         }
 
         // Load maintenance logs once so we can compute baselines efficiently.
-        // Group by MaintenanceTaskId for V3 task-level dedup.
+        // Group by (MaintenanceTaskId, ToolheadId) so per-toolhead-scoped schedules accrue
+        // their intervals independently from printer-wide schedules and from each other
+        // (issue #711, F6). A printer-wide deployment (null toolhead) only consumes logs that
+        // are themselves printer-wide.
         List<MaintenanceLog> logs = await _logRepo.GetByPrinterIdAsync(printerId, cancellationToken);
-        Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logs
+        Dictionary<(Guid TaskId, Guid? ToolheadId), MaintenanceLog> lastLogByTaskAndToolhead = logs
             .Where(l => l.MaintenanceTaskId.HasValue)
-            .GroupBy(l => l.MaintenanceTaskId!.Value)
+            .GroupBy(l => (l.MaintenanceTaskId!.Value, l.ToolheadId))
             .ToDictionary(
                 g => g.Key,
                 g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
+        // Per-toolhead cumulative hours so per-tool schedules accrue against their own
+        // toolhead, not the printer-wide counter (issue #711, FIX B). Empty when the optional
+        // repository is not wired (test constructors) → per-tool schedules fall back to
+        // printer-wide hours.
+        IReadOnlyDictionary<Guid, double> toolheadHours = _toolheadStatsRepo is not null
+            ? await _toolheadStatsRepo.GetCumulativeHoursByPrinterAsync(printerId, cancellationToken)
+            : EmptyToolheadHours;
+
         int alertsGenerated = 0;
         List<MaintenanceAlert> createdAlerts = new();
+
+        // When the per-tool maintenance feature is disabled, toolhead-scoped deployments must not
+        // generate new per-tool alerts (issue #711, round-5 FIX 2). Printer-wide deployments
+        // (null toolhead) are unaffected. A null gate (test constructors) is treated as enabled.
+        bool perToolMaintenanceEnabled = _operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
 
         // Evaluate each deployment → plan → tasks
         foreach (PrinterMaintenanceSchedule deployment in deployments)
         {
             if (deployment.MaintenancePlan?.PlanTasks == null)
             {
+                continue;
+            }
+
+            if (deployment.ToolheadId.HasValue && !perToolMaintenanceEnabled)
+            {
+                _logger.LogDebug(
+                    "Skipping per-tool deployment {DeploymentId} on printer {PrinterId}: MultiSlotFallback disabled",
+                    deployment.Id,
+                    printerId);
                 continue;
             }
 
@@ -101,8 +140,8 @@ public class MaintenanceAlertEngine(
                     continue;
                 }
 
-                lastLogByTaskId.TryGetValue(task.Id, out MaintenanceLog? lastLog);
-                bool shouldAlert = ShouldGenerateAlert(stats, task.TaskName, effectiveHours, effectiveDays, lastLog, deployment.DeployedAt, settings);
+                lastLogByTaskAndToolhead.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
+                bool shouldAlert = ShouldGenerateAlert(stats, task.TaskName, effectiveHours, effectiveDays, lastLog, deployment.DeployedAt, settings, deployment.ToolheadId, toolheadHours);
 
                 if (shouldAlert)
                 {
@@ -115,7 +154,7 @@ public class MaintenanceAlertEngine(
 
                     if (!hasActiveAlert)
                     {
-                        MaintenanceAlert created = await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, cancellationToken);
+                        MaintenanceAlert created = await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, toolheadHours, cancellationToken);
                         createdAlerts.Add(created);
                         alertsGenerated++;
                     }
@@ -157,14 +196,16 @@ public class MaintenanceAlertEngine(
         int? intervalDays,
         MaintenanceLog? lastLog,
         DateTime deployedAt,
-        MaintenanceAlertSettings settings)
+        MaintenanceAlertSettings settings,
+        Guid? toolheadId,
+        IReadOnlyDictionary<Guid, double> toolheadHours)
     {
         // Check hour-based interval
         if (intervalHours.HasValue)
         {
             double thresholdHours = intervalHours.Value * (settings.ThresholdPercentage / 100.0);
 
-            double hoursSinceLast = ComputeHoursSinceLastMaintenance(stats, lastLog);
+            double hoursSinceLast = ComputeHoursSinceLastMaintenance(stats, lastLog, toolheadId, toolheadHours);
 
             if (hoursSinceLast >= thresholdHours)
             {
@@ -207,23 +248,27 @@ public class MaintenanceAlertEngine(
         double? effectiveHours,
         int? effectiveDays,
         MaintenanceLog? lastLog,
+        IReadOnlyDictionary<Guid, double> toolheadHours,
         CancellationToken cancellationToken)
     {
         double? hoursSinceLast = effectiveHours.HasValue
-            ? ComputeHoursSinceLastMaintenance(stats, lastLog)
+            ? ComputeHoursSinceLastMaintenance(stats, lastLog, deployment.ToolheadId, toolheadHours)
             : null;
 
         int? daysSinceLast = effectiveDays.HasValue
             ? (DateTime.UtcNow - (lastLog?.PerformedAt ?? deployment.DeployedAt)).Days
             : null;
 
-        // Create alert referencing both the deployment and the specific task
+        // Create alert referencing both the deployment and the specific task. The alert
+        // inherits the deployment's optional toolhead scope so per-tool alerts stay
+        // independent and resolution logs can preserve that scope (issue #711, F6).
         MaintenanceAlert alert = new()
         {
             Id = Guid.NewGuid(),
             PrinterId = stats.PrinterId,
             PrinterMaintenanceScheduleId = deployment.Id,
             MaintenanceTaskId = task.Id,
+            ToolheadId = deployment.ToolheadId,
             Title = $"Maintenance Due: {task.TaskName}",
             Message = BuildAlertMessage(stats, task.TaskName, task.Description, effectiveHours, effectiveDays, hoursSinceLast, daysSinceLast),
             Severity = task.Priority,
@@ -284,11 +329,29 @@ public class MaintenanceAlertEngine(
         return $"{taskName} is due. {fallbackMessage}";
     }
 
-    private static double ComputeHoursSinceLastMaintenance(PrinterStatistics stats, MaintenanceLog? lastLog)
+    private static readonly IReadOnlyDictionary<Guid, double> EmptyToolheadHours = new Dictionary<Guid, double>();
+
+    private static double ComputeHoursSinceLastMaintenance(
+        PrinterStatistics stats,
+        MaintenanceLog? lastLog,
+        Guid? toolheadId,
+        IReadOnlyDictionary<Guid, double> toolheadHours)
     {
-        // Preferred baseline is the printer's total hours at the last maintenance log.
-        // If historical logs don't contain printer hours yet, fall back to total hours
-        // (maintains previous behavior until new logs populate PrinterHoursAtMaintenance).
+        // Per-toolhead scope (issue #711, FIX B): when the schedule targets a specific toolhead
+        // and per-toolhead hours are available, accrue against that toolhead's cumulative hours
+        // using the log's captured per-toolhead baseline. Per-tool tracking starts at 0 at
+        // migration time, so a schedule with no prior per-tool log measures from when tracking
+        // began (baseline 0).
+        if (toolheadId.HasValue && toolheadHours.TryGetValue(toolheadId.Value, out double currentToolheadHours))
+        {
+            double toolheadBaseline = lastLog?.ToolheadHoursAtMaintenance ?? 0;
+            return Math.Max(0, currentToolheadHours - toolheadBaseline);
+        }
+
+        // Printer-wide scope (or no per-toolhead data): preferred baseline is the printer's
+        // total hours at the last maintenance log. If historical logs don't contain printer
+        // hours yet, fall back to total hours (maintains previous behavior until new logs
+        // populate PrinterHoursAtMaintenance).
         if (lastLog?.PrinterHoursAtMaintenance is double baselineHours)
         {
             return Math.Max(0, stats.TotalPrintHours - baselineHours);
@@ -350,6 +413,8 @@ public class MaintenanceAlertEngine(
             return;
         }
 
+        EnsureAlertMutationEnabled(alert);
+
         alert.Status = MaintenanceAlertStatus.Acknowledged;
         alert.AcknowledgedAt = DateTime.UtcNow;
         alert.AcknowledgedBy = acknowledgedBy;
@@ -377,6 +442,8 @@ public class MaintenanceAlertEngine(
             _logger.LogWarning("Alert {AlertId} not found for resolution", alertId);
             return;
         }
+
+        EnsureAlertMutationEnabled(alert);
 
         alert.Status = MaintenanceAlertStatus.Resolved;
         alert.ResolvedAt = DateTime.UtcNow;
@@ -407,6 +474,8 @@ public class MaintenanceAlertEngine(
             return;
         }
 
+        EnsureAlertMutationEnabled(alert);
+
         alert.Status = MaintenanceAlertStatus.Dismissed;
         alert.DismissedAt = DateTime.UtcNow;
         alert.DismissedBy = dismissedBy;
@@ -423,6 +492,16 @@ public class MaintenanceAlertEngine(
 
         // Broadcast status change
         await BroadcastAlertStatusChangedAsync(alert);
+    }
+
+    private void EnsureAlertMutationEnabled(MaintenanceAlert alert)
+    {
+        bool perToolMaintenanceEnabled =
+            _operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+        if (alert.ToolheadId.HasValue && !perToolMaintenanceEnabled)
+        {
+            throw new PerToolMaintenanceDisabledException();
+        }
     }
 
     private async Task BroadcastAlertStatusChangedAsync(MaintenanceAlert alert)

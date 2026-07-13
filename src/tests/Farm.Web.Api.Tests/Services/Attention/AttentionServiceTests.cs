@@ -526,6 +526,79 @@ public class AttentionServiceTests
     }
 
     [Fact]
+    public async Task ExecuteActionAsync_MaintenanceResolve_WithResolutionCoordinator_WritesCompletionLogInsteadOfAlertOnlyResolve()
+    {
+        // Finding H6 (issue #711): when a resolution coordinator is wired, the unified attention
+        // Resolve must route through ResolveAlertWithCompletionLogAsync (authoritative log + alert
+        // transition) rather than the alert-only ResolveAlertAsync — otherwise the alert engine
+        // re-derives the alert as still-due and recreates it. _maintenance is a Strict mock, so any
+        // stray ResolveAlertAsync call would fail this test.
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        Guid alertId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Maintenance, alertId);
+        AttentionActionDto resolve = new(AttentionActionKind.Resolve, "Resolve", true);
+        AttentionItemDto item = BuildItem(itemId, AttentionKind.Maintenance, AttentionSeverity.Warning, printer, Now, actions: new[] { resolve });
+
+        var resolutionService = new Mock<IMaintenanceAlertResolutionService>(MockBehavior.Strict);
+        var resolvedAlert = new MaintenanceAlert { Id = alertId, PrinterId = printer, Status = MaintenanceAlertStatus.Resolved };
+        var completionLog = new MaintenanceLog { Id = Guid.NewGuid(), PrinterId = printer, ResolvedAlertId = alertId, TaskName = "t", PerformedAt = Now, PerformedBy = "user" };
+        resolutionService
+            .Setup(r => r.ResolveAlertWithCompletionLogAsync(alertId, "user", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MaintenanceAlertResolutionResult(resolvedAlert, completionLog));
+
+        var svc = new AttentionService(
+            new[] { new StubSource("s", new[] { item }) },
+            _snoozeRepo.Object,
+            _printers.Object,
+            _maintenance.Object,
+            _queueData.Object,
+            NullLogger<AttentionService>.Instance,
+            _clock,
+            alertResolution: resolutionService.Object);
+
+        AttentionActionResult result = await svc.ExecuteActionAsync(userId, "user", isFarmAdmin: true, itemId, AttentionActionKind.Resolve, CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.Ok);
+        resolutionService.Verify(
+            r => r.ResolveAlertWithCompletionLogAsync(alertId, "user", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _maintenance.Verify(m => m.ResolveAlertAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteActionAsync_MaintenanceFeatureDisabled_ReturnsInvalidAction()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid printer = Guid.NewGuid();
+        Guid alertId = Guid.NewGuid();
+        string itemId = AttentionIdPrefixes.Build(AttentionIdPrefixes.Maintenance, alertId);
+        AttentionActionDto acknowledge = new(AttentionActionKind.Acknowledge, "Acknowledge", true);
+        AttentionItemDto item = BuildItem(
+            itemId,
+            AttentionKind.Maintenance,
+            AttentionSeverity.Warning,
+            printer,
+            Now,
+            actions: [acknowledge]);
+        _maintenance
+            .Setup(m => m.AcknowledgeAlertAsync(alertId, "user", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PerToolMaintenanceDisabledException());
+
+        AttentionService svc = CreateService([new StubSource("s", [item])]);
+        AttentionActionResult result = await svc.ExecuteActionAsync(
+            userId,
+            "user",
+            isFarmAdmin: true,
+            itemId,
+            AttentionActionKind.Acknowledge,
+            CancellationToken.None);
+
+        result.Outcome.Should().Be(AttentionActionOutcome.InvalidAction);
+        result.Reason.Should().Be("Per-tool maintenance is disabled.");
+    }
+
+    [Fact]
     public async Task ExecuteActionAsync_HarvestKind_DispatchesProductionHarvestService()
     {
         Guid userId = Guid.NewGuid();
